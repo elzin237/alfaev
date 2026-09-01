@@ -1,0 +1,110 @@
+import { useNavigate } from "react-router";
+import { ShieldCheck } from "lucide-react";
+
+function LoginPage() {
+  const navigate = useNavigate();
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+
+    localStorage.setItem("alfaev_auth", "true");
+    navigate("/");
+  };
+
+  return (
+    <main className="min-h-screen bg-zinc-100">
+      <div className="grid min-h-screen lg:grid-cols-2">
+        <section className="flex flex-col bg-[#202225] text-white">
+          <div className="p-8 lg:p-14">
+            <h1 className="text-5xl font-bold tracking-wide text-red-600 lg:text-6xl">
+              ALFAEV
+            </h1>
+
+            <p className="mt-3 text-base text-zinc-400 lg:text-lg">
+              Enterprise Resource Planning & Manufacturing Execution System
+            </p>
+          </div>
+
+          <div className="flex flex-1 items-center px-8 pb-12 lg:px-14">
+            <div className="max-w-2xl">
+              <div className="mb-8 flex h-24 w-24 items-center justify-center rounded-3xl bg-red-600 shadow-lg shadow-red-600/20">
+                <ShieldCheck size={46} />
+              </div>
+
+              <h2 className="text-4xl font-semibold leading-tight lg:text-6xl">
+                Centralizovano upravljanje projektima, proizvodnjom i
+                dokumentacijom.
+              </h2>
+
+              <p className="mt-8 max-w-xl text-lg leading-relaxed text-zinc-400 lg:text-xl">
+                Jedinstveno radno okruženje za planiranje, praćenje i kontrolu
+                svih poslovnih procesa unutar ALFA PROTEH sistema.
+              </p>
+            </div>
+          </div>
+
+          <div className="border-t border-white/10 px-8 py-6 lg:px-14">
+            <p className="text-sm text-zinc-500 lg:text-base">
+              ALFAEV • Internal Enterprise Platform
+            </p>
+          </div>
+        </section>
+
+        <section className="flex items-center justify-center bg-zinc-100 p-6 lg:p-12">
+          <div className="w-full max-w-xl">
+            <div className="mb-10">
+              <h2 className="text-4xl font-bold text-zinc-900 lg:text-5xl">
+                Prijava u sistem
+              </h2>
+
+              <p className="mt-3 text-base text-zinc-500 lg:text-lg">
+                Unesite svoje pristupne podatke za nastavak rada.
+              </p>
+            </div>
+
+            <div className="rounded-4xl border border-zinc-200 bg-white p-8 shadow-xl shadow-black/5 transition lg:p-12">
+              <form onSubmit={handleSubmit} className="space-y-7">
+                <div>
+                  <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600">
+                    Korisničko ime
+                  </label>
+
+                  <input
+                    type="text"
+                    placeholder="Unesite korisničko ime"
+                    className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600">
+                    Lozinka
+                  </label>
+
+                  <input
+                    type="password"
+                    placeholder="Unesite lozinku"
+                    className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-red-600 py-5 text-lg font-semibold text-white transition hover:-translate-y-0.5 hover:bg-red-700"
+                >
+                  Prijava u sistem
+                </button>
+              </form>
+            </div>
+
+            <p className="mt-8 text-center text-sm text-zinc-500 lg:text-left">
+              ALFA PROTEH • ERP / MES Platform
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+export default LoginPage;
