@@ -1,11 +1,13 @@
 import { useState } from "react";
+import type { SettingsSection } from "../../lib/types/domain";
 
 import SettingsHeader from "./components/SettingsHeader";
 import SettingsSidebar from "./components/SettingsSidebar";
 import SettingsContent from "./components/SettingsContent";
 
 function SettingsPage() {
-  const [activeSection, setActiveSection] = useState("general");
+  const [activeSection, setActiveSection] =
+    useState<SettingsSection>("general");
 
   return (
     <div className="space-y-6">

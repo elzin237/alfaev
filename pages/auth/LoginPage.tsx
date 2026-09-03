@@ -1,10 +1,11 @@
+import type { FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ShieldCheck } from "lucide-react";
 
 function LoginPage() {
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     localStorage.setItem("alfaev_auth", "true");

@@ -5,6 +5,15 @@ import {
   Clock3,
   TriangleAlert,
 } from "lucide-react";
+import type {
+  Alert,
+  DashboardStat,
+  InventoryItem,
+  ProcurementRequest,
+  Project,
+  RecentActivity,
+  WorkOrder,
+} from "../../../lib/types/domain";
 
 export const stats = [
   {
@@ -42,7 +51,7 @@ export const stats = [
     icon: TriangleAlert,
     variant: "light",
   },
-];
+] satisfies DashboardStat[];
 
 export const projects = [
   {
@@ -95,7 +104,7 @@ export const projects = [
     image: "/images/projects/ssp-pult-03.webp",
     step: 1,
   },
-];
+] satisfies Project[];
 
 export const alerts = [
   {
@@ -130,7 +139,7 @@ export const alerts = [
     level: "task",
     time: "prije 5 h",
   },
-];
+] satisfies Alert[];
 
 export const inventory = [
   {
@@ -161,7 +170,7 @@ export const inventory = [
     minimum: 20,
     status: "U redu",
   },
-];
+] satisfies InventoryItem[];
 
 export const recentActivities = [
   {
@@ -192,7 +201,7 @@ export const recentActivities = [
     target: "EK-553P Rev. C",
     time: "12:18",
   },
-];
+] satisfies RecentActivity[];
 
 export const workOrders = [
   {
@@ -213,7 +222,7 @@ export const workOrders = [
     priority: "Visok",
     status: "Na čekanju",
   },
-];
+] satisfies WorkOrder[];
 
 export const procurementRequests = [
   {
@@ -234,4 +243,4 @@ export const procurementRequests = [
     value: "2.100 KM",
     status: "Priprema",
   },
-];
+] satisfies ProcurementRequest[];

@@ -1,4 +1,5 @@
 import { Settings, Building2, Palette, Shield, Bell } from "lucide-react";
+import type { SettingsNavigationItem } from "../../../lib/types/domain";
 
 export const SETTINGS_SECTIONS = [
   {
@@ -26,4 +27,4 @@ export const SETTINGS_SECTIONS = [
     label: "Notifications",
     icon: Bell,
   },
-];
+] satisfies SettingsNavigationItem[];

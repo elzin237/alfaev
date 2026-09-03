@@ -1,6 +1,15 @@
 import { SETTINGS_SECTIONS } from "../data/settingsSections";
+import type { SettingsSection } from "../../../lib/types/domain";
 
-function SettingsSidebar({ activeSection, setActiveSection }) {
+interface SettingsSidebarProps {
+  activeSection: SettingsSection;
+  setActiveSection: (section: SettingsSection) => void;
+}
+
+function SettingsSidebar({
+  activeSection,
+  setActiveSection,
+}: SettingsSidebarProps) {
   return (
     <aside className="rounded-3xl border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="mb-4 px-3 pt-2">

@@ -1,6 +1,10 @@
 import { Bell, Menu, Search, UserCircle2 } from "lucide-react";
 
-function Topbar({ setSidebarOpen }) {
+interface TopbarProps {
+  setSidebarOpen: (open: boolean) => void;
+}
+
+function Topbar({ setSidebarOpen }: TopbarProps) {
   return (
     <header className="flex h-20 items-center justify-between border-b border-zinc-200 bg-white px-4 lg:px-8">
       <div className="flex items-center gap-4">

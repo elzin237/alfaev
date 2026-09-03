@@ -1,5 +1,11 @@
-function SettingsContent({ activeSection }) {
-  const titles = {
+import type { SettingsSection } from "../../../lib/types/domain";
+
+interface SettingsContentProps {
+  activeSection: SettingsSection;
+}
+
+function SettingsContent({ activeSection }: SettingsContentProps) {
+  const titles: Record<SettingsSection, string> = {
     general: "General Settings",
     company: "Company Settings",
     appearance: "Appearance Settings",
@@ -7,7 +13,7 @@ function SettingsContent({ activeSection }) {
     notifications: "Notification Settings",
   };
 
-  const descriptions = {
+  const descriptions: Record<SettingsSection, string> = {
     general: "Manage core platform configuration and default system behavior.",
     company: "Configure company information and organizational details.",
     appearance: "Customize themes, colors and visual preferences.",

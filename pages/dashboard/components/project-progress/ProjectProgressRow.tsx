@@ -1,6 +1,11 @@
 import { Check, Clock3 } from "lucide-react";
+import type {
+  PhaseStatus,
+  Project,
+  ProjectPhase,
+} from "../../../../lib/types/domain";
 
-const phases = [
+const phases: ProjectPhase[] = [
   "Projektovanje",
   "Nabavka",
   "Izrada",
@@ -9,7 +14,11 @@ const phases = [
   "Isporuka",
 ];
 
-function PhaseNode({ state }) {
+interface PhaseNodeProps {
+  state: PhaseStatus;
+}
+
+function PhaseNode({ state }: PhaseNodeProps) {
   if (state === "completed") {
     return (
       <div className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full bg-[#ba0000] text-white shadow-sm">
@@ -31,7 +40,11 @@ function PhaseNode({ state }) {
   );
 }
 
-function ProjectProgressRow({ project }) {
+interface ProjectProgressRowProps {
+  project: Project;
+}
+
+function ProjectProgressRow({ project }: ProjectProgressRowProps) {
   return (
     <div className="grid grid-cols-[260px_repeat(6,1fr)] items-center border-b border-zinc-200 px-8 py-5 last:border-b-0">
       <div className="font-semibold text-zinc-900">{project.name}</div>

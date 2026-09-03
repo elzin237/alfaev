@@ -1,7 +1,8 @@
 import { projects } from "../../data/dashboardMockData";
+import type { ProjectPhase } from "../../../../lib/types/domain";
 import ProjectProgressRow from "./ProjectProgressRow";
 
-const phases = [
+const phases: ProjectPhase[] = [
   "Projektovanje",
   "Nabavka",
   "Izrada",

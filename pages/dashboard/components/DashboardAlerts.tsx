@@ -1,13 +1,15 @@
 import { AlertTriangle, ClipboardList, FileText } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { AlertLevel } from "../../../lib/types/domain";
 import { alerts } from "../data/dashboardMockData";
 
-const iconMap = {
+const iconMap: Record<AlertLevel, LucideIcon> = {
   critical: AlertTriangle,
   document: FileText,
   task: ClipboardList,
 };
 
-const iconStyles = {
+const iconStyles: Record<AlertLevel, string> = {
   critical: "bg-red-600 text-white",
   document: "bg-zinc-900 text-white",
   task: "bg-zinc-900 text-white",

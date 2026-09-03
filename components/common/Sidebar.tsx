@@ -3,7 +3,12 @@ import { X } from "lucide-react";
 
 import { NAVIGATION } from "../../lib/constants/navigation";
 
-function Sidebar({ sidebarOpen, setSidebarOpen }) {
+interface SidebarProps {
+  sidebarOpen: boolean;
+  setSidebarOpen: (open: boolean) => void;
+}
+
+function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   return (
     <>
       {sidebarOpen && (

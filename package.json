@@ -1,0 +1,27 @@
+{
+  "name": "alfaev",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "@vitejs/plugin-react": "latest",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "latest"
+  }
+}

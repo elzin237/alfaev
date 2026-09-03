@@ -12,6 +12,7 @@ import {
   Users,
   Settings,
 } from "lucide-react";
+import type { NavigationItem } from "../types/domain";
 
 export const NAVIGATION = [
   {
@@ -74,4 +75,4 @@ export const NAVIGATION = [
     path: "/settings",
     icon: Settings,
   },
-];
+] satisfies NavigationItem[];
