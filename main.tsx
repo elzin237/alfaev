@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router";
 
 import App from "./App";
+import QueryProvider from "./app/providers/QueryProvider";
 import "./styles/index.css";
 
 const rootElement = document.getElementById("root");
@@ -13,8 +14,10 @@ if (!rootElement) {
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    <QueryProvider>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </QueryProvider>
   </React.StrictMode>,
 );
