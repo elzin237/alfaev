@@ -1,16 +1,14 @@
 import {
   LayoutDashboard,
   FolderKanban,
-  FileText,
   ShoppingCart,
+  Truck,
   Warehouse,
-  Factory,
   Cpu,
   ClipboardList,
-  ShieldCheck,
-  BarChart3,
+  CalendarDays,
+  Archive,
   Users,
-  Settings,
 } from "lucide-react";
 import type { NavigationItem } from "../types/domain";
 
@@ -21,14 +19,9 @@ export const NAVIGATION = [
     icon: LayoutDashboard,
   },
   {
-    label: "Projekti",
+    label: "Projects",
     path: "/projects",
     icon: FolderKanban,
-  },
-  {
-    label: "Dokumentacija",
-    path: "/documents",
-    icon: FileText,
   },
   {
     label: "Nabavka",
@@ -36,17 +29,17 @@ export const NAVIGATION = [
     icon: ShoppingCart,
   },
   {
+    label: "Dobavljači",
+    path: "/suppliers",
+    icon: Truck,
+  },
+  {
     label: "Skladište",
     path: "/inventory",
     icon: Warehouse,
   },
   {
-    label: "Proizvodnja",
-    path: "/production",
-    icon: Factory,
-  },
-  {
-    label: "PCB Kartice",
+    label: "PCB Cards",
     path: "/pcb",
     icon: Cpu,
   },
@@ -56,23 +49,18 @@ export const NAVIGATION = [
     icon: ClipboardList,
   },
   {
-    label: "Kontrola Kvaliteta",
-    path: "/quality",
-    icon: ShieldCheck,
+    label: "Calendar",
+    path: "/calendar",
+    icon: CalendarDays,
   },
   {
-    label: "Izvještaji",
-    path: "/reports",
-    icon: BarChart3,
+    label: "Archive",
+    path: "/archive",
+    icon: Archive,
   },
   {
-    label: "Korisnici",
+    label: "Users",
     path: "/users",
     icon: Users,
-  },
-  {
-    label: "Postavke",
-    path: "/settings",
-    icon: Settings,
   },
 ] satisfies NavigationItem[];
