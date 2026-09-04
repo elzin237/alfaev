@@ -1,0 +1,541 @@
+# AlfaEV — ARCHITECTURE_RULES.md
+
+Status: Canonical architecture rules v1  
+Purpose: Define non-negotiable implementation rules so AlfaEV remains scalable, secure, reviewable, and maintainable from day one.
+
+---
+
+## 1. Core Principle
+
+AlfaEV must be built as a modular TypeScript application with clear feature boundaries.
+
+The goal is not enterprise overengineering. The goal is to avoid a codebase that becomes difficult to change after a few modules are added.
+
+Implementation must favor:
+
+- small focused files
+- reusable components
+- reusable domain/services
+- explicit business-rule boundaries
+- trusted backend authorization
+- shared types
+- predictable folder structure
+- testable pure logic
+- minimal cross-feature coupling
+
+---
+
+## 2. TypeScript / TSX Only
+
+Application source uses:
+
+- `.tsx` for React components/pages/layouts
+- `.ts` for domain logic, services, types, validation, utilities, configuration, and data access
+
+Do not introduce new `.jsx` or application `.js` files.
+
+TypeScript must remain strict.
+
+Do not use:
+
+- `any`
+- `as any`
+- `@ts-ignore`
+- `@ts-nocheck`
+- broad unsafe casts to silence errors
+
+---
+
+## 3. No Giant Files
+
+Do not allow pages/components/services to become monolithic.
+
+A file should have one clear responsibility.
+
+Examples of things that should normally be separated:
+
+- page shell
+- table
+- form
+- dialog
+- filters
+- status badge
+- domain validation
+- permission checks
+- data access
+- mutations
+- business-rule calculations
+- PDF generation
+- barcode generation/scanning helpers
+
+Do not split files mechanically into meaningless micro-files. Split when there is a clear responsibility or reuse boundary.
+
+---
+
+## 4. Feature-Oriented Structure
+
+Prefer a feature-based structure.
+
+Conceptual example:
+
+```text
+src/
+  app/
+    router/
+    layouts/
+    guards/
+
+  features/
+    projects/
+      components/
+      hooks/
+      services/
+      types/
+      validation/
+
+    procurement/
+    suppliers/
+    inventory/
+    pcb/
+    work-orders/
+    calendar/
+    archive/
+    users/
+
+  shared/
+    components/
+    hooks/
+    lib/
+    types/
+    validation/
+
+  backend/
+    clients/
+    services/
+    auth/
+```
+
+Exact folders may adapt to the existing repository, but the boundaries must remain clear.
+
+Do not create one giant global `components/` or `utils/` dumping ground.
+
+---
+
+## 5. UI Components Must Not Own Critical Business Logic
+
+TSX components should primarily:
+
+- render UI
+- collect user input
+- call typed hooks/services/actions
+- display loading/error/success states
+- coordinate local presentation state
+
+Critical business rules must not live only inside page/component event handlers.
+
+Examples that must live in trusted domain/backend logic:
+
+- Serial Number / Šifra generation
+- Work Order number generation
+- permission enforcement
+- Inventory non-negative validation
+- Work Order Finish
+- PCB production
+- audit creation
+- BOM versioning rules
+- completed-record immutability
+- manual stock adjustment rules
+
+The frontend may repeat lightweight validation for UX, but the trusted backend must remain authoritative.
+
+---
+
+## 6. Shared Domain Types
+
+Do not duplicate core interfaces/types across features.
+
+Canonical shared/domain types should exist for concepts such as:
+
+- User
+- Permission
+- Product
+- Brand
+- Supplier
+- ProductSupplier
+- Project
+- ProcurementRequest
+- PcbCard
+- PcbBomVersion
+- PcbProductionRun
+- WorkOrder
+- WorkOrderItem
+- InventoryMovement
+- CalendarEntry
+- AuditLog
+
+Feature-specific UI-only types may remain local.
+
+Do not create a single enormous `types.ts` file containing the entire application.
+
+Prefer bounded type modules grouped by domain.
+
+---
+
+## 7. Reusable UI
+
+Reusable UI should be extracted when multiple modules share the same behavior.
+
+Likely shared primitives include:
+
+- table shell
+- pagination
+- search input
+- filter controls
+- status badge
+- empty state
+- confirmation dialog
+- form field wrappers
+- modal/dialog shell
+- permission-aware action wrapper
+- loading state
+- error state
+- page header
+- barcode display/download component
+
+Reuse should reduce duplication without forcing unrelated screens into one overly generic abstraction.
+
+---
+
+## 8. Validation
+
+Input validation must be explicit and centralized.
+
+Use typed schemas/validators for forms and trusted mutations.
+
+Validation must exist at the correct layer:
+
+### Frontend
+For immediate UX feedback.
+
+### Backend/database
+For authoritative enforcement.
+
+Do not rely on React form checks alone for critical rules.
+
+---
+
+## 9. Data Access Boundaries
+
+React pages/components must not contain scattered direct database calls.
+
+Use a defined data-access/service layer.
+
+Each feature should expose clear operations, for example:
+
+```text
+projects.list()
+projects.getById()
+projects.create()
+projects.update()
+
+inventory.getProduct()
+inventory.adjustStock()
+inventory.getMovements()
+
+workOrders.createDraft()
+workOrders.updateDraft()
+workOrders.finish()
+```
+
+Exact implementation names may differ.
+
+The important rule is that database details should not leak throughout TSX components.
+
+---
+
+## 10. Trusted Backend Mutations
+
+Critical operations must execute through trusted server/database boundaries.
+
+At minimum:
+
+- create Product with unique Serial Number
+- manual Inventory adjustment
+- create Product from Nabavka request
+- PCB production
+- Work Order Finish
+- Work Order number allocation
+- permission changes
+- Admin status changes
+- account deactivation
+- audit record creation for protected operations
+
+These operations must validate:
+
+- authenticated actor
+- authorization
+- current record state
+- business rules
+- inventory availability where relevant
+
+---
+
+## 11. Atomic Transactions
+
+Stock-sensitive workflows must be atomic.
+
+### PCB production
+Either all occur:
+
+- input stock deductions
+- production record
+- finished-goods stock increase
+- Inventory movements
+- Audit record
+
+or none occur.
+
+### Work Order Finish
+Either all required state transitions succeed coherently, or the Work Order must not appear successfully Finished.
+
+### Manual Inventory adjustment
+Balance change, movement record, and audit record belong to one trusted transaction.
+
+Never allow partial Inventory state.
+
+---
+
+## 12. Permission Architecture
+
+Authorization is backend-enforced.
+
+Rules:
+
+- Admin always has full access.
+- Non-admin access comes from explicit per-user permissions.
+- frontend hiding/disabled controls are UX only
+- direct unauthorized backend/database attempts must fail
+- Users module is Admin-only
+- permission management is Admin-only
+- Calendar modification is Admin-only
+- manual Inventory adjustment is Admin-only
+
+Permission checks should be reusable and centralized rather than duplicated manually throughout components.
+
+---
+
+## 13. Audit Architecture
+
+Audit logging is a cross-cutting system concern.
+
+Do not require each random TSX component to manually construct audit records.
+
+Trusted business operations should create the required audit event centrally.
+
+Audit records are immutable.
+
+Audit must capture meaningful business changes without logging useless UI interaction noise.
+
+---
+
+## 14. Inventory Architecture
+
+Inventory must never be modeled only as a mutable quantity.
+
+Use:
+
+- current balance
+- immutable Inventory Movement ledger
+
+All stock changes must pass through trusted Inventory logic.
+
+No feature should directly set Inventory quantity.
+
+Projects, PCB, Work Orders, and future features must interact with Inventory through defined operations.
+
+---
+
+## 15. Historical Integrity
+
+Do not silently rewrite historical business records.
+
+Examples:
+
+- Finished Work Orders are immutable.
+- Used PCB BOM versions are immutable.
+- Serial Numbers are never reused.
+- Work Order numbers are never reused.
+- Audit records are immutable.
+- Inventory movements are immutable.
+- historical users are deactivated rather than deleted.
+- referenced Products/Suppliers/Brands are archived rather than hard-deleted.
+
+Corrections should create explicit new correction/reversal records where needed.
+
+---
+
+## 16. Derived Data
+
+Do not persist duplicate data unless required for history/performance.
+
+Prefer derived queries/read models for:
+
+- Project material totals
+- Nabavka sidebar badge count
+- Calendar birthday entries
+- Dashboard aggregates
+- remaining Nabavka quantity
+
+If a value is persisted for historical correctness, document why.
+
+---
+
+## 17. Naming and Readability
+
+Use domain language consistently.
+
+Preferred code terms:
+
+- `Project`
+- `ProcurementRequest`
+- `Supplier`
+- `Product`
+- `InventoryMovement`
+- `PcbCard`
+- `PcbBomVersion`
+- `PcbProductionRun`
+- `WorkOrder`
+- `CalendarEntry`
+- `AuditLog`
+
+UI may use localized labels such as:
+
+- Nabavka
+- Dobavljači
+- Skladište
+- Radni Nalozi
+
+Avoid multiple code names for the same domain concept.
+
+---
+
+## 18. Dependency Direction
+
+Higher-level UI depends on domain/service abstractions.
+
+Domain/business logic must not depend on React UI.
+
+Conceptually:
+
+```text
+TSX UI
+  ↓
+hooks / use-cases
+  ↓
+domain/services
+  ↓
+trusted backend/data-access
+  ↓
+database
+```
+
+Do not create circular feature dependencies.
+
+Shared code must be genuinely shared, not merely moved to `shared/` to bypass boundaries.
+
+---
+
+## 19. Error Handling
+
+Critical operations must return typed, intentional errors.
+
+Examples:
+
+- insufficient inventory
+- unauthorized action
+- record already Finished
+- archived product
+- duplicate/invalid state transition
+- missing Project
+- invalid BOM
+- invalid Work Order state
+
+Do not expose raw database errors directly to users.
+
+UI should translate known domain errors into clear user-facing messages.
+
+---
+
+## 20. Scalability Without Premature Complexity
+
+Do not pre-build unused ERP capabilities.
+
+Do not add:
+
+- microservices
+- event buses
+- CQRS
+- complex plugin systems
+- generic workflow engines
+- unnecessary repository abstraction layers
+
+unless the real product later requires them.
+
+The architecture should scale by keeping boundaries clean, not by introducing enterprise patterns prematurely.
+
+---
+
+## 21. Code Review Expectations
+
+Every Codex task should preserve:
+
+- strict TypeScript
+- small reviewable changes
+- existing feature boundaries
+- shared types
+- centralized business rules
+- backend-enforced permissions
+- audit requirements
+- transaction safety
+
+Codex must not:
+
+- silently redesign architecture
+- create large all-purpose files
+- duplicate existing domain logic
+- bypass services for convenience
+- move trusted rules into frontend-only logic
+- weaken TypeScript/security to finish faster
+
+---
+
+## 22. File Size Guidance
+
+There is no rigid line-count limit, but large files are a warning signal.
+
+As a rule of thumb:
+
+- page components should stay focused on page composition
+- forms/tables/dialogs should be extracted when independently complex
+- domain services should represent one domain/use-case area
+- shared modules should not become giant catch-all files
+
+If a file grows because it contains multiple responsibilities, split it before continuing to add features.
+
+---
+
+## 23. Architecture Definition of Done
+
+AlfaEV architecture is considered healthy when:
+
+- no critical business rule exists only in TSX
+- no stock mutation bypasses trusted Inventory logic
+- permissions cannot be bypassed through direct backend calls
+- shared domain types are not duplicated
+- features have clear ownership/boundaries
+- historical records remain trustworthy
+- critical workflows are atomic
+- audit generation is centralized
+- new modules can be added without rewriting existing modules
+- no giant files become de facto application controllers
+- the codebase remains understandable to a new engineer/Codex session from the canonical docs

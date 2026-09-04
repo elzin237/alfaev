@@ -1,0 +1,1432 @@
+# AlfaEV — UI_SPEC.md
+
+Status: Canonical UI/UX specification v1  
+Purpose: Define how approved AlfaEV modules should behave visually and interactively while preserving the existing React/Tailwind visual language.  
+Rule: This is a UI behavior specification, not permission/security enforcement. Backend authorization and business rules remain authoritative.
+
+---
+
+# 1. UI Principles
+
+AlfaEV is an internal operational tool.
+
+The UI should optimize for:
+
+- speed
+- clarity
+- low cognitive load
+- reliable data entry
+- obvious status
+- traceability
+- predictable actions
+- desktop-first operational use
+- responsive usability on smaller screens
+
+Do not redesign the application into a different visual style.
+
+Preserve the current approved:
+
+- typography direction
+- spacing rhythm
+- Tailwind-based design language
+- Sidebar / Topbar shell
+- dark/light treatment already used by the prototype where applicable
+
+Visual changes should support functionality rather than introduce a new brand system.
+
+---
+
+# 2. General Layout
+
+Protected application layout contains:
+
+- left Sidebar
+- Topbar
+- main content area
+
+Desktop:
+
+- Sidebar remains visible
+- content area uses available width
+- data-heavy pages may use wide tables
+
+Mobile/smaller widths:
+
+- Sidebar collapses into an overlay/drawer
+- Topbar exposes menu control
+- forms stack vertically
+- tables may become horizontally scrollable or convert to compact card rows where needed
+
+Do not hide essential data solely because the viewport is narrow.
+
+---
+
+# 3. Sidebar
+
+Final navigation order:
+
+1. Dashboard
+2. Projects
+3. Nabavka
+4. Dobavljači
+5. Skladište
+6. PCB Cards
+7. Radni Nalozi
+8. Calendar
+9. Archive
+10. Users
+
+Rules:
+
+- Users item is visible only to Admin.
+- Other items respect module visibility permissions.
+- Calendar is visible to all authenticated users.
+- Dashboard visibility follows the locked Dashboard permission model.
+- Removed placeholder modules must not appear.
+
+## Nabavka badge
+
+Display a compact numeric badge beside Nabavka.
+
+Badge value:
+
+- count Active requests
+- plus Partly Delivered requests
+- exclude Resolved requests
+
+Badge counts rows, not quantity.
+
+Examples:
+
+`Nabavka  4`
+
+The badge should update after relevant mutations without requiring a full page reload.
+
+---
+
+# 4. Topbar
+
+Topbar should remain lightweight.
+
+Expected responsibilities:
+
+- mobile Sidebar toggle
+- optional page/global search entry if retained
+- current user identity/profile access
+- logout action
+
+Do not overload Topbar with module-specific actions.
+
+Primary create/edit actions belong in the relevant page header.
+
+---
+
+# 5. Page Header Pattern
+
+Each module page should use a consistent page header.
+
+Structure:
+
+- page title
+- concise supporting description if useful
+- primary action on the right when authorized
+- optional secondary actions
+
+Example:
+
+`Projects`
+`Track active Alfa Proteh projects and delivery dates.`
+
+`[ Add Project ]`
+
+Permission behavior:
+
+- if user cannot perform an action, do not render a fake enabled button
+- disabled states may be used only when the reason should be visible to the user
+- backend remains authoritative
+
+---
+
+# 6. List / Table Pattern
+
+Data-heavy modules should use a consistent list/table shell.
+
+Recommended features:
+
+- search input
+- relevant filters
+- sortable columns where useful
+- pagination or incremental loading when dataset grows
+- clear empty state
+- row click/open detail behavior
+- compact status badge
+- right-aligned row actions
+
+Avoid placing too many action buttons inside every row.
+
+Prefer:
+
+- row click → detail
+- overflow menu for secondary actions
+
+Tables must not depend on color alone to communicate status.
+
+---
+
+# 7. Search and Filters
+
+Search should be debounced where server-backed.
+
+Use clear field labels/placeholders.
+
+Examples:
+
+## Inventory
+Search by:
+
+- Name
+- Serial Number / Šifra
+- optional Catalog Number
+
+## Work Orders
+Search by:
+
+- Work Order Number
+- Project
+- Customer where useful
+
+## Archive
+Filter by:
+
+- date range
+- user
+- module/entity
+- action
+- search text
+
+Filters should be easy to clear.
+
+Show active filter count when multiple filters exist.
+
+---
+
+# 8. Status Badges
+
+Use one reusable StatusBadge component with domain-specific variants.
+
+Project:
+
+- Planned
+- In Progress
+- On Hold
+- Completed
+- Cancelled
+
+Nabavka:
+
+- Active
+- Partly Delivered
+- Resolved
+
+Work Order:
+
+- Draft
+- Finished
+
+Status badge must include readable text.
+
+Do not encode meaning using color only.
+
+---
+
+# 9. Forms
+
+Use a consistent form system.
+
+Recommended:
+
+- React Hook Form
+- Zod
+- shared field components
+
+Each field should have:
+
+- visible label
+- clear validation message
+- required indicator where relevant
+- consistent spacing
+- no placeholder-only labeling
+
+Use appropriate control types:
+
+- text input
+- select/combobox
+- date picker/input
+- numeric input
+- textarea
+- permission checkbox/toggle
+
+Primary form actions appear at the bottom/right.
+
+Avoid multi-column forms on narrow screens.
+
+---
+
+# 10. Dialogs / Modals
+
+Use dialogs for:
+
+- focused small forms
+- confirmations
+- status transitions
+- barcode preview
+- manual Inventory adjustment
+
+Use full pages for:
+
+- complex record creation
+- large BOM editing
+- Work Order editing
+- detail-heavy workflows
+
+Dialogs must:
+
+- trap focus
+- close with Escape where safe
+- provide Cancel
+- prevent accidental close during critical submitting state
+
+---
+
+# 11. Confirmation Pattern
+
+Destructive or irreversible actions require explicit confirmation.
+
+Examples:
+
+- archive Product
+- archive Supplier
+- delete Draft Work Order
+- Finish Work Order
+- complete PCB production
+- deactivate User
+- reopen Completed Project
+
+Confirmation copy should state the consequence.
+
+Example:
+
+`Finish Work Order RN-2026-0041?`
+
+`This will deduct Inventory and permanently lock the Work Order.`
+
+Buttons:
+
+- Cancel
+- Finish Work Order
+
+Do not use vague labels such as `Yes`.
+
+---
+
+# 12. Loading / Error / Empty States
+
+Every server-backed page must support:
+
+- loading
+- error
+- empty
+- success refresh
+
+## Loading
+Prefer:
+
+- skeleton rows/cards
+- inline spinner for small operations
+
+Avoid full-screen loading for normal page mutations.
+
+## Error
+Show:
+
+- concise user-facing message
+- retry when appropriate
+
+Do not expose raw database errors.
+
+## Empty
+Use contextual empty states.
+
+Example:
+
+`No Work Orders yet.`
+
+If authorized:
+
+`[ Create Work Order ]`
+
+---
+
+# 13. Toast / Feedback Pattern
+
+Use transient toasts for successful non-critical actions.
+
+Examples:
+
+- Project saved
+- Permission updated
+- Supplier archived
+- Barcode downloaded
+
+Do not rely on toasts for critical information users must read.
+
+Critical failures should remain visible near the affected form/action.
+
+---
+
+# 14. Dashboard
+
+## Early phase
+Keep as placeholder.
+
+Do not build fake production widgets.
+
+## Final phase
+Use permission-aware widgets.
+
+Potential sections:
+
+- Projects summary
+- recent Work Orders
+- active Nabavka
+- Inventory alerts / recent products
+- recent business activity
+- Calendar upcoming events
+
+Rules:
+
+- widget visibility inherits source-module permissions
+- Admin sees all
+- company-wide Calendar data may show to all authenticated users
+- do not fetch unauthorized data and merely hide the widget
+
+Dashboard should summarize, not duplicate full module pages.
+
+---
+
+# 15. Projects UI
+
+## Projects list
+
+Recommended columns:
+
+- Project Name
+- Customer
+- Status
+- Start Date
+- Delivery Date
+- optional material usage summary
+- actions
+
+Filters:
+
+- status
+- date range if useful
+
+Primary action:
+
+- Add Project
+
+Only when authorized.
+
+---
+
+## Project detail
+
+Header:
+
+- Project Name
+- Customer
+- Status
+- Start / Delivery dates
+- edit action if allowed
+
+Sections:
+
+### Overview
+Core Project fields.
+
+### Material Usage
+Derived read-only list/table.
+
+Recommended columns:
+
+- Product
+- Serial Number / Šifra
+- Quantity
+- Source Type
+- Source Record
+- Date
+
+Source examples:
+
+- RN-2026-0041
+- PCB Production Run
+
+### Related Work Orders
+List Finished/Draft Work Orders linked to Project.
+
+### PCB Production
+Only Project-linked runs.
+
+### Activity
+Relevant Audit events.
+
+Completed Project:
+
+- show clear `Completed` state
+- normal edit controls hidden/disabled
+- Admin-only `Reopen Project` action
+- confirmation required
+
+---
+
+# 16. Nabavka UI
+
+## List
+
+Recommended columns:
+
+- Serial Number / Šifra
+  - show `Not assigned` for brand-new unlinked component
+- Name
+- Supplier
+- Requested Quantity
+- Delivered
+- Remaining
+- Status
+- Created By
+- actions
+
+Search:
+
+- Name
+- Serial Number
+
+Filters:
+
+- Active
+- Partly Delivered
+- Resolved
+- Supplier
+
+Default view should emphasize unresolved requests.
+
+---
+
+## Add request
+
+Start with a choice/search experience:
+
+### Existing Product
+- search/select Product
+- Serial Number auto-fills
+- Name auto-fills
+- Supplier select
+- Quantity
+
+### New Component
+- Name
+- Supplier
+- Quantity
+- clear message:
+  `Serial Number will be generated later when Admin creates the Product.`
+
+Do not ask worker to invent a Serial Number.
+
+---
+
+## Partly Delivered update
+
+Small dialog:
+
+- Requested
+- Delivered So Far
+- Remaining
+- input: Delivered So Far or Delivered Now
+
+Choose one implementation consistently.
+
+Recommended:
+- input `Delivered So Far`
+- validate 0 <= delivered <= requested
+
+Status updates automatically or explicitly according to implementation.
+
+No Inventory update occurs.
+
+---
+
+## Create component from request
+
+Admin-only.
+
+Open a focused form prefilled from Nabavka.
+
+Fields may include:
+
+- Name
+- Category
+- Brand
+- Supplier
+- Catalog Number
+
+Serial Number:
+
+- displayed as `Generated automatically`
+
+On success:
+- Product is created
+- request links to Product
+- Serial Number appears on Nabavka row
+
+---
+
+# 17. Dobavljači / Suppliers UI
+
+## List
+
+Columns:
+
+- Supplier Name
+- Country
+- Contact Person
+- Phone
+- Email
+- status
+- actions
+
+Primary action:
+
+- Add Supplier
+
+---
+
+## Supplier detail
+
+Sections:
+
+### Contact
+- Name
+- Country
+- Contact Person
+- Phone
+- Email
+
+### Products
+Table of linked Products:
+
+- Product
+- Serial Number
+- Catalog Number
+
+Allow authorized user to manage Product-Supplier links.
+
+Referenced archived Supplier:
+
+- display archived state
+- no new links
+
+---
+
+# 18. Skladište / Inventory UI
+
+## Inventory list
+
+Columns:
+
+- Serial Number / Šifra
+- Name
+- Category
+- Brand
+- Quantity
+- primary Supplier or supplier count
+- status
+- actions
+
+Search:
+
+- Name
+- Serial Number
+- Catalog Number where implemented
+
+Primary actions:
+
+- Add Component
+- Manage Brands, if authorized
+
+---
+
+## Add Product
+
+Fields:
+
+- Name
+- Category
+- Brand
+- Supplier(s)
+- Catalog Number per Supplier
+
+Serial Number:
+
+- not editable
+- display:
+  `Generated automatically when saved`
+
+Initial quantity:
+
+Recommended UI:
+- Product creation itself creates master record
+- Admin uses explicit Inventory adjustment/stock-entry action for stock
+- avoid silently mixing product creation and stock mutation unless later locked otherwise
+
+---
+
+## Product detail
+
+Header:
+
+- Name
+- Serial Number
+- current Quantity
+- archived/active state
+
+Sections:
+
+### Product Information
+- Category
+- Brand
+
+### Suppliers
+- Supplier
+- Catalog Number
+
+### Barcode
+- barcode preview
+- Open
+- Download
+
+### Inventory History
+Table:
+
+- Date
+- Type
+- Delta
+- Before
+- After
+- Source
+- User
+- Reason
+
+### Admin actions
+- Adjust Inventory
+- Archive Product
+
+---
+
+# 19. Manual Inventory Adjustment UI
+
+Admin-only.
+
+Dialog fields:
+
+- Type
+  - Add
+  - Remove
+  - Correction
+- Quantity
+- required Reason
+
+Display before confirmation:
+
+- Current Quantity
+- Adjustment
+- Resulting Quantity
+
+If result would be negative:
+
+- show validation error
+- block submit
+
+Confirmation for significant Remove/Correction actions is recommended.
+
+---
+
+# 20. Barcode UI
+
+Barcode format:
+
+- Code 128
+- value = 7-digit Serial Number
+
+Product detail should show:
+
+- readable Serial Number
+- barcode image
+- Open/Preview
+- Download
+
+Barcode image should have:
+
+- sufficient white margin
+- readable human text where useful
+- print-safe dimensions
+
+Do not store barcode images if deterministic generation is sufficient.
+
+---
+
+# 21. Barcode Scanner UX in Work Orders
+
+Assume scanner behaves like keyboard input.
+
+Work Order page should include a dedicated scan target.
+
+Example:
+
+`Scan component barcode`
+
+Behavior:
+
+1. scanner sends 7-digit value
+2. submit on Enter
+3. validate format
+4. resolve Product
+5. add/focus Product row
+6. move focus to Quantity input
+7. user enters quantity
+
+Success feedback should be immediate.
+
+If Product already exists in table:
+
+- focus existing row
+- do not create duplicate row
+
+Errors:
+
+- invalid barcode
+- Product not found
+- Product archived/ineligible
+
+Scanner input should reset after each scan.
+
+---
+
+# 22. PCB Cards UI
+
+## PCB list
+
+Columns:
+
+- PCB Card
+- Serial Number
+- Current Stock
+- Active BOM Version
+- Last Production
+- status
+- actions
+
+Primary actions:
+
+- Create PCB Card
+- Produce
+
+---
+
+## PCB detail
+
+Header:
+
+- Card Name
+- Serial Number
+- current finished-goods stock
+- active BOM version
+
+Sections:
+
+### Active BOM
+Table:
+
+- Component
+- Serial Number
+- Qty per Card
+- Current Stock
+
+### BOM History
+- Version
+- Created Date
+- Created By
+- Production Used?
+- active/historical state
+
+### Production History
+- Date
+- Quantity
+- Project
+- BOM Version
+- Produced By
+
+---
+
+# 23. PCB BOM Editor
+
+Use a focused page or large dialog.
+
+Actions:
+
+- Add Component
+- Remove Component
+- edit Qty per Card
+
+Each row:
+
+- Product search/select
+- Serial Number display
+- Quantity per Card
+
+Validation:
+
+- no duplicate component in same BOM
+- quantity > 0
+- cannot select the PCB output Product itself
+
+If current BOM has production history:
+
+- UI clearly states:
+  `Saving changes will create a new BOM version.`
+
+Do not suggest that old production will change.
+
+---
+
+# 24. PCB Production UI
+
+Production form:
+
+- PCB Card
+- Quantity to Produce
+- optional Project
+
+After Quantity input:
+
+show calculated requirements table:
+
+- Component
+- Qty per Card
+- Required
+- Available
+- Missing
+
+If all sufficient:
+
+- positive ready state
+- Confirm Production button
+
+If insufficient:
+
+- missing rows clearly emphasized
+- Confirm button disabled/hidden
+- message:
+  `Production cannot be completed because Inventory is insufficient.`
+
+Before final confirm:
+
+`Produce 20 × E55?`
+
+`This will deduct BOM components and add 20 E55 cards to Inventory.`
+
+After success:
+
+- show production reference/summary
+- refresh PCB stock and component balances
+
+---
+
+# 25. Work Orders List UI
+
+Columns:
+
+- Work Order Number
+- Project
+- Customer
+- Status
+- Created Date
+- Finished Date
+- Created By
+- actions
+
+Search:
+
+- Work Order Number
+- Project
+- Customer
+
+Filters:
+
+- Draft
+- Finished
+
+Primary action:
+
+- Create Work Order
+
+---
+
+# 26. New / Draft Work Order UI
+
+Header:
+
+- Work Order Number
+  - generated automatically
+- Draft badge
+
+Fields:
+
+- Project selector
+- Customer
+  - auto-filled
+  - read-only
+- Short Description
+
+Materials section:
+
+- dedicated barcode scan field
+- materials table
+
+Table columns:
+
+- Serial Number
+- Product Name
+- Quantity
+- Current Inventory
+- remove row
+
+Quantity remains manually entered.
+
+Footer actions:
+
+- Delete Draft
+- Save for Later
+- Finish Work Order
+
+Order visually:
+
+- destructive Delete separated
+- Save secondary
+- Finish primary
+
+---
+
+# 27. Work Order Finish UX
+
+When user clicks Finish:
+
+1. validate fields locally
+2. show confirmation summary
+3. trusted backend revalidates Inventory
+4. show blocking loading state for finalization
+5. on success:
+   - status becomes Finished
+   - editor becomes read-only
+   - PDF action appears
+
+Confirmation should summarize:
+
+- Work Order Number
+- Project
+- number of material lines
+- consequence:
+  `Inventory will be deducted and this Work Order can no longer be edited.`
+
+If Inventory became insufficient since page load:
+
+- show exact affected Product(s)
+- keep Work Order Draft
+- do not lose data
+
+---
+
+# 28. Finished Work Order UI
+
+Read-only.
+
+Header:
+
+- Work Order Number
+- Finished badge
+- Project
+- Customer
+- Finished Date
+- Finished By
+
+Sections:
+
+- Description
+- Materials
+- Inventory movements
+- PDF
+
+Actions:
+
+- Open PDF
+- Print via browser/PDF viewer
+- correction/reversal entry point when that workflow is implemented
+
+No:
+
+- Edit
+- Reopen
+- Delete
+
+---
+
+# 29. Work Order PDF UI
+
+PDF exact visual layout will be designed later.
+
+Application-level behavior is locked:
+
+- Finished Work Order exposes `Open PDF`
+- PDF opens in a controlled viewer/new browser context
+- authorized users may print
+- download may be allowed if desired by implementation
+- no edit/replace action
+
+The PDF itself should include enough document identity to be useful when printed, such as:
+
+- AlfaEV / company identity
+- Work Order Number
+- Project
+- Customer
+- materials table
+- description
+- date
+- signature area
+
+Exact formatting remains a later document-design task.
+
+---
+
+# 30. Calendar UI
+
+Use a real calendar view.
+
+Filters/toggles:
+
+- Birthdays
+- Business Trips
+- Events
+- Vacations
+
+Allow multiple selected simultaneously.
+
+Use distinct visual markers but always include readable labels/details.
+
+All users:
+- view
+- filter
+
+Admin:
+- Add Event
+- Edit entries
+- Delete/archive entries where appropriate
+
+Birthday entries:
+- read-only
+- sourced from User profiles
+
+Business Trip/Vacation:
+- informational
+- no approval controls
+
+---
+
+# 31. Archive UI
+
+Archive is a read-only data-heavy page.
+
+Recommended columns:
+
+- Date/Time
+- User
+- Module
+- Action
+- Record
+- Summary
+
+Filters:
+
+- date range
+- user
+- module
+- action
+- free-text search
+
+Row click/detail panel may show:
+
+- summary
+- before values
+- after values
+- metadata/source links
+
+Never render edit/delete controls.
+
+Where possible, affected record references should be navigable.
+
+---
+
+# 32. Users UI
+
+Completely Admin-only.
+
+## Users list
+
+Columns:
+
+- Full Name
+- Email
+- Active/Inactive
+- Admin
+- Last Login
+- Created Date
+- actions
+
+Primary action:
+
+- Create User
+
+---
+
+## User detail
+
+Sections:
+
+### Profile
+- Full Name
+- Email
+- Birthday
+- Active/Inactive
+- Admin status
+- Created Date
+- Last Login
+
+### Permissions
+Only for non-admin users.
+
+Show grouped permission checkboxes by module.
+
+Examples:
+
+Projects:
+- View
+- Create
+- Edit
+- Archive
+
+Nabavka:
+- View
+- Create
+- Edit
+- Change Status
+- Resolve
+
+Inventory:
+- View
+- Add Products
+- Edit Products
+- Manage Brands
+- Generate/Download Barcodes
+
+PCB:
+- View
+- Create
+- Edit
+- Produce
+- Archive
+
+Work Orders:
+- View
+- Create
+- Edit Draft
+- Finish
+- Delete Draft
+
+Archive:
+- View
+
+Do not display permanently Admin-only capabilities as grantable checkboxes.
+
+Permission changes require explicit Save.
+
+Audit all changes.
+
+---
+
+# 33. Permission-aware UI Rules
+
+When permission is absent:
+
+- hide protected create/edit actions
+- prevent route access where applicable
+- avoid fetching unauthorized data
+- show clear unauthorized state if user reaches a forbidden route
+
+Do not render a disabled button for every unavailable capability if it adds clutter.
+
+Use disabled-with-explanation only where understanding the unavailable action helps the workflow.
+
+---
+
+# 34. Unsaved Changes
+
+Forms with meaningful edits should warn before accidental navigation when feasible.
+
+High-value areas:
+
+- Draft Work Order
+- PCB BOM editor
+- large Project edits
+
+Do not create aggressive warnings for tiny forms that save instantly.
+
+---
+
+# 35. Accessibility
+
+At minimum:
+
+- keyboard-accessible controls
+- visible focus states
+- semantic buttons/labels
+- form errors associated with fields
+- dialogs with focus management
+- sufficient contrast
+- status not communicated by color alone
+
+Barcode scanner workflow must also work without a mouse.
+
+---
+
+# 36. Responsive Behavior
+
+Primary target is desktop operational use.
+
+Still support smaller screens.
+
+Rules:
+
+- Sidebar becomes drawer
+- tables may scroll horizontally
+- action bars stack
+- form grids collapse to one column
+- dialogs fit viewport
+- barcode scan input remains easy to focus
+- critical actions remain reachable without horizontal clipping
+
+Do not build a separate mobile application layout.
+
+---
+
+# 37. Reusable Component Candidates
+
+Likely shared components:
+
+- `PageHeader`
+- `DataTable`
+- `SearchInput`
+- `FilterBar`
+- `StatusBadge`
+- `EmptyState`
+- `ConfirmDialog`
+- `FormField`
+- `PermissionGate`
+- `BarcodePreview`
+- `InventoryDelta`
+- `EntityLink`
+- `LoadingState`
+- `ErrorState`
+
+Do not over-generalize them prematurely.
+
+Extract when there is real shared behavior.
+
+---
+
+# 38. UI File Architecture
+
+TSX files should stay focused.
+
+Example:
+
+```text
+features/inventory/
+  pages/
+    InventoryPage.tsx
+    ProductDetailPage.tsx
+
+  components/
+    InventoryTable.tsx
+    ProductForm.tsx
+    InventoryAdjustmentDialog.tsx
+    BarcodeCard.tsx
+    InventoryMovementTable.tsx
+
+  hooks/
+    useInventory.ts
+
+  services/
+    inventoryService.ts
+
+  types/
+    inventory.ts
+
+  validation/
+    productSchemas.ts
+```
+
+Pages compose feature components.
+
+Business logic should not accumulate inside page TSX files.
+
+---
+
+# 39. Visual Regression Rule
+
+When converting current placeholder/prototype pages into functional pages:
+
+- preserve approved shell
+- preserve established spacing/typography
+- preserve existing brand styling
+- do not redesign unrelated screens
+
+Functionality may require new tables/forms/dialogs, but visual changes should remain coherent with the current AlfaEV UI.
+
+---
+
+# 40. UI Definition of Done
+
+A feature UI is complete when:
+
+- correct data is shown
+- permissions control visible actions
+- loading/error/empty states exist
+- form validation is clear
+- destructive actions are confirmed
+- responsive behavior is usable
+- keyboard interaction works for critical flows
+- barcode scanning is fast and predictable
+- irreversible actions explain consequences
+- TSX files remain focused
+- repeated patterns use reusable components where appropriate
+- no backend/security rule is assumed to be enforced only by the UI
