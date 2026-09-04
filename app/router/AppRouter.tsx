@@ -4,7 +4,7 @@ import AuthGuard from "../guards/AuthGuard";
 
 import LoginPage from "../../pages/auth/LoginPage";
 
-import DashboardPage from "../../pages/dashboard/DashboardPage";
+import DashboardPage from "../../features/dashboard/DashboardPage";
 import ProjectsPage from "../../pages/projects/ProjectsPage";
 import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import InventoryPage from "../../pages/inventory/InventoryPage";

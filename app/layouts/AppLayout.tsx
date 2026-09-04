@@ -1,8 +1,8 @@
 import { useState } from "react";
 
 import AppRouter from "../router/AppRouter";
-import Sidebar from "../../components/common/Sidebar";
-import Topbar from "../../components/common/Topbar";
+import Sidebar from "../../shared/components/Sidebar";
+import Topbar from "../../shared/components/Topbar";
 
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
