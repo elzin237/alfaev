@@ -14,7 +14,9 @@
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "react-router": "latest"
+    "react-hook-form": "^7.87.0",
+    "react-router": "latest",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
