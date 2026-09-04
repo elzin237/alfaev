@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  // Declare browser-safe VITE_* variables here as they are introduced.
+  readonly VITE_SUPABASE_URL: string;
+  readonly VITE_SUPABASE_PUBLISHABLE_KEY: string;
 }
 
 interface ImportMeta {

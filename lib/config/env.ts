@@ -12,3 +12,14 @@ export function requireEnv(
 
   return normalizedValue;
 }
+
+export const frontendEnv = {
+  supabaseUrl: requireEnv(
+    "VITE_SUPABASE_URL",
+    import.meta.env.VITE_SUPABASE_URL,
+  ),
+  supabasePublishableKey: requireEnv(
+    "VITE_SUPABASE_PUBLISHABLE_KEY",
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  ),
+} as const;
