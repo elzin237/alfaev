@@ -3,8 +3,12 @@ import { randomUUID } from "node:crypto";
 import {
   createClient,
   type SupabaseClient,
+  type User,
 } from "@supabase/supabase-js";
-import { Pool } from "pg";
+import {
+  Pool,
+  type PoolClient,
+} from "pg";
 
 import type { BackendTestEnvironment } from "./env";
 
@@ -15,10 +19,16 @@ export interface SecurityActor {
 }
 
 export interface CleanupVerification {
+  auditLogsRemaining: number;
   authUsersRemaining: number;
   profilesRemaining: number;
   permissionsRemaining: number;
   postgresClosed: boolean;
+}
+
+export interface TemporaryAuthUser {
+  authUserId: string;
+  email: string;
 }
 
 export interface SecurityFixtureHarness {
@@ -33,6 +43,11 @@ export interface SecurityFixtureHarness {
     granted: string;
     ungranted: string;
   };
+  countAuthUsersByEmail: (email: string) => Promise<number>;
+  createTemporaryAuthUser: (label: string) => Promise<TemporaryAuthUser>;
+  withRollbackDatabaseTransaction: <Result>(
+    operation: (client: PoolClient) => Promise<Result>,
+  ) => Promise<Result>;
   cleanup: () => Promise<CleanupVerification>;
 }
 
@@ -124,10 +139,10 @@ export async function createSecurityFixtureHarness(
   const fixtureEmailPrefix = `${fixtureIdentityPrefix}${runId}.`;
   let cleanupPromise: Promise<CleanupVerification> | undefined;
 
-  const countTemporaryAuthUsers = async (): Promise<number> => {
+  const listTemporaryAuthUsers = async () => {
     const pageSize = 1_000;
     let page = 1;
-    let count = 0;
+    const users: User[] = [];
 
     for (;;) {
       const { data, error } = await authAdminClient.auth.admin.listUsers({
@@ -135,25 +150,97 @@ export async function createSecurityFixtureHarness(
         perPage: pageSize,
       });
 
-      throwIfError("Auth fixture cleanup verification", error);
-      count += data.users.filter((user) =>
-        user.email?.startsWith(fixtureIdentityPrefix),
-      ).length;
+      throwIfError("Auth fixture lookup", error);
+      users.push(...data.users);
 
       if (data.users.length < pageSize) {
-        return count;
+        return users;
       }
 
       page += 1;
     }
   };
 
+  const countTemporaryAuthUsers = async (): Promise<number> => {
+    const users = await listTemporaryAuthUsers();
+
+    return users.filter((user) =>
+      user.email?.startsWith(fixtureIdentityPrefix),
+    ).length;
+  };
+
+  const countAuthUsersByEmail = async (email: string): Promise<number> => {
+    const users = await listTemporaryAuthUsers();
+
+    return users.filter((user) => user.email === email).length;
+  };
+
+  const createTemporaryAuthUser = async (
+    label: string,
+  ): Promise<TemporaryAuthUser> => {
+    const email = `${fixtureEmailPrefix}${label}.${randomUUID()}@example.com`;
+    const password = `AlfaEV-${randomUUID()}-Aa1!`;
+    const { data, error } = await authAdminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+    throwIfError("Temporary Auth user creation", error);
+
+    if (!data.user) {
+      throw new Error("Temporary Auth user creation returned no user");
+    }
+
+    state.authUserIds.push(data.user.id);
+
+    return {
+      authUserId: data.user.id,
+      email,
+    };
+  };
+
+  const withRollbackDatabaseTransaction = async <Result>(
+    operation: (client: PoolClient) => Promise<Result>,
+  ): Promise<Result> => {
+    const client = await database.connect();
+
+    try {
+      await client.query("begin");
+      const result = await operation(client);
+      await client.query("rollback");
+      return result;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  };
+
   const performCleanup = async (): Promise<CleanupVerification> => {
     const cleanupErrors: string[] = [];
+    let auditLogsRemaining = 0;
     let permissionsRemaining = 0;
     let profilesRemaining = 0;
     let authUsersRemaining = 0;
     let postgresClosed = false;
+
+    try {
+      if (state.profileIds.length > 0) {
+        const auditCount = await database.query<CountRow>(
+          `select count(*)::text as count
+           from public.audit_logs
+           where actor_user_id = any($1::uuid[])
+              or entity_id = any($1::uuid[])`,
+          [state.profileIds],
+        );
+
+        auditLogsRemaining = parseCount(auditCount.rows[0]);
+      }
+    } catch {
+      cleanupErrors.push("audit cleanup could not be verified");
+    }
 
     try {
       if (state.profileIds.length > 0) {
@@ -238,6 +325,7 @@ export async function createSecurityFixtureHarness(
     }
 
     if (
+      auditLogsRemaining !== 0 ||
       permissionsRemaining !== 0 ||
       profilesRemaining !== 0 ||
       authUsersRemaining !== 0
@@ -250,6 +338,7 @@ export async function createSecurityFixtureHarness(
     }
 
     return {
+      auditLogsRemaining,
       authUsersRemaining,
       profilesRemaining,
       permissionsRemaining,
@@ -404,6 +493,9 @@ export async function createSecurityFixtureHarness(
         granted: grantedPermission.id,
         ungranted: ungrantedPermission.id,
       },
+      countAuthUsersByEmail,
+      createTemporaryAuthUser,
+      withRollbackDatabaseTransaction,
       cleanup,
     };
   } catch (setupError) {
