@@ -491,16 +491,26 @@ No UI changes yet.
 ## 023 — Replace Fake Login with Supabase Auth
 
 Goal:
-- update LoginPage to use real Auth service
+- replace LoginPage fake login with the Task 022 Supabase Auth service
+- make the minimum compatibility update to the existing AuthGuard so protected
+  routes recognize a real Supabase session after login
 
-Remove localStorage `alfaev_auth` as authority.
+Remove localStorage `alfaev_auth` usage as authentication authority.
 
 Preserve current visual design.
+
+Do not:
+- load UserProfile yet
+- enforce `is_active` yet
+- load permissions
+- implement the final reusable/loading-aware authenticated route architecture;
+  that remains Task 027
 
 Validate:
 - valid login
 - invalid login error
 - no public signup UI
+- successful login can enter the existing protected application shell
 
 ---
 
@@ -546,12 +556,13 @@ Validate protected routes are unavailable afterward.
 ## 027 — Implement Authenticated Route Guard
 
 Goal:
-- reusable protected-route boundary
+- replace/refine the minimal Task 023 session-compatible guard into the final
+  reusable authenticated route boundary
 
 Behavior:
 - unauthenticated → `/login`
 - authenticated active → continue
-- loading state handled cleanly
+- session/profile loading state handled cleanly without redirect flicker
 
 Do not add module permissions yet.
 
