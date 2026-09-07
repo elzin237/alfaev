@@ -540,6 +540,18 @@ Admin-only.
 
 ---
 
+## Edit User Profile
+
+1. Admin opens an AlfaEV User.
+2. Admin may edit:
+   - Full Name
+   - Email
+   - Birthday
+3. Email changes go through trusted backend orchestration so the Supabase Auth identity and `UserProfile.email` remain synchronized.
+4. Successful email and profile changes create Audit history.
+
+---
+
 ## Edit Permissions
 
 1. Admin opens non-admin User.

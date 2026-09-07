@@ -657,16 +657,32 @@ Keep form focused.
 ## 034 — Build User Detail / Profile Edit
 
 Goal:
-- Admin-only user detail
+- Admin-only user detail and profile editing
 
-Support:
+Admin may edit:
 - Full Name
-- Email as allowed by auth architecture
+- Email
 - Birthday
+
+Display:
+- Active/Inactive
+- Admin status
 - Created Date
 - Last Login
 
-Do not add permission matrix yet.
+Email changes must:
+- use a trusted server-side operation
+- update the Supabase Auth email and `public.user_profiles.email` coherently
+- require an active Admin
+- keep service-role/secret credentials out of browser code
+- create Audit history
+- use a safe compensating rollback if a cross-system update partially fails, so Supabase Auth and UserProfile do not remain inconsistent
+
+Do not add:
+- activate/deactivate; that remains Task 035
+- Admin status changes; that remains Task 036
+- permission management; that remains Tasks 037+
+- password management
 
 ---
 
