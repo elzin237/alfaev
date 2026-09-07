@@ -219,7 +219,51 @@ describe("AuthGuard centralized auth state", () => {
     expect(authProviderMocks.useAuth).toHaveBeenCalled();
   });
 
-  it("fails closed when a session has no valid loaded profile", () => {
+  it("fails closed with a safe error when a session has no loaded profile", () => {
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: null,
+    });
+    renderProtectedRoute();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "No AlfaEV profile is linked to this account.",
+    );
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Login destination" }))
+      .not.toBeInTheDocument();
+    expect(authServiceMocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it("renders the centralized safe session restore error and fails closed", () => {
+    authProviderMocks.useAuth.mockReturnValue({
+      session: null,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: {
+        code: "session_restore_failed",
+        message: "The authentication session could not be restored.",
+      },
+    });
+    renderProtectedRoute();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The authentication session could not be restored.",
+    );
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Login destination" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("renders the centralized safe profile error and fails closed", () => {
     authProviderMocks.useAuth.mockReturnValue({
       session,
       profile: null,
@@ -227,17 +271,17 @@ describe("AuthGuard centralized auth state", () => {
       isActive: false,
       isLoading: false,
       error: {
-        code: "profile_not_found",
-        message: "No AlfaEV profile is linked to this account.",
+        code: "profile_load_failed",
+        message: "The AlfaEV profile could not be loaded.",
       },
     });
     renderProtectedRoute();
 
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The AlfaEV profile could not be loaded.",
+    );
     expect(screen.queryByRole("heading", { name: "Protected content" }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Login destination" }))
-      .not.toBeInTheDocument();
-    expect(authServiceMocks.signOut).not.toHaveBeenCalled();
   });
 
   it("blocks a restored inactive session, signs out, and shows a safe login message", async () => {
@@ -276,7 +320,7 @@ describe("AuthGuard centralized auth state", () => {
     expect(authServiceMocks.signOut).toHaveBeenCalledOnce();
   });
 
-  it("does not render protected content while auth or profile state is loading", () => {
+  it("renders a loading state without protected content or redirect flicker", () => {
     authProviderMocks.useAuth.mockReturnValue({
       session,
       profile: null,
@@ -287,6 +331,9 @@ describe("AuthGuard centralized auth state", () => {
     });
     renderProtectedRoute();
 
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Restoring your AlfaEV session...",
+    );
     expect(screen.queryByRole("heading", { name: "Protected content" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Login destination" }))

@@ -3,6 +3,8 @@ import { Navigate, Outlet, useNavigate } from "react-router";
 
 import { useAuth } from "../auth/AuthProvider";
 import { signOut } from "../auth/authService";
+import ErrorState from "../../shared/components/ErrorState";
+import LoadingState from "../../shared/components/LoadingState";
 
 function InactiveAccountLockout() {
   const navigate = useNavigate();
@@ -27,10 +29,19 @@ function InactiveAccountLockout() {
 }
 
 function AuthGuard() {
-  const { session, profile, isLoading } = useAuth();
+  const { session, profile, isLoading, error } = useAuth();
 
   if (isLoading) {
-    return null;
+    return <LoadingState message="Restoring your AlfaEV session..." />;
+  }
+
+  if (error) {
+    return (
+      <ErrorState
+        title="Unable to access AlfaEV"
+        message={error.message}
+      />
+    );
   }
 
   if (!session) {
@@ -38,7 +49,12 @@ function AuthGuard() {
   }
 
   if (!profile) {
-    return null;
+    return (
+      <ErrorState
+        title="Unable to access AlfaEV"
+        message="No AlfaEV profile is linked to this account."
+      />
+    );
   }
 
   if (!profile.isActive) {

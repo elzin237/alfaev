@@ -1,10 +1,45 @@
-import { Bell, Menu, Search, UserCircle2 } from "lucide-react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Bell, LogOut, Menu, Search, UserCircle2 } from "lucide-react";
+import { useNavigate } from "react-router";
+
+import { signOut } from "../../app/auth/authService";
 
 interface TopbarProps {
   setSidebarOpen: (open: boolean) => void;
 }
 
 function Topbar({ setSidebarOpen }: TopbarProps) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+
+  const handleLogout = async () => {
+    if (isSigningOut) {
+      return;
+    }
+
+    setIsSigningOut(true);
+    setLogoutError(null);
+
+    try {
+      const result = await signOut();
+
+      if (!result.ok) {
+        setLogoutError(result.error.message);
+        return;
+      }
+
+      queryClient.clear();
+      navigate("/login", { replace: true });
+    } catch {
+      setLogoutError("The authentication request could not be completed.");
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
   return (
     <header className="flex h-20 items-center justify-between border-b border-zinc-200 bg-white px-4 lg:px-8">
       <div className="flex items-center gap-4">
@@ -45,6 +80,23 @@ function Topbar({ setSidebarOpen }: TopbarProps) {
           <UserCircle2 size={22} />
           <span className="hidden text-sm font-medium sm:block">Admin</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => void handleLogout()}
+          disabled={isSigningOut}
+          aria-busy={isSigningOut}
+          className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <LogOut size={18} />
+          <span>{isSigningOut ? "Odjava u toku..." : "Odjava"}</span>
+        </button>
+
+        {logoutError && (
+          <p className="max-w-48 text-sm font-medium text-red-700" role="alert">
+            {logoutError}
+          </p>
+        )}
       </div>
     </header>
   );
