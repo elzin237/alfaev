@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import EmptyState from "../../shared/components/EmptyState";
@@ -7,6 +7,7 @@ import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
+import CreateUserDialog from "./components/CreateUserDialog";
 import { listUsersAdmin } from "./services/usersService";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -19,8 +20,12 @@ function formatDate(value: string): string {
 
 function UsersPage() {
   const { profile } = useAuth();
+  const queryClient = useQueryClient();
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const usersListQueryKey = ["users", "list", profile?.id] as const;
   const usersQuery = useQuery({
-    queryKey: ["users", "list", profile?.id],
+    queryKey: usersListQueryKey,
     queryFn: listUsersAdmin,
     enabled: Boolean(profile?.id),
     staleTime: 60_000,
@@ -112,8 +117,39 @@ function UsersPage() {
       <PageHeader
         title="Users"
         description="View AlfaEV user accounts and their current status."
+        actions={
+          <button
+            type="button"
+            onClick={() => {
+              setSuccessMessage(null);
+              setIsCreateDialogOpen(true);
+            }}
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+          >
+            Create User
+          </button>
+        }
       />
+      {successMessage && (
+        <p
+          role="status"
+          className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800"
+        >
+          {successMessage}
+        </p>
+      )}
       {content}
+      <CreateUserDialog
+        open={isCreateDialogOpen}
+        onClose={() => setIsCreateDialogOpen(false)}
+        onCreated={() => {
+          setSuccessMessage("User invitation sent.");
+          void queryClient.invalidateQueries({
+            queryKey: usersListQueryKey,
+            exact: true,
+          });
+        }}
+      />
     </section>
   );
 }

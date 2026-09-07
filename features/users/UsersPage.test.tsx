@@ -1,10 +1,18 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const usersPageMocks = vi.hoisted(() => ({
   listUsersAdmin: vi.fn(),
+  inviteUserAdmin: vi.fn(),
   useAuth: vi.fn(),
 }));
 
@@ -13,6 +21,9 @@ vi.mock("../../app/auth/AuthProvider", () => ({
 }));
 vi.mock("./services/usersService", () => ({
   listUsersAdmin: usersPageMocks.listUsersAdmin,
+}));
+vi.mock("./services/userInviteService", () => ({
+  inviteUserAdmin: usersPageMocks.inviteUserAdmin,
 }));
 
 import UsersPage from "./UsersPage";
@@ -64,15 +75,21 @@ function renderUsersPage() {
     defaultOptions: { queries: { retry: false } },
   });
 
-  return render(
+  const rendered = render(
     <QueryClientProvider client={queryClient}>
       <UsersPage />
     </QueryClientProvider>,
   );
+
+  return { ...rendered, queryClient };
 }
 
 beforeEach(() => {
   usersPageMocks.useAuth.mockReturnValue(createAuthState());
+  usersPageMocks.inviteUserAdmin.mockResolvedValue({
+    ok: true,
+    value: { profileId: "00000000-0000-0000-0000-000000000301" },
+  });
 });
 
 afterEach(() => {
@@ -166,5 +183,50 @@ describe("UsersPage", () => {
     expect(screen.getByText("Non-admin")).toBeInTheDocument();
     expect(screen.getByText("Never")).toBeInTheDocument();
     expect(usersPageMocks.listUsersAdmin).toHaveBeenCalledOnce();
+  });
+
+  it("opens the Create User form from the page header action", async () => {
+    usersPageMocks.listUsersAdmin.mockResolvedValue({ ok: true, value: [] });
+
+    renderUsersPage();
+    fireEvent.click(screen.getByRole("button", { name: "Create User" }));
+
+    expect(screen.getByRole("dialog", { name: "Create User" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("Full Name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Birthday")).toBeInTheDocument();
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+  });
+
+  it("closes after success, confirms it, and refreshes the current Admin list", async () => {
+    usersPageMocks.listUsersAdmin.mockResolvedValue({ ok: true, value: [] });
+    const { queryClient } = renderUsersPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await screen.findByRole("heading", { name: "No users found" });
+    fireEvent.click(screen.getByRole("button", { name: "Create User" }));
+    fireEvent.change(screen.getByLabelText("Full Name"), {
+      target: { value: "New AlfaEV User" },
+    });
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "new.user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Birthday"), {
+      target: { value: "1995-04-03" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send Invitation" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "User invitation sent.",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["users", "list", profile.id],
+      exact: true,
+    });
+    await waitFor(() => {
+      expect(usersPageMocks.listUsersAdmin).toHaveBeenCalledTimes(2);
+    });
   });
 });
