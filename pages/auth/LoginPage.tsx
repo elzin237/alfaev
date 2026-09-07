@@ -1,14 +1,30 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { ShieldCheck } from "lucide-react";
 
 import { signIn } from "../../app/auth/authService";
 
+const inactiveAccountMessage =
+  "This AlfaEV account is inactive. Contact an administrator.";
+
+function hasInactiveAccountReason(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    "authReason" in state &&
+    state.authReason === "inactive_account"
+  );
+}
+
 function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [noticeMessage, setNoticeMessage] = useState<string | null>(() =>
+    hasInactiveAccountReason(location.state) ? inactiveAccountMessage : null,
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -19,6 +35,7 @@ function LoginPage() {
     }
 
     setErrorMessage(null);
+    setNoticeMessage(null);
     setIsSubmitting(true);
 
     try {
@@ -130,12 +147,12 @@ function LoginPage() {
                   />
                 </div>
 
-                {errorMessage && (
+                {(errorMessage ?? noticeMessage) && (
                   <p
                     role="alert"
                     className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
                   >
-                    {errorMessage}
+                    {errorMessage ?? noticeMessage}
                   </p>
                 )}
 

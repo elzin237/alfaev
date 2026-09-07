@@ -368,7 +368,7 @@ export async function createSecurityFixtureHarness(
     });
     const inactive = await createActor({
       label: "inactive",
-      isAdmin: false,
+      isAdmin: true,
       isActive: false,
       createdByUserId: admin.profileId,
     });
@@ -381,6 +381,15 @@ export async function createSecurityFixtureHarness(
        )
        values ($1::uuid, $2::uuid, $3::uuid)`,
       [permitted.profileId, grantedPermission.id, admin.profileId],
+    );
+    await database.query(
+      `insert into public.user_permissions (
+         user_id,
+         permission_definition_id,
+         granted_by_user_id
+       )
+       values ($1::uuid, $2::uuid, $3::uuid)`,
+      [inactive.profileId, grantedPermission.id, admin.profileId],
     );
 
     return {

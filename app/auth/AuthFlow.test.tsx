@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 
 const authServiceMocks = vi.hoisted(() => ({
   signIn: vi.fn(),
+  signOut: vi.fn(),
 }));
 const authProviderMocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
@@ -15,6 +16,7 @@ vi.mock("./AuthProvider", () => authProviderMocks);
 
 import AuthGuard from "../guards/AuthGuard";
 import LoginPage from "../../pages/auth/LoginPage";
+import type { UserProfile } from "./profileService";
 
 const user: User = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -31,6 +33,26 @@ const session: Session = {
   expires_at: 1_788_739_200,
   refresh_token: "test-refresh-token",
   user,
+};
+
+const activeProfile: UserProfile = {
+  id: "00000000-0000-0000-0000-000000000101",
+  authUserId: user.id,
+  fullName: "Active User",
+  email: "active@example.com",
+  birthday: "1990-01-01",
+  isAdmin: false,
+  isActive: true,
+  createdAt: "2026-09-07T00:00:00.000Z",
+  lastLoginAt: null,
+};
+
+const inactiveProfile: UserProfile = {
+  ...activeProfile,
+  fullName: "Inactive User",
+  email: "inactive@example.com",
+  isAdmin: true,
+  isActive: false,
 };
 
 function renderLoginFlow() {
@@ -72,9 +94,9 @@ describe("Supabase login flow", () => {
     authServiceMocks.signIn.mockResolvedValue({ ok: true, value: session });
     authProviderMocks.useAuth.mockReturnValue({
       session,
-      profile: null,
+      profile: activeProfile,
       isAdmin: false,
-      isActive: false,
+      isActive: true,
       isLoading: false,
       error: null,
     });
@@ -129,6 +151,38 @@ describe("Supabase login flow", () => {
     expect(screen.getByRole("heading", { name: "Prijava u sistem" }))
       .toBeInTheDocument();
   });
+
+  it("blocks a successful sign-in when the loaded profile is inactive", async () => {
+    authServiceMocks.signIn.mockResolvedValue({ ok: true, value: session });
+    authServiceMocks.signOut.mockResolvedValue({
+      ok: true,
+      value: undefined,
+    });
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: inactiveProfile,
+      isAdmin: true,
+      isActive: false,
+      isLoading: false,
+      error: null,
+    });
+    renderLoginFlow();
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "inactive@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Lozinka"), {
+      target: { value: "valid-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Prijava u sistem" }));
+
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This AlfaEV account is inactive. Contact an administrator.",
+    );
+    expect(authServiceMocks.signOut).toHaveBeenCalledOnce();
+  });
 });
 
 describe("AuthGuard centralized auth state", () => {
@@ -148,12 +202,12 @@ describe("AuthGuard centralized auth state", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders protected content when a session exists", async () => {
+  it("renders protected content for an active session with an active profile", async () => {
     authProviderMocks.useAuth.mockReturnValue({
       session,
-      profile: null,
+      profile: activeProfile,
       isAdmin: false,
-      isActive: false,
+      isActive: true,
       isLoading: false,
       error: null,
     });
@@ -163,5 +217,79 @@ describe("AuthGuard centralized auth state", () => {
       await screen.findByRole("heading", { name: "Protected content" }),
     ).toBeInTheDocument();
     expect(authProviderMocks.useAuth).toHaveBeenCalled();
+  });
+
+  it("fails closed when a session has no valid loaded profile", () => {
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: {
+        code: "profile_not_found",
+        message: "No AlfaEV profile is linked to this account.",
+      },
+    });
+    renderProtectedRoute();
+
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Login destination" }))
+      .not.toBeInTheDocument();
+    expect(authServiceMocks.signOut).not.toHaveBeenCalled();
+  });
+
+  it("blocks a restored inactive session, signs out, and shows a safe login message", async () => {
+    authServiceMocks.signOut.mockResolvedValue({
+      ok: true,
+      value: undefined,
+    });
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: inactiveProfile,
+      isAdmin: true,
+      isActive: false,
+      isLoading: false,
+      error: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/protected"]}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route element={<AuthGuard />}>
+            <Route
+              path="/protected"
+              element={<h1>Protected content</h1>}
+            />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This AlfaEV account is inactive. Contact an administrator.",
+    );
+    expect(authServiceMocks.signOut).toHaveBeenCalledOnce();
+  });
+
+  it("does not render protected content while auth or profile state is loading", () => {
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: true,
+      error: null,
+    });
+    renderProtectedRoute();
+
+    expect(screen.queryByRole("heading", { name: "Protected content" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Login destination" }))
+      .not.toBeInTheDocument();
   });
 });

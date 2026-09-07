@@ -107,18 +107,36 @@ describe("Supabase security helpers", () => {
   });
 
   it("denies application access to an inactive authenticated user", async () => {
-    const { inactive } = requireHarness().actors;
+    const fixture = requireHarness();
+    const { inactive } = fixture.actors;
+    const sessionResult = await inactive.client.auth.getSession();
     const activeProfile = await inactive.client.rpc(
       "current_active_user_profile_id",
     );
     const activeStatus = await inactive.client.rpc("is_active_user");
+    const profileMutation = await inactive.client
+      .from("user_profiles")
+      .update({ full_name: "Forbidden inactive update" })
+      .eq("id", inactive.profileId);
+    const permissionMutation = await inactive.client
+      .from("user_permissions")
+      .insert({
+        user_id: inactive.profileId,
+        permission_definition_id:
+          fixture.permissionDefinitionIds.ungranted,
+        granted_by_user_id: fixture.actors.admin.profileId,
+      });
 
+    expect(sessionResult.error).toBeNull();
+    expect(sessionResult.data.session).not.toBeNull();
     expect(activeProfile.error).toBeNull();
     expect(activeProfile.data).toBeNull();
     expect(activeStatus.error).toBeNull();
     expect(activeStatus.data).toBe(false);
     await expectAdminStatus(inactive.client, false);
     await expectPermission(inactive.client, "projects.view", false);
+    expectPermissionDenied(profileMutation.error);
+    expectPermissionDenied(permissionMutation.error);
   });
 
   it("allows an authenticated user to read only their own profile", async () => {
