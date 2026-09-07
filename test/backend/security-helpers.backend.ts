@@ -23,6 +23,10 @@ function expectPermissionDenied(error: PostgrestError | null): void {
   expect(error?.code).toBe("42501");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 async function expectAdminStatus(
   client: SupabaseClient,
   expected: boolean,
@@ -211,5 +215,55 @@ describe("Supabase security helpers", () => {
     expectPermissionDenied(profileMutation.error);
     expectPermissionDenied(permissionDefinitionMutation.error);
     expectPermissionDenied(permissionGrantMutation.error);
+  });
+
+  it("allows an active Admin to list only approved User fields", async () => {
+    const fixture = requireHarness();
+    const { data, error } = await fixture.actors.admin.client.rpc(
+      "list_users_admin",
+    );
+    const rows: unknown = data;
+
+    expect(error).toBeNull();
+
+    if (!Array.isArray(rows) || !rows.every(isRecord)) {
+      throw new Error("Admin Users RPC returned an invalid result shape");
+    }
+
+    const approvedFields = [
+      "created_at",
+      "email",
+      "full_name",
+      "id",
+      "is_active",
+      "is_admin",
+      "last_login_at",
+    ];
+
+    for (const row of rows) {
+      expect(Object.keys(row).sort()).toEqual(approvedFields);
+    }
+
+    const resultIds = new Set(rows.map((row) => row.id));
+
+    for (const actor of Object.values(fixture.actors)) {
+      expect(resultIds.has(actor.profileId)).toBe(true);
+    }
+  });
+
+  it("denies the Admin Users list to every non-Admin actor class", async () => {
+    const fixture = requireHarness();
+    const deniedClients = [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ];
+
+    for (const client of deniedClients) {
+      const { error } = await client.rpc("list_users_admin");
+
+      expectPermissionDenied(error);
+    }
   });
 });

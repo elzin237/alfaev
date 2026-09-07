@@ -12,7 +12,7 @@ import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import InventoryPage from "../../pages/inventory/InventoryPage";
 import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
-import UsersPage from "../../pages/users/UsersPage";
+import UsersPage from "../../features/users/UsersPage";
 
 function AppRouter() {
   return (
