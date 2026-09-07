@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router";
 
 import AuthGuard from "../guards/AuthGuard";
+import AdminRoute from "../guards/AdminRoute";
 import PermissionRoute from "../guards/PermissionRoute";
 
 import LoginPage from "../../pages/auth/LoginPage";
@@ -37,7 +38,9 @@ function AppRouter() {
         <Route element={<PermissionRoute permission="work_orders.view" />}>
           <Route path="/work-orders" element={<WorkOrdersPage />} />
         </Route>
-        <Route path="/users" element={<UsersPage />} />
+        <Route element={<AdminRoute />}>
+          <Route path="/users" element={<UsersPage />} />
+        </Route>
       </Route>
     </Routes>
   );
