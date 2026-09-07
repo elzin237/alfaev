@@ -1,7 +1,16 @@
+import { useQueries } from "@tanstack/react-query";
 import { NavLink } from "react-router";
 import { X } from "lucide-react";
 
-import { NAVIGATION } from "../../lib/constants/navigation";
+import { useAuth } from "../../app/auth/AuthProvider";
+import { hasPermission } from "../../app/auth/permissionService";
+import { NAVIGATION } from "../../app/navigation/navigation";
+
+const permissionNavigationItems = NAVIGATION.flatMap((item) =>
+  item.access.kind === "permission"
+    ? [{ permission: item.access.permission }]
+    : [],
+);
 
 interface SidebarProps {
   sidebarOpen: boolean;
@@ -9,6 +18,54 @@ interface SidebarProps {
 }
 
 function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
+  const { session, profile, isAdmin, isActive } = useAuth();
+  const canResolvePermissions = Boolean(
+    session && profile?.isActive && isActive && !isAdmin,
+  );
+  const permissionQueries = useQueries({
+    queries: permissionNavigationItems.map(({ permission }) => ({
+      queryKey: [
+        "permission",
+        session?.user.id,
+        profile?.id,
+        permission,
+      ],
+      queryFn: () => hasPermission(permission),
+      enabled: canResolvePermissions,
+      staleTime: 60_000,
+    })),
+  });
+  const isAuthenticatedActive = Boolean(
+    session && profile?.isActive && isActive,
+  );
+  const permissionResults = new Map(
+    permissionNavigationItems.map(({ permission }, index) => [
+      permission,
+      permissionQueries[index]?.data,
+    ]),
+  );
+  const visibleNavigation = NAVIGATION.filter((item) => {
+    if (!isAuthenticatedActive) {
+      return false;
+    }
+
+    if (isAdmin) {
+      return true;
+    }
+
+    if (item.access.kind === "authenticated") {
+      return true;
+    }
+
+    if (item.access.kind === "admin") {
+      return false;
+    }
+
+    const result = permissionResults.get(item.access.permission);
+
+    return result?.ok === true && result.value;
+  });
+
   return (
     <>
       {sidebarOpen && (
@@ -42,7 +99,7 @@ lg:relative lg:h-screen lg:translate-x-0        `}
         </div>
 
         <nav className="p-4">
-          {NAVIGATION.map(({ label, path, icon: Icon }) => (
+          {visibleNavigation.map(({ label, path, icon: Icon }) => (
             <NavLink
               key={path}
               to={path}
