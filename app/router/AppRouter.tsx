@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router";
 
 import AuthGuard from "../guards/AuthGuard";
+import PermissionRoute from "../guards/PermissionRoute";
 
 import LoginPage from "../../pages/auth/LoginPage";
 
@@ -18,12 +19,24 @@ function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
 
       <Route element={<AuthGuard />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/procurement" element={<ProcurementPage />} />
-        <Route path="/inventory" element={<InventoryPage />} />
-        <Route path="/pcb" element={<PcbPage />} />
-        <Route path="/work-orders" element={<WorkOrdersPage />} />
+        <Route element={<PermissionRoute permission="dashboard.view" />}>
+          <Route path="/" element={<DashboardPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="projects.view" />}>
+          <Route path="/projects" element={<ProjectsPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="procurement.view" />}>
+          <Route path="/procurement" element={<ProcurementPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="inventory.view" />}>
+          <Route path="/inventory" element={<InventoryPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="pcb.view" />}>
+          <Route path="/pcb" element={<PcbPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="work_orders.view" />}>
+          <Route path="/work-orders" element={<WorkOrdersPage />} />
+        </Route>
         <Route path="/users" element={<UsersPage />} />
       </Route>
     </Routes>
