@@ -1,15 +1,40 @@
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { ShieldCheck } from "lucide-react";
 
+import { signIn } from "../../app/auth/authService";
+
 function LoginPage() {
   const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-    localStorage.setItem("alfaev_auth", "true");
-    navigate("/");
+    if (isSubmitting) {
+      return;
+    }
+
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await signIn({ email, password });
+
+      if (!result.ok) {
+        setErrorMessage(result.error.message);
+        return;
+      }
+
+      navigate("/", { replace: true });
+    } catch {
+      setErrorMessage("The authentication request could not be completed.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -66,34 +91,61 @@ function LoginPage() {
             <div className="rounded-4xl border border-zinc-200 bg-white p-8 shadow-xl shadow-black/5 transition lg:p-12">
               <form onSubmit={handleSubmit} className="space-y-7">
                 <div>
-                  <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600">
-                    Korisničko ime
+                  <label
+                    htmlFor="login-email"
+                    className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600"
+                  >
+                    Email
                   </label>
 
                   <input
-                    type="text"
-                    placeholder="Unesite korisničko ime"
+                    id="login-email"
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                    placeholder="Unesite email adresu"
                     className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
                   />
                 </div>
 
                 <div>
-                  <label className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600">
+                  <label
+                    htmlFor="login-password"
+                    className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600"
+                  >
                     Lozinka
                   </label>
 
                   <input
+                    id="login-password"
                     type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
                     placeholder="Unesite lozinku"
                     className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
                   />
                 </div>
 
+                {errorMessage && (
+                  <p
+                    role="alert"
+                    className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700"
+                  >
+                    {errorMessage}
+                  </p>
+                )}
+
                 <button
                   type="submit"
-                  className="w-full rounded-2xl bg-red-600 py-5 text-lg font-semibold text-white transition hover:-translate-y-0.5 hover:bg-red-700"
+                  disabled={isSubmitting}
+                  aria-busy={isSubmitting}
+                  className="w-full rounded-2xl bg-red-600 py-5 text-lg font-semibold text-white transition hover:-translate-y-0.5 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:bg-red-600"
                 >
-                  Prijava u sistem
+                  {isSubmitting ? "Prijava u toku..." : "Prijava u sistem"}
                 </button>
               </form>
             </div>
