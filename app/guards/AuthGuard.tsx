@@ -1,36 +1,15 @@
-import { useEffect, useState } from "react";
 import { Navigate, Outlet } from "react-router";
 
-import { getSession } from "../auth/authService";
+import { useAuth } from "../auth/AuthProvider";
 
 function AuthGuard() {
-  const [hasSession, setHasSession] = useState<boolean | null>(null);
+  const { session, isLoading } = useAuth();
 
-  useEffect(() => {
-    let isCurrent = true;
-
-    void getSession()
-      .then((result) => {
-        if (isCurrent) {
-          setHasSession(result.ok && result.value !== null);
-        }
-      })
-      .catch(() => {
-        if (isCurrent) {
-          setHasSession(false);
-        }
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
-
-  if (hasSession === null) {
+  if (isLoading) {
     return null;
   }
 
-  if (!hasSession) {
+  if (!session) {
     return <Navigate to="/login" replace />;
   }
 

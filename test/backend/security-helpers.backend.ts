@@ -121,6 +121,54 @@ describe("Supabase security helpers", () => {
     await expectPermission(inactive.client, "projects.view", false);
   });
 
+  it("allows an authenticated user to read only their own profile", async () => {
+    const fixture = requireHarness();
+    const actor = fixture.actors.permitted;
+    const ownProfile = await actor.client
+      .from("user_profiles")
+      .select("id,auth_user_id,is_admin,is_active")
+      .eq("id", actor.profileId)
+      .single();
+    const otherProfile = await actor.client
+      .from("user_profiles")
+      .select("id")
+      .eq("id", fixture.actors.unpermitted.profileId);
+
+    expect(ownProfile.error).toBeNull();
+    expect(ownProfile.data).toEqual({
+      id: actor.profileId,
+      auth_user_id: actor.authUserId,
+      is_admin: false,
+      is_active: true,
+    });
+    expect(otherProfile.error).toBeNull();
+    expect(otherProfile.data).toEqual([]);
+  });
+
+  it("allows an inactive authenticated user to read their own inactive profile", async () => {
+    const { inactive } = requireHarness().actors;
+    const ownProfile = await inactive.client
+      .from("user_profiles")
+      .select("id,is_active")
+      .eq("id", inactive.profileId)
+      .single();
+
+    expect(ownProfile.error).toBeNull();
+    expect(ownProfile.data).toEqual({
+      id: inactive.profileId,
+      is_active: false,
+    });
+  });
+
+  it("denies anonymous profile reads", async () => {
+    const profileRead = await requireHarness()
+      .anonymousClient.from("user_profiles")
+      .select("id")
+      .limit(1);
+
+    expectPermissionDenied(profileRead.error);
+  });
+
   it("denies direct protected-table mutations to normal actors", async () => {
     const fixture = requireHarness();
     const client = fixture.actors.permitted.client;

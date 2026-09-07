@@ -4,11 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 const authServiceMocks = vi.hoisted(() => ({
-  getSession: vi.fn(),
   signIn: vi.fn(),
+}));
+const authProviderMocks = vi.hoisted(() => ({
+  useAuth: vi.fn(),
 }));
 
 vi.mock("./authService", () => authServiceMocks);
+vi.mock("./AuthProvider", () => authProviderMocks);
 
 import AuthGuard from "../guards/AuthGuard";
 import LoginPage from "../../pages/auth/LoginPage";
@@ -67,9 +70,13 @@ afterEach(() => {
 describe("Supabase login flow", () => {
   it("signs in and enters the protected route", async () => {
     authServiceMocks.signIn.mockResolvedValue({ ok: true, value: session });
-    authServiceMocks.getSession.mockResolvedValue({
-      ok: true,
-      value: session,
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: null,
     });
     renderLoginFlow();
 
@@ -98,6 +105,14 @@ describe("Supabase login flow", () => {
         message: "The email or password is incorrect.",
       },
     });
+    authProviderMocks.useAuth.mockReturnValue({
+      session: null,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: null,
+    });
     renderLoginFlow();
 
     fireEvent.change(screen.getByLabelText("Email"), {
@@ -116,9 +131,16 @@ describe("Supabase login flow", () => {
   });
 });
 
-describe("AuthGuard compatibility bridge", () => {
-  it("redirects after session lookup returns no session", async () => {
-    authServiceMocks.getSession.mockResolvedValue({ ok: true, value: null });
+describe("AuthGuard centralized auth state", () => {
+  it("redirects when centralized state has no session", async () => {
+    authProviderMocks.useAuth.mockReturnValue({
+      session: null,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: null,
+    });
     renderProtectedRoute();
 
     expect(
@@ -127,14 +149,19 @@ describe("AuthGuard compatibility bridge", () => {
   });
 
   it("renders protected content when a session exists", async () => {
-    authServiceMocks.getSession.mockResolvedValue({
-      ok: true,
-      value: session,
+    authProviderMocks.useAuth.mockReturnValue({
+      session,
+      profile: null,
+      isAdmin: false,
+      isActive: false,
+      isLoading: false,
+      error: null,
     });
     renderProtectedRoute();
 
     expect(
       await screen.findByRole("heading", { name: "Protected content" }),
     ).toBeInTheDocument();
+    expect(authProviderMocks.useAuth).toHaveBeenCalled();
   });
 });
