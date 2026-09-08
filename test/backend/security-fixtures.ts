@@ -46,12 +46,16 @@ export interface SecurityFixtureHarness {
   anonymousClient: SupabaseClient;
   actors: {
     admin: SecurityActor;
+    brandManager: SecurityActor;
+    inactiveBrandManager: SecurityActor;
     permitted: SecurityActor;
     unpermitted: SecurityActor;
     inactive: SecurityActor;
   };
   permissionDefinitionIds: {
+    brandsManage: string;
     granted: string;
+    inventoryView: string;
     ungranted: string;
   };
   countAuthUsersByEmail: (email: string) => Promise<number>;
@@ -654,8 +658,13 @@ export async function createSecurityFixtureHarness(
     const permissionResult = await database.query<PermissionDefinitionRow>(
       `select id, key
        from public.permission_definitions
-       where key in ($1::text, $2::text)`,
-      ["projects.view", "projects.create"],
+       where key = any($1::text[])`,
+      [[
+        "projects.view",
+        "projects.create",
+        "inventory.view",
+        "inventory.brands.manage",
+      ]],
     );
     const grantedPermission = permissionResult.rows.find(
       (permission) => permission.key === "projects.view",
@@ -663,8 +672,19 @@ export async function createSecurityFixtureHarness(
     const ungrantedPermission = permissionResult.rows.find(
       (permission) => permission.key === "projects.create",
     );
+    const inventoryViewPermission = permissionResult.rows.find(
+      (permission) => permission.key === "inventory.view",
+    );
+    const brandsManagePermission = permissionResult.rows.find(
+      (permission) => permission.key === "inventory.brands.manage",
+    );
 
-    if (!grantedPermission?.id || !ungrantedPermission?.id) {
+    if (
+      !grantedPermission?.id ||
+      !ungrantedPermission?.id ||
+      !inventoryViewPermission?.id ||
+      !brandsManagePermission?.id
+    ) {
       throw new Error("Canonical fixture permissions are missing");
     }
 
@@ -692,6 +712,18 @@ export async function createSecurityFixtureHarness(
       isActive: false,
       createdByUserId: admin.profileId,
     });
+    const brandManager = await createActor({
+      label: "brand-manager",
+      isAdmin: false,
+      isActive: true,
+      createdByUserId: admin.profileId,
+    });
+    const inactiveBrandManager = await createActor({
+      label: "inactive-brand-manager",
+      isAdmin: false,
+      isActive: false,
+      createdByUserId: admin.profileId,
+    });
 
     await database.query(
       `insert into public.user_permissions (
@@ -712,6 +744,36 @@ export async function createSecurityFixtureHarness(
       [inactive.profileId, grantedPermission.id, admin.profileId],
     );
     await database.query(
+      `insert into public.user_permissions (
+         user_id,
+         permission_definition_id,
+         granted_by_user_id
+       )
+       select $1::uuid, permission_definition.id, $2::uuid
+       from public.permission_definitions as permission_definition
+       where permission_definition.id = any($3::uuid[])`,
+      [
+        brandManager.profileId,
+        admin.profileId,
+        [inventoryViewPermission.id, brandsManagePermission.id],
+      ],
+    );
+    await database.query(
+      `insert into public.user_permissions (
+         user_id,
+         permission_definition_id,
+         granted_by_user_id
+       )
+       select $1::uuid, permission_definition.id, $2::uuid
+       from public.permission_definitions as permission_definition
+       where permission_definition.id = any($3::uuid[])`,
+      [
+        inactiveBrandManager.profileId,
+        admin.profileId,
+        [inventoryViewPermission.id, brandsManagePermission.id],
+      ],
+    );
+    await database.query(
       `insert into public.user_permission_revisions (
          user_id,
          revision,
@@ -721,6 +783,8 @@ export async function createSecurityFixtureHarness(
        from pg_catalog.unnest($1::uuid[]) as fixture_user(fixture_user_id)`,
       [[
         admin.profileId,
+        brandManager.profileId,
+        inactiveBrandManager.profileId,
         permitted.profileId,
         unpermitted.profileId,
         inactive.profileId,
@@ -731,12 +795,16 @@ export async function createSecurityFixtureHarness(
       anonymousClient,
       actors: {
         admin,
+        brandManager,
+        inactiveBrandManager,
         permitted,
         unpermitted,
         inactive,
       },
       permissionDefinitionIds: {
+        brandsManage: brandsManagePermission.id,
         granted: grantedPermission.id,
+        inventoryView: inventoryViewPermission.id,
         ungranted: ungrantedPermission.id,
       },
       countAuthUsersByEmail,
