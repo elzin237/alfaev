@@ -47,9 +47,22 @@ Do not store plaintext passwords anywhere in AlfaEV tables.
 
 An authenticated Supabase token is not sufficient if the AlfaEV profile is inactive.
 
+`UserProfile.is_active` remains the authoritative AlfaEV access gate even when an older Supabase session/token has already been issued.
+
 Trusted permission helpers/RLS must reject inactive users.
 
 This prevents an already authenticated user from continuing to use AlfaEV after Admin deactivation.
+
+Account activation/deactivation requires trusted Admin-only server orchestration across both layers:
+
+- AlfaEV UserProfile active/deactivation state
+- future Supabase Auth sign-in state
+
+The browser must never receive service-role or other server-secret credentials used for Auth administration.
+
+Self-deactivation and deactivation of the last active Admin must fail in trusted backend enforcement, not only in UI checks.
+
+If either side of the Auth/UserProfile state change fails, the trusted operation must compensate safely and must not report success while the states are known to be inconsistent.
 
 ---
 

@@ -689,14 +689,23 @@ Do not add:
 ## 035 — Add Activate / Deactivate User
 
 Goal:
-- Admin-only account state mutation
+- trusted Admin-only account state mutation
 
 Requirements:
-- audit
-- deactivated user loses access
+- dual-layer synchronization between AlfaEV UserProfile state and Supabase Auth state
+- deactivation sets `is_active = false`, `deactivated_at`, and `deactivated_by_user_id` to the acting Admin
+- trusted server-side Auth Admin operation disables future Supabase Auth sign-in without deleting the Auth user
+- `UserProfile.is_active` remains the authoritative AlfaEV access gate for already-issued sessions
+- reactivation restores future Supabase Auth sign-in, sets `is_active = true`, and clears current `deactivated_at` / `deactivated_by_user_id`
+- immutable AuditLog entries for every successful deactivate/reactivate operation
 - historical actor references remain
+- self-deactivation is forbidden
+- deactivation of the last active Admin is forbidden
+- safe compensating rollback if either side of the cross-system state change fails, so Auth and UserProfile do not remain knowingly inconsistent
 
-Add backend/security tests.
+Add backend/security tests covering authorized operations, inactive-session enforcement, self-deactivation, last-active-Admin protection, cross-system rollback, and direct bypass attempts.
+
+Do not add Admin-status editing; that remains Task 036.
 
 ---
 

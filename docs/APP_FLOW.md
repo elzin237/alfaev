@@ -569,10 +569,25 @@ Non-admin users never gain permission-management capability.
 ## Deactivate User
 
 1. Admin opens User.
-2. Deactivate account.
-3. User can no longer authenticate/use AlfaEV.
-4. Historical references remain intact.
-5. Audit deactivation.
+2. Admin explicitly confirms deactivation.
+3. Backend blocks self-deactivation.
+4. Backend blocks deactivation when the target is the last active Admin.
+5. Trusted AlfaEV backend marks the UserProfile inactive and records the acting Admin/time in current deactivation metadata.
+6. Trusted server-side Auth administration disables future Supabase Auth sign-in without deleting the Auth user.
+7. Existing sessions remain blocked by the authoritative AlfaEV `is_active` check.
+8. Historical references remain intact.
+9. Create an immutable Audit event.
+
+---
+
+## Reactivate User
+
+1. Admin explicitly reactivates the User.
+2. Trusted server-side Auth administration restores future Supabase Auth sign-in.
+3. Trusted AlfaEV backend marks the UserProfile active.
+4. Clear current `deactivated_at` and `deactivated_by_user_id` metadata.
+5. Preserve historical deactivate/reactivate events in immutable AuditLog records.
+6. Create an immutable reactivation Audit event.
 
 ---
 

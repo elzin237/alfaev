@@ -414,9 +414,17 @@ Every permission change creates an audit event.
 
 The Users module is completely Admin-only. Non-admin users must not see or access the Users page or any read-only user directory.
 
-Deactivated users cannot authenticate or perform new actions.
+Inactive users cannot perform new AlfaEV actions, including when an older Supabase session or token still exists.
 
-Historical audit records continue to display the original actor after deactivation.
+Deactivation preserves the Supabase Auth user, UserProfile, business history, and historical references; it does not delete the account records.
+
+An Admin cannot deactivate their own account.
+
+At least one active Admin must remain; deactivation of the last active Admin is forbidden.
+
+Reactivation is an explicit Admin action and creates an immutable audit event.
+
+Historical audit records continue to display the original actor after deactivation or reactivation.
 
 ---
 

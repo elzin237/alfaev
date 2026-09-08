@@ -91,14 +91,21 @@ Fields:
 - `last_login_at`
   - nullable until first successful login
 - `deactivated_at`
-  - nullable
+  - nullable current-state metadata
+  - set when the profile is deactivated
+  - cleared when the profile is reactivated
 - `deactivated_by_user_id`
-  - nullable
+  - nullable current-state metadata
+  - set to the acting Admin when the profile is deactivated
+  - cleared when the profile is reactivated
 
 Rules:
 
 - Admin accounts bypass delegable per-user permissions.
 - Inactive users cannot authenticate/use AlfaEV.
+- The Supabase Auth user is preserved when a UserProfile is deactivated; it is not deleted.
+- `deactivated_at` and `deactivated_by_user_id` describe only the current deactivated state.
+- Historical deactivate/reactivate events are preserved permanently in immutable AuditLog records.
 - Users with history are deactivated, not hard-deleted.
 - Historical Audit records continue to reference the UserProfile.
 
