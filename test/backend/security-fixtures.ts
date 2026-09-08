@@ -21,6 +21,7 @@ export interface SecurityActor {
 export interface CleanupVerification {
   auditLogsRemaining: number;
   authUsersRemaining: number;
+  permissionRevisionsRemaining: number;
   profilesRemaining: number;
   permissionsRemaining: number;
   postgresClosed: boolean;
@@ -427,6 +428,7 @@ export async function createSecurityFixtureHarness(
   const performCleanup = async (): Promise<CleanupVerification> => {
     const cleanupErrors: string[] = [];
     let auditLogsRemaining = 0;
+    let permissionRevisionsRemaining = 0;
     let permissionsRemaining = 0;
     let profilesRemaining = 0;
     let authUsersRemaining = 0;
@@ -459,6 +461,26 @@ export async function createSecurityFixtureHarness(
       }
     } catch {
       cleanupErrors.push("permission rows could not be deleted");
+    }
+
+    try {
+      if (state.profileIds.length > 0) {
+        await database.query(
+          `delete from public.user_permission_revisions
+           where user_id = any($1::uuid[])`,
+          [state.profileIds],
+        );
+        const revisionCount = await database.query<CountRow>(
+          `select count(*)::text as count
+           from public.user_permission_revisions
+           where user_id = any($1::uuid[])`,
+          [state.profileIds],
+        );
+
+        permissionRevisionsRemaining = parseCount(revisionCount.rows[0]);
+      }
+    } catch {
+      cleanupErrors.push("permission revision rows could not be deleted");
     }
 
     for (const profileId of [...state.profileIds].reverse()) {
@@ -532,6 +554,7 @@ export async function createSecurityFixtureHarness(
 
     if (
       auditLogsRemaining !== 0 ||
+      permissionRevisionsRemaining !== 0 ||
       permissionsRemaining !== 0 ||
       profilesRemaining !== 0 ||
       authUsersRemaining !== 0
@@ -546,6 +569,7 @@ export async function createSecurityFixtureHarness(
     return {
       auditLogsRemaining,
       authUsersRemaining,
+      permissionRevisionsRemaining,
       profilesRemaining,
       permissionsRemaining,
       postgresClosed,
@@ -686,6 +710,21 @@ export async function createSecurityFixtureHarness(
        )
        values ($1::uuid, $2::uuid, $3::uuid)`,
       [inactive.profileId, grantedPermission.id, admin.profileId],
+    );
+    await database.query(
+      `insert into public.user_permission_revisions (
+         user_id,
+         revision,
+         updated_at
+       )
+       select fixture_user_id, 1, pg_catalog.now()
+       from pg_catalog.unnest($1::uuid[]) as fixture_user(fixture_user_id)`,
+      [[
+        admin.profileId,
+        permitted.profileId,
+        unpermitted.profileId,
+        inactive.profileId,
+      ]],
     );
 
     return {

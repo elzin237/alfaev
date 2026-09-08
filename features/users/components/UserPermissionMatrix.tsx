@@ -21,15 +21,17 @@ const PERMISSION_GROUPS: ReadonlyArray<{
 export interface UserPermissionMatrixProps {
   permissions: readonly UserPermissionMatrixItem[];
   isAdminTarget: boolean;
+  isSubmitting?: boolean;
   onPermissionChange?: (permissionKey: PermissionKey, granted: boolean) => void;
 }
 
 function UserPermissionMatrix({
   permissions,
   isAdminTarget,
+  isSubmitting = false,
   onPermissionChange,
 }: UserPermissionMatrixProps) {
-  const isReadOnly = isAdminTarget || !onPermissionChange;
+  const isReadOnly = isAdminTarget || isSubmitting || !onPermissionChange;
 
   return (
     <section

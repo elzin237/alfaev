@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -277,5 +277,35 @@ describe("PermissionRoute", () => {
         "projects.view",
       ]),
     ).toEqual({ ok: true, value: true });
+  });
+
+  it("refetches and fails closed after the current identity prefix is invalidated", async () => {
+    let isAllowed = true;
+    permissionServiceMocks.hasPermission.mockImplementation(async () => ({
+      ok: true,
+      value: isAllowed,
+    }));
+    const queryClient = createQueryClient();
+    renderPermissionRoute("projects.view", queryClient);
+
+    await screen.findByRole("heading", {
+      name: "Protected permission content",
+    });
+    isAllowed = false;
+
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: [
+          "permission",
+          firstUser.id,
+          createProfile(firstUser).id,
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
+    });
+    expect(permissionServiceMocks.hasPermission).toHaveBeenCalledTimes(2);
   });
 });

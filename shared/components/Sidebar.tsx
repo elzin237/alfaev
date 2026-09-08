@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import { hasPermission } from "../../app/auth/permissionService";
+import { permissionQueryKey } from "../../app/auth/permissionQueryKeys";
 import { NAVIGATION } from "../../app/navigation/navigation";
 
 const permissionNavigationItems = NAVIGATION.flatMap((item) =>
@@ -24,12 +25,11 @@ function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
   );
   const permissionQueries = useQueries({
     queries: permissionNavigationItems.map(({ permission }) => ({
-      queryKey: [
-        "permission",
+      queryKey: permissionQueryKey(
         session?.user.id,
         profile?.id,
         permission,
-      ],
+      ),
       queryFn: () => hasPermission(permission),
       enabled: canResolvePermissions,
       staleTime: 60_000,

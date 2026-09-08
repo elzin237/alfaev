@@ -268,6 +268,36 @@ describe("Sidebar permission visibility", () => {
     ).toEqual({ ok: true, value: false });
   });
 
+  it("refetches visible links after the current identity prefix is invalidated", async () => {
+    let projectsAllowed = true;
+    sidebarMocks.hasPermission.mockImplementation(
+      async (permission: string): Promise<PermissionServiceResult> => ({
+        ok: true,
+        value: projectsAllowed && permission === "projects.view",
+      }),
+    );
+    const queryClient = createQueryClient();
+    renderSidebar(vi.fn(), queryClient);
+
+    expect(await screen.findByRole("link", { name: "Projects" }))
+      .toBeInTheDocument();
+    projectsAllowed = false;
+
+    await queryClient.invalidateQueries({
+      queryKey: [
+        "permission",
+        firstUser.id,
+        createProfile(firstUser).id,
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "Projects" }))
+        .not.toBeInTheDocument();
+    });
+    expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(16);
+  });
+
   it("preserves close-on-navigation behavior", () => {
     sidebarMocks.useAuth.mockReturnValue(
       createAuthState({

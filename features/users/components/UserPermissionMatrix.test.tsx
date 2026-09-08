@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -50,10 +50,13 @@ afterEach(cleanup);
 
 describe("UserPermissionMatrix", () => {
   it("renders all 30 delegable permissions once in canonical group order", () => {
+    const onPermissionChange = vi.fn();
+
     render(
       <UserPermissionMatrix
         permissions={permissionMatrix()}
         isAdminTarget={false}
+        onPermissionChange={onPermissionChange}
       />,
     );
 
@@ -72,7 +75,25 @@ describe("UserPermissionMatrix", () => {
       .toBeChecked();
     expect(screen.getByRole("checkbox", { name: "projects.create" }))
       .not.toBeChecked();
-    expect(checkboxes.every((checkbox) => checkbox.hasAttribute("disabled")))
+    expect(checkboxes.every((checkbox) => !checkbox.hasAttribute("disabled")))
+      .toBe(true);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "projects.create" }));
+
+    expect(onPermissionChange).toHaveBeenCalledWith("projects.create", true);
+  });
+
+  it("locks editing while a permission save is submitting", () => {
+    render(
+      <UserPermissionMatrix
+        permissions={permissionMatrix()}
+        isAdminTarget={false}
+        isSubmitting
+        onPermissionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByRole("checkbox").every((checkbox) => checkbox.hasAttribute("disabled")))
       .toBe(true);
   });
 

@@ -4,6 +4,7 @@ import { Outlet } from "react-router";
 import { useAuth } from "../auth/AuthProvider";
 import { hasPermission } from "../auth/permissionService";
 import type { PermissionKey } from "../auth/permissions";
+import { permissionQueryKey } from "../auth/permissionQueryKeys";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 
@@ -17,12 +18,11 @@ function PermissionRoute({ permission }: PermissionRouteProps) {
     session && profile?.isActive && !isAdmin,
   );
   const permissionQuery = useQuery({
-    queryKey: [
-      "permission",
+    queryKey: permissionQueryKey(
       session?.user.id,
       profile?.id,
       permission,
-    ],
+    ),
     queryFn: () => hasPermission(permission),
     enabled: canCheckPermission,
     staleTime: 60_000,

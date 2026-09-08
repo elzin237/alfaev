@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router";
 
 import App from "./App";
 import AuthProvider from "./app/auth/AuthProvider";
+import PermissionRuntimeSync from "./app/auth/PermissionRuntimeSync";
 import QueryProvider from "./app/providers/QueryProvider";
 import "./styles/index.css";
 
@@ -17,6 +18,7 @@ ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryProvider>
       <AuthProvider>
+        <PermissionRuntimeSync />
         <BrowserRouter>
           <App />
         </BrowserRouter>

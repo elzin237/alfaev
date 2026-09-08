@@ -232,7 +232,7 @@ describe("UserDetailPage", () => {
       .toBeChecked();
     expect(screen.getByRole("checkbox", { name: "View Dashboard" }))
       .not.toBeChecked();
-    expect(screen.getAllByRole("checkbox").every((checkbox) => checkbox.hasAttribute("disabled")))
+    expect(screen.getAllByRole("checkbox").every((checkbox) => !checkbox.hasAttribute("disabled")))
       .toBe(true);
     expect(userDetailPageMocks.getUserPermissionsAdmin).toHaveBeenCalledWith(
       routeUserId,
@@ -245,9 +245,9 @@ describe("UserDetailPage", () => {
         routeUserId,
       ]),
     ).toEqual({ ok: true, value: permissions });
-    expect(screen.queryByRole("button", { name: /save permissions/i }))
-      .not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /admin status|permission|password/i }))
+    expect(screen.getByRole("button", { name: /save permissions/i }))
+      .toBeDisabled();
+    expect(screen.queryByRole("button", { name: /password/i }))
       .not.toBeInTheDocument();
   });
 

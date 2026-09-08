@@ -9,7 +9,7 @@ import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import UserActiveStateControl from "./components/UserActiveStateControl";
 import UserAdminStatusControl from "./components/UserAdminStatusControl";
-import UserPermissionMatrix from "./components/UserPermissionMatrix";
+import UserPermissionEditor from "./components/UserPermissionEditor";
 import UserProfileForm from "./components/UserProfileForm";
 import { getUserAdmin } from "./services/userDetailService";
 import { getUserPermissionsAdmin } from "./services/userPermissionsService";
@@ -96,9 +96,12 @@ function UserDetailPage() {
       );
     } else {
       permissionsContent = (
-        <UserPermissionMatrix
+        <UserPermissionEditor
           permissions={permissionsQuery.data.value}
+          userId={user.id}
+          currentAdminProfileId={profile?.id ?? ""}
           isAdminTarget={user.isAdmin}
+          onSaved={setSuccessMessage}
         />
       );
     }
