@@ -74,6 +74,27 @@ interface UpdatedAuditRow {
   metadata: Record<string, unknown>;
 }
 
+interface ActiveStateProfileRow {
+  deactivated_at: Date | null;
+  deactivated_by_user_id: string | null;
+  is_active: boolean;
+  is_admin: boolean;
+}
+
+interface ActiveStateAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown>;
+  before_data: Record<string, unknown>;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+}
+
+interface ActivityWaitRow {
+  wait_event: string | null;
+  wait_event_type: string | null;
+}
+
 async function expectAdminStatus(
   client: SupabaseClient,
   expected: boolean,
@@ -245,7 +266,7 @@ describe("Supabase security helpers", () => {
     const nonexistentId = "00000000-0000-0000-0000-000000000000";
     const profileMutation = await client
       .from("user_profiles")
-      .update({ full_name: "Forbidden update" })
+      .update({ is_active: false })
       .eq("id", nonexistentId);
     const permissionDefinitionMutation = await client
       .from("permission_definitions")
@@ -860,5 +881,521 @@ describe("Supabase security helpers", () => {
       ]);
       expect(audit.rows).toEqual([{ count: 0 }]);
     });
+  });
+
+  it("denies account-state operations to anonymous, non-Admin, and inactive actors", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const preflight = await client.rpc("preflight_user_active_state_admin", {
+        p_user_id: target.profileId,
+        p_is_active: false,
+      });
+      const mutation = await client.rpc("set_user_active_state_admin", {
+        p_user_id: target.profileId,
+        p_is_active: false,
+      });
+
+      expectPermissionDenied(preflight.error);
+      expectPermissionDenied(mutation.error);
+    }
+  });
+
+  it("blocks self-deactivation without changing the account", async () => {
+    const fixture = requireHarness();
+    const additionalAdmin = await fixture.createTemporaryProfile(
+      "self-deactivation-continuity",
+      undefined,
+      fixture.actors.admin.profileId,
+      { isAdmin: true },
+    );
+    const { error } = await fixture.actors.admin.client.rpc(
+      "set_user_active_state_admin",
+      {
+        p_user_id: fixture.actors.admin.profileId,
+        p_is_active: false,
+      },
+    );
+
+    expect(error?.code).toBe("AUE01");
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const profile = await database.query<ActiveStateProfileRow>(
+        `select is_active, is_admin, deactivated_at, deactivated_by_user_id
+         from public.user_profiles
+         where id = $1::uuid`,
+        [fixture.actors.admin.profileId],
+      );
+
+      expect(profile.rows[0]?.is_active).toBe(true);
+      expect(additionalAdmin.profileId).toEqual(expect.any(String));
+    });
+  });
+
+  it("prevents deactivation of the last active Admin under the serialized continuity lock", async () => {
+    const fixture = requireHarness();
+
+    await expect(
+      fixture.withRollbackDatabaseTransaction(async (database) => {
+        await database.query(
+          `update public.user_profiles
+           set is_active = false
+           where is_admin
+             and id <> $1::uuid`,
+          [fixture.actors.admin.profileId],
+        );
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(
+          "select public.set_user_active_state_admin($1::uuid, false)",
+          [fixture.actors.admin.profileId],
+        );
+      }),
+    ).rejects.toMatchObject({ code: "AUE02" });
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const definition = await database.query<{ definition: string }>(
+        `select pg_catalog.pg_get_functiondef(
+           'public.set_user_active_state_admin(uuid,boolean)'::regprocedure
+         ) as definition`,
+      );
+
+      expect(definition.rows[0]?.definition).toContain(
+        "pg_advisory_xact_lock",
+      );
+      expect(definition.rows[0]?.definition.toLowerCase()).toContain(
+        "for update",
+      );
+    });
+  });
+
+  it("rechecks Admin authorization after a waiting continuity lock is acquired", async () => {
+    const fixture = requireHarness();
+    const waitingAdmin = await fixture.createTemporaryProfile(
+      "waiting-admin-authorization",
+      undefined,
+      fixture.actors.admin.profileId,
+      { isAdmin: true },
+    );
+    const target = fixture.actors.unpermitted;
+    const applicationName = `alfaev-security-wait-${randomUUID()}`;
+
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const lockHolder = clients[0];
+      const waitingActor = clients[1];
+      const observer = clients[2];
+
+      if (!lockHolder || !waitingActor || !observer) {
+        throw new Error("Concurrency fixture clients are unavailable");
+      }
+
+      await lockHolder.query("begin");
+      await lockHolder.query(
+        `select pg_catalog.pg_advisory_xact_lock(
+           pg_catalog.hashtextextended(
+             'alfaev.active_admin_continuity',
+             0
+           )
+         )`,
+      );
+      await waitingActor.query("begin");
+      await waitingActor.query(
+        "select pg_catalog.set_config('application_name', $1::text, true)",
+        [applicationName],
+      );
+      await waitingActor.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [waitingAdmin.authUserId],
+      );
+      await waitingActor.query("set local role authenticated");
+
+      const waitingMutation = waitingActor
+        .query(
+          "select public.set_user_active_state_admin($1::uuid, false)",
+          [target.profileId],
+        )
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      let observedAdvisoryWait = false;
+
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const activity = await observer.query<ActivityWaitRow>(
+          `select wait_event_type, wait_event
+           from pg_catalog.pg_stat_activity
+           where application_name = $1::text`,
+          [applicationName],
+        );
+        const waiting = activity.rows[0];
+
+        if (
+          waiting?.wait_event_type === "Lock" &&
+          waiting.wait_event?.toLowerCase() === "advisory"
+        ) {
+          observedAdvisoryWait = true;
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(observedAdvisoryWait).toBe(true);
+
+      await lockHolder.query(
+        `update public.user_profiles
+         set is_active = false,
+             deactivated_at = pg_catalog.now(),
+             deactivated_by_user_id = $2::uuid
+         where id = $1::uuid`,
+        [waitingAdmin.profileId, fixture.actors.admin.profileId],
+      );
+      await lockHolder.query("commit");
+
+      const mutationError = await waitingMutation;
+
+      expect(mutationError).toMatchObject({ code: "42501" });
+      await waitingActor.query("rollback");
+
+      const targetState = await observer.query<{ is_active: boolean }>(
+        `select is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const audit = await observer.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.deactivated'`,
+        [target.profileId],
+      );
+      const definitions = await observer.query<{
+        name: string;
+        definition: string;
+      }>(
+        `select
+           routine.proname as name,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'preflight_user_active_state_admin',
+             'set_user_active_state_admin'
+           )`,
+      );
+
+      expect(targetState.rows).toEqual([{ is_active: true }]);
+      expect(audit.rows).toEqual([{ count: 0 }]);
+      expect(definitions.rows).toHaveLength(2);
+
+      for (const { definition } of definitions.rows) {
+        const normalizedDefinition = definition.toLowerCase();
+        const lockPosition = normalizedDefinition.indexOf(
+          "pg_advisory_xact_lock",
+        );
+        const actorResolutionPosition = normalizedDefinition.indexOf(
+          "actor_profile_id := public.current_active_user_profile_id()",
+        );
+
+        expect(
+          normalizedDefinition.match(/current_user_is_admin\(\)/g),
+        ).toHaveLength(2);
+        expect(lockPosition).toBeGreaterThan(-1);
+        expect(actorResolutionPosition).toBeGreaterThan(lockPosition);
+      }
+    });
+  });
+
+  it("does not add audit noise for an account-state no-op", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const before = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in ('user.deactivated', 'user.reactivated')`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const result = await database.query<CreatedProfileIdRow>(
+        `select public.set_user_active_state_admin(
+           $1::uuid,
+           true
+         ) as profile_id`,
+        [target.profileId],
+      );
+      await database.query("reset role");
+
+      const after = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in ('user.deactivated', 'user.reactivated')`,
+        [target.profileId],
+      );
+
+      expect(result.rows).toEqual([{ profile_id: target.profileId }]);
+      expect(after.rows).toEqual(before.rows);
+    });
+  });
+
+  it("deactivates profile and Auth state while preserving history and permissions", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.permitted;
+    const existingSession = await target.client.auth.getSession();
+
+    expect(existingSession.data.session).not.toBeNull();
+    expect(await fixture.getAuthUserBanned(target.authUserId)).toBe(false);
+
+    await fixture.setAuthUserBanned(target.authUserId, true);
+
+    try {
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        const permissionsBefore = await database.query<CountResultRow>(
+          `select count(*)::integer as count
+           from public.user_permissions
+           where user_id = $1::uuid`,
+          [target.profileId],
+        );
+
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(
+          "select public.set_user_active_state_admin($1::uuid, false)",
+          [target.profileId],
+        );
+        await database.query("reset role");
+
+        const profile = await database.query<ActiveStateProfileRow>(
+          `select is_active, is_admin, deactivated_at, deactivated_by_user_id
+           from public.user_profiles
+           where id = $1::uuid`,
+          [target.profileId],
+        );
+        const audit = await database.query<ActiveStateAuditRow>(
+          `select actor_user_id, action_type, entity_id, before_data,
+                  after_data, metadata
+           from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type = 'user.deactivated'`,
+          [target.profileId],
+        );
+        const permissionsAfter = await database.query<CountResultRow>(
+          `select count(*)::integer as count
+           from public.user_permissions
+           where user_id = $1::uuid`,
+          [target.profileId],
+        );
+
+        expect(profile.rows[0]).toMatchObject({
+          is_active: false,
+          is_admin: false,
+          deactivated_by_user_id: fixture.actors.admin.profileId,
+        });
+        expect(profile.rows[0]?.deactivated_at).toBeInstanceOf(Date);
+        expect(audit.rows).toHaveLength(1);
+        expect(audit.rows[0]).toMatchObject({
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "user.deactivated",
+          entity_id: target.profileId,
+          before_data: { is_active: true },
+          after_data: {
+            is_active: false,
+            deactivated_by_user_id: fixture.actors.admin.profileId,
+          },
+          metadata: { source: "admin_user_active_state" },
+        });
+        expect(permissionsAfter.rows).toEqual(permissionsBefore.rows);
+
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [target.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const activeGate = await database.query<{ active: boolean }>(
+          "select public.is_active_user() as active",
+        );
+        const permissionGate = await database.query<{ allowed: boolean }>(
+          "select public.has_permission('projects.view') as allowed",
+        );
+
+        expect(activeGate.rows).toEqual([{ active: false }]);
+        expect(permissionGate.rows).toEqual([{ allowed: false }]);
+      });
+
+      const signIn = await fixture.attemptPasswordSignIn(target.authUserId);
+
+      expect(signIn.signedIn).toBe(false);
+      expect(signIn.errorCode).toEqual(expect.any(String));
+    } finally {
+      await fixture.setAuthUserBanned(target.authUserId, false);
+    }
+  });
+
+  it("reactivates Auth and profile state and clears current deactivation metadata", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    await fixture.setAuthUserBanned(target.authUserId, true);
+
+    try {
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        await database.query(
+          `update public.user_profiles
+           set is_active = false,
+               deactivated_at = pg_catalog.now(),
+               deactivated_by_user_id = $2::uuid
+           where id = $1::uuid`,
+          [target.profileId, fixture.actors.admin.profileId],
+        );
+
+        await fixture.setAuthUserBanned(target.authUserId, false);
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(
+          "select public.set_user_active_state_admin($1::uuid, true)",
+          [target.profileId],
+        );
+        await database.query("reset role");
+
+        const profile = await database.query<ActiveStateProfileRow>(
+          `select is_active, is_admin, deactivated_at, deactivated_by_user_id
+           from public.user_profiles
+           where id = $1::uuid`,
+          [target.profileId],
+        );
+        const audit = await database.query<ActiveStateAuditRow>(
+          `select actor_user_id, action_type, entity_id, before_data,
+                  after_data, metadata
+           from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type = 'user.reactivated'`,
+          [target.profileId],
+        );
+        const signIn = await fixture.attemptPasswordSignIn(target.authUserId);
+
+        expect(profile.rows).toEqual([
+          {
+            is_active: true,
+            is_admin: false,
+            deactivated_at: null,
+            deactivated_by_user_id: null,
+          },
+        ]);
+        expect(audit.rows).toHaveLength(1);
+        expect(audit.rows[0]).toMatchObject({
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "user.reactivated",
+          entity_id: target.profileId,
+          before_data: {
+            is_active: false,
+            deactivated_by_user_id: fixture.actors.admin.profileId,
+          },
+          after_data: {
+            is_active: true,
+            deactivated_at: null,
+            deactivated_by_user_id: null,
+          },
+          metadata: { source: "admin_user_active_state" },
+        });
+        expect(signIn).toEqual({ signedIn: true, errorCode: null });
+      });
+    } finally {
+      if (await fixture.getAuthUserBanned(target.authUserId)) {
+        await fixture.setAuthUserBanned(target.authUserId, false);
+      }
+    }
+  });
+
+  it("denies non-Admin and inactive callers at the account-state Edge boundary", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    for (const actor of [fixture.actors.permitted, fixture.actors.inactive]) {
+      const sessionResult = await actor.client.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+
+      expect(sessionResult.error).toBeNull();
+      expect(accessToken).toEqual(expect.any(String));
+
+      const response = await fetch(
+        `${environment.supabaseUrl}/functions/v1/admin-set-user-active`,
+        {
+          method: "POST",
+          headers: {
+            apikey: environment.supabasePublishableKey,
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ userId: target.profileId, isActive: false }),
+        },
+      );
+      const responseBody: unknown = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(isRecord(responseBody) ? responseBody.code : null).toBe(
+        "access_denied",
+      );
+      expect(await fixture.getAuthUserBanned(target.authUserId)).toBe(false);
+    }
+  });
+
+  it("returns a safe no-op from the account-state Edge boundary", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+    const sessionResult = await fixture.actors.admin.client.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    expect(accessToken).toEqual(expect.any(String));
+
+    const response = await fetch(
+      `${environment.supabaseUrl}/functions/v1/admin-set-user-active`,
+      {
+        method: "POST",
+        headers: {
+          apikey: environment.supabasePublishableKey,
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ userId: target.profileId, isActive: true }),
+      },
+    );
+    const responseBody: unknown = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(responseBody).toMatchObject({
+      code: "user_active_state_unchanged",
+      data: {
+        profileId: target.profileId,
+        isActive: true,
+        changed: false,
+      },
+    });
+    expect(await fixture.getAuthUserBanned(target.authUserId)).toBe(false);
   });
 });

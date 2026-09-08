@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
@@ -13,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const userDetailPageMocks = vi.hoisted(() => ({
   getUserAdmin: vi.fn(),
+  setUserActiveStateAdmin: vi.fn(),
   updateUserProfileAdmin: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -25,6 +27,9 @@ vi.mock("./services/userDetailService", () => ({
 }));
 vi.mock("./services/userProfileUpdateService", () => ({
   updateUserProfileAdmin: userDetailPageMocks.updateUserProfileAdmin,
+}));
+vi.mock("./services/userActiveStateService", () => ({
+  setUserActiveStateAdmin: userDetailPageMocks.setUserActiveStateAdmin,
 }));
 
 import type { AuthState } from "../../app/auth/AuthProvider";
@@ -123,6 +128,10 @@ beforeEach(() => {
     ok: true,
     value: { profileId: routeUserId },
   });
+  userDetailPageMocks.setUserActiveStateAdmin.mockResolvedValue({
+    ok: true,
+    value: { profileId: routeUserId, isActive: true, changed: true },
+  });
 });
 
 afterEach(() => {
@@ -177,10 +186,35 @@ describe("UserDetailPage", () => {
     expect(screen.getByText("Inactive")).toBeInTheDocument();
     expect(screen.getByText("Non-admin")).toBeInTheDocument();
     expect(screen.getByText("Never")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /activate|deactivate/i }))
-      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reactivate User" }))
+      .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /admin status|permission|password/i }))
       .not.toBeInTheDocument();
+  });
+
+  it("refreshes detail and list data after a successful reactivation", async () => {
+    const { queryClient } = renderUserDetailPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await screen.findByRole("button", { name: "Reactivate User" });
+    fireEvent.click(screen.getByRole("button", { name: "Reactivate User" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Reactivate User",
+      }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "User reactivated.",
+    );
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["users", "detail", profile.id, routeUserId],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["users", "list", profile.id],
+      exact: true,
+    });
   });
 
   it("validates editable fields before calling the update service", async () => {

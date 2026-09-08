@@ -7,6 +7,7 @@ import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
+import UserActiveStateControl from "./components/UserActiveStateControl";
 import UserProfileForm from "./components/UserProfileForm";
 import { getUserAdmin } from "./services/userDetailService";
 
@@ -111,6 +112,23 @@ function UserDetailPage() {
               </dd>
             </div>
           </dl>
+          {profile && (
+            <UserActiveStateControl
+              user={user}
+              currentProfileId={profile.id}
+              onChanged={(message) => {
+                setSuccessMessage(message);
+                void queryClient.invalidateQueries({
+                  queryKey: detailQueryKey,
+                  exact: true,
+                });
+                void queryClient.invalidateQueries({
+                  queryKey: usersListQueryKey,
+                  exact: true,
+                });
+              }}
+            />
+          )}
         </aside>
       </div>
     );

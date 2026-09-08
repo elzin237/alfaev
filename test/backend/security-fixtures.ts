@@ -36,6 +36,11 @@ export interface TemporaryProfileFixture extends TemporaryAuthUser {
   profileEmail: string;
 }
 
+export interface PasswordSignInResult {
+  errorCode: string | null;
+  signedIn: boolean;
+}
+
 export interface SecurityFixtureHarness {
   anonymousClient: SupabaseClient;
   actors: {
@@ -54,9 +59,19 @@ export interface SecurityFixtureHarness {
     label: string,
     profileEmail: string | undefined,
     createdByUserId: string,
+    options?: { isActive?: boolean; isAdmin?: boolean },
   ) => Promise<TemporaryProfileFixture>;
+  getAuthUserBanned: (authUserId: string) => Promise<boolean>;
   getAuthUserEmail: (authUserId: string) => Promise<string>;
+  setAuthUserBanned: (authUserId: string, banned: boolean) => Promise<void>;
+  attemptPasswordSignIn: (
+    authUserId: string,
+  ) => Promise<PasswordSignInResult>;
   updateAuthUserEmail: (authUserId: string, email: string) => Promise<void>;
+  withDatabaseClients: <Result>(
+    count: number,
+    operation: (clients: readonly PoolClient[]) => Promise<Result>,
+  ) => Promise<Result>;
   withRollbackDatabaseTransaction: <Result>(
     operation: (client: PoolClient) => Promise<Result>,
   ) => Promise<Result>;
@@ -136,7 +151,7 @@ export async function createSecurityFixtureHarness(
   );
   const database = new Pool({
     connectionString: environment.supabaseTestDatabaseUrl,
-    max: 1,
+    max: 4,
     ssl: {
       rejectUnauthorized: false,
     },
@@ -149,6 +164,7 @@ export async function createSecurityFixtureHarness(
   const runId = randomUUID();
   const fixtureIdentityPrefix = "alfaev.security.";
   const fixtureEmailPrefix = `${fixtureIdentityPrefix}${runId}.`;
+  const credentials = new Map<string, { email: string; password: string }>();
   let cleanupPromise: Promise<CleanupVerification> | undefined;
 
   const listTemporaryAuthUsers = async () => {
@@ -205,6 +221,7 @@ export async function createSecurityFixtureHarness(
     }
 
     state.authUserIds.push(data.user.id);
+    credentials.set(data.user.id, { email, password });
 
     return {
       authUserId: data.user.id,
@@ -232,6 +249,7 @@ export async function createSecurityFixtureHarness(
     label: string,
     profileEmail: string | undefined,
     createdByUserId: string,
+    options: { isActive?: boolean; isAdmin?: boolean } = {},
   ): Promise<TemporaryProfileFixture> => {
     const authUser = await createTemporaryAuthUser(label);
     const normalizedProfileEmail = (profileEmail ?? authUser.email)
@@ -247,13 +265,15 @@ export async function createSecurityFixtureHarness(
          is_active,
          created_by_user_id
        )
-       values ($1::uuid, $2::text, $3::text, $4::date, false, true, $5::uuid)
+       values ($1::uuid, $2::text, $3::text, $4::date, $5::boolean, $6::boolean, $7::uuid)
        returning id`,
       [
         authUser.authUserId,
         `Security fixture ${label}`,
         normalizedProfileEmail,
         "1990-01-01",
+        options.isAdmin ?? false,
+        options.isActive ?? true,
         createdByUserId,
       ],
     );
@@ -289,6 +309,72 @@ export async function createSecurityFixtureHarness(
     }
   };
 
+  const getAuthUserBanned = async (authUserId: string): Promise<boolean> => {
+    const { data, error } = await authAdminClient.auth.admin.getUserById(
+      authUserId,
+    );
+
+    throwIfError("Auth fixture ban lookup", error);
+
+    if (!data.user) {
+      throw new Error("Auth fixture ban lookup returned no user");
+    }
+
+    if (!data.user.banned_until) {
+      return false;
+    }
+
+    const bannedUntil = Date.parse(data.user.banned_until);
+
+    if (!Number.isFinite(bannedUntil)) {
+      throw new Error("Auth fixture ban lookup returned invalid state");
+    }
+
+    return bannedUntil > Date.now();
+  };
+
+  const setAuthUserBanned = async (
+    authUserId: string,
+    banned: boolean,
+  ): Promise<void> => {
+    const { data, error } = await authAdminClient.auth.admin.updateUserById(
+      authUserId,
+      { ban_duration: banned ? "876000h" : "none" },
+    );
+
+    throwIfError("Auth fixture ban update", error);
+
+    if (!data.user || (await getAuthUserBanned(authUserId)) !== banned) {
+      throw new Error("Auth fixture ban update did not reach the requested state");
+    }
+  };
+
+  const attemptPasswordSignIn = async (
+    authUserId: string,
+  ): Promise<PasswordSignInResult> => {
+    const credential = credentials.get(authUserId);
+
+    if (!credential) {
+      throw new Error("Auth fixture credentials are unavailable");
+    }
+
+    const client = createClient(
+      environment.supabaseUrl,
+      environment.supabasePublishableKey,
+      createClientOptions(),
+    );
+    const { data, error } = await client.auth.signInWithPassword(credential);
+    const signedIn = Boolean(data.session);
+
+    if (signedIn) {
+      const { error: signOutError } = await client.auth.signOut();
+
+      throwIfError("Temporary sign-in cleanup", signOutError);
+    }
+
+    return { signedIn, errorCode: error?.code ?? null };
+  };
+
   const withRollbackDatabaseTransaction = async <Result>(
     operation: (client: PoolClient) => Promise<Result>,
   ): Promise<Result> => {
@@ -304,6 +390,37 @@ export async function createSecurityFixtureHarness(
       throw error;
     } finally {
       client.release();
+    }
+  };
+
+  const withDatabaseClients = async <Result>(
+    count: number,
+    operation: (clients: readonly PoolClient[]) => Promise<Result>,
+  ): Promise<Result> => {
+    if (!Number.isInteger(count) || count < 1 || count > 4) {
+      throw new Error("Concurrent database fixture client count is invalid");
+    }
+
+    const clients: PoolClient[] = [];
+
+    try {
+      for (let index = 0; index < count; index += 1) {
+        clients.push(await database.connect());
+      }
+
+      return await operation(clients);
+    } finally {
+      for (const client of clients) {
+        let rollbackFailed = false;
+
+        try {
+          await client.query("rollback");
+        } catch {
+          rollbackFailed = true;
+        } finally {
+          client.release(rollbackFailed);
+        }
+      }
     }
   };
 
@@ -457,6 +574,7 @@ export async function createSecurityFixtureHarness(
     }
 
     state.authUserIds.push(authData.user.id);
+    credentials.set(authData.user.id, { email, password });
 
     const profileResult = await database.query<IdRow>(
       `insert into public.user_profiles (
@@ -585,8 +703,12 @@ export async function createSecurityFixtureHarness(
       countAuthUsersByEmail,
       createTemporaryAuthUser,
       createTemporaryProfile,
+      getAuthUserBanned,
       getAuthUserEmail,
+      setAuthUserBanned,
+      attemptPasswordSignIn,
       updateAuthUserEmail,
+      withDatabaseClients,
       withRollbackDatabaseTransaction,
       cleanup,
     };
