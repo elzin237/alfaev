@@ -812,15 +812,25 @@ Respect permissions/Admin rules from canonical docs.
 ## 042 — Create Supplier Schema + Security
 
 Goal:
-- implement Supplier table/RLS
+- implement the backend-only Supplier schema and security boundary
 
-Fields:
-- Name
-- Country
-- Contact Person
-- Phone
-- Email
-- active/archive metadata
+Implement:
+- Supplier table with active/archive metadata
+- required, trimmed, nonblank, case-insensitively unique Name
+- required, trimmed, nonblank Country
+- optional Contact Person and Phone, trimmed and stored as `NULL` when blank, without aggressive database phone formatting
+- optional Email, trimmed and lowercased when provided, stored as `NULL` when blank, subject to basic validation, and not unique
+- Supplier identity based only on normalized Name
+- RLS/read policy allowing Supplier reads to Admin or `suppliers.view`
+- trusted create operation allowing Admin or `suppliers.create`
+- trusted edit operation allowing Admin or `suppliers.edit`
+- immutable AuditLog entries for meaningful create/edit changes
+- audit-free normalized no-op edits
+- backend/security tests for constraints, normalization, authorization, direct bypass attempts, lifecycle-state enforcement, and audit behavior
+
+Backend only. Do not build Supplier UI, archive RPC/behavior, Supplier Product links, or procurement Supplier workflows in this task.
+
+Task 043 owns Supplier list/search and Add Supplier UI. Task 044 owns Supplier detail/edit UI. Task 045 owns trusted Supplier archive behavior and archive UI.
 
 ---
 
@@ -849,14 +859,20 @@ Product links come later.
 ## 045 — Add Supplier Archive Behavior
 
 Goal:
-- enforce preservation of referenced Suppliers
+- implement the only normal Supplier removal workflow while preserving historical references
 
 Include:
 - trusted archive mutation
-- UI confirmation
-- audit
+- archive UI confirmation
+- immutable AuditLog entry
+- archived Supplier lifecycle and immutability
+- historical preservation
 
-No hard delete when referenced.
+Do not hard-delete Suppliers through normal application workflows, regardless of whether they are currently referenced.
+
+Supplier reactivation/unarchive is not supported in the current scope. Do not add a restore operation.
+
+The canonical prohibition on using archived Suppliers for new ProductSupplier links and new procurement selections remains in force. The later trusted ProductSupplier and procurement workflows must enforce that rule when those workflows are implemented. Task 045 must not create those future workflows early.
 
 ---
 

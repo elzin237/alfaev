@@ -98,6 +98,16 @@ The Admin user-management UI should expose a clear checkbox/toggle matrix for no
 - Edit Suppliers
 - Delete/Archive Suppliers
 
+Supplier reads require Admin access or View Suppliers (`suppliers.view`).
+
+Supplier creation requires Admin access or Create Suppliers (`suppliers.create`).
+
+Supplier editing requires Admin access or Edit Suppliers (`suppliers.edit`).
+
+Supplier archive requires Admin access or Delete/Archive Suppliers (`suppliers.archive`). This permission does not authorize hard deletion or Supplier reactivation/unarchive.
+
+Frontend visibility is UX only. Trusted backend/database operations remain authoritative and must re-check the actor's permission and the Supplier's lifecycle state.
+
 ### Skladište / Inventory
 
 - View Inventory

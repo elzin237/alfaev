@@ -148,6 +148,25 @@ The badge counts rows/requests, not piece quantities.
 - Meaningful Brand create/edit/archive changes create immutable AuditLog history.
 - No-op Brand edits do not create audit noise.
 
+### Suppliers
+
+- Supplier name is required and must be trimmed before persistence.
+- Empty or blank Supplier names are invalid.
+- Supplier names are case-insensitively unique; values such as `Bosch`, `bosch`, and `BOSCH` represent the same Supplier identity.
+- Country and contact details do not define Supplier identity.
+- Country is required, trimmed before persistence, and must not be empty or blank.
+- Contact Person and Phone are optional, trimmed when provided, and stored as `NULL` when blank.
+- Phone values do not require aggressive formatting at the database boundary.
+- Email is optional, trimmed and lowercased when provided, stored as `NULL` when blank, and subject to basic email validation.
+- Supplier email is not unique.
+- AlfaEV does not hard-delete Suppliers through normal application workflows.
+- Archive/deactivate is the normal Supplier removal workflow, and historical references remain intact.
+- Archived Suppliers remain readable wherever historical records require them and are immutable through normal Supplier editing.
+- Archived Suppliers cannot be selected for new ProductSupplier links or new procurement selections.
+- Supplier reactivation/unarchive is not supported in the current scope.
+- Meaningful Supplier create/edit/archive changes create immutable AuditLog history.
+- Normalized no-op Supplier edits do not create audit noise.
+
 ### Serial Number / Šifra
 
 - unique
@@ -496,9 +515,11 @@ If used/referenced:
 - do not hard-delete
 
 ### Suppliers
-If referenced:
-- archive/deactivate
-- do not hard-delete
+AlfaEV does not hard-delete Suppliers through normal application workflows, regardless of whether they are currently referenced.
+
+- archive/deactivate is the normal removal workflow
+- preserve existing historical references
+- do not provide Supplier reactivation/unarchive in the current scope
 
 ### Projects
 If linked history exists:

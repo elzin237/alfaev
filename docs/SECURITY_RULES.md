@@ -118,6 +118,15 @@ Brand authorization:
 - direct client mutation is not authoritative authorization
 - trusted backend/database operations must re-check Brand mutation authorization and current archive state
 
+Supplier authorization:
+
+- Supplier reads require Admin access or `suppliers.view`
+- Supplier creation requires Admin access or `suppliers.create`
+- Supplier editing requires Admin access or `suppliers.edit`
+- Supplier archive requires Admin access or `suppliers.archive`
+- direct client mutation is not authoritative authorization
+- trusted backend/database operations must re-check Supplier mutation authorization and current lifecycle state
+
 ---
 
 # 6. Row Level Security
@@ -170,6 +179,7 @@ At minimum, trusted backend/database operations are required for:
 - Admin-status changes
 - account activation/deactivation
 - Brand create/edit/archive
+- Supplier create/edit/archive
 
 These operations must re-check authorization and current state at execution time.
 

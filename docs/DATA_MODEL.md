@@ -336,8 +336,20 @@ Fields:
 
 Rules:
 
-- Referenced Suppliers are archived/deactivated rather than hard-deleted.
+- `name` is required, trimmed before persistence, nonblank, and case-insensitively unique.
+- Normalized Supplier name defines Supplier identity; capitalization variants such as `Bosch`, `bosch`, and `BOSCH` cannot create separate Supplier records.
+- Country and contact details do not define Supplier identity.
+- `country` is required, trimmed before persistence, and nonblank.
+- `contact_person_name` is optional, trimmed when provided, and stored as `NULL` when blank.
+- `contact_phone` is optional, trimmed when provided, and stored as `NULL` when blank. The database boundary does not enforce aggressive phone formatting.
+- `contact_email` is optional, trimmed and lowercased when provided, stored as `NULL` when blank, and subject to basic email validation. It is not unique.
+- Suppliers are never hard-deleted through normal application workflows; archive/deactivate is the normal removal path.
+- Archived Suppliers remain readable for historical records and are immutable through normal Supplier editing.
+- Archived Suppliers cannot be selected for new ProductSupplier links or new procurement selections.
+- Supplier reactivation/unarchive is not supported in the current scope.
+- Existing historical references remain intact after archive.
 - One Supplier can supply many Products.
+- Meaningful Supplier create/edit/archive changes create immutable AuditLog history; normalized no-op edits create no audit event.
 
 ---
 
