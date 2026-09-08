@@ -222,6 +222,10 @@ Fields:
 
 - `id`
 - `name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - case-insensitively unique
 - `is_active`
 - `created_at`
 - `created_by_user_id`
@@ -235,8 +239,13 @@ Fields:
 Rules:
 
 - Brand management belongs to the Inventory/product domain.
-- Do not hard-delete a Brand once referenced by Products.
+- Brand name comparisons for uniqueness are case-insensitive; capitalization variants do not represent separate Brands.
+- Do not hard-delete Brand records through normal application workflows, regardless of whether they are currently referenced by Products.
+- Archive/deactivate is the only normal removal workflow, preserving all historical references.
+- Archived Brands are immutable through normal Brand editing.
 - Archived Brands remain available for historical records but cannot be selected for new Products.
+- Brand reactivation/unarchive is not supported in the current scope.
+- Meaningful create/edit/archive changes are permanently recorded in AuditLog; no-op edits create no audit event.
 
 No separate main-navigation page is required; brand management can live inside Inventory/product administration.
 
@@ -1054,7 +1063,7 @@ ProcurementRequest
 |---|---|---|
 | UserProfile | Yes, Admin-controlled | Deactivate rather than delete when historical |
 | UserPermission | Yes, Admin-controlled | Every change audited |
-| Brand | Yes until archived | Referenced brand not hard-deleted |
+| Brand | Yes until archived | Never hard-deleted through normal workflows; archived records are immutable and cannot be reactivated in the current scope |
 | Product | Yes until archived | Serial Number never changes/reuses |
 | ProductSupplier | Yes | History/audit required for meaningful changes |
 | InventoryBalance | Transactionally mutable | Never directly mutated without movement |

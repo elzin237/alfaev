@@ -111,6 +111,13 @@ Permanently Admin-only:
 - manual Inventory quantity adjustment
 - Calendar modification
 
+Brand authorization:
+
+- normal Brand reads used by Inventory require Admin access or `inventory.view`
+- Brand create/edit/archive operations require Admin access or `inventory.brands.manage`
+- direct client mutation is not authoritative authorization
+- trusted backend/database operations must re-check Brand mutation authorization and current archive state
+
 ---
 
 # 6. Row Level Security
@@ -162,6 +169,7 @@ At minimum, trusted backend/database operations are required for:
 - permission changes
 - Admin-status changes
 - account activation/deactivation
+- Brand create/edit/archive
 
 These operations must re-check authorization and current state at execution time.
 

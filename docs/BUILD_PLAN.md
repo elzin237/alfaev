@@ -775,9 +775,22 @@ Add integration tests for two different non-admin permission sets.
 ## 040 — Create Brand Schema + Security
 
 Goal:
-- implement Brand table/RLS/archive rules
+- implement the backend-only Brand schema and security boundary
 
-Do not build UI yet.
+Implement:
+- Brand table with required, trimmed, nonblank, case-insensitively unique names
+- archive/deactivate state with no normal hard-delete workflow
+- archived Brand immutability
+- historical Brand reads while preventing archived Brand selection for newly created Products
+- RLS/read policy allowing normal Brand reads to Admin or `inventory.view`
+- trusted create/edit/archive operations allowing Admin or `inventory.brands.manage`
+- immutable AuditLog entries for meaningful create/edit/archive changes
+- audit-free no-op edits
+- backend/security tests for constraints, authorization, direct bypass attempts, archive immutability, historical reads, and audit behavior
+
+Brand reactivation/unarchive is not supported in the current scope. Do not add a restore operation.
+
+Backend only. Do not build Brand UI; Task 041 owns the Brand management UI.
 
 ---
 

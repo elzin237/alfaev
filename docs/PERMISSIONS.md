@@ -110,6 +110,10 @@ Manual Inventory quantity adjustment is Admin-only and is therefore not a delega
 
 Barcode scanning itself does not require a separate global permission if it is only used to select a product inside an already-authorized workflow.
 
+Normal Brand reads within Inventory require Admin access or View Inventory (`inventory.view`).
+
+Creating, editing, or archiving Brands requires Admin access or Manage Brands (`inventory.brands.manage`). This permission does not authorize hard deletion or Brand reactivation/unarchive.
+
 ### PCB Cards
 
 - View PCB Cards

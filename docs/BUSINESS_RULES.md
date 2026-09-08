@@ -137,9 +137,16 @@ The badge counts rows/requests, not piece quantities.
 ### Brands
 
 - AlfaEV supports reusable Brand records for products/components.
-- Brand records may be created/edited through authorized Inventory administration.
-- Referenced Brands are archived/deactivated rather than hard-deleted.
-
+- Brand name is required and must be trimmed before persistence.
+- Empty or blank Brand names are invalid.
+- Brand names are case-insensitively unique; values such as `Bosch`, `bosch`, and `BOSCH` represent the same Brand identity.
+- AlfaEV does not hard-delete Brand records through normal application workflows, whether or not they are currently referenced.
+- Archive/deactivate is the only normal Brand removal workflow, and historical references remain intact.
+- Archived Brands are immutable through normal Brand editing.
+- Archived Brands remain readable where historical Product data requires them but cannot be selected for newly created Products.
+- Brand reactivation/unarchive is not supported in the current scope.
+- Meaningful Brand create/edit/archive changes create immutable AuditLog history.
+- No-op Brand edits do not create audit noise.
 
 ### Serial Number / Šifra
 
