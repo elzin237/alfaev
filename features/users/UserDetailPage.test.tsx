@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const userDetailPageMocks = vi.hoisted(() => ({
   getUserAdmin: vi.fn(),
+  getUserPermissionsAdmin: vi.fn(),
   setUserActiveStateAdmin: vi.fn(),
   setUserAdminStatus: vi.fn(),
   updateUserProfileAdmin: vi.fn(),
@@ -25,6 +26,9 @@ vi.mock("../../app/auth/AuthProvider", () => ({
 }));
 vi.mock("./services/userDetailService", () => ({
   getUserAdmin: userDetailPageMocks.getUserAdmin,
+}));
+vi.mock("./services/userPermissionsService", () => ({
+  getUserPermissionsAdmin: userDetailPageMocks.getUserPermissionsAdmin,
 }));
 vi.mock("./services/userProfileUpdateService", () => ({
   updateUserProfileAdmin: userDetailPageMocks.updateUserProfileAdmin,
@@ -43,6 +47,10 @@ import type {
   AdminUserDetail,
   UserDetailResult,
 } from "./services/userDetailService";
+import type {
+  UserPermissionMatrixItem,
+  UserPermissionsResult,
+} from "./services/userPermissionsService";
 
 const routeUserId = "00000000-0000-0000-0000-000000000201";
 const authUser: User = {
@@ -80,6 +88,22 @@ const detail: AdminUserDetail = {
   createdAt: "2026-09-01T08:00:00.000Z",
   lastLoginAt: null,
 };
+const permissions: UserPermissionMatrixItem[] = [
+  {
+    permissionKey: "dashboard.view",
+    module: "dashboard",
+    label: "View Dashboard",
+    description: "View the Dashboard.",
+    granted: false,
+  },
+  {
+    permissionKey: "projects.view",
+    module: "projects",
+    label: "View Projects",
+    description: "View Projects.",
+    granted: true,
+  },
+];
 
 function authState(): AuthState {
   return {
@@ -128,6 +152,10 @@ function fillProfile(values: {
 beforeEach(() => {
   userDetailPageMocks.useAuth.mockReturnValue(authState());
   userDetailPageMocks.getUserAdmin.mockResolvedValue({ ok: true, value: detail });
+  userDetailPageMocks.getUserPermissionsAdmin.mockResolvedValue({
+    ok: true,
+    value: permissions,
+  });
   userDetailPageMocks.updateUserProfileAdmin.mockResolvedValue({
     ok: true,
     value: { profileId: routeUserId },
@@ -186,7 +214,7 @@ describe("UserDetailPage", () => {
   });
 
   it("shows editable profile fields and read-only account information only", async () => {
-    renderUserDetailPage();
+    const { queryClient } = renderUserDetailPage();
 
     expect(await screen.findByLabelText("Full Name")).toHaveValue("Ina Worker");
     expect(screen.getByLabelText("Email")).toHaveValue("ina@example.com");
@@ -198,8 +226,85 @@ describe("UserDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Promote to Admin" }))
       .toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Permissions" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "View Projects" }))
+      .toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "View Dashboard" }))
+      .not.toBeChecked();
+    expect(screen.getAllByRole("checkbox").every((checkbox) => checkbox.hasAttribute("disabled")))
+      .toBe(true);
+    expect(userDetailPageMocks.getUserPermissionsAdmin).toHaveBeenCalledWith(
+      routeUserId,
+    );
+    expect(
+      queryClient.getQueryData([
+        "users",
+        "permissions",
+        profile.id,
+        routeUserId,
+      ]),
+    ).toEqual({ ok: true, value: permissions });
+    expect(screen.queryByRole("button", { name: /save permissions/i }))
+      .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /admin status|permission|password/i }))
       .not.toBeInTheDocument();
+  });
+
+  it("shows a focused loading state while the permission matrix is pending", async () => {
+    let resolvePermissions: ((value: UserPermissionsResult) => void) | undefined;
+    const pendingPermissions = new Promise<UserPermissionsResult>((resolve) => {
+      resolvePermissions = resolve;
+    });
+    userDetailPageMocks.getUserPermissionsAdmin.mockReturnValue(
+      pendingPermissions,
+    );
+
+    renderUserDetailPage();
+
+    expect(await screen.findByLabelText("Full Name")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading user permissions...",
+    );
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolvePermissions?.({ ok: true, value: permissions });
+      await pendingPermissions;
+    });
+  });
+
+  it("fails closed with a safe retriable permission-matrix error", async () => {
+    userDetailPageMocks.getUserPermissionsAdmin.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "permission_matrix_failed",
+        message: "The user's permissions could not be loaded.",
+      },
+    });
+
+    renderUserDetailPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The user's permissions could not be loaded.",
+    );
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" }))
+      .toBeInTheDocument();
+  });
+
+  it("shows the read-only Admin bypass explanation for an Admin target", async () => {
+    userDetailPageMocks.getUserAdmin.mockResolvedValue({
+      ok: true,
+      value: { ...detail, isAdmin: true },
+    });
+
+    renderUserDetailPage();
+
+    expect(await screen.findByText(/full access through Admin bypass/i))
+      .toBeInTheDocument();
+    expect(screen.getByText(/become relevant again after demotion/i))
+      .toBeInTheDocument();
   });
 
   it("refreshes detail and list data after a successful reactivation", async () => {
@@ -214,9 +319,7 @@ describe("UserDetailPage", () => {
       }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "User reactivated.",
-    );
+    expect(await screen.findByText("User reactivated.")).toBeInTheDocument();
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["users", "detail", profile.id, routeUserId],
       exact: true,
@@ -239,9 +342,8 @@ describe("UserDetailPage", () => {
       }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "User promoted to Admin.",
-    );
+    expect(await screen.findByText("User promoted to Admin."))
+      .toBeInTheDocument();
     expect(userDetailPageMocks.setUserAdminStatus).toHaveBeenCalledWith(
       routeUserId,
       true,
@@ -287,9 +389,8 @@ describe("UserDetailPage", () => {
         birthday: "1994-07-08",
       });
     });
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "User profile updated.",
-    );
+    expect(await screen.findByText("User profile updated."))
+      .toBeInTheDocument();
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["users", "detail", profile.id, routeUserId],
       exact: true,

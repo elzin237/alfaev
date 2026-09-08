@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { PERMISSION_KEYS } from "../../app/auth/permissions";
 import { loadBackendTestEnvironment } from "./env";
 import {
   createSecurityFixtureHarness,
@@ -116,6 +117,25 @@ interface PermissionAuditRow {
   before_data: Record<string, unknown>;
   entity_id: string;
   metadata: Record<string, unknown>;
+}
+
+interface PermissionMatrixRow {
+  permission_key: string;
+  module: string;
+  label: string;
+  description: string;
+  granted: boolean;
+}
+
+function isPermissionMatrixRow(value: unknown): value is PermissionMatrixRow {
+  return (
+    isRecord(value) &&
+    typeof value.permission_key === "string" &&
+    typeof value.module === "string" &&
+    typeof value.label === "string" &&
+    typeof value.description === "string" &&
+    typeof value.granted === "boolean"
+  );
 }
 
 async function expectAdminStatus(
@@ -2277,5 +2297,114 @@ describe("Supabase security helpers", () => {
       expect(permissionsAfter.rows).toEqual(existingPermissions.rows);
       expect(auditAfter.rows).toEqual(existingAudit.rows);
     });
+  });
+
+  it("returns the complete real permission matrix to an active Admin without mutation", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.permitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const permissionsBefore = await database.query<{
+        granted_by_user_id: string;
+        permission_definition_id: string;
+      }>(
+        `select granted_by_user_id, permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+      const { data, error } = await fixture.actors.admin.client.rpc(
+        "get_user_permissions_admin",
+        { p_user_id: target.profileId },
+      );
+      const rows: unknown = data;
+
+      expect(error).toBeNull();
+
+      if (!Array.isArray(rows) || !rows.every(isPermissionMatrixRow)) {
+        throw new Error("Admin permission matrix RPC returned invalid data");
+      }
+
+      expect(rows).toHaveLength(30);
+      expect(rows.map((row) => row.permission_key)).toEqual(PERMISSION_KEYS);
+      expect(new Set(rows.map((row) => row.permission_key)).size).toBe(30);
+
+      for (const row of rows) {
+        expect(Object.keys(row).sort()).toEqual([
+          "description",
+          "granted",
+          "label",
+          "module",
+          "permission_key",
+        ]);
+      }
+
+      expect(
+        rows.find((row) => row.permission_key === "projects.view")?.granted,
+      ).toBe(true);
+      expect(
+        rows.find((row) => row.permission_key === "projects.create")?.granted,
+      ).toBe(false);
+      expect(rows.filter((row) => row.granted)).toHaveLength(1);
+
+      const permissionsAfter = await database.query<{
+        granted_by_user_id: string;
+        permission_definition_id: string;
+      }>(
+        `select granted_by_user_id, permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+
+      expect(permissionsAfter.rows).toEqual(permissionsBefore.rows);
+    });
+  });
+
+  it("shows preserved explicit grants for an Admin target without fabricating bypass grants", async () => {
+    const fixture = requireHarness();
+    const { data, error } = await fixture.actors.admin.client.rpc(
+      "get_user_permissions_admin",
+      { p_user_id: fixture.actors.inactive.profileId },
+    );
+    const rows: unknown = data;
+
+    expect(error).toBeNull();
+
+    if (!Array.isArray(rows) || !rows.every(isPermissionMatrixRow)) {
+      throw new Error("Admin-target permission matrix returned invalid data");
+    }
+
+    expect(rows).toHaveLength(30);
+    expect(rows.filter((row) => row.granted).map((row) => row.permission_key))
+      .toEqual(["projects.view"]);
+  });
+
+  it("denies permission-matrix reads to non-Admins, inactive Admins, and anonymous callers", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const { error } = await client.rpc("get_user_permissions_admin", {
+        p_user_id: fixture.actors.permitted.profileId,
+      });
+
+      expectPermissionDenied(error);
+    }
+  });
+
+  it("fails safely when the permission-matrix target does not exist", async () => {
+    const { error } = await requireHarness().actors.admin.client.rpc(
+      "get_user_permissions_admin",
+      { p_user_id: "00000000-0000-0000-0000-000000000000" },
+    );
+
+    expect(error?.code).toBe("P0002");
   });
 });

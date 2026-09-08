@@ -1,0 +1,114 @@
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  PERMISSION_KEYS,
+  type PermissionKey,
+} from "../../../app/auth/permissions";
+import type {
+  UserPermissionMatrixItem,
+  UserPermissionModule,
+} from "../services/userPermissionsService";
+import UserPermissionMatrix from "./UserPermissionMatrix";
+
+const groupLabels = [
+  "Dashboard",
+  "Projects",
+  "Nabavka",
+  "Dobavljači",
+  "Skladište",
+  "PCB Cards",
+  "Radni Nalozi",
+  "Archive",
+];
+
+function moduleForPermission(
+  permissionKey: PermissionKey,
+): UserPermissionModule {
+  if (permissionKey.startsWith("dashboard.")) return "dashboard";
+  if (permissionKey.startsWith("projects.")) return "projects";
+  if (permissionKey.startsWith("procurement.")) return "procurement";
+  if (permissionKey.startsWith("suppliers.")) return "suppliers";
+  if (permissionKey.startsWith("inventory.")) return "inventory";
+  if (permissionKey.startsWith("pcb.")) return "pcb";
+  if (permissionKey.startsWith("work_orders.")) return "work_orders";
+  return "archive";
+}
+
+function permissionMatrix(): UserPermissionMatrixItem[] {
+  return PERMISSION_KEYS.map((permissionKey) => ({
+    permissionKey,
+    module: moduleForPermission(permissionKey),
+    label: permissionKey,
+    description: `Description for ${permissionKey}.`,
+    granted:
+      permissionKey === "projects.view" || permissionKey === "archive.view",
+  }));
+}
+
+afterEach(cleanup);
+
+describe("UserPermissionMatrix", () => {
+  it("renders all 30 delegable permissions once in canonical group order", () => {
+    render(
+      <UserPermissionMatrix
+        permissions={permissionMatrix()}
+        isAdminTarget={false}
+      />,
+    );
+
+    const renderedGroupLabels = screen
+      .getAllByRole("group")
+      .map((group) => group.querySelector("legend")?.textContent);
+    const checkboxes = screen.getAllByRole("checkbox");
+
+    expect(renderedGroupLabels).toEqual(groupLabels);
+    expect(checkboxes).toHaveLength(30);
+    for (const permissionKey of PERMISSION_KEYS) {
+      expect(screen.getAllByRole("checkbox", { name: permissionKey }))
+        .toHaveLength(1);
+    }
+    expect(screen.getByRole("checkbox", { name: "projects.view" }))
+      .toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "projects.create" }))
+      .not.toBeChecked();
+    expect(checkboxes.every((checkbox) => checkbox.hasAttribute("disabled")))
+      .toBe(true);
+  });
+
+  it("does not expose permanently Admin-only capabilities or a Save action", () => {
+    render(
+      <UserPermissionMatrix
+        permissions={permissionMatrix()}
+        isAdminTarget={false}
+      />,
+    );
+
+    expect(screen.queryByText(/users\.manage|calendar\.manage|inventory\.adjust/i))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("explains Admin bypass while preserving read-only explicit grant state", () => {
+    const onPermissionChange = vi.fn();
+
+    render(
+      <UserPermissionMatrix
+        permissions={permissionMatrix()}
+        isAdminTarget
+        onPermissionChange={onPermissionChange}
+      />,
+    );
+
+    expect(screen.getByText(/full access through Admin bypass/i))
+      .toBeInTheDocument();
+    expect(screen.getByText(/become relevant again after demotion/i))
+      .toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "projects.view" }))
+      .toBeChecked();
+    expect(screen.getAllByRole("checkbox").every((checkbox) => checkbox.hasAttribute("disabled")))
+      .toBe(true);
+    expect(onPermissionChange).not.toHaveBeenCalled();
+  });
+});

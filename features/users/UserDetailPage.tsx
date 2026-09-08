@@ -9,8 +9,10 @@ import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import UserActiveStateControl from "./components/UserActiveStateControl";
 import UserAdminStatusControl from "./components/UserAdminStatusControl";
+import UserPermissionMatrix from "./components/UserPermissionMatrix";
 import UserProfileForm from "./components/UserProfileForm";
 import { getUserAdmin } from "./services/userDetailService";
+import { getUserPermissionsAdmin } from "./services/userPermissionsService";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
 
@@ -24,11 +26,23 @@ function UserDetailPage() {
   const queryClient = useQueryClient();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const detailQueryKey = ["users", "detail", profile?.id, userId] as const;
+  const permissionsQueryKey = [
+    "users",
+    "permissions",
+    profile?.id,
+    userId,
+  ] as const;
   const usersListQueryKey = ["users", "list", profile?.id] as const;
   const userQuery = useQuery({
     queryKey: detailQueryKey,
     queryFn: () => getUserAdmin(userId),
     enabled: Boolean(profile?.id && userId),
+    staleTime: 60_000,
+  });
+  const permissionsQuery = useQuery({
+    queryKey: permissionsQueryKey,
+    queryFn: () => getUserPermissionsAdmin(userId),
+    enabled: Boolean(profile?.id && userId && userQuery.data?.ok),
     staleTime: 60_000,
   });
 
@@ -62,92 +76,122 @@ function UserDetailPage() {
     );
   } else {
     const user = userQuery.data.value;
+    let permissionsContent: ReactNode;
+
+    if (permissionsQuery.isPending) {
+      permissionsContent = (
+        <LoadingState message="Loading user permissions..." />
+      );
+    } else if (permissionsQuery.isError || !permissionsQuery.data?.ok) {
+      permissionsContent = (
+        <ErrorState
+          title="Unable to load permissions"
+          message={
+            permissionsQuery.data?.ok === false
+              ? permissionsQuery.data.error.message
+              : "The user's permissions could not be loaded."
+          }
+          onRetry={() => void permissionsQuery.refetch()}
+        />
+      );
+    } else {
+      permissionsContent = (
+        <UserPermissionMatrix
+          permissions={permissionsQuery.data.value}
+          isAdminTarget={user.isAdmin}
+        />
+      );
+    }
 
     content = (
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <UserProfileForm
-          key={`${user.id}:${user.fullName}:${user.email}:${user.birthday}`}
-          user={user}
-          onUpdated={() => {
-            setSuccessMessage("User profile updated.");
-            void queryClient.invalidateQueries({
-              queryKey: detailQueryKey,
-              exact: true,
-            });
-            void queryClient.invalidateQueries({
-              queryKey: usersListQueryKey,
-              exact: true,
-            });
-          }}
-        />
+      <div className="space-y-6">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <UserProfileForm
+            key={`${user.id}:${user.fullName}:${user.email}:${user.birthday}`}
+            user={user}
+            onUpdated={() => {
+              setSuccessMessage("User profile updated.");
+              void queryClient.invalidateQueries({
+                queryKey: detailQueryKey,
+                exact: true,
+              });
+              void queryClient.invalidateQueries({
+                queryKey: usersListQueryKey,
+                exact: true,
+              });
+            }}
+          />
 
-        <aside className="h-fit rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <h2 className="text-xl font-bold text-zinc-900">Account status</h2>
-          <dl className="mt-5 space-y-5">
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Active status</dt>
-              <dd className="mt-2">
-                <StatusBadge
-                  label={user.isActive ? "Active" : "Inactive"}
-                  tone={user.isActive ? "success" : "neutral"}
+          <aside className="h-fit rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+            <h2 className="text-xl font-bold text-zinc-900">Account status</h2>
+            <dl className="mt-5 space-y-5">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Active status</dt>
+                <dd className="mt-2">
+                  <StatusBadge
+                    label={user.isActive ? "Active" : "Inactive"}
+                    tone={user.isActive ? "success" : "neutral"}
+                  />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Admin status</dt>
+                <dd className="mt-2">
+                  <StatusBadge
+                    label={user.isAdmin ? "Admin" : "Non-admin"}
+                    tone={user.isAdmin ? "info" : "neutral"}
+                  />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Created Date</dt>
+                <dd className="mt-1 text-sm font-medium text-zinc-900">{formatDate(user.createdAt)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last Login</dt>
+                <dd className="mt-1 text-sm font-medium text-zinc-900">
+                  {user.lastLoginAt ? formatDate(user.lastLoginAt) : "Never"}
+                </dd>
+              </div>
+            </dl>
+            {profile && (
+              <>
+                <UserActiveStateControl
+                  user={user}
+                  currentProfileId={profile.id}
+                  onChanged={(message) => {
+                    setSuccessMessage(message);
+                    void queryClient.invalidateQueries({
+                      queryKey: detailQueryKey,
+                      exact: true,
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: usersListQueryKey,
+                      exact: true,
+                    });
+                  }}
                 />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Admin status</dt>
-              <dd className="mt-2">
-                <StatusBadge
-                  label={user.isAdmin ? "Admin" : "Non-admin"}
-                  tone={user.isAdmin ? "info" : "neutral"}
+                <UserAdminStatusControl
+                  user={user}
+                  currentProfileId={profile.id}
+                  onChanged={(message) => {
+                    setSuccessMessage(message);
+                    void queryClient.invalidateQueries({
+                      queryKey: detailQueryKey,
+                      exact: true,
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: usersListQueryKey,
+                      exact: true,
+                    });
+                  }}
                 />
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Created Date</dt>
-              <dd className="mt-1 text-sm font-medium text-zinc-900">{formatDate(user.createdAt)}</dd>
-            </div>
-            <div>
-              <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last Login</dt>
-              <dd className="mt-1 text-sm font-medium text-zinc-900">
-                {user.lastLoginAt ? formatDate(user.lastLoginAt) : "Never"}
-              </dd>
-            </div>
-          </dl>
-          {profile && (
-            <>
-              <UserActiveStateControl
-                user={user}
-                currentProfileId={profile.id}
-                onChanged={(message) => {
-                  setSuccessMessage(message);
-                  void queryClient.invalidateQueries({
-                    queryKey: detailQueryKey,
-                    exact: true,
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: usersListQueryKey,
-                    exact: true,
-                  });
-                }}
-              />
-              <UserAdminStatusControl
-                user={user}
-                currentProfileId={profile.id}
-                onChanged={(message) => {
-                  setSuccessMessage(message);
-                  void queryClient.invalidateQueries({
-                    queryKey: detailQueryKey,
-                    exact: true,
-                  });
-                  void queryClient.invalidateQueries({
-                    queryKey: usersListQueryKey,
-                    exact: true,
-                  });
-                }}
-              />
-            </>
-          )}
-        </aside>
+              </>
+            )}
+          </aside>
+        </div>
+
+        {permissionsContent}
       </div>
     );
   }
