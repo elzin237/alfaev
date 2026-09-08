@@ -62,6 +62,10 @@ A non-admin user must never be able to:
 
 Admin always has access to all other actions in the system.
 
+Admin users do not need UserPermission rows for access because Admin bypass applies. Existing UserPermission rows are not deleted merely because a user is promoted to Admin; they remain stored, are ignored for access while Admin bypass applies, and become relevant again if the user is later demoted.
+
+Changing Admin status remains permanently Admin-only and is never delegable.
+
 ---
 
 ## 4. Initial Delegable Permission Checklist

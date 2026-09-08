@@ -424,6 +424,18 @@ At least one active Admin must remain; deactivation of the last active Admin is 
 
 Reactivation is an explicit Admin action and creates an immutable audit event.
 
+Admin status and Active/Inactive account status are separate concepts; changing `is_admin` does not change `is_active`.
+
+An inactive user may be promoted or demoted, but remains unable to use AlfaEV until explicitly reactivated through the separate account-state workflow.
+
+An Admin cannot change their own Admin status.
+
+At least one active Admin must remain; demotion of the last active Admin is forbidden.
+
+Existing explicit UserPermission rows are preserved across promotion and demotion. Admin bypass applies while the user is an Admin, and the preserved permissions become effective again after demotion.
+
+Every meaningful Admin-status promotion or demotion creates an immutable audit event.
+
 Historical audit records continue to display the original actor after deactivation or reactivation.
 
 ---

@@ -102,6 +102,10 @@ Fields:
 Rules:
 
 - Admin accounts bypass delegable per-user permissions.
+- `is_admin` and `is_active` are independent state dimensions; promotion/demotion does not activate/deactivate an account.
+- UserPermission rows may remain stored for Admin users.
+- Admin bypass ignores stored UserPermission rows while the profile is Admin.
+- Preserved UserPermission rows become effective again if the profile is later demoted.
 - Inactive users cannot authenticate/use AlfaEV.
 - The Supabase Auth user is preserved when a UserProfile is deactivated; it is not deleted.
 - `deactivated_at` and `deactivated_by_user_id` describe only the current deactivated state.

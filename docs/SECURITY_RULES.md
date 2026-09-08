@@ -470,6 +470,16 @@ Permission/Admin writes require authenticated Admin actor in trusted backend.
 
 Use database constraints/policies/functions to make self-escalation impossible.
 
+Writes to `UserProfile.is_admin` require trusted authorization by the currently active Admin actor. Browser/UI state is never authoritative.
+
+An Admin-status operation must fail server-side when the actor targets their own Admin status or when demotion would remove the last active Admin. Last-active-Admin protection must be concurrency-safe.
+
+Non-admin users must not be able to promote themselves through direct API or database attempts.
+
+Admin-status changes do not require Supabase Auth mutation. They do not change account Active/Inactive state.
+
+An inactive Admin-marked profile has no AlfaEV access because active-state enforcement remains authoritative over Admin bypass.
+
 ---
 
 # 24. Audit Log Integrity

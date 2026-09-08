@@ -714,12 +714,20 @@ Do not add Admin-status editing; that remains Task 036.
 Goal:
 - trusted Admin-only promotion/demotion
 
-Protect:
-- non-admin cannot self-promote
-- direct client manipulation fails
-- audit change
+Requirements:
+- require a trusted active-Admin actor; browser/UI state is not authoritative
+- forbid an Admin from changing their own `is_admin` status
+- forbid demotion of the last active Admin
+- make Admin-continuity protection concurrency-safe so simultaneous changes cannot leave AlfaEV with zero active Admins
+- leave `is_active` unchanged for promotion and demotion, including when the target is inactive
+- do not modify Supabase Auth state
+- preserve all existing UserPermission rows across promotion/demotion
+- create an immutable AuditLog entry for every meaningful promotion/demotion
+- create no AuditLog noise for a no-op requested state
 
-Add security test.
+Add backend/security tests covering authorized changes, direct bypass attempts, self-change, last-active-Admin protection, inactive targets, UserPermission preservation, no-op behavior, and concurrent Admin-continuity enforcement.
+
+Do not add permission grant/revoke behavior; that remains Task 037+.
 
 ---
 

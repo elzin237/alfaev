@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const userDetailPageMocks = vi.hoisted(() => ({
   getUserAdmin: vi.fn(),
   setUserActiveStateAdmin: vi.fn(),
+  setUserAdminStatus: vi.fn(),
   updateUserProfileAdmin: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -30,6 +31,9 @@ vi.mock("./services/userProfileUpdateService", () => ({
 }));
 vi.mock("./services/userActiveStateService", () => ({
   setUserActiveStateAdmin: userDetailPageMocks.setUserActiveStateAdmin,
+}));
+vi.mock("./services/userAdminStatusService", () => ({
+  setUserAdminStatus: userDetailPageMocks.setUserAdminStatus,
 }));
 
 import type { AuthState } from "../../app/auth/AuthProvider";
@@ -132,6 +136,10 @@ beforeEach(() => {
     ok: true,
     value: { profileId: routeUserId, isActive: true, changed: true },
   });
+  userDetailPageMocks.setUserAdminStatus.mockResolvedValue({
+    ok: true,
+    value: { profileId: routeUserId, isAdmin: true },
+  });
 });
 
 afterEach(() => {
@@ -188,6 +196,8 @@ describe("UserDetailPage", () => {
     expect(screen.getByText("Never")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reactivate User" }))
       .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Promote to Admin" }))
+      .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /admin status|permission|password/i }))
       .not.toBeInTheDocument();
   });
@@ -206,6 +216,35 @@ describe("UserDetailPage", () => {
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       "User reactivated.",
+    );
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["users", "detail", profile.id, routeUserId],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["users", "list", profile.id],
+      exact: true,
+    });
+  });
+
+  it("refreshes detail and list data after a successful promotion", async () => {
+    const { queryClient } = renderUserDetailPage();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await screen.findByRole("button", { name: "Promote to Admin" });
+    fireEvent.click(screen.getByRole("button", { name: "Promote to Admin" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Promote to Admin",
+      }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "User promoted to Admin.",
+    );
+    expect(userDetailPageMocks.setUserAdminStatus).toHaveBeenCalledWith(
+      routeUserId,
+      true,
     );
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["users", "detail", profile.id, routeUserId],

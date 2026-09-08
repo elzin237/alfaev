@@ -591,6 +591,18 @@ Non-admin users never gain permission-management capability.
 
 ---
 
+## Change Admin Status
+
+1. Admin opens another AlfaEV User.
+2. Admin explicitly chooses Promote to Admin or Demote from Admin.
+3. Backend blocks changes to the acting Admin's own Admin status.
+4. Backend blocks demotion when the target is the last active Admin.
+5. The target's Active/Inactive state remains unchanged.
+6. Existing UserPermission rows remain preserved; Admin bypass applies while promoted and the preserved rows become relevant again after demotion.
+7. Create an immutable Audit event for a successful meaningful change.
+
+---
+
 # 17. Permission Change Runtime Behavior
 
 After permission changes:

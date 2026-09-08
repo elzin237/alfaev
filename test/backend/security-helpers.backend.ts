@@ -95,6 +95,20 @@ interface ActivityWaitRow {
   wait_event_type: string | null;
 }
 
+interface AdminStatusProfileRow {
+  is_active: boolean;
+  is_admin: boolean;
+}
+
+interface AdminStatusAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown>;
+  before_data: Record<string, unknown>;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+}
+
 async function expectAdminStatus(
   client: SupabaseClient,
   expected: boolean,
@@ -266,7 +280,7 @@ describe("Supabase security helpers", () => {
     const nonexistentId = "00000000-0000-0000-0000-000000000000";
     const profileMutation = await client
       .from("user_profiles")
-      .update({ is_active: false })
+      .update({ is_active: false, is_admin: true })
       .eq("id", nonexistentId);
     const permissionDefinitionMutation = await client
       .from("permission_definitions")
@@ -1397,5 +1411,476 @@ describe("Supabase security helpers", () => {
       },
     });
     expect(await fixture.getAuthUserBanned(target.authUserId)).toBe(false);
+  });
+
+  it("promotes and demotes while preserving active state and explicit permissions", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.permitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const permissionsBefore = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const promotion = await database.query<CreatedProfileIdRow>(
+        `select public.set_user_admin_status_admin(
+           $1::uuid,
+           true
+         ) as profile_id`,
+        [target.profileId],
+      );
+      await database.query("reset role");
+
+      const promotedProfile = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [target.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const promotedAdminStatus = await database.query<{ value: boolean }>(
+        "select public.current_user_is_admin() as value",
+      );
+      const promotedAdminBypass = await database.query<{ value: boolean }>(
+        "select public.has_permission('projects.create') as value",
+      );
+      await database.query("reset role");
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const demotion = await database.query<CreatedProfileIdRow>(
+        `select public.set_user_admin_status_admin(
+           $1::uuid,
+           false
+         ) as profile_id`,
+        [target.profileId],
+      );
+      await database.query("reset role");
+
+      const demotedProfile = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const permissionsAfter = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+      const audits = await database.query<AdminStatusAuditRow>(
+        `select actor_user_id, action_type, entity_id, before_data,
+                after_data, metadata
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in (
+             'user.promoted_to_admin',
+             'user.demoted_from_admin'
+           )
+         order by action_type`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [target.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const demotedAdminStatus = await database.query<{ value: boolean }>(
+        "select public.current_user_is_admin() as value",
+      );
+      const preservedGrant = await database.query<{ value: boolean }>(
+        "select public.has_permission('projects.view') as value",
+      );
+      const ungrantedPermission = await database.query<{ value: boolean }>(
+        "select public.has_permission('projects.create') as value",
+      );
+
+      expect(promotion.rows).toEqual([{ profile_id: target.profileId }]);
+      expect(demotion.rows).toEqual([{ profile_id: target.profileId }]);
+      expect(promotedProfile.rows).toEqual([
+        { is_admin: true, is_active: true },
+      ]);
+      expect(demotedProfile.rows).toEqual([
+        { is_admin: false, is_active: true },
+      ]);
+      expect(promotedAdminStatus.rows).toEqual([{ value: true }]);
+      expect(promotedAdminBypass.rows).toEqual([{ value: true }]);
+      expect(demotedAdminStatus.rows).toEqual([{ value: false }]);
+      expect(preservedGrant.rows).toEqual([{ value: true }]);
+      expect(ungrantedPermission.rows).toEqual([{ value: false }]);
+      expect(permissionsAfter.rows).toEqual(permissionsBefore.rows);
+      expect(audits.rows).toEqual([
+        {
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "user.demoted_from_admin",
+          entity_id: target.profileId,
+          before_data: { is_admin: true },
+          after_data: { is_admin: false },
+          metadata: { source: "admin_user_status_change" },
+        },
+        {
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "user.promoted_to_admin",
+          entity_id: target.profileId,
+          before_data: { is_admin: false },
+          after_data: { is_admin: true },
+          metadata: { source: "admin_user_status_change" },
+        },
+      ]);
+    });
+  });
+
+  it("changes Admin status for an inactive target without activating it", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.inactive;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const permissionsBefore = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.user_permissions
+         where user_id = $1::uuid`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        "select public.set_user_admin_status_admin($1::uuid, false)",
+        [target.profileId],
+      );
+      await database.query("reset role");
+      const demoted = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        "select public.set_user_admin_status_admin($1::uuid, true)",
+        [target.profileId],
+      );
+      await database.query("reset role");
+
+      const promoted = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const permissionsAfter = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.user_permissions
+         where user_id = $1::uuid`,
+        [target.profileId],
+      );
+
+      expect(demoted.rows).toEqual([{ is_admin: false, is_active: false }]);
+      expect(promoted.rows).toEqual([{ is_admin: true, is_active: false }]);
+      expect(permissionsAfter.rows).toEqual(permissionsBefore.rows);
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [target.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const inactiveAdmin = await database.query<{ value: boolean }>(
+        "select public.current_user_is_admin() as value",
+      );
+
+      expect(inactiveAdmin.rows).toEqual([{ value: false }]);
+    });
+  });
+
+  it("denies Admin-status changes to anonymous, non-Admin, and inactive actors", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const { error } = await client.rpc("set_user_admin_status_admin", {
+        p_user_id: target.profileId,
+        p_is_admin: true,
+      });
+
+      expectPermissionDenied(error);
+    }
+  });
+
+  it("rejects self Admin-status changes without changing the actor", async () => {
+    const fixture = requireHarness();
+    const additionalAdmin = await fixture.createTemporaryProfile(
+      "admin-status-self-continuity",
+      undefined,
+      fixture.actors.admin.profileId,
+      { isAdmin: true },
+    );
+    const { error } = await fixture.actors.admin.client.rpc(
+      "set_user_admin_status_admin",
+      {
+        p_user_id: fixture.actors.admin.profileId,
+        p_is_admin: false,
+      },
+    );
+
+    expect(error?.code).toBe("AUS01");
+    expect(additionalAdmin.profileId).toEqual(expect.any(String));
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const profile = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [fixture.actors.admin.profileId],
+      );
+
+      expect(profile.rows).toEqual([{ is_admin: true, is_active: true }]);
+    });
+  });
+
+  it("rejects demotion of the last active Admin without audit noise", async () => {
+    const fixture = requireHarness();
+
+    await expect(
+      fixture.withRollbackDatabaseTransaction(async (database) => {
+        await database.query(
+          `update public.user_profiles
+           set is_active = false
+           where is_admin
+             and id <> $1::uuid`,
+          [fixture.actors.admin.profileId],
+        );
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(
+          "select public.set_user_admin_status_admin($1::uuid, false)",
+          [fixture.actors.admin.profileId],
+        );
+      }),
+    ).rejects.toMatchObject({ code: "AUS02" });
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const profile = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [fixture.actors.admin.profileId],
+      );
+      const audit = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.demoted_from_admin'`,
+        [fixture.actors.admin.profileId],
+      );
+
+      expect(profile.rows).toEqual([{ is_admin: true, is_active: true }]);
+      expect(audit.rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("does not add audit noise for an Admin-status no-op", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const before = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in (
+             'user.promoted_to_admin',
+             'user.demoted_from_admin'
+           )`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const result = await database.query<CreatedProfileIdRow>(
+        `select public.set_user_admin_status_admin(
+           $1::uuid,
+           false
+         ) as profile_id`,
+        [target.profileId],
+      );
+      await database.query("reset role");
+
+      const after = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in (
+             'user.promoted_to_admin',
+             'user.demoted_from_admin'
+           )`,
+        [target.profileId],
+      );
+
+      expect(result.rows).toEqual([{ profile_id: target.profileId }]);
+      expect(after.rows).toEqual(before.rows);
+    });
+  });
+
+  it("shares the continuity lock and rejects an actor demoted while waiting", async () => {
+    const fixture = requireHarness();
+    const waitingAdmin = await fixture.createTemporaryProfile(
+      "waiting-admin-status-authorization",
+      undefined,
+      fixture.actors.admin.profileId,
+      { isAdmin: true },
+    );
+    const target = fixture.actors.unpermitted;
+    const applicationName = `alfaev-admin-status-wait-${randomUUID()}`;
+
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const lockHolder = clients[0];
+      const waitingActor = clients[1];
+      const observer = clients[2];
+
+      if (!lockHolder || !waitingActor || !observer) {
+        throw new Error("Concurrency fixture clients are unavailable");
+      }
+
+      await lockHolder.query("begin");
+      await lockHolder.query(
+        `select pg_catalog.pg_advisory_xact_lock(
+           pg_catalog.hashtextextended(
+             'alfaev.active_admin_continuity',
+             0
+           )
+         )`,
+      );
+      await waitingActor.query("begin");
+      await waitingActor.query(
+        "select pg_catalog.set_config('application_name', $1::text, true)",
+        [applicationName],
+      );
+      await waitingActor.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [waitingAdmin.authUserId],
+      );
+      await waitingActor.query("set local role authenticated");
+      const waitingMutation = waitingActor
+        .query(
+          "select public.set_user_admin_status_admin($1::uuid, true)",
+          [target.profileId],
+        )
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      let observedAdvisoryWait = false;
+
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const activity = await observer.query<ActivityWaitRow>(
+          `select wait_event_type, wait_event
+           from pg_catalog.pg_stat_activity
+           where application_name = $1::text`,
+          [applicationName],
+        );
+        const waiting = activity.rows[0];
+
+        if (
+          waiting?.wait_event_type === "Lock" &&
+          waiting.wait_event?.toLowerCase() === "advisory"
+        ) {
+          observedAdvisoryWait = true;
+          break;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(observedAdvisoryWait).toBe(true);
+
+      await lockHolder.query(
+        `update public.user_profiles
+         set is_admin = false
+         where id = $1::uuid`,
+        [waitingAdmin.profileId],
+      );
+      await lockHolder.query("commit");
+
+      const mutationError = await waitingMutation;
+
+      expect(mutationError).toMatchObject({ code: "42501" });
+      await waitingActor.query("rollback");
+
+      const targetState = await observer.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const audit = await observer.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.promoted_to_admin'`,
+        [target.profileId],
+      );
+      const definitions = await observer.query<{
+        name: string;
+        definition: string;
+      }>(
+        `select
+           routine.proname as name,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'set_user_active_state_admin',
+             'set_user_admin_status_admin'
+           )`,
+      );
+
+      expect(targetState.rows).toEqual([{ is_admin: false, is_active: true }]);
+      expect(audit.rows).toEqual([{ count: 0 }]);
+      expect(definitions.rows).toHaveLength(2);
+
+      for (const { definition } of definitions.rows) {
+        expect(definition).toContain("alfaev.active_admin_continuity");
+      }
+    });
   });
 });
