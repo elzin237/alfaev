@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const usersPageMocks = vi.hoisted(() => ({
@@ -77,7 +78,9 @@ function renderUsersPage() {
 
   const rendered = render(
     <QueryClientProvider client={queryClient}>
-      <UsersPage />
+      <MemoryRouter>
+        <UsersPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 
@@ -174,6 +177,10 @@ describe("UsersPage", () => {
 
     expect(await screen.findByRole("table")).toBeInTheDocument();
     expect(screen.getByText("Ada Admin")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ada Admin" })).toHaveAttribute(
+      "href",
+      "/users/00000000-0000-0000-0000-000000000201",
+    );
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
     expect(screen.getByText("Ina Worker")).toBeInTheDocument();
     expect(screen.getByText("ina@example.com")).toBeInTheDocument();

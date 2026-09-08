@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import EmptyState from "../../shared/components/EmptyState";
@@ -83,7 +84,12 @@ function UsersPage() {
             {usersQuery.data.value.map((user) => (
               <tr key={user.id} className="text-sm text-zinc-700">
                 <td className="whitespace-nowrap px-5 py-4 font-semibold text-zinc-900">
-                  {user.fullName}
+                  <Link
+                    to={`/users/${user.id}`}
+                    className="transition hover:text-red-600 hover:underline focus:outline-none focus:ring-2 focus:ring-red-200"
+                  >
+                    {user.fullName}
+                  </Link>
                 </td>
                 <td className="whitespace-nowrap px-5 py-4">{user.email}</td>
                 <td className="whitespace-nowrap px-5 py-4">

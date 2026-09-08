@@ -13,6 +13,7 @@ import InventoryPage from "../../pages/inventory/InventoryPage";
 import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
+import UserDetailPage from "../../features/users/UserDetailPage";
 
 function AppRouter() {
   return (
@@ -40,6 +41,7 @@ function AppRouter() {
         </Route>
         <Route element={<AdminRoute />}>
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/users/:userId" element={<UserDetailPage />} />
         </Route>
       </Route>
     </Routes>

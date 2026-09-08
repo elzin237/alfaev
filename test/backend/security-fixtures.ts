@@ -31,6 +31,11 @@ export interface TemporaryAuthUser {
   email: string;
 }
 
+export interface TemporaryProfileFixture extends TemporaryAuthUser {
+  profileId: string;
+  profileEmail: string;
+}
+
 export interface SecurityFixtureHarness {
   anonymousClient: SupabaseClient;
   actors: {
@@ -45,6 +50,13 @@ export interface SecurityFixtureHarness {
   };
   countAuthUsersByEmail: (email: string) => Promise<number>;
   createTemporaryAuthUser: (label: string) => Promise<TemporaryAuthUser>;
+  createTemporaryProfile: (
+    label: string,
+    profileEmail: string | undefined,
+    createdByUserId: string,
+  ) => Promise<TemporaryProfileFixture>;
+  getAuthUserEmail: (authUserId: string) => Promise<string>;
+  updateAuthUserEmail: (authUserId: string, email: string) => Promise<void>;
   withRollbackDatabaseTransaction: <Result>(
     operation: (client: PoolClient) => Promise<Result>,
   ) => Promise<Result>;
@@ -198,6 +210,83 @@ export async function createSecurityFixtureHarness(
       authUserId: data.user.id,
       email,
     };
+  };
+
+  const getAuthUserEmail = async (authUserId: string): Promise<string> => {
+    const { data, error } = await authAdminClient.auth.admin.getUserById(
+      authUserId,
+    );
+
+    throwIfError("Auth fixture email lookup", error);
+
+    const email = data.user?.email?.trim().toLowerCase();
+
+    if (!email) {
+      throw new Error("Auth fixture email lookup returned no email");
+    }
+
+    return email;
+  };
+
+  const createTemporaryProfile = async (
+    label: string,
+    profileEmail: string | undefined,
+    createdByUserId: string,
+  ): Promise<TemporaryProfileFixture> => {
+    const authUser = await createTemporaryAuthUser(label);
+    const normalizedProfileEmail = (profileEmail ?? authUser.email)
+      .trim()
+      .toLowerCase();
+    const profile = await database.query<IdRow>(
+      `insert into public.user_profiles (
+         auth_user_id,
+         full_name,
+         email,
+         birthday,
+         is_admin,
+         is_active,
+         created_by_user_id
+       )
+       values ($1::uuid, $2::text, $3::text, $4::date, false, true, $5::uuid)
+       returning id`,
+      [
+        authUser.authUserId,
+        `Security fixture ${label}`,
+        normalizedProfileEmail,
+        "1990-01-01",
+        createdByUserId,
+      ],
+    );
+    const profileId = profile.rows[0]?.id;
+
+    if (!profileId) {
+      throw new Error("Temporary profile fixture creation returned no profile ID");
+    }
+
+    state.profileIds.push(profileId);
+
+    return {
+      ...authUser,
+      profileId,
+      profileEmail: normalizedProfileEmail,
+    };
+  };
+
+  const updateAuthUserEmail = async (
+    authUserId: string,
+    email: string,
+  ): Promise<void> => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data, error } = await authAdminClient.auth.admin.updateUserById(
+      authUserId,
+      { email: normalizedEmail },
+    );
+
+    throwIfError("Auth fixture email update", error);
+
+    if (data.user?.email?.trim().toLowerCase() !== normalizedEmail) {
+      throw new Error("Auth fixture email update returned an unexpected email");
+    }
   };
 
   const withRollbackDatabaseTransaction = async <Result>(
@@ -495,6 +584,9 @@ export async function createSecurityFixtureHarness(
       },
       countAuthUsersByEmail,
       createTemporaryAuthUser,
+      createTemporaryProfile,
+      getAuthUserEmail,
+      updateAuthUserEmail,
       withRollbackDatabaseTransaction,
       cleanup,
     };

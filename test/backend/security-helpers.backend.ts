@@ -57,6 +57,23 @@ interface CountResultRow {
   count: number;
 }
 
+interface UpdatedProfileRow {
+  birthday: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  is_admin: boolean;
+}
+
+interface UpdatedAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown>;
+  before_data: Record<string, unknown>;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+}
+
 async function expectAdminStatus(
   client: SupabaseClient,
   expected: boolean,
@@ -298,6 +315,278 @@ describe("Supabase security helpers", () => {
     }
   });
 
+  it("allows only an active Admin to read the approved user-detail fields", async () => {
+    const fixture = requireHarness();
+    const { data, error } = await fixture.actors.admin.client.rpc(
+      "get_user_admin",
+      { p_user_id: fixture.actors.permitted.profileId },
+    );
+    const rows: unknown = data;
+
+    expect(error).toBeNull();
+
+    if (!Array.isArray(rows) || rows.length !== 1 || !isRecord(rows[0])) {
+      throw new Error("Admin user-detail RPC returned an invalid result shape");
+    }
+
+    expect(Object.keys(rows[0]).sort()).toEqual([
+      "birthday",
+      "created_at",
+      "email",
+      "full_name",
+      "id",
+      "is_active",
+      "is_admin",
+      "last_login_at",
+    ]);
+    expect(rows[0].id).toBe(fixture.actors.permitted.profileId);
+
+    const identity = await fixture.actors.admin.client.rpc(
+      "resolve_user_auth_identity_admin",
+      { p_user_id: fixture.actors.permitted.profileId },
+    );
+
+    expect(identity.error).toBeNull();
+    expect(identity.data).toEqual([
+      {
+        auth_user_id: fixture.actors.permitted.authUserId,
+        email: await fixture.getAuthUserEmail(
+          fixture.actors.permitted.authUserId,
+        ),
+      },
+    ]);
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const denied = await client.rpc("get_user_admin", {
+        p_user_id: fixture.actors.permitted.profileId,
+      });
+
+      expectPermissionDenied(denied.error);
+
+      const deniedIdentity = await client.rpc(
+        "resolve_user_auth_identity_admin",
+        { p_user_id: fixture.actors.permitted.profileId },
+      );
+
+      expectPermissionDenied(deniedIdentity.error);
+    }
+  });
+
+  it("updates only editable profile fields and audits meaningful changes atomically", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.permitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const permissionBefore = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.user_permissions
+         where user_id = $1::uuid`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const update = await database.query<CreatedProfileIdRow>(
+        `select public.update_user_profile_admin(
+           $1::uuid,
+           $2::text,
+           $3::text,
+           $4::date
+         ) as profile_id`,
+        [
+          target.profileId,
+          "  Updated   Security User  ",
+          await fixture.getAuthUserEmail(target.authUserId),
+          "1992-05-06",
+        ],
+      );
+      await database.query("reset role");
+
+      const profile = await database.query<UpdatedProfileRow>(
+        `select full_name, email, birthday::text, is_active, is_admin
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const audit = await database.query<UpdatedAuditRow>(
+        `select
+           actor_user_id,
+           action_type,
+           entity_id,
+           before_data,
+           after_data,
+           metadata
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.updated'`,
+        [target.profileId],
+      );
+      const permissionAfter = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.user_permissions
+         where user_id = $1::uuid`,
+        [target.profileId],
+      );
+
+      expect(update.rows).toEqual([{ profile_id: target.profileId }]);
+      expect(profile.rows).toEqual([
+        {
+          full_name: "Updated Security User",
+          email: await fixture.getAuthUserEmail(target.authUserId),
+          birthday: "1992-05-06",
+          is_active: true,
+          is_admin: false,
+        },
+      ]);
+      expect(audit.rows).toEqual([
+        {
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "user.updated",
+          entity_id: target.profileId,
+          before_data: {
+            full_name: "Security fixture permitted",
+            email: await fixture.getAuthUserEmail(target.authUserId),
+            birthday: "1990-01-01",
+          },
+          after_data: {
+            full_name: "Updated Security User",
+            email: await fixture.getAuthUserEmail(target.authUserId),
+            birthday: "1992-05-06",
+          },
+          metadata: { source: "admin_user_profile_update" },
+        },
+      ]);
+      expect(permissionAfter.rows).toEqual(permissionBefore.rows);
+    });
+  });
+
+  it("does not create audit noise for a no-op profile update", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const before = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.updated'`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        `select public.update_user_profile_admin(
+           $1::uuid,
+           $2::text,
+           $3::text,
+           $4::date
+         )`,
+        [
+          target.profileId,
+          "Security fixture unpermitted",
+          await fixture.getAuthUserEmail(target.authUserId),
+          "1990-01-01",
+        ],
+      );
+      await database.query("reset role");
+
+      const after = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.updated'`,
+        [target.profileId],
+      );
+
+      expect(after.rows).toEqual(before.rows);
+    });
+  });
+
+  it("keeps Auth and UserProfile email synchronized during trusted finalization", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+    const previousEmail = await fixture.getAuthUserEmail(target.authUserId);
+    const updatedEmail = `alfaev.security.email-update.${randomUUID()}@example.com`;
+
+    await fixture.updateAuthUserEmail(target.authUserId, updatedEmail);
+
+    try {
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(
+          `select public.update_user_profile_admin(
+             $1::uuid,
+             $2::text,
+             $3::text,
+             $4::date
+           )`,
+          [target.profileId, "Email Updated User", updatedEmail, "1990-01-01"],
+        );
+        await database.query("reset role");
+
+        const synchronized = await database.query<{
+          auth_email: string;
+          profile_email: string;
+        }>(
+          `select
+             pg_catalog.lower(auth.users.email) as auth_email,
+             public.user_profiles.email as profile_email
+           from public.user_profiles
+           join auth.users
+             on auth.users.id = public.user_profiles.auth_user_id
+           where public.user_profiles.id = $1::uuid`,
+          [target.profileId],
+        );
+
+        expect(synchronized.rows).toEqual([
+          { auth_email: updatedEmail, profile_email: updatedEmail },
+        ]);
+      });
+    } finally {
+      await fixture.updateAuthUserEmail(target.authUserId, previousEmail);
+    }
+
+    expect(await fixture.getAuthUserEmail(target.authUserId)).toBe(previousEmail);
+  });
+
+  it("denies profile updates to anonymous, non-Admin, and inactive actors", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+    const targetEmail = await fixture.getAuthUserEmail(target.authUserId);
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const { error } = await client.rpc("update_user_profile_admin", {
+        p_user_id: target.profileId,
+        p_full_name: "Forbidden Update",
+        p_email: targetEmail,
+        p_birthday: "1990-01-01",
+      });
+
+      expectPermissionDenied(error);
+    }
+  });
+
   it("lets an active Admin atomically finalize a profile and its audit entry", async () => {
     const fixture = requireHarness();
     const targetUser = await fixture.createTemporaryAuthUser("profile-finalization");
@@ -460,5 +749,116 @@ describe("Supabase security helpers", () => {
       );
       expect(await fixture.countAuthUsersByEmail(invitedEmail)).toBe(0);
     }
+  });
+
+  it("denies the profile-update Edge Function before non-Admin mutation", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+    const targetEmail = await fixture.getAuthUserEmail(target.authUserId);
+
+    for (const actor of [fixture.actors.permitted, fixture.actors.inactive]) {
+      const sessionResult = await actor.client.auth.getSession();
+      const accessToken = sessionResult.data.session?.access_token;
+
+      expect(sessionResult.error).toBeNull();
+      expect(accessToken).toEqual(expect.any(String));
+
+      const response = await fetch(
+        `${environment.supabaseUrl}/functions/v1/admin-update-user-profile`,
+        {
+          method: "POST",
+          headers: {
+            apikey: environment.supabasePublishableKey,
+            authorization: `Bearer ${accessToken}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            userId: target.profileId,
+            fullName: "Forbidden Edge Update",
+            email: targetEmail,
+            birthday: "1990-01-01",
+          }),
+        },
+      );
+      const responseBody: unknown = await response.json();
+
+      expect(response.status).toBe(403);
+      expect(isRecord(responseBody) ? responseBody.code : null).toBe(
+        "access_denied",
+      );
+      expect(await fixture.getAuthUserEmail(target.authUserId)).toBe(targetEmail);
+    }
+  });
+
+  it("rolls Auth email back when Edge profile finalization fails", async () => {
+    const fixture = requireHarness();
+    const target = await fixture.createTemporaryProfile(
+      "edge-rollback-target",
+      undefined,
+      fixture.actors.admin.profileId,
+    );
+    const collisionEmail =
+      `alfaev.security.edge-collision.${randomUUID()}@example.com`;
+
+    await fixture.createTemporaryProfile(
+      "edge-rollback-collision",
+      collisionEmail,
+      fixture.actors.admin.profileId,
+    );
+
+    const sessionResult = await fixture.actors.admin.client.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    expect(sessionResult.error).toBeNull();
+    expect(accessToken).toEqual(expect.any(String));
+
+    const response = await fetch(
+      `${environment.supabaseUrl}/functions/v1/admin-update-user-profile`,
+      {
+        method: "POST",
+        headers: {
+          apikey: environment.supabasePublishableKey,
+          authorization: `Bearer ${accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: target.profileId,
+          fullName: "Rollback Target",
+          email: collisionEmail,
+          birthday: "1990-01-01",
+        }),
+      },
+    );
+    const responseBody: unknown = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(isRecord(responseBody) ? responseBody.code : null).toBe(
+      "user_exists",
+    );
+    expect(await fixture.getAuthUserEmail(target.authUserId)).toBe(target.email);
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const profile = await database.query<{ email: string; full_name: string }>(
+        `select email, full_name
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const audit = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'user.updated'`,
+        [target.profileId],
+      );
+
+      expect(profile.rows).toEqual([
+        {
+          email: target.profileEmail,
+          full_name: "Security fixture edge-rollback-target",
+        },
+      ]);
+      expect(audit.rows).toEqual([{ count: 0 }]);
+    });
   });
 });
