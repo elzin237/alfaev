@@ -9,7 +9,7 @@ import LoginPage from "../../pages/auth/LoginPage";
 import DashboardPage from "../../features/dashboard/DashboardPage";
 import ProjectsPage from "../../pages/projects/ProjectsPage";
 import ProcurementPage from "../../pages/procurement/ProcurementPage";
-import InventoryPage from "../../pages/inventory/InventoryPage";
+import InventoryPage from "../../features/inventory/InventoryPage";
 import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
