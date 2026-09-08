@@ -109,6 +109,15 @@ interface AdminStatusAuditRow {
   metadata: Record<string, unknown>;
 }
 
+interface PermissionAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown>;
+  before_data: Record<string, unknown>;
+  entity_id: string;
+  metadata: Record<string, unknown>;
+}
+
 async function expectAdminStatus(
   client: SupabaseClient,
   expected: boolean,
@@ -294,10 +303,20 @@ describe("Supabase security helpers", () => {
           fixture.permissionDefinitionIds.ungranted,
         granted_by_user_id: fixture.actors.admin.profileId,
       });
+    const permissionUpdateMutation = await client
+      .from("user_permissions")
+      .update({ granted_by_user_id: fixture.actors.unpermitted.profileId })
+      .eq("user_id", fixture.actors.permitted.profileId);
+    const permissionDeleteMutation = await client
+      .from("user_permissions")
+      .delete()
+      .eq("user_id", fixture.actors.permitted.profileId);
 
     expectPermissionDenied(profileMutation.error);
     expectPermissionDenied(permissionDefinitionMutation.error);
     expectPermissionDenied(permissionGrantMutation.error);
+    expectPermissionDenied(permissionUpdateMutation.error);
+    expectPermissionDenied(permissionDeleteMutation.error);
   });
 
   it("allows an active Admin to list only approved User fields", async () => {
@@ -1881,6 +1900,382 @@ describe("Supabase security helpers", () => {
       for (const { definition } of definitions.rows) {
         expect(definition).toContain("alfaev.active_admin_continuity");
       }
+    });
+  });
+
+  it("grants and revokes one delegable permission atomically with audit", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.permitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const profileBefore = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const unrelatedPermissionsBefore = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const grant = await database.query<{ granted: boolean }>(
+        `select public.set_user_permission_admin(
+           $1::uuid,
+           $2::text,
+           true
+         ) as granted`,
+        [target.profileId, "  projects.create  "],
+      );
+      await database.query("reset role");
+
+      const grantedRow = await database.query<{
+        granted_by_user_id: string;
+        permission_definition_id: string;
+      }>(
+        `select
+           user_permission.granted_by_user_id,
+           user_permission.permission_definition_id
+         from public.user_permissions as user_permission
+         join public.permission_definitions as definition
+           on definition.id = user_permission.permission_definition_id
+         where user_permission.user_id = $1::uuid
+           and definition.key = 'projects.create'`,
+        [target.profileId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [target.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const helperAfterGrant = await database.query<{ allowed: boolean }>(
+        "select public.has_permission('projects.create') as allowed",
+      );
+      await database.query("reset role");
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const revoke = await database.query<{ granted: boolean }>(
+        `select public.set_user_permission_admin(
+           $1::uuid,
+           $2::text,
+           false
+         ) as granted`,
+        [target.profileId, "projects.create"],
+      );
+      await database.query("reset role");
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [target.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const helperAfterRevoke = await database.query<{ allowed: boolean }>(
+        "select public.has_permission('projects.create') as allowed",
+      );
+      const unrelatedHelper = await database.query<{ allowed: boolean }>(
+        "select public.has_permission('projects.view') as allowed",
+      );
+      await database.query("reset role");
+
+      const profileAfter = await database.query<AdminStatusProfileRow>(
+        `select is_admin, is_active
+         from public.user_profiles
+         where id = $1::uuid`,
+        [target.profileId],
+      );
+      const unrelatedPermissionsAfter = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [target.profileId],
+      );
+      const audits = await database.query<PermissionAuditRow>(
+        `select actor_user_id, action_type, entity_id, before_data,
+                after_data, metadata
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in ('permission.granted', 'permission.revoked')
+         order by action_type`,
+        [target.profileId],
+      );
+
+      expect(grant.rows).toEqual([{ granted: true }]);
+      expect(revoke.rows).toEqual([{ granted: false }]);
+      expect(grantedRow.rows).toEqual([
+        {
+          granted_by_user_id: fixture.actors.admin.profileId,
+          permission_definition_id:
+            fixture.permissionDefinitionIds.ungranted,
+        },
+      ]);
+      expect(helperAfterGrant.rows).toEqual([{ allowed: true }]);
+      expect(helperAfterRevoke.rows).toEqual([{ allowed: false }]);
+      expect(unrelatedHelper.rows).toEqual([{ allowed: true }]);
+      expect(profileAfter.rows).toEqual(profileBefore.rows);
+      expect(unrelatedPermissionsAfter.rows).toEqual(
+        unrelatedPermissionsBefore.rows,
+      );
+      expect(audits.rows).toEqual([
+        {
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "permission.granted",
+          entity_id: target.profileId,
+          before_data: {
+            permission_key: "projects.create",
+            granted: false,
+          },
+          after_data: {
+            permission_key: "projects.create",
+            granted: true,
+          },
+          metadata: {
+            source: "admin_user_permission_change",
+            permission_definition_id:
+              fixture.permissionDefinitionIds.ungranted,
+          },
+        },
+        {
+          actor_user_id: fixture.actors.admin.profileId,
+          action_type: "permission.revoked",
+          entity_id: target.profileId,
+          before_data: {
+            permission_key: "projects.create",
+            granted: true,
+          },
+          after_data: {
+            permission_key: "projects.create",
+            granted: false,
+          },
+          metadata: {
+            source: "admin_user_permission_change",
+            permission_definition_id:
+              fixture.permissionDefinitionIds.ungranted,
+          },
+        },
+      ]);
+    });
+  });
+
+  it("treats duplicate grant and revoke requests as audit-free no-ops", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        "select public.set_user_permission_admin($1::uuid, $2::text, true)",
+        [target.profileId, "projects.create"],
+      );
+      await database.query("reset role");
+      const auditAfterGrant = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'permission.granted'`,
+        [target.profileId],
+      );
+      await database.query("set local role authenticated");
+      const duplicateGrant = await database.query<{ granted: boolean }>(
+        `select public.set_user_permission_admin(
+           $1::uuid,
+           $2::text,
+           true
+        ) as granted`,
+        [target.profileId, "projects.create"],
+      );
+      await database.query("reset role");
+      const auditAfterDuplicateGrant = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'permission.granted'`,
+        [target.profileId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        "select public.set_user_permission_admin($1::uuid, $2::text, false)",
+        [target.profileId, "projects.create"],
+      );
+      await database.query("reset role");
+      const auditAfterRevoke = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'permission.revoked'`,
+        [target.profileId],
+      );
+      await database.query("set local role authenticated");
+      const duplicateRevoke = await database.query<{ granted: boolean }>(
+        `select public.set_user_permission_admin(
+           $1::uuid,
+           $2::text,
+           false
+        ) as granted`,
+        [target.profileId, "projects.create"],
+      );
+      await database.query("reset role");
+      const auditAfterDuplicateRevoke = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'permission.revoked'`,
+        [target.profileId],
+      );
+
+      expect(duplicateGrant.rows).toEqual([{ granted: true }]);
+      expect(duplicateRevoke.rows).toEqual([{ granted: false }]);
+      expect(auditAfterGrant.rows).toEqual([{ count: 1 }]);
+      expect(auditAfterDuplicateGrant.rows).toEqual(auditAfterGrant.rows);
+      expect(auditAfterRevoke.rows).toEqual([{ count: 1 }]);
+      expect(auditAfterDuplicateRevoke.rows).toEqual(auditAfterRevoke.rows);
+    });
+  });
+
+  it("rejects unknown and non-delegable permission capabilities", async () => {
+    const fixture = requireHarness();
+    const target = fixture.actors.unpermitted;
+    const unknown = await fixture.actors.admin.client.rpc(
+      "set_user_permission_admin",
+      {
+        p_user_id: target.profileId,
+        p_permission_key: "users.manage",
+        p_granted: true,
+      },
+    );
+
+    expect(unknown.error?.code).toBe("PRM03");
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const nonDelegableCatalogRows = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.permission_definitions
+         where not is_delegable`,
+      );
+      const mutationDefinition = await database.query<{ definition: string }>(
+        `select pg_catalog.pg_get_functiondef(
+           'public.set_user_permission_admin(uuid,text,boolean)'::regprocedure
+         ) as definition`,
+      );
+      const invariantDefinition = await database.query<{ definition: string }>(
+        `select pg_catalog.pg_get_functiondef(
+           'public.enforce_delegable_permission_grant()'::regprocedure
+         ) as definition`,
+      );
+
+      expect(nonDelegableCatalogRows.rows).toEqual([{ count: 0 }]);
+      expect(mutationDefinition.rows[0]?.definition).toContain(
+        "permission_definitions.is_delegable",
+      );
+      expect(invariantDefinition.rows[0]?.definition).toContain(
+        "permission_definitions.is_delegable",
+      );
+    });
+  });
+
+  it("denies permission mutation to anonymous, non-Admin, and inactive actors", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.permitted.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+    ]) {
+      const { error } = await client.rpc("set_user_permission_admin", {
+        p_user_id: fixture.actors.unpermitted.profileId,
+        p_permission_key: "projects.create",
+        p_granted: true,
+      });
+
+      expectPermissionDenied(error);
+    }
+  });
+
+  it("rejects self permission changes and permission changes for Admin targets", async () => {
+    const fixture = requireHarness();
+    const selfChange = await fixture.actors.admin.client.rpc(
+      "set_user_permission_admin",
+      {
+        p_user_id: fixture.actors.admin.profileId,
+        p_permission_key: "projects.create",
+        p_granted: true,
+      },
+    );
+
+    expect(selfChange.error?.code).toBe("PRM01");
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const existingPermissions = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [fixture.actors.inactive.profileId],
+      );
+      const existingAudit = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in ('permission.granted', 'permission.revoked')`,
+        [fixture.actors.inactive.profileId],
+      );
+
+      expect(existingPermissions.rows).toHaveLength(1);
+
+      const adminTarget = await fixture.actors.admin.client.rpc(
+        "set_user_permission_admin",
+        {
+          p_user_id: fixture.actors.inactive.profileId,
+          p_permission_key: "projects.view",
+          p_granted: false,
+        },
+      );
+
+      expect(adminTarget.error?.code).toBe("PRM02");
+
+      const permissionsAfter = await database.query<{
+        permission_definition_id: string;
+      }>(
+        `select permission_definition_id
+         from public.user_permissions
+         where user_id = $1::uuid
+         order by permission_definition_id`,
+        [fixture.actors.inactive.profileId],
+      );
+      const auditAfter = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in ('permission.granted', 'permission.revoked')`,
+        [fixture.actors.inactive.profileId],
+      );
+
+      expect(permissionsAfter.rows).toEqual(existingPermissions.rows);
+      expect(auditAfter.rows).toEqual(existingAudit.rows);
     });
   });
 });
