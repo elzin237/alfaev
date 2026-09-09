@@ -49,6 +49,7 @@ export interface SecurityFixtureHarness {
     brandManager: SecurityActor;
     inactiveBrandManager: SecurityActor;
     permitted: SecurityActor;
+    productCreator: SecurityActor;
     supplierArchiver: SecurityActor;
     supplierCreator: SecurityActor;
     supplierEditor: SecurityActor;
@@ -669,6 +670,7 @@ export async function createSecurityFixtureHarness(
         "projects.create",
         "inventory.view",
         "inventory.brands.manage",
+        "inventory.products.create",
         "suppliers.view",
         "suppliers.create",
         "suppliers.edit",
@@ -686,6 +688,9 @@ export async function createSecurityFixtureHarness(
     );
     const brandsManagePermission = permissionResult.rows.find(
       (permission) => permission.key === "inventory.brands.manage",
+    );
+    const productsCreatePermission = permissionResult.rows.find(
+      (permission) => permission.key === "inventory.products.create",
     );
     const suppliersViewPermission = permissionResult.rows.find(
       (permission) => permission.key === "suppliers.view",
@@ -705,6 +710,7 @@ export async function createSecurityFixtureHarness(
       !ungrantedPermission?.id ||
       !inventoryViewPermission?.id ||
       !brandsManagePermission?.id ||
+      !productsCreatePermission?.id ||
       !suppliersViewPermission?.id ||
       !suppliersCreatePermission?.id ||
       !suppliersEditPermission?.id ||
@@ -747,6 +753,12 @@ export async function createSecurityFixtureHarness(
       label: "inactive-brand-manager",
       isAdmin: false,
       isActive: false,
+      createdByUserId: admin.profileId,
+    });
+    const productCreator = await createActor({
+      label: "product-creator",
+      isAdmin: false,
+      isActive: true,
       createdByUserId: admin.profileId,
     });
     const supplierViewer = await createActor({
@@ -819,6 +831,15 @@ export async function createSecurityFixtureHarness(
          permission_definition_id,
          granted_by_user_id
        )
+       values ($1::uuid, $2::uuid, $3::uuid)`,
+      [productCreator.profileId, productsCreatePermission.id, admin.profileId],
+    );
+    await database.query(
+      `insert into public.user_permissions (
+         user_id,
+         permission_definition_id,
+         granted_by_user_id
+       )
        values
          ($1::uuid, $5::uuid, $4::uuid),
          ($2::uuid, $6::uuid, $4::uuid),
@@ -868,7 +889,11 @@ export async function createSecurityFixtureHarness(
       [
         inactiveBrandManager.profileId,
         admin.profileId,
-        [inventoryViewPermission.id, brandsManagePermission.id],
+        [
+          inventoryViewPermission.id,
+          brandsManagePermission.id,
+          productsCreatePermission.id,
+        ],
       ],
     );
     await database.query(
@@ -883,6 +908,7 @@ export async function createSecurityFixtureHarness(
         admin.profileId,
         brandManager.profileId,
         inactiveBrandManager.profileId,
+        productCreator.profileId,
         supplierViewer.profileId,
         supplierCreator.profileId,
         supplierEditor.profileId,
@@ -901,6 +927,7 @@ export async function createSecurityFixtureHarness(
         brandManager,
         inactiveBrandManager,
         permitted,
+        productCreator,
         supplierArchiver,
         supplierCreator,
         supplierEditor,

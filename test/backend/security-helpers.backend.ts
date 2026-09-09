@@ -189,6 +189,20 @@ interface ProductRow {
   updated_by_user_id: string;
 }
 
+interface ProductAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown> | null;
+  before_data: Record<string, unknown> | null;
+  entity_id: string;
+  entity_type: string;
+}
+
+interface CreatedProductRow {
+  product_id: string;
+  serial_number: string;
+}
+
 function createTestSerialNumber(): string {
   const randomValue = Number.parseInt(
     randomUUID().replace(/-/g, "").slice(0, 12),
@@ -4808,7 +4822,7 @@ describe("Supabase security helpers", () => {
     });
   });
 
-  it("denies direct Product writes and exposes no Product mutation RPCs", async () => {
+  it("denies direct Product writes and exposes no Product edit or lifecycle RPCs", async () => {
     const fixture = requireHarness();
     const client = fixture.actors.brandManager.client;
     const productId = randomUUID();
@@ -4872,7 +4886,6 @@ describe("Supabase security helpers", () => {
          where namespace.nspname = 'public'
            and routine.proname in (
              'archive_product',
-             'create_product',
              'delete_product',
              'reactivate_product',
              'restore_product',
@@ -5135,6 +5148,316 @@ describe("Supabase security helpers", () => {
           authenticated_usage: false,
         },
       ]);
+    });
+  });
+
+  it("lets an active Admin create a normalized Component with an active Brand and one audit", async () => {
+    const fixture = requireHarness();
+    const productName = `Created Product ${randomUUID()}`;
+    const category = `Category ${randomUUID()}`;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const brandId = randomUUID();
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, $3::uuid, $3::uuid)`,
+        [
+          brandId,
+          `Product creation Brand ${randomUUID()}`,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const created = await database.query<CreatedProductRow>(
+        `select *
+         from public.create_product($1::text, $2::text, $3::uuid)`,
+        [`  ${productName}  `, `  ${category}  `, brandId],
+      );
+      await database.query("reset role");
+      const result = created.rows[0];
+
+      if (!result) {
+        throw new Error("Trusted Product creation returned no result");
+      }
+
+      const product = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [result.product_id],
+      );
+      const audit = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.created'`,
+        [result.product_id],
+      );
+
+      expect(result.serial_number).toMatch(/^[0-9]{7}$/);
+      expect(product.rows).toHaveLength(1);
+      expect(product.rows[0]).toMatchObject({
+        archived_at: null,
+        archived_by_user_id: null,
+        brand_id: brandId,
+        category,
+        created_by_user_id: fixture.actors.admin.profileId,
+        id: result.product_id,
+        is_active: true,
+        name: productName,
+        product_kind: "component",
+        serial_number: result.serial_number,
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(product.rows[0]?.created_at).toEqual(product.rows[0]?.updated_at);
+      expect(audit.rows).toEqual([
+        {
+          action_type: "product.created",
+          actor_user_id: fixture.actors.admin.profileId,
+          after_data: {
+            brand_id: brandId,
+            category,
+            is_active: true,
+            name: productName,
+            product_kind: "component",
+            serial_number: result.serial_number,
+          },
+          before_data: null,
+          entity_id: result.product_id,
+          entity_type: "product",
+        },
+      ]);
+    });
+  });
+
+  it("lets inventory.products.create allocate sequential NULL-Brand Components without reuse after rollback", async () => {
+    const fixture = requireHarness();
+    const actor = fixture.actors.productCreator;
+
+    const createRolledBackProduct = async (
+      name: string,
+    ): Promise<CreatedProductRow> => {
+      return fixture.withRollbackDatabaseTransaction(async (database) => {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const created = await database.query<CreatedProductRow>(
+          `select *
+           from public.create_product($1::text, $2::text, null)`,
+          [name, "Uncategorized Components"],
+        );
+        await database.query("reset role");
+        const result = created.rows[0];
+
+        if (!result) {
+          throw new Error("Delegated Product creation returned no result");
+        }
+
+        const product = await database.query<ProductRow>(
+          "select * from public.products where id = $1::uuid",
+          [result.product_id],
+        );
+        const audit = await database.query<ProductAuditRow>(
+          `select actor_user_id, action_type, entity_type, entity_id,
+                  before_data, after_data
+           from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type = 'product.created'`,
+          [result.product_id],
+        );
+
+        expect(product.rows[0]).toMatchObject({
+          brand_id: null,
+          created_by_user_id: actor.profileId,
+          id: result.product_id,
+          product_kind: "component",
+          serial_number: result.serial_number,
+          updated_by_user_id: actor.profileId,
+        });
+        expect(audit.rows).toHaveLength(1);
+        expect(audit.rows[0]).toMatchObject({
+          actor_user_id: actor.profileId,
+          entity_id: result.product_id,
+        });
+
+        return result;
+      });
+    };
+
+    const first = await createRolledBackProduct(
+      `Rolled Back Product ${randomUUID()}`,
+    );
+    const second = await createRolledBackProduct(
+      `Next Product ${randomUUID()}`,
+    );
+
+    expect(first.serial_number).toMatch(/^[0-9]{7}$/);
+    expect(second.serial_number).toMatch(/^[0-9]{7}$/);
+    expect(Number(second.serial_number)).toBe(Number(first.serial_number) + 1);
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const products = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.products
+         where id = any($1::uuid[])`,
+        [[first.product_id, second.product_id]],
+      );
+      const audits = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = any($1::uuid[])
+           and action_type = 'product.created'`,
+        [[first.product_id, second.product_id]],
+      );
+
+      expect(products.rows).toEqual([{ count: 0 }]);
+      expect(audits.rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("fails Product creation closed for invalid data, unavailable Brands, and unauthorized actors", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactiveBrandManager.client,
+    ]) {
+      const { error } = await client.rpc("create_product", {
+        p_name: `Denied Product ${randomUUID()}`,
+        p_category: "Category",
+      });
+
+      expectPermissionDenied(error);
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const archivedBrandId = randomUUID();
+      const missingBrandId = randomUUID();
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values (
+           $1::uuid,
+           $2::text,
+           false,
+           $3::uuid,
+           $3::uuid,
+           pg_catalog.now(),
+           $3::uuid
+         )`,
+        [
+          archivedBrandId,
+          `Archived Product Brand ${randomUUID()}`,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      const productCountBefore = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.products",
+      );
+      const auditCountBefore = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'product.created'`,
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+
+      for (const [name, category, brandId, errorCode] of [
+        ["   ", "Category", null, "22023"],
+        [`Product ${randomUUID()}`, "   ", null, "22023"],
+        [`Product ${randomUUID()}`, "Category", missingBrandId, "PRD04"],
+        [`Product ${randomUUID()}`, "Category", archivedBrandId, "PRD04"],
+      ] as const) {
+        await database.query("savepoint invalid_product_creation");
+        await expect(
+          database.query(
+            `select *
+             from public.create_product($1::text, $2::text, $3::uuid)`,
+            [name, category, brandId],
+          ),
+        ).rejects.toMatchObject({ code: errorCode });
+        await database.query("rollback to savepoint invalid_product_creation");
+      }
+
+      await database.query("reset role");
+
+      const productCountAfter = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.products",
+      );
+      const auditCountAfter = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'product.created'`,
+      );
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        arguments: string;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'create_product'`,
+      );
+      const stockTable = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from information_schema.tables
+         where table_schema = 'public'
+           and table_name = 'inventory_balances'`,
+      );
+
+      expect(productCountAfter.rows).toEqual(productCountBefore.rows);
+      expect(auditCountAfter.rows).toEqual(auditCountBefore.rows);
+      expect(functionSecurity.rows).toEqual([
+        {
+          anonymous_execute: false,
+          arguments: "p_name text, p_category text, p_brand_id uuid DEFAULT NULL::uuid",
+          authenticated_execute: true,
+          is_security_definer: true,
+          result_type: "TABLE(product_id uuid, serial_number text)",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+      expect(stockTable.rows).toEqual([{ count: 0 }]);
     });
   });
 });
