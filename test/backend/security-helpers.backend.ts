@@ -4871,7 +4871,6 @@ describe("Supabase security helpers", () => {
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and routine.proname in (
-             'allocate_product_serial_number',
              'archive_product',
              'create_product',
              'delete_product',
@@ -4940,6 +4939,200 @@ describe("Supabase security helpers", () => {
           authenticated_execute: false,
           is_security_definer: false,
           settings: ["search_path=\"\""],
+        },
+      ]);
+    });
+  });
+
+  it("allocates sequential seven-digit Product Serials without rollback reuse", async () => {
+    const fixture = requireHarness();
+    const sequenceConfiguration = await fixture.withRollbackDatabaseTransaction(
+      async (database) => {
+        return database.query<{
+          cache_size: string;
+          cycles: boolean;
+          increment_by: string;
+          maximum_value: string;
+          minimum_value: string;
+          start_value: string;
+        }>(
+          `select
+             sequence_info.seqstart::text as start_value,
+             sequence_info.seqincrement::text as increment_by,
+             sequence_info.seqmin::text as minimum_value,
+             sequence_info.seqmax::text as maximum_value,
+             sequence_info.seqcache::text as cache_size,
+             sequence_info.seqcycle as cycles
+           from pg_catalog.pg_sequence as sequence_info
+           join pg_catalog.pg_class as sequence_object
+             on sequence_object.oid = sequence_info.seqrelid
+           join pg_catalog.pg_namespace as namespace
+             on namespace.oid = sequence_object.relnamespace
+           where namespace.nspname = 'public'
+             and sequence_object.relname = 'product_serial_number_seq'`,
+        );
+      },
+    );
+
+    expect(sequenceConfiguration.rows).toEqual([
+      {
+        cache_size: "1",
+        cycles: false,
+        increment_by: "1",
+        maximum_value: "9999999",
+        minimum_value: "1",
+        start_value: "1",
+      },
+    ]);
+
+    const rolledBackAllocations = await fixture.withRollbackDatabaseTransaction(
+      async (database) => {
+        return database.query<{ serial_number: string }>(
+          `select public.allocate_product_serial_number() as serial_number
+           from pg_catalog.generate_series(1, 2)`,
+        );
+      },
+    );
+    const firstValue = rolledBackAllocations.rows[0]?.serial_number;
+    const secondValue = rolledBackAllocations.rows[1]?.serial_number;
+
+    expect(firstValue).toMatch(/^[0-9]{7}$/);
+    expect(secondValue).toMatch(/^[0-9]{7}$/);
+    expect(Number(secondValue)).toBe(Number(firstValue) + 1);
+
+    const afterRollback = await fixture.withRollbackDatabaseTransaction(
+      async (database) => {
+        return database.query<{ serial_number: string }>(
+          "select public.allocate_product_serial_number() as serial_number",
+        );
+      },
+    );
+    const afterRollbackValue = afterRollback.rows[0]?.serial_number;
+
+    expect(afterRollbackValue).toMatch(/^[0-9]{7}$/);
+    expect(Number(afterRollbackValue)).toBe(Number(secondValue) + 1);
+  });
+
+  it("allocates unique Product Serials safely across concurrent connections", async () => {
+    const allocations = await requireHarness().withDatabaseClients(
+      4,
+      async (clients) => {
+        return Promise.all(
+          clients.map(async (database) => {
+            const result = await database.query<{ serial_number: string }>(
+              "select public.allocate_product_serial_number() as serial_number",
+            );
+
+            return result.rows[0]?.serial_number;
+          }),
+        );
+      },
+    );
+
+    expect(allocations.every((value) => /^[0-9]{7}$/.test(value ?? "")))
+      .toBe(true);
+    expect(new Set(allocations).size).toBe(allocations.length);
+  });
+
+  it("keeps the Product Serial allocator internal and sequence state protected", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.admin.client,
+      fixture.actors.brandManager.client,
+    ]) {
+      const { error } = await client.rpc("allocate_product_serial_number");
+
+      expectPermissionDenied(error);
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const allocator = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           pg_catalog.has_function_privilege(
+             'authenticated',
+             routine.oid,
+             'execute'
+           ) as authenticated_execute,
+           pg_catalog.has_function_privilege(
+             'anon',
+             routine.oid,
+             'execute'
+           ) as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'allocate_product_serial_number'`,
+      );
+      const sequencePrivileges = await database.query<{
+        anonymous_select: boolean;
+        anonymous_update: boolean;
+        anonymous_usage: boolean;
+        authenticated_select: boolean;
+        authenticated_update: boolean;
+        authenticated_usage: boolean;
+      }>(
+        `select
+           pg_catalog.has_sequence_privilege(
+             'authenticated',
+             'public.product_serial_number_seq',
+             'select'
+           ) as authenticated_select,
+           pg_catalog.has_sequence_privilege(
+             'authenticated',
+             'public.product_serial_number_seq',
+             'update'
+           ) as authenticated_update,
+           pg_catalog.has_sequence_privilege(
+             'authenticated',
+             'public.product_serial_number_seq',
+             'usage'
+           ) as authenticated_usage,
+           pg_catalog.has_sequence_privilege(
+             'anon',
+             'public.product_serial_number_seq',
+             'select'
+           ) as anonymous_select,
+           pg_catalog.has_sequence_privilege(
+             'anon',
+             'public.product_serial_number_seq',
+             'update'
+           ) as anonymous_update,
+           pg_catalog.has_sequence_privilege(
+             'anon',
+             'public.product_serial_number_seq',
+             'usage'
+           ) as anonymous_usage`,
+      );
+
+      expect(allocator.rows).toEqual([
+        {
+          anonymous_execute: false,
+          authenticated_execute: false,
+          is_security_definer: true,
+          result_type: "text",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+      expect(sequencePrivileges.rows).toEqual([
+        {
+          anonymous_select: false,
+          anonymous_update: false,
+          anonymous_usage: false,
+          authenticated_select: false,
+          authenticated_update: false,
+          authenticated_usage: false,
         },
       ]);
     });
