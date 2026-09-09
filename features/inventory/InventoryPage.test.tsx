@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
   useProductCreation: vi.fn(),
+  useProducts: vi.fn(),
   refetch: vi.fn(),
+  productRefetch: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   archive: vi.fn(),
@@ -17,9 +19,13 @@ vi.mock("./hooks/useBrandManagement", () => ({
 vi.mock("./hooks/useProductCreation", () => ({
   useProductCreation: inventoryMocks.useProductCreation,
 }));
+vi.mock("./hooks/useProducts", () => ({
+  useProducts: inventoryMocks.useProducts,
+}));
 
 import InventoryPage from "./InventoryPage";
 import type { Brand } from "./services/brandService";
+import type { Product, ProductListResult } from "./services/productService";
 
 const activeBrand: Brand = {
   id: "brand-active",
@@ -39,12 +45,37 @@ const archivedBrand: Brand = {
   archivedAt: "2026-08-02T00:00:00.000Z",
 };
 
+const activeProduct: Product = {
+  id: "product-active",
+  serialNumber: "0000001",
+  name: "Resistor",
+  category: "Passive",
+  brandId: null,
+  brandName: null,
+  productKind: "component",
+  isActive: true,
+};
+
+const archivedProduct: Product = {
+  id: "product-archived",
+  serialNumber: "0000002",
+  name: "Legacy Controller",
+  category: "Control",
+  brandId: "brand-archived",
+  brandName: "Bosch",
+  productKind: "pcb_finished_good",
+  isActive: false,
+};
+
 function setHookState(options: {
   canManage?: boolean;
   canCreate?: boolean;
   isPending?: boolean;
   isError?: boolean;
   data?: { ok: true; value: Brand[] } | { ok: false; error: { code: string; message: string } };
+  productsPending?: boolean;
+  productsError?: boolean;
+  productsData?: ProductListResult;
 } = {}) {
   inventoryMocks.useBrandManagement.mockReturnValue({
     canManage: options.canManage ?? true,
@@ -61,6 +92,12 @@ function setHookState(options: {
   inventoryMocks.useProductCreation.mockReturnValue({
     canCreate: options.canCreate ?? true,
     create: inventoryMocks.createProduct,
+  });
+  inventoryMocks.useProducts.mockReturnValue({
+    isPending: options.productsPending ?? false,
+    isError: options.productsError ?? false,
+    data: options.productsData ?? { ok: true, value: [] },
+    refetch: inventoryMocks.productRefetch,
   });
 }
 
@@ -123,6 +160,58 @@ describe("InventoryPage", () => {
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
   });
 
+  it("renders Product loading, safe error with retry, and empty states", () => {
+    setHookState({ productsPending: true });
+    const rendered = render(<InventoryPage />);
+    expect(screen.getByText("Loading Products...")).toBeInTheDocument();
+
+    setHookState({
+      productsData: {
+        ok: false,
+        error: {
+          code: "product_list_failed",
+          message: "The Product list could not be loaded.",
+        },
+      },
+    });
+    rendered.rerender(<InventoryPage />);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The Product list could not be loaded.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(inventoryMocks.productRefetch).toHaveBeenCalledOnce();
+
+    setHookState({ productsData: { ok: true, value: [] }, canCreate: false });
+    rendered.rerender(<InventoryPage />);
+    expect(screen.getByRole("heading", { name: "No Products found" }))
+      .toBeInTheDocument();
+  });
+
+  it("shows Products before Brands, including nullable and archived Brand history", () => {
+    setHookState({
+      productsData: { ok: true, value: [activeProduct, archivedProduct] },
+    });
+    render(<InventoryPage />);
+
+    const productsHeading = screen.getByRole("heading", { name: "Products" });
+    const brandsHeading = screen.getByRole("heading", { name: "Brands" });
+    expect(
+      productsHeading.compareDocumentPosition(brandsHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const activeRow = screen.getByRole("row", {
+      name: /0000001 Resistor Passive — Active/,
+    });
+    const archivedRow = screen.getByRole("row", {
+      name: /0000002 Legacy Controller Control Bosch Archived/,
+    });
+    expect(within(activeRow).getByText("—")).toBeInTheDocument();
+    expect(within(archivedRow).getByText("Bosch")).toBeInTheDocument();
+    expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
+    expect(screen.queryByText("Quantity")).not.toBeInTheDocument();
+  });
+
   it("hides every management action for an Inventory view-only user", () => {
     setHookState({ canManage: false, canCreate: false });
     render(<InventoryPage />);
@@ -139,7 +228,12 @@ describe("InventoryPage", () => {
   it("creates a Component with an active optional Brand and shows its generated Serial", async () => {
     render(<InventoryPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Add Component" }));
+    const pageHeader = screen.getByRole("heading", { name: "Inventory" })
+      .closest("header");
+    if (!pageHeader) throw new Error("Inventory PageHeader was not rendered.");
+    fireEvent.click(
+      within(pageHeader).getByRole("button", { name: "Add Component" }),
+    );
     const dialog = screen.getByRole("dialog", { name: "Add Component" });
     const brandSelect = within(dialog).getByLabelText(/Brand/);
 

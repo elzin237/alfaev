@@ -8,14 +8,17 @@ import PageHeader from "../../shared/components/PageHeader";
 import AddComponentDialog from "./components/AddComponentDialog";
 import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
+import ProductList from "./components/ProductList";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useProductCreation } from "./hooks/useProductCreation";
+import { useProducts } from "./hooks/useProducts";
 import type { Brand } from "./services/brandService";
 
 function InventoryPage() {
   const { brandsQuery, canManage, create: createBrand, update, archive } =
     useBrandManagement();
   const { canCreate, create: createProduct } = useProductCreation();
+  const productsQuery = useProducts();
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
@@ -40,6 +43,11 @@ function InventoryPage() {
     setFormMode("edit");
   }
 
+  function openComponentDialog() {
+    setProductSuccessMessage(null);
+    setIsComponentDialogOpen(true);
+  }
+
   async function confirmArchive() {
     if (!archiveTarget || archiveLockRef.current) return;
 
@@ -62,12 +70,42 @@ function InventoryPage() {
     }
   }
 
-  let content: ReactNode;
+  let productContent: ReactNode;
+
+  if (productsQuery.isPending) {
+    productContent = <LoadingState message="Loading Products..." />;
+  } else if (productsQuery.isError || !productsQuery.data?.ok) {
+    productContent = (
+      <ErrorState
+        title="Unable to load Products"
+        message={
+          productsQuery.data?.ok === false
+            ? productsQuery.data.error.message
+            : "The Product list could not be loaded."
+        }
+        onRetry={() => void productsQuery.refetch()}
+      />
+    );
+  } else if (productsQuery.data.value.length === 0) {
+    productContent = (
+      <EmptyState
+        title="No Products found"
+        description="There are no Inventory Products to display."
+        action={canCreate
+          ? { label: "Add Component", onClick: openComponentDialog }
+          : undefined}
+      />
+    );
+  } else {
+    productContent = <ProductList products={productsQuery.data.value} />;
+  }
+
+  let brandContent: ReactNode;
 
   if (brandsQuery.isPending) {
-    content = <LoadingState message="Loading Brands..." />;
+    brandContent = <LoadingState message="Loading Brands..." />;
   } else if (brandsQuery.isError || !brandsQuery.data?.ok) {
-    content = (
+    brandContent = (
       <ErrorState
         title="Unable to load Brands"
         message={
@@ -79,7 +117,7 @@ function InventoryPage() {
       />
     );
   } else if (brandsQuery.data.value.length === 0) {
-    content = (
+    brandContent = (
       <EmptyState
         title="No Brands found"
         description="There are no Inventory Brands to display."
@@ -87,7 +125,7 @@ function InventoryPage() {
       />
     );
   } else {
-    content = (
+    brandContent = (
       <BrandList
         brands={brandsQuery.data.value}
         canManage={canManage}
@@ -109,10 +147,7 @@ function InventoryPage() {
         actions={canCreate ? (
           <button
             type="button"
-            onClick={() => {
-              setProductSuccessMessage(null);
-              setIsComponentDialogOpen(true);
-            }}
+            onClick={openComponentDialog}
             className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
           >
             Add Component
@@ -125,6 +160,19 @@ function InventoryPage() {
           {productSuccessMessage}
         </p>
       )}
+
+      <section className="space-y-5" aria-labelledby="products-heading">
+        <div>
+          <h2 id="products-heading" className="text-2xl font-bold text-zinc-900">
+            Products
+          </h2>
+          <p className="mt-1 text-sm leading-6 text-zinc-500">
+            Active and archived Inventory Products.
+          </p>
+        </div>
+
+        {productContent}
+      </section>
 
       <section className="space-y-5" aria-labelledby="brands-heading">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -157,7 +205,7 @@ function InventoryPage() {
             {actionError}
           </p>
         )}
-        {content}
+        {brandContent}
       </section>
 
       <BrandFormDialog

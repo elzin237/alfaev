@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,10 @@ beforeEach(() => {
     isAdmin: false,
   });
   hookMocks.hasPermission.mockResolvedValue({ ok: true, value: false });
+  hookMocks.createProduct.mockResolvedValue({
+    ok: true,
+    value: { productId: "product-1", serialNumber: "0000001" },
+  });
 });
 
 afterEach(() => {
@@ -101,5 +105,42 @@ describe("useProductCreation", () => {
 
     await waitFor(() => expect(hookMocks.hasPermission).toHaveBeenCalled());
     expect(failed.result.current.canCreate).toBe(false);
+  });
+
+  it("invalidates only the current profile Product list after successful creation", async () => {
+    const { result, queryClient } = renderProductCreationHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await act(async () => {
+      await result.current.create({
+        name: "Resistor",
+        category: "Passive",
+        brandId: null,
+      });
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["inventory", "products", "profile-1"],
+      exact: true,
+    });
+  });
+
+  it("does not invalidate the Product list after failed creation", async () => {
+    hookMocks.createProduct.mockResolvedValue({
+      ok: false,
+      error: { code: "product_creation_failed", message: "safe failure" },
+    });
+    const { result, queryClient } = renderProductCreationHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await act(async () => {
+      await result.current.create({
+        name: "Resistor",
+        category: "Passive",
+        brandId: null,
+      });
+    });
+
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });
