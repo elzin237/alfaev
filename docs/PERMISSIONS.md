@@ -128,7 +128,7 @@ Product reads require Admin access or View Inventory (`inventory.view`).
 
 Product creation and editing use the existing Add Products/Components (`inventory.products.create`) and Edit Product/Component Data (`inventory.products.edit`) permissions respectively. Trusted backend/database operations remain authoritative; direct client Product mutation is not permitted.
 
-Archiving a Product is part of the trusted Product lifecycle workflow and does not imply hard deletion or reactivation/unarchive authority.
+Product archive/deactivate requires an active Admin or Edit Product/Component Data (`inventory.products.edit`). Add Products/Components (`inventory.products.create`) does not authorize archive, View Inventory (`inventory.view`) remains read-only, and no separate `inventory.products.archive` permission is added. Archive remains a trusted backend lifecycle mutation and does not authorize hard deletion or reactivation/unarchive.
 
 ### PCB Cards
 

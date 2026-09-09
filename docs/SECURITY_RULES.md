@@ -132,6 +132,8 @@ Product authorization:
 - Product reads require Admin access or `inventory.view`
 - direct client Product `INSERT`, `UPDATE`, and `DELETE` are denied
 - trusted Product create/edit operations must re-check authorization and allow only active Brands for new Product references or Brand changes
+- Product archive/deactivate requires an active Admin or `inventory.products.edit`; `inventory.products.create` does not authorize archive and `inventory.view` remains read-only
+- Product archive/deactivate remains a trusted backend lifecycle mutation; do not add a separate `inventory.products.archive` permission
 - historical Products may continue to reference archived Brands
 - archived Products remain readable for authorized historical access but are immutable through normal Product editing
 - no normal hard-delete or reactivation/unarchive workflow is supported

@@ -995,7 +995,13 @@ Goal:
 - UI confirmation
 - audit
 
-This is the only normal Product removal workflow. Do not hard-delete Products or add reactivation/unarchive.
+Authorization:
+- active Admin OR `inventory.products.edit`
+- `inventory.products.create` does not authorize archive
+- `inventory.view` remains read-only
+- do not add a new `inventory.products.archive` permission
+
+Archive/deactivate must remain a trusted backend lifecycle mutation. This is the only normal Product removal workflow. Do not hard-delete Products or add restore/reactivation/unarchive.
 
 ---
 

@@ -176,6 +176,7 @@ The badge counts rows/requests, not piece quantities.
 - The only Product kinds are `component` and `pcb_finished_good`.
 - Product kind is immutable after creation.
 - Normal Inventory Add Product creates a `component`; `pcb_finished_good` is reserved for later trusted PCB workflows and is not a normal user-selectable Product kind.
+- Product archive/deactivate is a trusted backend lifecycle mutation authorized only for an active Admin or a user with `inventory.products.edit`; `inventory.products.create` does not authorize archive, `inventory.view` remains read-only, and no separate `inventory.products.archive` permission is added.
 - AlfaEV does not hard-delete Products through normal application workflows.
 - Archived Products remain readable for historical records and are immutable through normal Product editing.
 - Product reactivation/unarchive is not supported in the current scope.
