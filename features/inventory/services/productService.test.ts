@@ -5,6 +5,8 @@ const productServiceMocks = vi.hoisted(() => ({
   from: vi.fn(),
   select: vi.fn(),
   order: vi.fn(),
+  eq: vi.fn(),
+  maybeSingle: vi.fn(),
 }));
 
 vi.mock("../../../lib/supabase/client", () => ({
@@ -14,7 +16,12 @@ vi.mock("../../../lib/supabase/client", () => ({
   },
 }));
 
-import { createProduct, listProducts } from "./productService";
+import {
+  createProduct,
+  getProduct,
+  listProducts,
+  updateProduct,
+} from "./productService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -191,5 +198,140 @@ describe("productService", () => {
     });
     expect(failed).toEqual(malformed);
     expect(JSON.stringify(failed)).not.toContain("raw database details");
+  });
+
+  it("reads and strictly maps one Product detail with lifecycle dates and Brand state", async () => {
+    productServiceMocks.select.mockReturnValue({ eq: productServiceMocks.eq });
+    productServiceMocks.eq.mockReturnValue({
+      maybeSingle: productServiceMocks.maybeSingle,
+    });
+    productServiceMocks.maybeSingle.mockResolvedValue({
+      data: {
+        id: "product-1",
+        serial_number: "0000001",
+        name: "Controller",
+        category: "Control",
+        brand_id: "brand-1",
+        brand: { name: "Legacy Brand", is_active: false },
+        product_kind: "component",
+        is_active: true,
+        created_at: "2026-09-01T10:00:00.000Z",
+        updated_at: "2026-09-02T11:00:00.000Z",
+        archived_at: null,
+      },
+      error: null,
+    });
+
+    await expect(getProduct("product-1")).resolves.toEqual({
+      ok: true,
+      value: {
+        id: "product-1",
+        serialNumber: "0000001",
+        name: "Controller",
+        category: "Control",
+        brandId: "brand-1",
+        brandName: "Legacy Brand",
+        brandIsActive: false,
+        productKind: "component",
+        isActive: true,
+        createdAt: "2026-09-01T10:00:00.000Z",
+        updatedAt: "2026-09-02T11:00:00.000Z",
+        archivedAt: null,
+      },
+    });
+    expect(productServiceMocks.select).toHaveBeenCalledWith(
+      "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)",
+    );
+    expect(productServiceMocks.eq).toHaveBeenCalledWith("id", "product-1");
+    expect(productServiceMocks.maybeSingle).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes missing Product details from safe read failures", async () => {
+    productServiceMocks.select.mockReturnValue({ eq: productServiceMocks.eq });
+    productServiceMocks.eq.mockReturnValue({
+      maybeSingle: productServiceMocks.maybeSingle,
+    });
+    productServiceMocks.maybeSingle
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({
+        data: null,
+        error: { code: "XX000", message: "raw provider details" },
+      })
+      .mockResolvedValueOnce({
+        data: { id: "product-1", name: "Malformed" },
+        error: null,
+      });
+
+    await expect(getProduct("missing")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_not_found",
+        message: "The Product could not be found.",
+      },
+    });
+    await expect(getProduct("product-1")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_detail_failed",
+        message: "The Product details could not be loaded.",
+      },
+    });
+    await expect(getProduct("product-1")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_detail_failed",
+        message: "The Product details could not be loaded.",
+      },
+    });
+  });
+
+  it("updates only through the trusted RPC with normalized master data", async () => {
+    productServiceMocks.rpc.mockResolvedValue({ data: "product-1", error: null });
+
+    await expect(updateProduct("product-1", {
+      name: "  Controller  ",
+      category: "  Control  ",
+      brandId: " brand-1 ",
+    })).resolves.toEqual({
+      ok: true,
+      value: { productId: "product-1" },
+    });
+
+    expect(productServiceMocks.rpc).toHaveBeenCalledWith("update_product", {
+      p_product_id: "product-1",
+      p_name: "Controller",
+      p_category: "Control",
+      p_brand_id: "brand-1",
+    });
+    expect(productServiceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty(
+      "serial_number",
+    );
+    expect(productServiceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty(
+      "product_kind",
+    );
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to edit Products."],
+    ["PRD01", "product_archived", "Archived Products cannot be edited."],
+    ["PRD04", "brand_unavailable", "The selected Brand is unavailable. Choose an active Brand or no Brand."],
+    ["22023", "product_invalid", "Enter valid Product information."],
+    ["P0002", "product_not_found", "The Product could not be found."],
+    ["XX000", "product_update_failed", "The Product could not be updated. Please try again."],
+  ] as const)("maps %s update failures without raw details", async (
+    backendCode,
+    code,
+    message,
+  ) => {
+    productServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw SQL details" },
+    });
+
+    await expect(updateProduct("product-1", {
+      name: "Controller",
+      category: "Control",
+      brandId: null,
+    })).resolves.toEqual({ ok: false, error: { code, message } });
   });
 });

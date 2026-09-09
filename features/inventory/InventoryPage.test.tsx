@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
@@ -101,6 +102,14 @@ function setHookState(options: {
   });
 }
 
+function renderInventory() {
+  return render(
+    <MemoryRouter>
+      <InventoryPage />
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   inventoryMocks.create.mockResolvedValue({
     ok: true,
@@ -129,7 +138,7 @@ afterEach(() => {
 describe("InventoryPage", () => {
   it("renders loading, safe error with retry, and empty states", () => {
     setHookState({ isPending: true });
-    const rendered = render(<InventoryPage />);
+    const rendered = renderInventory();
     expect(screen.getByRole("status")).toHaveTextContent("Loading Brands...");
 
     setHookState({
@@ -138,19 +147,19 @@ describe("InventoryPage", () => {
         error: { code: "brand_list_failed", message: "The Brand list could not be loaded." },
       },
     });
-    rendered.rerender(<InventoryPage />);
+    rendered.rerender(<MemoryRouter><InventoryPage /></MemoryRouter>);
     expect(screen.getByRole("alert")).toHaveTextContent("The Brand list could not be loaded.");
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(inventoryMocks.refetch).toHaveBeenCalledOnce();
 
     setHookState({ data: { ok: true, value: [] }, canManage: false });
-    rendered.rerender(<InventoryPage />);
+    rendered.rerender(<MemoryRouter><InventoryPage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "No Brands found" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Brand" })).not.toBeInTheDocument();
   });
 
   it("shows real active and archived rows in deterministic service order", () => {
-    render(<InventoryPage />);
+    renderInventory();
     const rows = screen.getAllByRole("row");
     const activeRow = screen.getByRole("row", { name: /ABB Active/ });
     const archivedRow = screen.getByRole("row", { name: /Bosch Archived/ });
@@ -162,7 +171,7 @@ describe("InventoryPage", () => {
 
   it("renders Product loading, safe error with retry, and empty states", () => {
     setHookState({ productsPending: true });
-    const rendered = render(<InventoryPage />);
+    const rendered = renderInventory();
     expect(screen.getByText("Loading Products...")).toBeInTheDocument();
 
     setHookState({
@@ -174,7 +183,7 @@ describe("InventoryPage", () => {
         },
       },
     });
-    rendered.rerender(<InventoryPage />);
+    rendered.rerender(<MemoryRouter><InventoryPage /></MemoryRouter>);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The Product list could not be loaded.",
     );
@@ -182,7 +191,7 @@ describe("InventoryPage", () => {
     expect(inventoryMocks.productRefetch).toHaveBeenCalledOnce();
 
     setHookState({ productsData: { ok: true, value: [] }, canCreate: false });
-    rendered.rerender(<InventoryPage />);
+    rendered.rerender(<MemoryRouter><InventoryPage /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "No Products found" }))
       .toBeInTheDocument();
   });
@@ -191,7 +200,7 @@ describe("InventoryPage", () => {
     setHookState({
       productsData: { ok: true, value: [activeProduct, archivedProduct] },
     });
-    render(<InventoryPage />);
+    renderInventory();
 
     const productsHeading = screen.getByRole("heading", { name: "Products" });
     const brandsHeading = screen.getByRole("heading", { name: "Brands" });
@@ -214,7 +223,7 @@ describe("InventoryPage", () => {
 
   it("hides every management action for an Inventory view-only user", () => {
     setHookState({ canManage: false, canCreate: false });
-    render(<InventoryPage />);
+    renderInventory();
 
     expect(screen.getByText("ABB")).toBeInTheDocument();
     expect(screen.getByText("Bosch")).toBeInTheDocument();
@@ -226,7 +235,7 @@ describe("InventoryPage", () => {
   });
 
   it("creates a Component with an active optional Brand and shows its generated Serial", async () => {
-    render(<InventoryPage />);
+    renderInventory();
 
     const pageHeader = screen.getByRole("heading", { name: "Inventory" })
       .closest("header");
@@ -266,7 +275,7 @@ describe("InventoryPage", () => {
   });
 
   it("shows Add/Edit/Archive to managers, but no archived or destructive actions", () => {
-    render(<InventoryPage />);
+    renderInventory();
 
     expect(screen.getByRole("button", { name: "Add Brand" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(1);
@@ -275,7 +284,7 @@ describe("InventoryPage", () => {
   });
 
   it("adds and edits through focused dialogs with success feedback", async () => {
-    render(<InventoryPage />);
+    renderInventory();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Brand" }));
     fireEvent.change(screen.getByLabelText("Brand Name"), {
@@ -301,7 +310,7 @@ describe("InventoryPage", () => {
   });
 
   it("requires archive confirmation and describes all locked consequences", async () => {
-    render(<InventoryPage />);
+    renderInventory();
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     expect(inventoryMocks.archive).not.toHaveBeenCalled();

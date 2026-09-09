@@ -1,5 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { MemoryRouter } from "react-router";
 
 import type { Product } from "../services/productService";
 import ProductList from "./ProductList";
@@ -31,7 +32,7 @@ afterEach(cleanup);
 
 describe("ProductList", () => {
   it("renders Product fields, nullable Brands, archived Brand history, and status text", () => {
-    render(<ProductList products={products} />);
+    render(<MemoryRouter><ProductList products={products} /></MemoryRouter>);
 
     const activeRow = screen.getByRole("row", {
       name: /0000001 Resistor Passive — Active/,
@@ -46,11 +47,16 @@ describe("ProductList", () => {
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
   });
 
-  it("contains no quantity, edit, archive, or detail behavior", () => {
-    render(<ProductList products={products} />);
+  it("links Product names to detail without quantity or mutation actions", () => {
+    render(<MemoryRouter><ProductList products={products} /></MemoryRouter>);
 
     expect(screen.queryByText("Quantity")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Resistor" })).toHaveAttribute(
+      "href",
+      "/inventory/product-1",
+    );
+    expect(screen.getByRole("link", { name: "Legacy Controller" }))
+      .toHaveAttribute("href", "/inventory/product-2");
   });
 });

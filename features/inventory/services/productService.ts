@@ -13,6 +13,13 @@ export interface Product {
   isActive: boolean;
 }
 
+export interface ProductDetail extends Product {
+  brandIsActive: boolean | null;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+}
+
 export interface ProductListError {
   code: "product_list_failed";
   message: string;
@@ -21,6 +28,15 @@ export interface ProductListError {
 export type ProductListResult =
   | { ok: true; value: Product[] }
   | { ok: false; error: ProductListError };
+
+export interface ProductDetailError {
+  code: "product_not_found" | "product_detail_failed";
+  message: string;
+}
+
+export type ProductDetailResult =
+  | { ok: true; value: ProductDetail }
+  | { ok: false; error: ProductDetailError };
 
 export interface CreateProductInput {
   name: string;
@@ -46,6 +62,27 @@ export type ProductCreationResult =
   | { ok: true; value: CreatedProduct }
   | { ok: false; error: ProductCreationError };
 
+export interface UpdateProductInput {
+  name: string;
+  category: string;
+  brandId: string | null;
+}
+
+export interface ProductUpdateError {
+  code:
+    | "access_denied"
+    | "product_archived"
+    | "brand_unavailable"
+    | "product_invalid"
+    | "product_not_found"
+    | "product_update_failed";
+  message: string;
+}
+
+export type ProductUpdateResult =
+  | { ok: true; value: { productId: string } }
+  | { ok: false; error: ProductUpdateError };
+
 interface CreatedProductRow {
   product_id: string;
   serial_number: string;
@@ -60,6 +97,29 @@ interface ProductRow {
   brand: { name: string } | null;
   product_kind: ProductKind;
   is_active: boolean;
+}
+
+interface ProductDetailRow {
+  id: string;
+  serial_number: string;
+  name: string;
+  category: string;
+  brand_id: string | null;
+  brand: { name: string; is_active: boolean } | null;
+  product_kind: ProductKind;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+const productListFields =
+  "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name)";
+const productDetailFields =
+  "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)";
+
+function isDateTime(value: string): boolean {
+  return Number.isFinite(Date.parse(value));
 }
 
 function isProductKind(value: unknown): value is ProductKind {
@@ -110,6 +170,70 @@ function mapProduct(row: ProductRow): Product {
     brandName: row.brand?.name ?? null,
     productKind: row.product_kind,
     isActive: row.is_active,
+  };
+}
+
+function isProductDetailRow(value: unknown): value is ProductDetailRow {
+  if (typeof value !== "object" || value === null) return false;
+
+  const brandIsValid =
+    "brand" in value &&
+    (
+      value.brand === null ||
+      (
+        typeof value.brand === "object" &&
+        "name" in value.brand &&
+        typeof value.brand.name === "string" &&
+        "is_active" in value.brand &&
+        typeof value.brand.is_active === "boolean"
+      )
+    );
+
+  return (
+    "id" in value &&
+    typeof value.id === "string" &&
+    "serial_number" in value &&
+    typeof value.serial_number === "string" &&
+    /^[0-9]{7}$/.test(value.serial_number) &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "category" in value &&
+    typeof value.category === "string" &&
+    "brand_id" in value &&
+    (typeof value.brand_id === "string" || value.brand_id === null) &&
+    brandIsValid &&
+    "product_kind" in value &&
+    isProductKind(value.product_kind) &&
+    "is_active" in value &&
+    typeof value.is_active === "boolean" &&
+    "created_at" in value &&
+    typeof value.created_at === "string" &&
+    isDateTime(value.created_at) &&
+    "updated_at" in value &&
+    typeof value.updated_at === "string" &&
+    isDateTime(value.updated_at) &&
+    "archived_at" in value &&
+    (
+      value.archived_at === null ||
+      (typeof value.archived_at === "string" && isDateTime(value.archived_at))
+    )
+  );
+}
+
+function mapProductDetail(row: ProductDetailRow): ProductDetail {
+  return {
+    id: row.id,
+    serialNumber: row.serial_number,
+    name: row.name,
+    category: row.category,
+    brandId: row.brand_id,
+    brandName: row.brand?.name ?? null,
+    brandIsActive: row.brand?.is_active ?? null,
+    productKind: row.product_kind,
+    isActive: row.is_active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at,
   };
 }
 
@@ -173,6 +297,59 @@ function creationFailure(code?: string): ProductCreationResult {
   }
 }
 
+function updateFailure(code?: string): ProductUpdateResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to edit Products.",
+        },
+      };
+    case "PRD01":
+      return {
+        ok: false,
+        error: {
+          code: "product_archived",
+          message: "Archived Products cannot be edited.",
+        },
+      };
+    case "PRD04":
+      return {
+        ok: false,
+        error: {
+          code: "brand_unavailable",
+          message: "The selected Brand is unavailable. Choose an active Brand or no Brand.",
+        },
+      };
+    case "22023":
+      return {
+        ok: false,
+        error: {
+          code: "product_invalid",
+          message: "Enter valid Product information.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "product_not_found",
+          message: "The Product could not be found.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "product_update_failed",
+          message: "The Product could not be updated. Please try again.",
+        },
+      };
+  }
+}
+
 export async function createProduct(
   input: CreateProductInput,
 ): Promise<ProductCreationResult> {
@@ -211,9 +388,7 @@ export async function listProducts(): Promise<ProductListResult> {
   try {
     const { data, error } = await supabase
       .from("products")
-      .select(
-        "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name)",
-      )
+      .select(productListFields)
       .order("serial_number", { ascending: true });
 
     if (error || !Array.isArray(data)) {
@@ -233,5 +408,78 @@ export async function listProducts(): Promise<ProductListResult> {
     };
   } catch {
     return listFailure();
+  }
+}
+
+export async function getProduct(
+  productId: string,
+): Promise<ProductDetailResult> {
+  try {
+    const { data, error } = await supabase
+      .from("products")
+      .select(productDetailFields)
+      .eq("id", productId)
+      .maybeSingle();
+
+    if (error) {
+      return {
+        ok: false,
+        error: {
+          code: "product_detail_failed",
+          message: "The Product details could not be loaded.",
+        },
+      };
+    }
+
+    if (data === null) {
+      return {
+        ok: false,
+        error: {
+          code: "product_not_found",
+          message: "The Product could not be found.",
+        },
+      };
+    }
+
+    if (!isProductDetailRow(data)) {
+      return {
+        ok: false,
+        error: {
+          code: "product_detail_failed",
+          message: "The Product details could not be loaded.",
+        },
+      };
+    }
+
+    return { ok: true, value: mapProductDetail(data) };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "product_detail_failed",
+        message: "The Product details could not be loaded.",
+      },
+    };
+  }
+}
+
+export async function updateProduct(
+  productId: string,
+  input: UpdateProductInput,
+): Promise<ProductUpdateResult> {
+  try {
+    const { data, error } = await supabase.rpc("update_product", {
+      p_product_id: productId,
+      p_name: input.name.trim(),
+      p_category: input.category.trim(),
+      p_brand_id: input.brandId?.trim() || null,
+    });
+
+    if (error) return updateFailure(error.code);
+    if (typeof data !== "string" || data.length === 0) return updateFailure();
+
+    return { ok: true, value: { productId: data } };
+  } catch {
+    return updateFailure();
   }
 }

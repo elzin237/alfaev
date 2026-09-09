@@ -4822,7 +4822,7 @@ describe("Supabase security helpers", () => {
     });
   });
 
-  it("denies direct Product writes and exposes no Product edit or lifecycle RPCs", async () => {
+  it("denies direct Product writes and exposes no Product lifecycle RPCs", async () => {
     const fixture = requireHarness();
     const client = fixture.actors.brandManager.client;
     const productId = randomUUID();
@@ -4889,8 +4889,7 @@ describe("Supabase security helpers", () => {
              'delete_product',
              'reactivate_product',
              'restore_product',
-             'unarchive_product',
-             'update_product'
+             'unarchive_product'
            )`,
       );
       const lifecycleFunction = await database.query<{
@@ -5332,6 +5331,7 @@ describe("Supabase security helpers", () => {
     for (const client of [
       fixture.anonymousClient,
       fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
       fixture.actors.inactiveBrandManager.client,
     ]) {
       const { error } = await client.rpc("create_product", {
@@ -5459,5 +5459,391 @@ describe("Supabase security helpers", () => {
       ]);
       expect(stockTable.rows).toEqual([{ count: 0 }]);
     });
+  });
+
+  it("lets Admin update normalized Product master data with an active Brand and one audit", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const productId = randomUUID();
+      const activeBrandId = randomUUID();
+      const serialNumber = createTestSerialNumber();
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, $3::uuid, $3::uuid)`,
+        [
+          activeBrandId,
+          `Product edit Brand ${randomUUID()}`,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Old Name', 'Old Category', 'component', $3::uuid, $3::uuid)`,
+        [productId, serialNumber, fixture.actors.admin.profileId],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const updated = await database.query<{ product_id: string }>(
+        `select public.update_product(
+           $1::uuid,
+           $2::text,
+           $3::text,
+           $4::uuid
+         ) as product_id`,
+        [productId, "  Updated Name  ", "  Updated Category  ", activeBrandId],
+      );
+      await database.query("reset role");
+
+      const product = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const audit = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.updated'`,
+        [productId],
+      );
+
+      expect(updated.rows).toEqual([{ product_id: productId }]);
+      expect(product.rows[0]).toMatchObject({
+        brand_id: activeBrandId,
+        category: "Updated Category",
+        id: productId,
+        name: "Updated Name",
+        product_kind: "component",
+        serial_number: serialNumber,
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(audit.rows).toEqual([
+        {
+          action_type: "product.updated",
+          actor_user_id: fixture.actors.admin.profileId,
+          after_data: {
+            brand_id: activeBrandId,
+            category: "Updated Category",
+            is_active: true,
+            name: "Updated Name",
+            product_kind: "component",
+            serial_number: serialNumber,
+          },
+          before_data: {
+            brand_id: null,
+            category: "Old Category",
+            is_active: true,
+            name: "Old Name",
+            product_kind: "component",
+            serial_number: serialNumber,
+          },
+          entity_id: productId,
+          entity_type: "product",
+        },
+      ]);
+
+      const updatedAt = product.rows[0]?.updated_at;
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        `select public.update_product($1::uuid, $2::text, $3::text, $4::uuid)`,
+        [
+          productId,
+          "  Updated Name  ",
+          "  Updated Category  ",
+          activeBrandId,
+        ],
+      );
+      await database.query("reset role");
+      const afterNoop = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const auditAfterNoop = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.updated'`,
+        [productId],
+      );
+
+      expect(afterNoop.rows[0]?.updated_at).toEqual(updatedAt);
+      expect(auditAfterNoop.rows).toEqual([{ count: 1 }]);
+    });
+  });
+
+  it("lets inventory.products.edit preserve its current archived Brand, clear it, and assign an active Brand", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const productId = randomUUID();
+      const archivedBrandId = randomUUID();
+      const activeBrandId = randomUUID();
+      const serialNumber = createTestSerialNumber();
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values
+           ($1::uuid, $2::text, false, $4::uuid, $4::uuid, pg_catalog.now(), $4::uuid),
+           ($3::uuid, $5::text, true, $4::uuid, $4::uuid, null, null)`,
+        [
+          archivedBrandId,
+          `Current Archived Brand ${randomUUID()}`,
+          activeBrandId,
+          fixture.actors.admin.profileId,
+          `Active Replacement Brand ${randomUUID()}`,
+        ],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           brand_id,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Historical Brand Product', 'Category', $3::uuid, 'pcb_finished_good', $4::uuid, $4::uuid)`,
+        [
+          productId,
+          serialNumber,
+          archivedBrandId,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.productEditor.authUserId],
+      );
+      await database.query("set local role authenticated");
+
+      await database.query(
+        `select public.update_product($1::uuid, 'Renamed Product', 'Category', $2::uuid)`,
+        [productId, archivedBrandId],
+      );
+      await database.query(
+        `select public.update_product($1::uuid, 'Renamed Product', 'Category', null)`,
+        [productId],
+      );
+      await database.query(
+        `select public.update_product($1::uuid, 'Renamed Product', 'Category', $2::uuid)`,
+        [productId, activeBrandId],
+      );
+      await database.query("reset role");
+
+      const product = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const audits = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.updated'
+         order by created_at`,
+        [productId],
+      );
+
+      expect(product.rows[0]).toMatchObject({
+        brand_id: activeBrandId,
+        id: productId,
+        name: "Renamed Product",
+        product_kind: "pcb_finished_good",
+        serial_number: serialNumber,
+        updated_by_user_id: fixture.actors.productEditor.profileId,
+      });
+      expect(audits.rows).toHaveLength(3);
+      expect(audits.rows.every((row) =>
+        row.actor_user_id === fixture.actors.productEditor.profileId
+      )).toBe(true);
+    });
+  });
+
+  it("fails Product updates closed for unauthorized actors, invalid state/data, and unavailable new Brands", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+      fixture.actors.inactiveBrandManager.client,
+    ]) {
+      const { error } = await client.rpc("update_product", {
+        p_product_id: randomUUID(),
+        p_name: "Denied Product",
+        p_category: "Category",
+        p_brand_id: null,
+      });
+
+      expectPermissionDenied(error);
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const activeProductId = randomUUID();
+      const archivedProductId = randomUUID();
+      const archivedBrandId = randomUUID();
+      const missingBrandId = randomUUID();
+      const activeSerial = createTestSerialNumber();
+      let archivedSerial = createTestSerialNumber();
+      while (archivedSerial === activeSerial) archivedSerial = createTestSerialNumber();
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values ($1::uuid, $2::text, false, $3::uuid, $3::uuid, pg_catalog.now(), $3::uuid)`,
+        [
+          archivedBrandId,
+          `Unavailable Brand ${randomUUID()}`,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values
+           ($1::uuid, $2::text, 'Active Product', 'Category', 'component', true, $5::uuid, $5::uuid, null, null),
+           ($3::uuid, $4::text, 'Archived Product', 'Category', 'component', false, $5::uuid, $5::uuid, pg_catalog.now(), $5::uuid)`,
+        [
+          activeProductId,
+          activeSerial,
+          archivedProductId,
+          archivedSerial,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      const beforeProduct = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [activeProductId],
+      );
+      const auditBefore = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'product.updated'`,
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+
+      for (const [productId, name, category, brandId, errorCode] of [
+        [activeProductId, "   ", "Category", null, "22023"],
+        [activeProductId, "Active Product", "   ", null, "22023"],
+        [activeProductId, "Active Product", "Category", missingBrandId, "PRD04"],
+        [activeProductId, "Active Product", "Category", archivedBrandId, "PRD04"],
+        [archivedProductId, "Changed", "Category", null, "PRD01"],
+        [randomUUID(), "Missing", "Category", null, "P0002"],
+      ] as const) {
+        await database.query("savepoint invalid_product_update");
+        await expect(
+          database.query(
+            `select public.update_product($1::uuid, $2::text, $3::text, $4::uuid)`,
+            [productId, name, category, brandId],
+          ),
+        ).rejects.toMatchObject({ code: errorCode });
+        await database.query("rollback to savepoint invalid_product_update");
+      }
+
+      await database.query("reset role");
+      const afterProduct = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [activeProductId],
+      );
+      const auditAfter = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'product.updated'`,
+      );
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        arguments: string;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'update_product'`,
+      );
+
+      expect(afterProduct.rows).toEqual(beforeProduct.rows);
+      expect(auditAfter.rows).toEqual(auditBefore.rows);
+      expect(functionSecurity.rows).toEqual([
+        {
+          anonymous_execute: false,
+          arguments: "p_product_id uuid, p_name text, p_category text, p_brand_id uuid",
+          authenticated_execute: true,
+          is_security_definer: true,
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+    });
+
+    const directUpdate = await fixture.actors.productEditor.client
+      .from("products")
+      .update({ name: "Forbidden direct edit" })
+      .eq("id", randomUUID());
+    expectPermissionDenied(directUpdate.error);
   });
 });

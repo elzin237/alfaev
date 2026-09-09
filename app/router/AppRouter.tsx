@@ -12,6 +12,7 @@ import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import SuppliersPage from "../../features/suppliers/SuppliersPage";
 import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
 import InventoryPage from "../../features/inventory/InventoryPage";
+import ProductDetailPage from "../../features/inventory/ProductDetailPage";
 import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
@@ -41,6 +42,7 @@ function AppRouter() {
         </Route>
         <Route element={<PermissionRoute permission="inventory.view" />}>
           <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/inventory/:productId" element={<ProductDetailPage />} />
         </Route>
         <Route element={<PermissionRoute permission="pcb.view" />}>
           <Route path="/pcb" element={<PcbPage />} />

@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { Product } from "../services/productService";
 
@@ -32,7 +34,12 @@ function ProductList({ products }: ProductListProps) {
                   {product.serialNumber}
                 </th>
                 <td className="px-5 py-4 font-semibold text-zinc-900">
-                  {product.name}
+                  <Link
+                    to={`/inventory/${product.id}`}
+                    className="text-zinc-900 underline-offset-4 transition hover:text-red-600 hover:underline focus:outline-none focus:ring-2 focus:ring-red-200"
+                  >
+                    {product.name}
+                  </Link>
                 </td>
                 <td className="px-5 py-4">{product.category}</td>
                 <td className="px-5 py-4">{product.brandName ?? "—"}</td>
