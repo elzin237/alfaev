@@ -49,6 +49,7 @@ export interface SecurityFixtureHarness {
     brandManager: SecurityActor;
     inactiveBrandManager: SecurityActor;
     permitted: SecurityActor;
+    supplierArchiver: SecurityActor;
     supplierCreator: SecurityActor;
     supplierEditor: SecurityActor;
     supplierViewer: SecurityActor;
@@ -671,6 +672,7 @@ export async function createSecurityFixtureHarness(
         "suppliers.view",
         "suppliers.create",
         "suppliers.edit",
+        "suppliers.archive",
       ]],
     );
     const grantedPermission = permissionResult.rows.find(
@@ -694,6 +696,9 @@ export async function createSecurityFixtureHarness(
     const suppliersEditPermission = permissionResult.rows.find(
       (permission) => permission.key === "suppliers.edit",
     );
+    const suppliersArchivePermission = permissionResult.rows.find(
+      (permission) => permission.key === "suppliers.archive",
+    );
 
     if (
       !grantedPermission?.id ||
@@ -702,7 +707,8 @@ export async function createSecurityFixtureHarness(
       !brandsManagePermission?.id ||
       !suppliersViewPermission?.id ||
       !suppliersCreatePermission?.id ||
-      !suppliersEditPermission?.id
+      !suppliersEditPermission?.id ||
+      !suppliersArchivePermission?.id
     ) {
       throw new Error("Canonical fixture permissions are missing");
     }
@@ -761,6 +767,12 @@ export async function createSecurityFixtureHarness(
       isActive: true,
       createdByUserId: admin.profileId,
     });
+    const supplierArchiver = await createActor({
+      label: "supplier-archiver",
+      isAdmin: false,
+      isActive: true,
+      createdByUserId: admin.profileId,
+    });
     const inactiveSupplierManager = await createActor({
       label: "inactive-supplier-manager",
       isAdmin: false,
@@ -810,7 +822,8 @@ export async function createSecurityFixtureHarness(
        values
          ($1::uuid, $5::uuid, $4::uuid),
          ($2::uuid, $6::uuid, $4::uuid),
-         ($3::uuid, $7::uuid, $4::uuid)`,
+         ($3::uuid, $7::uuid, $4::uuid),
+         ($8::uuid, $9::uuid, $4::uuid)`,
       [
         supplierViewer.profileId,
         supplierCreator.profileId,
@@ -819,6 +832,8 @@ export async function createSecurityFixtureHarness(
         suppliersViewPermission.id,
         suppliersCreatePermission.id,
         suppliersEditPermission.id,
+        supplierArchiver.profileId,
+        suppliersArchivePermission.id,
       ],
     );
     await database.query(
@@ -837,6 +852,7 @@ export async function createSecurityFixtureHarness(
           suppliersViewPermission.id,
           suppliersCreatePermission.id,
           suppliersEditPermission.id,
+          suppliersArchivePermission.id,
         ],
       ],
     );
@@ -870,6 +886,7 @@ export async function createSecurityFixtureHarness(
         supplierViewer.profileId,
         supplierCreator.profileId,
         supplierEditor.profileId,
+        supplierArchiver.profileId,
         inactiveSupplierManager.profileId,
         permitted.profileId,
         unpermitted.profileId,
@@ -884,6 +901,7 @@ export async function createSecurityFixtureHarness(
         brandManager,
         inactiveBrandManager,
         permitted,
+        supplierArchiver,
         supplierCreator,
         supplierEditor,
         supplierViewer,

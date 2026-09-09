@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
+import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
@@ -23,9 +24,36 @@ function valueOrUnavailable(value: string | null): string {
 
 function SupplierDetailPage() {
   const { supplierId = "" } = useParams<{ supplierId: string }>();
-  const { supplierQuery, canEdit, update } = useSupplierDetail(supplierId);
+  const { supplierQuery, canEdit, canArchive, update, archive } =
+    useSupplierDetail(supplierId);
+  const archiveLockRef = useRef(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function confirmArchive() {
+    if (archiveLockRef.current) return;
+
+    archiveLockRef.current = true;
+    setIsArchiving(true);
+    setActionError(null);
+
+    try {
+      const result = await archive();
+      if (!result.ok) {
+        setActionError(result.error.message);
+        return;
+      }
+
+      setIsArchiveOpen(false);
+      setSuccessMessage("Supplier archived.");
+    } finally {
+      archiveLockRef.current = false;
+      setIsArchiving(false);
+    }
+  }
   let content: ReactNode;
 
   if (!supplierId) {
@@ -66,18 +94,34 @@ function SupplierDetailPage() {
                   {supplier.name}
                 </h2>
               </div>
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSuccessMessage(null);
-                    setIsEditOpen(true);
-                  }}
-                  className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
-                >
-                  Edit Supplier
-                </button>
-              )}
+              <div className="flex flex-wrap gap-3">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccessMessage(null);
+                      setActionError(null);
+                      setIsEditOpen(true);
+                    }}
+                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                  >
+                    Edit Supplier
+                  </button>
+                )}
+                {canArchive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccessMessage(null);
+                      setActionError(null);
+                      setIsArchiveOpen(true);
+                    }}
+                    className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                  >
+                    Archive Supplier
+                  </button>
+                )}
+              </div>
             </div>
 
             <dl className="mt-8 grid gap-6 sm:grid-cols-2">
@@ -144,6 +188,19 @@ function SupplierDetailPage() {
           onSubmit={update}
           onSucceeded={() => setSuccessMessage("Supplier updated.")}
         />
+
+        <ConfirmDialog
+          open={isArchiveOpen}
+          title="Archive Supplier"
+          description={`Archive ${supplier.name}? It will remain in historical records, cannot be used for new Supplier relationships or selections in future workflows, and reactivation is not currently supported.`}
+          confirmLabel="Archive Supplier"
+          confirmVariant="danger"
+          isSubmitting={isArchiving}
+          onCancel={() => {
+            if (!isArchiving) setIsArchiveOpen(false);
+          }}
+          onConfirm={() => void confirmArchive()}
+        />
       </>
     );
   }
@@ -166,6 +223,11 @@ function SupplierDetailPage() {
       {successMessage && (
         <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
           {successMessage}
+        </p>
+      )}
+      {actionError && (
+        <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+          {actionError}
         </p>
       )}
 

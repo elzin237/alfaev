@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 
 const detailPageMocks = vi.hoisted(() => ({
   useSupplierDetail: vi.fn(),
+  archive: vi.fn(),
   refetch: vi.fn(),
   update: vi.fn(),
 }));
@@ -30,6 +31,7 @@ const activeSupplier: Supplier = {
 
 function setHookState(options: {
   canEdit?: boolean;
+  canArchive?: boolean;
   isPending?: boolean;
   isError?: boolean;
   data?:
@@ -38,6 +40,7 @@ function setHookState(options: {
 } = {}) {
   detailPageMocks.useSupplierDetail.mockReturnValue({
     canEdit: options.canEdit ?? true,
+    canArchive: options.canArchive ?? true,
     supplierQuery: {
       isPending: options.isPending ?? false,
       isError: options.isError ?? false,
@@ -45,6 +48,7 @@ function setHookState(options: {
       refetch: detailPageMocks.refetch,
     },
     update: detailPageMocks.update,
+    archive: detailPageMocks.archive,
   });
 }
 
@@ -60,6 +64,10 @@ function renderDetail() {
 
 beforeEach(() => {
   detailPageMocks.update.mockResolvedValue({
+    ok: true,
+    value: { supplierId: "supplier-1" },
+  });
+  detailPageMocks.archive.mockResolvedValue({
     ok: true,
     value: { supplierId: "supplier-1" },
   });
@@ -135,6 +143,7 @@ describe("SupplierDetailPage", () => {
   it("keeps archived Suppliers readable and exposes no edit/archive/restore controls", () => {
     setHookState({
       canEdit: false,
+      canArchive: false,
       data: {
         ok: true,
         value: {
@@ -153,12 +162,14 @@ describe("SupplierDetailPage", () => {
     })).not.toBeInTheDocument();
   });
 
-  it("hides Edit for a view-only or failed edit-permission check", () => {
-    setHookState({ canEdit: false });
+  it("hides Edit and Archive for view-only or failed permission checks", () => {
+    setHookState({ canEdit: false, canArchive: false });
     renderDetail();
 
     expect(screen.getByText("Bosch")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Supplier" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Supplier" }))
       .not.toBeInTheDocument();
   });
 
@@ -225,13 +236,87 @@ describe("SupplierDetailPage", () => {
       .toBeInTheDocument();
   });
 
+  it("requires explicit archive confirmation and cancellation makes no request", () => {
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Archive Supplier" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Archive Supplier" });
+    expect(dialog).toHaveTextContent("remain in historical records");
+    expect(dialog).toHaveTextContent(
+      "cannot be used for new Supplier relationships or selections in future workflows",
+    );
+    expect(dialog).toHaveTextContent("reactivation is not currently supported");
+    expect(detailPageMocks.archive).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Archive Supplier" }))
+      .not.toBeInTheDocument();
+    expect(detailPageMocks.archive).not.toHaveBeenCalled();
+  });
+
+  it("blocks duplicate archive submission and shows success", async () => {
+    let resolveArchive:
+      | ((result: {
+          ok: true;
+          value: { supplierId: string };
+        }) => void)
+      | undefined;
+    const pendingArchive = new Promise<{
+      ok: true;
+      value: { supplierId: string };
+    }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    detailPageMocks.archive.mockReturnValue(pendingArchive);
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Archive Supplier" }));
+    const confirm = within(
+      screen.getByRole("dialog", { name: "Archive Supplier" }),
+    ).getByRole("button", { name: "Archive Supplier" });
+
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(detailPageMocks.archive).toHaveBeenCalledOnce());
+    expect(confirm).toBeDisabled();
+    resolveArchive?.({ ok: true, value: { supplierId: "supplier-1" } });
+    await pendingArchive;
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Supplier archived.",
+    );
+    expect(screen.queryByRole("dialog", { name: "Archive Supplier" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows a safe archive failure and keeps confirmation open", async () => {
+    detailPageMocks.archive.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "supplier_archive_failed",
+        message: "The Supplier could not be archived. Please try again.",
+      },
+    });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Archive Supplier" }));
+    fireEvent.click(within(
+      screen.getByRole("dialog", { name: "Archive Supplier" }),
+    ).getByRole("button", { name: "Archive Supplier" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The Supplier could not be archived. Please try again.",
+    );
+    expect(screen.getByRole("dialog", { name: "Archive Supplier" }))
+      .toBeInTheDocument();
+  });
+
   it("does not add archive, ProductSupplier, Catalog Number, or procurement sections", () => {
     renderDetail();
 
     expect(screen.queryByText(/ProductSupplier/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Catalog Number/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/procurement history/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /archive|delete|restore/i }))
+    expect(screen.queryByRole("button", { name: /delete|restore|reactivate/i }))
       .not.toBeInTheDocument();
   });
 });

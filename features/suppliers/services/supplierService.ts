@@ -47,7 +47,8 @@ export interface SupplierServiceError {
     | "supplier_list_failed"
     | "supplier_detail_failed"
     | "supplier_create_failed"
-    | "supplier_update_failed";
+    | "supplier_update_failed"
+    | "supplier_archive_failed";
   message: string;
 }
 
@@ -64,6 +65,7 @@ export type SupplierDetailResult =
   | { ok: false; error: SupplierServiceError };
 
 export type SupplierUpdateResult = SupplierCreateResult;
+export type SupplierArchiveResult = SupplierCreateResult;
 
 const supplierFields =
   "id,name,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at";
@@ -216,6 +218,43 @@ function normalizeOptional(value: string | null): string | null {
   return normalized || null;
 }
 
+function archiveFailure(code?: string): SupplierArchiveResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to archive Suppliers.",
+        },
+      };
+    case "SUP01":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_archived",
+          message: "This Supplier is already archived and cannot be archived again.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_not_found",
+          message: "The Supplier could not be found.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "supplier_archive_failed",
+          message: "The Supplier could not be archived. Please try again.",
+        },
+      };
+  }
+}
+
 export async function listSuppliers(): Promise<SupplierListResult> {
   try {
     const { data, error } = await supabase
@@ -332,5 +371,22 @@ export async function updateSupplier(
     return { ok: true, value: { supplierId: data } };
   } catch {
     return mutationFailure("update");
+  }
+}
+
+export async function archiveSupplier(
+  supplierId: string,
+): Promise<SupplierArchiveResult> {
+  try {
+    const { data, error } = await supabase.rpc("archive_supplier", {
+      p_supplier_id: supplierId,
+    });
+
+    if (error) return archiveFailure(error.code);
+    if (typeof data !== "string") return archiveFailure();
+
+    return { ok: true, value: { supplierId: data } };
+  } catch {
+    return archiveFailure();
   }
 }

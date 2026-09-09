@@ -3936,6 +3936,242 @@ describe("Supabase security helpers", () => {
     expectPermissionDenied(editOnlyCreate.error);
   });
 
+  it("archives a Supplier atomically with canonical metadata and one trusted audit", async () => {
+    const fixture = requireHarness();
+    const supplierName = `Archive Supplier ${randomUUID()}`;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const created = await database.query<{ supplier_id: string }>(
+        `select public.create_supplier(
+           $1::text,
+           $2::text,
+           $3::text,
+           $4::text,
+           $5::text
+         ) as supplier_id`,
+        [
+          supplierName,
+          "Germany",
+          "Archive Contact",
+          "+49 30 123",
+          "archive@example.com",
+        ],
+      );
+      await database.query("reset role");
+      const supplierId = created.rows[0]?.supplier_id;
+
+      if (!supplierId) {
+        throw new Error("Supplier archive fixture returned no ID");
+      }
+
+      const before = await database.query<SupplierRow>(
+        "select * from public.suppliers where id = $1::uuid",
+        [supplierId],
+      );
+
+      await database.query("set local role authenticated");
+      const archivedResult = await database.query<{ supplier_id: string }>(
+        "select public.archive_supplier($1::uuid) as supplier_id",
+        [supplierId],
+      );
+      await database.query("reset role");
+
+      const after = await database.query<SupplierRow>(
+        "select * from public.suppliers where id = $1::uuid",
+        [supplierId],
+      );
+      const audit = await database.query<SupplierAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'supplier.archived'`,
+        [supplierId],
+      );
+
+      expect(archivedResult.rows).toEqual([{ supplier_id: supplierId }]);
+      expect(after.rows[0]).toMatchObject({
+        archived_by_user_id: fixture.actors.admin.profileId,
+        contact_email: before.rows[0]?.contact_email,
+        contact_person_name: before.rows[0]?.contact_person_name,
+        contact_phone: before.rows[0]?.contact_phone,
+        country: before.rows[0]?.country,
+        created_at: before.rows[0]?.created_at,
+        created_by_user_id: before.rows[0]?.created_by_user_id,
+        id: supplierId,
+        is_active: false,
+        name: before.rows[0]?.name,
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(after.rows[0]?.archived_at).toEqual(after.rows[0]?.updated_at);
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0]).toMatchObject({
+        action_type: "supplier.archived",
+        actor_user_id: fixture.actors.admin.profileId,
+        after_data: {
+          archived_by_user_id: fixture.actors.admin.profileId,
+          is_active: false,
+          name: supplierName,
+        },
+        before_data: {
+          archived_at: null,
+          archived_by_user_id: null,
+          is_active: true,
+          name: supplierName,
+        },
+        entity_id: supplierId,
+        entity_type: "supplier",
+      });
+      const auditArchivedAt = audit.rows[0]?.after_data?.archived_at;
+
+      if (typeof auditArchivedAt !== "string") {
+        throw new Error("Supplier archive audit returned no archive timestamp");
+      }
+
+      expect(Date.parse(auditArchivedAt)).toBe(
+        after.rows[0]?.archived_at?.getTime(),
+      );
+
+      await database.query("savepoint repeated_supplier_archive");
+      await database.query("set local role authenticated");
+      await expect(
+        database.query("select public.archive_supplier($1::uuid)", [supplierId]),
+      ).rejects.toMatchObject({ code: "SUP01" });
+      await database.query("rollback to savepoint repeated_supplier_archive");
+      await database.query("reset role");
+
+      await database.query("savepoint archived_supplier_update");
+      await database.query("set local role authenticated");
+      await expect(
+        database.query(
+          "select public.update_supplier($1::uuid, $2::text, $3::text)",
+          [supplierId, `${supplierName} Edited`, "Austria"],
+        ),
+      ).rejects.toMatchObject({ code: "SUP01" });
+      await database.query("rollback to savepoint archived_supplier_update");
+      await database.query("reset role");
+
+      const afterFailures = await database.query<SupplierRow>(
+        "select * from public.suppliers where id = $1::uuid",
+        [supplierId],
+      );
+      const auditAfterFailures = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'supplier.archived'`,
+        [supplierId],
+      );
+
+      expect(afterFailures.rows).toEqual(after.rows);
+      expect(auditAfterFailures.rows).toEqual([{ count: 1 }]);
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.supplierViewer.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const stillReadable = await database.query<{ id: string }>(
+        "select id from public.suppliers where id = $1::uuid",
+        [supplierId],
+      );
+      await database.query("reset role");
+
+      expect(stillReadable.rows).toEqual([{ id: supplierId }]);
+    });
+  });
+
+  it("allows an active suppliers.archive actor and derives the audit actor internally", async () => {
+    const fixture = requireHarness();
+    const supplierName = `Delegated Archive Supplier ${randomUUID()}`;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const created = await database.query<{ supplier_id: string }>(
+        "select public.create_supplier($1::text, $2::text) as supplier_id",
+        [supplierName, "Austria"],
+      );
+      await database.query("reset role");
+      const supplierId = created.rows[0]?.supplier_id;
+
+      if (!supplierId) {
+        throw new Error("Delegated Supplier archive fixture returned no ID");
+      }
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.supplierArchiver.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("select public.archive_supplier($1::uuid)", [supplierId]);
+      await database.query("reset role");
+
+      const archived = await database.query<SupplierRow>(
+        "select * from public.suppliers where id = $1::uuid",
+        [supplierId],
+      );
+      const audit = await database.query<SupplierAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'supplier.archived'`,
+        [supplierId],
+      );
+
+      expect(archived.rows[0]).toMatchObject({
+        archived_by_user_id: fixture.actors.supplierArchiver.profileId,
+        is_active: false,
+        updated_by_user_id: fixture.actors.supplierArchiver.profileId,
+      });
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0]).toMatchObject({
+        action_type: "supplier.archived",
+        actor_user_id: fixture.actors.supplierArchiver.profileId,
+        entity_id: supplierId,
+        entity_type: "supplier",
+      });
+    });
+  });
+
+  it("denies Supplier archive to unrelated, inactive, and anonymous actors", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.unpermitted.client,
+      fixture.actors.supplierViewer.client,
+      fixture.actors.supplierCreator.client,
+      fixture.actors.supplierEditor.client,
+      fixture.actors.inactiveSupplierManager.client,
+    ]) {
+      const { error } = await client.rpc("archive_supplier", {
+        p_supplier_id: randomUUID(),
+      });
+
+      expectPermissionDenied(error);
+    }
+
+    const missing = await fixture.actors.admin.client.rpc("archive_supplier", {
+      p_supplier_id: randomUUID(),
+    });
+    const missingId = await fixture.actors.admin.client.rpc("archive_supplier", {
+      p_supplier_id: null,
+    });
+
+    expect(missing.error?.code).toBe("P0002");
+    expect(missingId.error?.code).toBe("22023");
+  });
+
   it("denies Supplier mutations to unauthorized, inactive, and anonymous actors", async () => {
     const fixture = requireHarness();
 
@@ -4117,7 +4353,6 @@ describe("Supabase security helpers", () => {
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and routine.proname in (
-             'archive_supplier',
              'delete_supplier',
              'reactivate_supplier',
              'restore_supplier',
@@ -4141,7 +4376,11 @@ describe("Supabase security helpers", () => {
          join pg_catalog.pg_namespace as namespace
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
-           and routine.proname in ('create_supplier', 'update_supplier')
+           and routine.proname in (
+             'archive_supplier',
+             'create_supplier',
+             'update_supplier'
+           )
          order by routine.proname`,
       );
 
@@ -4181,7 +4420,7 @@ describe("Supabase security helpers", () => {
         },
       ]);
       expect(unsupportedFunctions.rows).toEqual([{ count: 0 }]);
-      expect(functions.rows).toHaveLength(2);
+      expect(functions.rows).toHaveLength(3);
       for (const supplierFunction of functions.rows) {
         expect(supplierFunction).toMatchObject({
           anonymous_execute: false,

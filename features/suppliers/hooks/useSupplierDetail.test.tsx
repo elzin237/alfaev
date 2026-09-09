@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const detailHookMocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   hasPermission: vi.fn(),
+  archiveSupplier: vi.fn(),
   getSupplier: vi.fn(),
   updateSupplier: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock("../../../app/auth/permissionService", () => ({
   hasPermission: detailHookMocks.hasPermission,
 }));
 vi.mock("../services/supplierService", () => ({
+  archiveSupplier: detailHookMocks.archiveSupplier,
   getSupplier: detailHookMocks.getSupplier,
   updateSupplier: detailHookMocks.updateSupplier,
 }));
@@ -60,6 +62,10 @@ beforeEach(() => {
     ok: true,
     value: activeSupplier,
   });
+  detailHookMocks.archiveSupplier.mockResolvedValue({
+    ok: true,
+    value: { supplierId: "supplier-1" },
+  });
   detailHookMocks.updateSupplier.mockResolvedValue({
     ok: true,
     value: { supplierId: "supplier-1" },
@@ -81,6 +87,7 @@ describe("useSupplierDetail", () => {
     const { result } = renderDetailHook();
 
     await waitFor(() => expect(result.current.canEdit).toBe(true));
+    expect(result.current.canArchive).toBe(true);
     expect(detailHookMocks.hasPermission).not.toHaveBeenCalled();
   });
 
@@ -111,6 +118,49 @@ describe("useSupplierDetail", () => {
 
     await waitFor(() => expect(result.current.supplierQuery.isSuccess).toBe(true));
     expect(result.current.canEdit).toBe(false);
+  });
+
+  it("keeps edit and archive permissions independent", async () => {
+    detailHookMocks.hasPermission.mockImplementation((permission: string) =>
+      Promise.resolve({
+        ok: true,
+        value: permission === "suppliers.archive",
+      }));
+    const archiveOnly = renderDetailHook();
+    await waitFor(() => expect(archiveOnly.result.current.canArchive).toBe(true));
+    expect(archiveOnly.result.current.canEdit).toBe(false);
+    archiveOnly.unmount();
+
+    detailHookMocks.hasPermission.mockImplementation((permission: string) =>
+      Promise.resolve({
+        ok: true,
+        value: permission === "suppliers.edit",
+      }));
+    const editOnly = renderDetailHook();
+    await waitFor(() => expect(editOnly.result.current.canEdit).toBe(true));
+    expect(editOnly.result.current.canArchive).toBe(false);
+  });
+
+  it("fails archive visibility closed while its permission is pending or failed", async () => {
+    detailHookMocks.hasPermission.mockImplementation((permission: string) => {
+      if (permission === "suppliers.archive") {
+        return new Promise(() => undefined);
+      }
+
+      return Promise.resolve({ ok: true, value: false });
+    });
+    const pending = renderDetailHook();
+    await waitFor(() => expect(pending.result.current.supplierQuery.isSuccess).toBe(true));
+    expect(pending.result.current.canArchive).toBe(false);
+    pending.unmount();
+
+    detailHookMocks.hasPermission.mockResolvedValue({
+      ok: false,
+      error: { code: "permission_check_failed", message: "safe" },
+    });
+    const failed = renderDetailHook();
+    await waitFor(() => expect(detailHookMocks.hasPermission).toHaveBeenCalled());
+    expect(failed.result.current.canArchive).toBe(false);
   });
 
   it("keeps archived Suppliers read-only even for Admin", async () => {
@@ -192,6 +242,37 @@ describe("useSupplierDetail", () => {
       });
     });
 
+    expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("invalidates exact detail and list queries after successful archive only", async () => {
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.supplierQuery.isSuccess).toBe(true));
+
+    await act(async () => {
+      await result.current.archive();
+    });
+
+    expect(detailHookMocks.archiveSupplier).toHaveBeenCalledWith("supplier-1");
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["suppliers", "detail", "profile-1", "supplier-1"],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["suppliers", "list", "profile-1"],
+      exact: true,
+    });
+
+    invalidateQueries.mockClear();
+    detailHookMocks.archiveSupplier.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "supplier_archive_failed", message: "safe" },
+    });
+    await act(async () => {
+      await result.current.archive();
+    });
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });

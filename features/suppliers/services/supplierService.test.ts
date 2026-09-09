@@ -16,6 +16,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 }));
 
 import {
+  archiveSupplier,
   createSupplier,
   getSupplier,
   listSuppliers,
@@ -340,5 +341,38 @@ describe("supplierService", () => {
       contactPhone: null,
       contactEmail: null,
     })).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("archives only through the trusted archive_supplier RPC", async () => {
+    supplierServiceMocks.rpc.mockResolvedValue({
+      data: "supplier-1",
+      error: null,
+    });
+
+    await expect(archiveSupplier("supplier-1")).resolves.toEqual({
+      ok: true,
+      value: { supplierId: "supplier-1" },
+    });
+    expect(supplierServiceMocks.rpc).toHaveBeenCalledWith("archive_supplier", {
+      p_supplier_id: "supplier-1",
+    });
+    expect(supplierServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to archive Suppliers."],
+    ["SUP01", "supplier_archived", "This Supplier is already archived and cannot be archived again."],
+    ["P0002", "supplier_not_found", "The Supplier could not be found."],
+    ["XX000", "supplier_archive_failed", "The Supplier could not be archived. Please try again."],
+  ])("maps %s archive failures without exposing raw backend details", async (backendCode, code, message) => {
+    supplierServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw SQL details" },
+    });
+
+    await expect(archiveSupplier("supplier-1")).resolves.toEqual({
+      ok: false,
+      error: { code, message },
+    });
   });
 });
