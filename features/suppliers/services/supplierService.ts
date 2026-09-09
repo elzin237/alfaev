@@ -26,7 +26,7 @@ export interface Supplier {
   archivedAt: string | null;
 }
 
-export interface SupplierCreateInput {
+export interface SupplierMutationInput {
   name: string;
   country: string;
   contactPersonName: string | null;
@@ -34,14 +34,20 @@ export interface SupplierCreateInput {
   contactEmail: string | null;
 }
 
+export type SupplierCreateInput = SupplierMutationInput;
+
 export interface SupplierServiceError {
   code:
     | "access_denied"
     | "supplier_duplicate"
     | "supplier_email_invalid"
     | "supplier_invalid"
+    | "supplier_archived"
+    | "supplier_not_found"
     | "supplier_list_failed"
-    | "supplier_create_failed";
+    | "supplier_detail_failed"
+    | "supplier_create_failed"
+    | "supplier_update_failed";
   message: string;
 }
 
@@ -52,6 +58,19 @@ export type SupplierListResult =
 export type SupplierCreateResult =
   | { ok: true; value: { supplierId: string } }
   | { ok: false; error: SupplierServiceError };
+
+export type SupplierDetailResult =
+  | { ok: true; value: Supplier }
+  | { ok: false; error: SupplierServiceError };
+
+export type SupplierUpdateResult = SupplierCreateResult;
+
+const supplierFields =
+  "id,name,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at";
+
+function isDateTime(value: string): boolean {
+  return Number.isFinite(Date.parse(value));
+}
 
 function isSupplierRow(value: unknown): value is SupplierRow {
   if (typeof value !== "object" || value === null) return false;
@@ -76,10 +95,15 @@ function isSupplierRow(value: unknown): value is SupplierRow {
     typeof value.is_active === "boolean" &&
     "created_at" in value &&
     typeof value.created_at === "string" &&
+    isDateTime(value.created_at) &&
     "updated_at" in value &&
     typeof value.updated_at === "string" &&
+    isDateTime(value.updated_at) &&
     "archived_at" in value &&
-    (typeof value.archived_at === "string" || value.archived_at === null)
+    (
+      value.archived_at === null ||
+      (typeof value.archived_at === "string" && isDateTime(value.archived_at))
+    )
   );
 }
 
@@ -119,14 +143,25 @@ function listFailure(): SupplierListResult {
   };
 }
 
-function createFailure(code?: string): SupplierCreateResult {
+function mutationFailure(
+  operation: "create" | "update",
+  code?: string,
+): SupplierCreateResult {
   switch (code) {
     case "42501":
       return {
         ok: false,
         error: {
           code: "access_denied",
-          message: "You do not have permission to create Suppliers.",
+          message: `You do not have permission to ${operation} Suppliers.`,
+        },
+      };
+    case "SUP01":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_archived",
+          message: "Archived Suppliers cannot be edited.",
         },
       };
     case "SUP02":
@@ -153,12 +188,24 @@ function createFailure(code?: string): SupplierCreateResult {
           message: "Enter valid required Supplier details.",
         },
       };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_not_found",
+          message: "The Supplier could not be found.",
+        },
+      };
     default:
       return {
         ok: false,
         error: {
-          code: "supplier_create_failed",
-          message: "The Supplier could not be created. Please try again.",
+          code: operation === "create"
+            ? "supplier_create_failed"
+            : "supplier_update_failed",
+          message: operation === "create"
+            ? "The Supplier could not be created. Please try again."
+            : "The Supplier could not be updated. Please try again.",
         },
       };
   }
@@ -173,9 +220,7 @@ export async function listSuppliers(): Promise<SupplierListResult> {
   try {
     const { data, error } = await supabase
       .from("suppliers")
-      .select(
-        "id,name,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at",
-      );
+      .select(supplierFields);
 
     if (error || !Array.isArray(data) || !data.every(isSupplierRow)) {
       return listFailure();
@@ -187,6 +232,58 @@ export async function listSuppliers(): Promise<SupplierListResult> {
     };
   } catch {
     return listFailure();
+  }
+}
+
+export async function getSupplier(
+  supplierId: string,
+): Promise<SupplierDetailResult> {
+  try {
+    const { data, error } = await supabase
+      .from("suppliers")
+      .select(supplierFields)
+      .eq("id", supplierId)
+      .maybeSingle();
+
+    if (error) {
+      return {
+        ok: false,
+        error: {
+          code: "supplier_detail_failed",
+          message: "The Supplier details could not be loaded.",
+        },
+      };
+    }
+
+    if (data === null) {
+      return {
+        ok: false,
+        error: {
+          code: "supplier_not_found",
+          message: "The Supplier could not be found.",
+        },
+      };
+    }
+
+    if (!isSupplierRow(data)) {
+      return {
+        ok: false,
+        error: {
+          code: "supplier_detail_failed",
+          message: "The Supplier details could not be loaded.",
+        },
+      };
+    }
+
+    return { ok: true, value: mapSupplier(data) };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "supplier_detail_failed",
+        message: "The Supplier details could not be loaded.",
+      },
+    };
   }
 }
 
@@ -204,11 +301,36 @@ export async function createSupplier(
       p_contact_email: contactEmail,
     });
 
-    if (error) return createFailure(error.code);
-    if (typeof data !== "string") return createFailure();
+    if (error) return mutationFailure("create", error.code);
+    if (typeof data !== "string") return mutationFailure("create");
 
     return { ok: true, value: { supplierId: data } };
   } catch {
-    return createFailure();
+    return mutationFailure("create");
+  }
+}
+
+export async function updateSupplier(
+  supplierId: string,
+  input: SupplierMutationInput,
+): Promise<SupplierUpdateResult> {
+  try {
+    const contactEmail = normalizeOptional(input.contactEmail)?.toLowerCase() ??
+      null;
+    const { data, error } = await supabase.rpc("update_supplier", {
+      p_supplier_id: supplierId,
+      p_name: input.name.trim(),
+      p_country: input.country.trim(),
+      p_contact_person_name: normalizeOptional(input.contactPersonName),
+      p_contact_phone: normalizeOptional(input.contactPhone),
+      p_contact_email: contactEmail,
+    });
+
+    if (error) return mutationFailure("update", error.code);
+    if (typeof data !== "string") return mutationFailure("update");
+
+    return { ok: true, value: { supplierId: data } };
+  } catch {
+    return mutationFailure("update");
   }
 }

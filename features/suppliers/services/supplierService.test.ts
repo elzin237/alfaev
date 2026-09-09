@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const supplierServiceMocks = vi.hoisted(() => ({
   select: vi.fn(),
+  eq: vi.fn(),
+  maybeSingle: vi.fn(),
   from: vi.fn(),
   rpc: vi.fn(),
 }));
@@ -13,7 +15,12 @@ vi.mock("../../../lib/supabase/client", () => ({
   },
 }));
 
-import { createSupplier, listSuppliers } from "./supplierService";
+import {
+  createSupplier,
+  getSupplier,
+  listSuppliers,
+  updateSupplier,
+} from "./supplierService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -129,6 +136,89 @@ describe("supplierService", () => {
     });
   });
 
+  it("reads and maps one Supplier detail through the RLS-protected table", async () => {
+    supplierServiceMocks.select.mockReturnValue({ eq: supplierServiceMocks.eq });
+    supplierServiceMocks.eq.mockReturnValue({
+      maybeSingle: supplierServiceMocks.maybeSingle,
+    });
+    supplierServiceMocks.maybeSingle.mockResolvedValue({
+      data: {
+        id: "supplier-1",
+        name: "Bosch",
+        country: "Germany",
+        contact_person_name: "Mira Marić",
+        contact_phone: "+387 61 111 222",
+        contact_email: "mira@bosch.example",
+        is_active: true,
+        created_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-02T00:00:00.000Z",
+        archived_at: null,
+      },
+      error: null,
+    });
+
+    await expect(getSupplier("supplier-1")).resolves.toEqual({
+      ok: true,
+      value: {
+        id: "supplier-1",
+        name: "Bosch",
+        country: "Germany",
+        contactPersonName: "Mira Marić",
+        contactPhone: "+387 61 111 222",
+        contactEmail: "mira@bosch.example",
+        isActive: true,
+        createdAt: "2026-09-01T00:00:00.000Z",
+        updatedAt: "2026-09-02T00:00:00.000Z",
+        archivedAt: null,
+      },
+    });
+    expect(supplierServiceMocks.eq).toHaveBeenCalledWith("id", "supplier-1");
+    expect(supplierServiceMocks.maybeSingle).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes missing Supplier details from safe read failures", async () => {
+    supplierServiceMocks.select.mockReturnValue({ eq: supplierServiceMocks.eq });
+    supplierServiceMocks.eq.mockReturnValue({
+      maybeSingle: supplierServiceMocks.maybeSingle,
+    });
+    supplierServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: null,
+    });
+
+    await expect(getSupplier("missing")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "supplier_not_found",
+        message: "The Supplier could not be found.",
+      },
+    });
+
+    supplierServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: { code: "XX000", message: "raw provider details" },
+    });
+    await expect(getSupplier("supplier-1")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "supplier_detail_failed",
+        message: "The Supplier details could not be loaded.",
+      },
+    });
+
+    supplierServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: { id: "supplier-1", name: "Malformed" },
+      error: null,
+    });
+    await expect(getSupplier("supplier-1")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "supplier_detail_failed",
+        message: "The Supplier details could not be loaded.",
+      },
+    });
+  });
+
   it("calls only the trusted create RPC with normalized named inputs", async () => {
     supplierServiceMocks.rpc.mockResolvedValue({
       data: "supplier-created",
@@ -199,5 +289,56 @@ describe("supplierService", () => {
         contactEmail: null,
       }),
     ).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("updates only through the trusted RPC with normalized named inputs", async () => {
+    supplierServiceMocks.rpc.mockResolvedValue({
+      data: "supplier-1",
+      error: null,
+    });
+
+    await expect(updateSupplier("supplier-1", {
+      name: "  Bosch Rexroth  ",
+      country: "  Germany  ",
+      contactPersonName: "  Mira Marić ",
+      contactPhone: "   ",
+      contactEmail: "  MIRA@BOSCH.EXAMPLE  ",
+    })).resolves.toEqual({
+      ok: true,
+      value: { supplierId: "supplier-1" },
+    });
+
+    expect(supplierServiceMocks.rpc).toHaveBeenCalledWith("update_supplier", {
+      p_supplier_id: "supplier-1",
+      p_name: "Bosch Rexroth",
+      p_country: "Germany",
+      p_contact_person_name: "Mira Marić",
+      p_contact_phone: null,
+      p_contact_email: "mira@bosch.example",
+    });
+    expect(supplierServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to update Suppliers."],
+    ["SUP01", "supplier_archived", "Archived Suppliers cannot be edited."],
+    ["SUP02", "supplier_duplicate", "A Supplier with this name already exists."],
+    ["SUP03", "supplier_email_invalid", "Enter a valid Supplier email address."],
+    ["22023", "supplier_invalid", "Enter valid required Supplier details."],
+    ["P0002", "supplier_not_found", "The Supplier could not be found."],
+    ["XX000", "supplier_update_failed", "The Supplier could not be updated. Please try again."],
+  ])("maps %s update failures without exposing raw backend details", async (backendCode, code, message) => {
+    supplierServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw SQL details" },
+    });
+
+    await expect(updateSupplier("supplier-1", {
+      name: "Bosch",
+      country: "Germany",
+      contactPersonName: null,
+      contactPhone: null,
+      contactEmail: null,
+    })).resolves.toEqual({ ok: false, error: { code, message } });
   });
 });

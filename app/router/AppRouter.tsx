@@ -10,6 +10,7 @@ import DashboardPage from "../../features/dashboard/DashboardPage";
 import ProjectsPage from "../../pages/projects/ProjectsPage";
 import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import SuppliersPage from "../../features/suppliers/SuppliersPage";
+import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
 import InventoryPage from "../../features/inventory/InventoryPage";
 import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
@@ -33,6 +34,10 @@ function AppRouter() {
         </Route>
         <Route element={<PermissionRoute permission="suppliers.view" />}>
           <Route path="/suppliers" element={<SuppliersPage />} />
+          <Route
+            path="/suppliers/:supplierId"
+            element={<SupplierDetailPage />}
+          />
         </Route>
         <Route element={<PermissionRoute permission="inventory.view" />}>
           <Route path="/inventory" element={<InventoryPage />} />

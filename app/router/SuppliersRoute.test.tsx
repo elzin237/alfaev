@@ -15,6 +15,9 @@ vi.mock("../auth/permissionService", () => ({
 vi.mock("../../features/suppliers/SuppliersPage", () => ({
   default: () => <h1>Suppliers route content</h1>,
 }));
+vi.mock("../../features/suppliers/SupplierDetailPage", () => ({
+  default: () => <h1>Supplier detail route content</h1>,
+}));
 
 import AppRouter from "./AppRouter";
 
@@ -55,7 +58,7 @@ describe("Suppliers route", () => {
     ));
   });
 
-  it("does not add a Supplier detail route", async () => {
+  it("wires /suppliers/:supplierId behind the same read permission", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -67,9 +70,11 @@ describe("Suppliers route", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Suppliers route content" }))
-        .not.toBeInTheDocument();
-    });
+    expect(await screen.findByRole("heading", {
+      name: "Supplier detail route content",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
+      "suppliers.view",
+    ));
   });
 });

@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { Supplier } from "../services/supplierService";
 
@@ -38,7 +40,12 @@ function SupplierList({ suppliers }: SupplierListProps) {
             {suppliers.map((supplier) => (
               <tr key={supplier.id} className="align-top">
                 <th scope="row" className="whitespace-nowrap px-5 py-4 text-left text-sm font-semibold text-zinc-900">
-                  {supplier.name}
+                  <Link
+                    to={`/suppliers/${supplier.id}`}
+                    className="text-zinc-900 underline-offset-4 transition hover:text-red-600 hover:underline focus:outline-none focus:ring-2 focus:ring-red-200"
+                  >
+                    {supplier.name}
+                  </Link>
                 </th>
                 <td className="whitespace-nowrap px-5 py-4 text-sm text-zinc-700">{supplier.country}</td>
                 <td className="whitespace-nowrap px-5 py-4 text-sm text-zinc-700">{valueOrDash(supplier.contactPersonName)}</td>

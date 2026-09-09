@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 
 const suppliersPageMocks = vi.hoisted(() => ({
   useSuppliers: vi.fn(),
@@ -13,6 +14,14 @@ vi.mock("./hooks/useSuppliers", () => ({
 
 import SuppliersPage from "./SuppliersPage";
 import type { Supplier } from "./services/supplierService";
+
+function SuppliersPageUnderTest() {
+  return (
+    <MemoryRouter>
+      <SuppliersPage />
+    </MemoryRouter>
+  );
+}
 
 const activeSupplier: Supplier = {
   id: "supplier-active",
@@ -79,7 +88,7 @@ afterEach(() => {
 describe("SuppliersPage", () => {
   it("renders loading, safe error with retry, and a true empty state", () => {
     setHookState({ isPending: true });
-    const rendered = render(<SuppliersPage />);
+    const rendered = render(<SuppliersPageUnderTest />);
     expect(screen.getByRole("status")).toHaveTextContent("Loading Suppliers...");
 
     setHookState({
@@ -91,7 +100,7 @@ describe("SuppliersPage", () => {
         },
       },
     });
-    rendered.rerender(<SuppliersPage />);
+    rendered.rerender(<SuppliersPageUnderTest />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The Supplier list could not be loaded.",
     );
@@ -99,14 +108,14 @@ describe("SuppliersPage", () => {
     expect(suppliersPageMocks.refetch).toHaveBeenCalledOnce();
 
     setHookState({ data: { ok: true, value: [] }, canCreate: false });
-    rendered.rerender(<SuppliersPage />);
+    rendered.rerender(<SuppliersPageUnderTest />);
     expect(screen.getByRole("heading", { name: "No Suppliers found" }))
       .toBeInTheDocument();
     expect(screen.queryByLabelText("Search Suppliers")).not.toBeInTheDocument();
   });
 
   it("renders active and archived Supplier details and status text", () => {
-    render(<SuppliersPage />);
+    render(<SuppliersPageUnderTest />);
 
     const activeRow = screen.getByRole("row", {
       name: /Bosch Germany Mira Marić mira@bosch.example \+387 61 111 222 Active/,
@@ -117,10 +126,14 @@ describe("SuppliersPage", () => {
     expect(rows.indexOf(activeRow)).toBeLessThan(rows.indexOf(archivedRow));
     expect(within(activeRow).getByText("Active")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Bosch" })).toHaveAttribute(
+      "href",
+      "/suppliers/supplier-active",
+    );
   });
 
   it("searches immediately across displayed fields and clearing restores the list", () => {
-    render(<SuppliersPage />);
+    render(<SuppliersPageUnderTest />);
     const search = screen.getByLabelText("Search Suppliers");
 
     fireEvent.change(search, { target: { value: "  MIRA@BOSCH  " } });
@@ -139,7 +152,7 @@ describe("SuppliersPage", () => {
 
   it("hides Add Supplier for a view-only or unresolved create permission", () => {
     setHookState({ canCreate: false });
-    render(<SuppliersPage />);
+    render(<SuppliersPageUnderTest />);
 
     expect(screen.getByText("Bosch")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Supplier" }))
@@ -147,7 +160,7 @@ describe("SuppliersPage", () => {
   });
 
   it("opens Add Supplier and shows success after creation", async () => {
-    render(<SuppliersPage />);
+    render(<SuppliersPageUnderTest />);
 
     fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));
     expect(screen.getByRole("dialog", { name: "Add Supplier" })).toBeInTheDocument();
@@ -174,7 +187,7 @@ describe("SuppliersPage", () => {
   });
 
   it("contains no Task 044+ actions or Product/procurement functionality", () => {
-    render(<SuppliersPage />);
+    render(<SuppliersPageUnderTest />);
 
     expect(screen.queryByRole("button", {
       name: /edit|archive|delete|restore|reactivate/i,
