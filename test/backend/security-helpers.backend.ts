@@ -173,6 +173,31 @@ interface SupplierAuditRow {
   entity_type: string;
 }
 
+interface ProductRow {
+  archived_at: Date | null;
+  archived_by_user_id: string | null;
+  brand_id: string | null;
+  category: string;
+  created_at: Date;
+  created_by_user_id: string;
+  id: string;
+  is_active: boolean;
+  name: string;
+  product_kind: "component" | "pcb_finished_good";
+  serial_number: string;
+  updated_at: Date;
+  updated_by_user_id: string;
+}
+
+function createTestSerialNumber(): string {
+  const randomValue = Number.parseInt(
+    randomUUID().replace(/-/g, "").slice(0, 12),
+    16,
+  ) % 10_000_000;
+
+  return randomValue.toString().padStart(7, "0");
+}
+
 function isPermissionMatrixRow(value: unknown): value is PermissionMatrixRow {
   return (
     isRecord(value) &&
@@ -4452,6 +4477,471 @@ describe("Supabase security helpers", () => {
         ).rejects.toMatchObject({ code: "23514" });
         await database.query("rollback to savepoint invalid_supplier_constraint");
       }
+    });
+  });
+
+  it("enforces the canonical Product schema and lifecycle constraints", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const archivedBrandId = randomUUID();
+      const componentId = randomUUID();
+      const finishedGoodId = randomUUID();
+      const componentSerial = createTestSerialNumber();
+      let finishedGoodSerial = createTestSerialNumber();
+
+      while (finishedGoodSerial === componentSerial) {
+        finishedGoodSerial = createTestSerialNumber();
+      }
+
+      await database.query(
+        `insert into public.brands (
+           id,
+           name,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values (
+           $1::uuid,
+           $2::text,
+           false,
+           $3::uuid,
+           $3::uuid,
+           pg_catalog.now(),
+           $3::uuid
+         )`,
+        [archivedBrandId, `Historical Brand ${randomUUID()}`, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           brand_id,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values
+           (
+             $1::uuid,
+             $2::text,
+             'Valid Component',
+             'Free Text Category',
+             null,
+             'component',
+             $5::uuid,
+             $5::uuid
+           ),
+           (
+             $3::uuid,
+             $4::text,
+             'Historical PCB',
+             'Finished Goods',
+             $6::uuid,
+             'pcb_finished_good',
+             $5::uuid,
+             $5::uuid
+           )`,
+        [
+          componentId,
+          componentSerial,
+          finishedGoodId,
+          finishedGoodSerial,
+          actorId,
+          archivedBrandId,
+        ],
+      );
+
+      const products = await database.query<ProductRow>(
+        `select *
+         from public.products
+         where id = any($1::uuid[])
+         order by id`,
+        [[componentId, finishedGoodId]],
+      );
+      const component = products.rows.find((row) => row.id === componentId);
+      const finishedGood = products.rows.find(
+        (row) => row.id === finishedGoodId,
+      );
+
+      expect(component).toMatchObject({
+        archived_at: null,
+        archived_by_user_id: null,
+        brand_id: null,
+        category: "Free Text Category",
+        created_by_user_id: actorId,
+        id: componentId,
+        is_active: true,
+        name: "Valid Component",
+        product_kind: "component",
+        serial_number: componentSerial,
+        updated_by_user_id: actorId,
+      });
+      expect(component?.created_at).toEqual(component?.updated_at);
+      expect(finishedGood).toMatchObject({
+        brand_id: archivedBrandId,
+        id: finishedGoodId,
+        product_kind: "pcb_finished_good",
+      });
+
+      for (const [serialNumber, name, category, productKind] of [
+        [createTestSerialNumber(), "   ", "Category", "component"],
+        [createTestSerialNumber(), " Untrimmed", "Category", "component"],
+        [createTestSerialNumber(), "Product", "   ", "component"],
+        [createTestSerialNumber(), "Product", "Category ", "component"],
+        ["123456", "Product", "Category", "component"],
+        ["12345678", "Product", "Category", "component"],
+        ["12345a7", "Product", "Category", "component"],
+        [createTestSerialNumber(), "Product", "Category", "service"],
+      ] as const) {
+        await database.query("savepoint invalid_product_constraint");
+        await expect(
+          database.query(
+            `insert into public.products (
+               serial_number,
+               name,
+               category,
+               product_kind,
+               created_by_user_id,
+               updated_by_user_id
+             )
+             values ($1::text, $2::text, $3::text, $4::text, $5::uuid, $5::uuid)`,
+            [serialNumber, name, category, productKind, actorId],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+        await database.query("rollback to savepoint invalid_product_constraint");
+      }
+
+      await database.query("savepoint duplicate_product_serial");
+      await expect(
+        database.query(
+          `insert into public.products (
+             serial_number,
+             name,
+             category,
+             product_kind,
+             created_by_user_id,
+             updated_by_user_id
+           )
+           values ($1::text, 'Duplicate', 'Category', 'component', $2::uuid, $2::uuid)`,
+          [componentSerial, actorId],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+      await database.query("rollback to savepoint duplicate_product_serial");
+
+      const beforeSerialChange = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [componentId],
+      );
+      let changedSerial = createTestSerialNumber();
+
+      while (changedSerial === componentSerial) {
+        changedSerial = createTestSerialNumber();
+      }
+
+      await database.query("savepoint immutable_product_serial");
+      await expect(
+        database.query(
+          `update public.products
+           set serial_number = $2::text
+           where id = $1::uuid`,
+          [componentId, changedSerial],
+        ),
+      ).rejects.toMatchObject({ code: "PRD03" });
+      await database.query("rollback to savepoint immutable_product_serial");
+
+      const afterSerialChange = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [componentId],
+      );
+
+      expect(afterSerialChange.rows).toEqual(beforeSerialChange.rows);
+
+      await database.query("savepoint immutable_product_kind");
+      await expect(
+        database.query(
+          `update public.products
+           set product_kind = 'pcb_finished_good'
+           where id = $1::uuid`,
+          [componentId],
+        ),
+      ).rejects.toMatchObject({ code: "PRD02" });
+      await database.query("rollback to savepoint immutable_product_kind");
+
+      await database.query(
+        `update public.products
+         set is_active = false,
+             updated_at = pg_catalog.now(),
+             updated_by_user_id = $2::uuid,
+             archived_at = pg_catalog.now(),
+             archived_by_user_id = $2::uuid
+         where id = $1::uuid`,
+        [componentId, actorId],
+      );
+      const archivedBefore = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [componentId],
+      );
+
+      expect(archivedBefore.rows[0]).toMatchObject({
+        archived_by_user_id: actorId,
+        id: componentId,
+        is_active: false,
+        serial_number: componentSerial,
+      });
+      expect(archivedBefore.rows[0]?.archived_at).toBeInstanceOf(Date);
+
+      await database.query("savepoint immutable_archived_product");
+      await expect(
+        database.query(
+          `update public.products
+           set name = 'Forbidden archived edit'
+           where id = $1::uuid`,
+          [componentId],
+        ),
+      ).rejects.toMatchObject({ code: "PRD01" });
+      await database.query("rollback to savepoint immutable_archived_product");
+
+      const archivedAfter = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [componentId],
+      );
+
+      expect(archivedAfter.rows).toEqual(archivedBefore.rows);
+    });
+  });
+
+  it("limits active and archived Product reads to Inventory-authorized actors", async () => {
+    const fixture = requireHarness();
+    const activeProductId = randomUUID();
+    const archivedProductId = randomUUID();
+    const activeSerial = createTestSerialNumber();
+    let archivedSerial = createTestSerialNumber();
+
+    while (archivedSerial === activeSerial) {
+      archivedSerial = createTestSerialNumber();
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values
+           ($1::uuid, $2::text, 'Active Product', 'Category', 'component', true, $5::uuid, $5::uuid, null, null),
+           ($3::uuid, $4::text, 'Archived Product', 'Category', 'component', false, $5::uuid, $5::uuid, pg_catalog.now(), $5::uuid)`,
+        [
+          activeProductId,
+          activeSerial,
+          archivedProductId,
+          archivedSerial,
+          fixture.actors.admin.profileId,
+        ],
+      );
+
+      for (const actor of [
+        fixture.actors.admin,
+        fixture.actors.brandManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const visible = await database.query<{ id: string }>(
+          `select id
+           from public.products
+           where id = any($1::uuid[])
+           order by id`,
+          [[activeProductId, archivedProductId]],
+        );
+        await database.query("reset role");
+
+        expect(visible.rows.map((row) => row.id).sort()).toEqual(
+          [activeProductId, archivedProductId].sort(),
+        );
+      }
+
+      for (const actor of [
+        fixture.actors.permitted,
+        fixture.actors.unpermitted,
+        fixture.actors.inactiveBrandManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const hidden = await database.query<{ id: string }>(
+          `select id
+           from public.products
+           where id = any($1::uuid[])`,
+          [[activeProductId, archivedProductId]],
+        );
+        await database.query("reset role");
+
+        expect(hidden.rows).toEqual([]);
+      }
+
+      await database.query("savepoint anonymous_product_read");
+      await database.query("set local role anon");
+      await expect(
+        database.query("select id from public.products limit 1"),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_product_read");
+      await database.query("reset role");
+    });
+  });
+
+  it("denies direct Product writes and exposes no Product mutation RPCs", async () => {
+    const fixture = requireHarness();
+    const client = fixture.actors.brandManager.client;
+    const productId = randomUUID();
+    const directInsert = await client.from("products").insert({
+      serial_number: createTestSerialNumber(),
+      name: "Direct Product",
+      category: "Category",
+      product_kind: "component",
+      created_by_user_id: fixture.actors.brandManager.profileId,
+      updated_by_user_id: fixture.actors.brandManager.profileId,
+    });
+    const directUpdate = await client
+      .from("products")
+      .update({ name: "Forbidden update" })
+      .eq("id", productId);
+    const directDelete = await client.from("products").delete().eq("id", productId);
+
+    expectPermissionDenied(directInsert.error);
+    expectPermissionDenied(directUpdate.error);
+    expectPermissionDenied(directDelete.error);
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const columns = await database.query<{ column_name: string }>(
+        `select column_name
+         from information_schema.columns
+         where table_schema = 'public'
+           and table_name = 'products'
+         order by ordinal_position`,
+      );
+      const constraints = await database.query<{ constraint_name: string }>(
+        `select constraint_name
+         from information_schema.table_constraints
+         where table_schema = 'public'
+           and table_name = 'products'
+         order by constraint_name`,
+      );
+      const tableSecurity = await database.query<{
+        authenticated_delete: boolean;
+        authenticated_insert: boolean;
+        authenticated_select: boolean;
+        authenticated_update: boolean;
+        row_security: boolean;
+      }>(
+        `select
+           table_info.relrowsecurity as row_security,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'select') as authenticated_select,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'insert') as authenticated_insert,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'update') as authenticated_update,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'delete') as authenticated_delete
+         from pg_catalog.pg_class as table_info
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = table_info.relnamespace
+         where namespace.nspname = 'public'
+           and table_info.relname = 'products'`,
+      );
+      const unsupportedFunctions = await database.query<{ count: number }>(
+        `select count(*)::integer as count
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'allocate_product_serial_number',
+             'archive_product',
+             'create_product',
+             'delete_product',
+             'reactivate_product',
+             'restore_product',
+             'unarchive_product',
+             'update_product'
+           )`,
+      );
+      const lifecycleFunction = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        settings: string[];
+      }>(
+        `select
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'enforce_product_lifecycle_immutability'`,
+      );
+
+      expect(columns.rows.map((column) => column.column_name)).toEqual([
+        "id",
+        "serial_number",
+        "name",
+        "category",
+        "brand_id",
+        "product_kind",
+        "is_active",
+        "created_at",
+        "created_by_user_id",
+        "updated_at",
+        "updated_by_user_id",
+        "archived_at",
+        "archived_by_user_id",
+      ]);
+      expect(constraints.rows.map((constraint) => constraint.constraint_name))
+        .toEqual(expect.arrayContaining([
+          "products_archive_state_consistent",
+          "products_category_trimmed_nonblank",
+          "products_kind_valid",
+          "products_name_trimmed_nonblank",
+          "products_pkey",
+          "products_serial_number_format",
+          "products_serial_number_key",
+        ]));
+      expect(tableSecurity.rows).toEqual([
+        {
+          authenticated_delete: false,
+          authenticated_insert: false,
+          authenticated_select: true,
+          authenticated_update: false,
+          row_security: true,
+        },
+      ]);
+      expect(unsupportedFunctions.rows).toEqual([{ count: 0 }]);
+      expect(lifecycleFunction.rows).toEqual([
+        {
+          anonymous_execute: false,
+          authenticated_execute: false,
+          is_security_definer: false,
+          settings: ["search_path=\"\""],
+        },
+      ]);
     });
   });
 });
