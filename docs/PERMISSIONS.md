@@ -124,6 +124,12 @@ Normal Brand reads within Inventory require Admin access or View Inventory (`inv
 
 Creating, editing, or archiving Brands requires Admin access or Manage Brands (`inventory.brands.manage`). This permission does not authorize hard deletion or Brand reactivation/unarchive.
 
+Product reads require Admin access or View Inventory (`inventory.view`).
+
+Product creation and editing use the existing Add Products/Components (`inventory.products.create`) and Edit Product/Component Data (`inventory.products.edit`) permissions respectively. Trusted backend/database operations remain authoritative; direct client Product mutation is not permitted.
+
+Archiving a Product is part of the trusted Product lifecycle workflow and does not imply hard deletion or reactivation/unarchive authority.
+
 ### PCB Cards
 
 - View PCB Cards

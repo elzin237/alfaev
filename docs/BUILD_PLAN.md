@@ -879,18 +879,26 @@ The canonical prohibition on using archived Suppliers for new ProductSupplier li
 ## 046 — Create Product Schema + Product Kinds
 
 Goal:
-- implement Product table/RLS
+- implement Product schema, constraints, and read RLS only
 
 Include:
-- Name
-- Category
-- Brand
-- `component`
-- `pcb_finished_good`
+- Name: required, trimmed, nonblank, not unique
+- Category: required, trimmed, nonblank, not unique, free text
+- nullable Brand reference
+- Product kind restricted to `component` or `pcb_finished_good`
+- immutable Product kind
 - archive metadata
-- Serial Number column
+- required, unique Serial Number column constrained to exactly 7 digits
+- Product reads for Admin or `inventory.view`
+- deny direct client `INSERT`, `UPDATE`, and `DELETE`
+- historical Products may retain archived Brand references
+- archived Products remain historically readable and immutable
+- no normal hard delete
+- no reactivation/unarchive
 
-Do not implement allocation yet.
+Do not implement Serial Number allocation, trusted Product create/edit/archive operations, or UI in this task.
+
+Active-Brand enforcement for new Product creation and Brand changes belongs to the later trusted Product create/edit operations.
 
 ---
 
@@ -908,6 +916,8 @@ Rules:
 
 Add concurrency/uniqueness tests.
 
+Task 046 stores and constrains Serial Numbers; this task owns concurrency-safe sequential allocation.
+
 ---
 
 ## 048 — Add Trusted Product Creation Operation
@@ -919,9 +929,13 @@ Requirements:
 - actor authorized
 - serial allocated server-side
 - client cannot choose serial
+- normal Product creation uses `component`
+- selected Brand, when present, must be active
 - audit
 
 Initial stock remains separate from Product creation.
+
+This is the first normal trusted Product creation path. `pcb_finished_good` creation remains reserved for a later trusted PCB workflow.
 
 ---
 
@@ -937,6 +951,8 @@ Fields:
 
 Serial:
 - displayed as generated automatically
+
+This form creates Components only and must not expose Product kind selection. A later trusted PCB workflow creates `pcb_finished_good` Products.
 
 Supplier links added later.
 
@@ -963,6 +979,10 @@ Quantity comes after InventoryBalance exists.
 Goal:
 - Product detail master-data view/edit
 
+Brand changes may select only active Brands. Product kind remains immutable.
+
+Archived Products are read-only and have no restore/reactivate action.
+
 Do not include Inventory adjustment yet.
 
 ---
@@ -974,6 +994,8 @@ Goal:
 - preserve referenced history
 - UI confirmation
 - audit
+
+This is the only normal Product removal workflow. Do not hard-delete Products or add reactivation/unarchive.
 
 ---
 

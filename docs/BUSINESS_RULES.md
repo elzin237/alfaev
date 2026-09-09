@@ -167,11 +167,25 @@ The badge counts rows/requests, not piece quantities.
 - Meaningful Supplier create/edit/archive changes create immutable AuditLog history.
 - Normalized no-op Supplier edits do not create audit noise.
 
+### Products
+
+- Product Name is required, trimmed before persistence, and must not be empty or blank. Product names are not unique.
+- Product Category is required, trimmed before persistence, and must not be empty or blank. Categories are not unique and remain free text in the current scope.
+- Product identity is the unique Serial Number / Šifra, not Name, Category, Brand, or Catalog Number.
+- Brand is optional. Historical Products may continue to reference archived Brands, but new Products and Product Brand changes may select only active Brands.
+- The only Product kinds are `component` and `pcb_finished_good`.
+- Product kind is immutable after creation.
+- Normal Inventory Add Product creates a `component`; `pcb_finished_good` is reserved for later trusted PCB workflows and is not a normal user-selectable Product kind.
+- AlfaEV does not hard-delete Products through normal application workflows.
+- Archived Products remain readable for historical records and are immutable through normal Product editing.
+- Product reactivation/unarchive is not supported in the current scope.
+
 ### Serial Number / Šifra
 
+- required
 - unique
 - generated automatically by AlfaEV
-- 7 digits
+- exactly 7 digits
 - starts at `0000001`
 - sequentially increments
 - never reused

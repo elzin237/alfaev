@@ -127,6 +127,15 @@ Supplier authorization:
 - direct client mutation is not authoritative authorization
 - trusted backend/database operations must re-check Supplier mutation authorization and current lifecycle state
 
+Product authorization:
+
+- Product reads require Admin access or `inventory.view`
+- direct client Product `INSERT`, `UPDATE`, and `DELETE` are denied
+- trusted Product create/edit operations must re-check authorization and allow only active Brands for new Product references or Brand changes
+- historical Products may continue to reference archived Brands
+- archived Products remain readable for authorized historical access but are immutable through normal Product editing
+- no normal hard-delete or reactivation/unarchive workflow is supported
+
 ---
 
 # 6. Row Level Security

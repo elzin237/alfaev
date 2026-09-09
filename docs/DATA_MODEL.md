@@ -268,11 +268,21 @@ Fields:
   - stable internal ID
 - `serial_number`
   - AlfaEV Serial Number / Šifra
+  - required
   - unique
   - exactly 7 digits
   - system-generated
 - `name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not unique
 - `category`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not unique
+  - free text in the current scope
 - `brand_id`
   - nullable
   - references Brand
@@ -293,11 +303,19 @@ Fields:
 Rules:
 
 - Serial Number / Šifra is the unique business identifier.
+- Product Name, Category, Brand, and Catalog Number do not define Product identity.
 - Users never manually assign the Serial Number.
 - Serial Number starts at `0000001`, increments sequentially, and is never reused.
 - Barcode encodes `serial_number`.
 - Catalog Number does not belong on Product.
-- Products with business history are archived/deactivated rather than hard-deleted.
+- Product kind is immutable after creation.
+- Normal Inventory Product creation uses `component`.
+- `pcb_finished_good` is reserved for later trusted PCB workflows and must not be exposed as a normal user-selectable Product kind.
+- Historical Products may continue to reference archived Brands.
+- New Product creation and Product Brand changes may use only active Brands; later trusted Product create/edit operations enforce this rule.
+- Products are archived/deactivated rather than hard-deleted through normal application workflows.
+- Archived Products remain readable where historical records require them and are immutable through normal Product editing.
+- Product reactivation/unarchive is not supported in the current scope.
 
 ### Serial Number allocation
 
@@ -309,6 +327,8 @@ Conceptual requirement:
 - issued values are never recycled
 
 The physical implementation may use a database sequence rather than a normal application table.
+
+The Product schema stores the required unique seven-digit Serial Number. Serial allocation is a separate trusted concern and is not performed by the Product schema migration itself.
 
 ---
 
