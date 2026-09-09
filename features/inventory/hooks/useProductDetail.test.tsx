@@ -8,6 +8,7 @@ const detailHookMocks = vi.hoisted(() => ({
   hasPermission: vi.fn(),
   getProduct: vi.fn(),
   listBrands: vi.fn(),
+  archiveProduct: vi.fn(),
   updateProduct: vi.fn(),
 }));
 
@@ -21,6 +22,7 @@ vi.mock("../services/brandService", () => ({
   listBrands: detailHookMocks.listBrands,
 }));
 vi.mock("../services/productService", () => ({
+  archiveProduct: detailHookMocks.archiveProduct,
   getProduct: detailHookMocks.getProduct,
   updateProduct: detailHookMocks.updateProduct,
 }));
@@ -72,6 +74,10 @@ beforeEach(() => {
     ok: true,
     value: { productId: "product-1" },
   });
+  detailHookMocks.archiveProduct.mockResolvedValue({
+    ok: true,
+    value: { productId: "product-1" },
+  });
 });
 
 afterEach(() => {
@@ -89,6 +95,7 @@ describe("useProductDetail", () => {
     const { result } = renderDetailHook();
 
     await waitFor(() => expect(result.current.canEdit).toBe(true));
+    expect(result.current.canArchive).toBe(true);
     expect(detailHookMocks.hasPermission).not.toHaveBeenCalled();
     await waitFor(() => expect(detailHookMocks.listBrands).toHaveBeenCalled());
   });
@@ -138,6 +145,7 @@ describe("useProductDetail", () => {
 
     await waitFor(() => expect(result.current.productQuery.isSuccess).toBe(true));
     expect(result.current.canEdit).toBe(false);
+    expect(result.current.canArchive).toBe(false);
     expect(detailHookMocks.listBrands).not.toHaveBeenCalled();
   });
 
@@ -201,6 +209,50 @@ describe("useProductDetail", () => {
         category: "Control",
         brandId: null,
       });
+    });
+
+    expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("reuses edit authorization and invalidates exact Product queries after archive", async () => {
+    detailHookMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canArchive).toBe(true));
+
+    await act(async () => {
+      await result.current.archive();
+    });
+
+    expect(detailHookMocks.archiveProduct).toHaveBeenCalledWith("product-1");
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "inventory",
+        "products",
+        "detail",
+        "profile-1",
+        "product-1",
+      ],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["inventory", "products", "profile-1"],
+      exact: true,
+    });
+  });
+
+  it("does not invalidate Product queries after failed archive", async () => {
+    detailHookMocks.archiveProduct.mockResolvedValue({
+      ok: false,
+      error: { code: "product_archive_failed", message: "safe" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.productQuery.isSuccess).toBe(true));
+
+    await act(async () => {
+      await result.current.archive();
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();

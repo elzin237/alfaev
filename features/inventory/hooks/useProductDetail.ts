@@ -10,6 +10,7 @@ import {
 } from "../productQueryKeys";
 import { listBrands } from "../services/brandService";
 import {
+  archiveProduct,
   getProduct,
   updateProduct,
   type UpdateProductInput,
@@ -43,6 +44,7 @@ export function useProductDetail(productId: string) {
     editPermissionQuery.data?.ok === true && editPermissionQuery.data.value
   );
   const canEdit = Boolean(hasEditPermission && product?.isActive);
+  const canArchive = canEdit;
   const brandsQuery = useQuery({
     queryKey: brandListQueryKey(profile?.id),
     queryFn: listBrands,
@@ -50,18 +52,28 @@ export function useProductDetail(productId: string) {
     staleTime: 60_000,
   });
 
+  async function invalidateProductQueries(): Promise<void> {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
+      queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
+    ]);
+  }
+
   async function update(input: UpdateProductInput) {
     const result = await updateProduct(productId, input);
 
-    if (result.ok) {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
-        queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
-      ]);
-    }
+    if (result.ok) await invalidateProductQueries();
 
     return result;
   }
 
-  return { productQuery, brandsQuery, canEdit, update };
+  async function archive() {
+    const result = await archiveProduct(productId);
+
+    if (result.ok) await invalidateProductQueries();
+
+    return result;
+  }
+
+  return { productQuery, brandsQuery, canEdit, canArchive, update, archive };
 }

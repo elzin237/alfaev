@@ -4822,7 +4822,7 @@ describe("Supabase security helpers", () => {
     });
   });
 
-  it("denies direct Product writes and exposes no Product lifecycle RPCs", async () => {
+  it("denies direct Product writes and exposes no unsupported Product lifecycle RPCs", async () => {
     const fixture = requireHarness();
     const client = fixture.actors.brandManager.client;
     const productId = randomUUID();
@@ -4885,7 +4885,6 @@ describe("Supabase security helpers", () => {
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and routine.proname in (
-             'archive_product',
              'delete_product',
              'reactivate_product',
              'restore_product',
@@ -5845,5 +5844,282 @@ describe("Supabase security helpers", () => {
       .update({ name: "Forbidden direct edit" })
       .eq("id", randomUUID());
     expectPermissionDenied(directUpdate.error);
+  });
+
+  it("archives a Product atomically with canonical lifecycle metadata and audit", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const productId = randomUUID();
+      const serialNumber = createTestSerialNumber();
+
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Archive Candidate', 'Controls',
+                 'component', $3::uuid, $3::uuid)`,
+        [productId, serialNumber, fixture.actors.admin.profileId],
+      );
+      const before = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const archived = await database.query<{ product_id: string }>(
+        "select public.archive_product($1::uuid) as product_id",
+        [productId],
+      );
+      await database.query("reset role");
+
+      const after = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const audits = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.archived'`,
+        [productId],
+      );
+      const current = after.rows[0];
+      const original = before.rows[0];
+
+      expect(archived.rows).toEqual([{ product_id: productId }]);
+      expect(current).toMatchObject({
+        archived_by_user_id: fixture.actors.admin.profileId,
+        brand_id: original?.brand_id,
+        category: original?.category,
+        id: productId,
+        is_active: false,
+        name: original?.name,
+        product_kind: original?.product_kind,
+        serial_number: original?.serial_number,
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(current?.archived_at).toBeInstanceOf(Date);
+      expect(current?.updated_at).toEqual(current?.archived_at);
+      expect(current?.created_at).toEqual(original?.created_at);
+      expect(audits.rows).toHaveLength(1);
+      expect(audits.rows[0]).toMatchObject({
+        actor_user_id: fixture.actors.admin.profileId,
+        action_type: "product.archived",
+        entity_id: productId,
+        entity_type: "product",
+        before_data: {
+          brand_id: null,
+          category: "Controls",
+          is_active: true,
+          name: "Archive Candidate",
+          product_kind: "component",
+          serial_number: serialNumber,
+        },
+        after_data: {
+          archived_by_user_id: fixture.actors.admin.profileId,
+          brand_id: null,
+          category: "Controls",
+          is_active: false,
+          name: "Archive Candidate",
+          product_kind: "component",
+          serial_number: serialNumber,
+        },
+      });
+
+      await database.query("set local role authenticated");
+      const readable = await database.query<{ id: string }>(
+        "select id from public.products where id = $1::uuid",
+        [productId],
+      );
+      expect(readable.rows).toEqual([{ id: productId }]);
+
+      await database.query("savepoint repeat_product_archive");
+      await expect(
+        database.query("select public.archive_product($1::uuid)", [productId]),
+      ).rejects.toMatchObject({ code: "PRD01" });
+      await database.query("rollback to savepoint repeat_product_archive");
+
+      await database.query("savepoint edit_archived_product");
+      await expect(
+        database.query(
+          `select public.update_product(
+             $1::uuid,
+             'Forbidden edit',
+             'Controls',
+             null
+           )`,
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "PRD01" });
+      await database.query("rollback to savepoint edit_archived_product");
+      await database.query("reset role");
+
+      const afterFailures = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const auditAfterFailures = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.archived'`,
+        [productId],
+      );
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        arguments: string;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'archive_product'`,
+      );
+
+      expect(afterFailures.rows).toEqual(after.rows);
+      expect(auditAfterFailures.rows).toEqual([{ count: 1 }]);
+      expect(functionSecurity.rows).toEqual([
+        {
+          anonymous_execute: false,
+          arguments: "p_product_id uuid",
+          authenticated_execute: true,
+          is_security_definer: true,
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+    });
+  });
+
+  it("limits Product archive to Admin or inventory.products.edit and fails safely", async () => {
+    const fixture = requireHarness();
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.productCreator.client,
+      fixture.actors.brandManager.client,
+      fixture.actors.unpermitted.client,
+      fixture.actors.inactive.client,
+      fixture.actors.inactiveBrandManager.client,
+    ]) {
+      const { error } = await client.rpc("archive_product", {
+        p_product_id: randomUUID(),
+      });
+
+      expectPermissionDenied(error);
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const productId = randomUUID();
+      const serialNumber = createTestSerialNumber();
+
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Editor Archive', 'Controls',
+                 'component', $3::uuid, $3::uuid)`,
+        [productId, serialNumber, fixture.actors.admin.profileId],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.productEditor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const archived = await database.query<{ product_id: string }>(
+        "select public.archive_product($1::uuid) as product_id",
+        [productId],
+      );
+      await database.query("reset role");
+
+      const product = await database.query<ProductRow>(
+        "select * from public.products where id = $1::uuid",
+        [productId],
+      );
+      const audit = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product.archived'`,
+        [productId],
+      );
+
+      expect(archived.rows).toEqual([{ product_id: productId }]);
+      expect(product.rows[0]).toMatchObject({
+        archived_by_user_id: fixture.actors.productEditor.profileId,
+        is_active: false,
+      });
+      expect(audit.rows).toHaveLength(1);
+      expect(audit.rows[0]?.actor_user_id)
+        .toBe(fixture.actors.productEditor.profileId);
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint missing_product_archive");
+      await expect(
+        database.query("select public.archive_product($1::uuid)", [randomUUID()]),
+      ).rejects.toMatchObject({ code: "P0002" });
+      await database.query("rollback to savepoint missing_product_archive");
+      await database.query("savepoint null_product_archive");
+      await expect(
+        database.query("select public.archive_product(null::uuid)"),
+      ).rejects.toMatchObject({ code: "22023" });
+      await database.query("rollback to savepoint null_product_archive");
+      await database.query("reset role");
+
+      const failedAudit = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'product.archived'
+           and entity_id <> $1::uuid`,
+        [productId],
+      );
+      expect(failedAudit.rows).toEqual([{ count: 0 }]);
+    });
+
+    const directUpdate = await fixture.actors.productEditor.client
+      .from("products")
+      .update({ is_active: false })
+      .eq("id", randomUUID());
+    const directDelete = await fixture.actors.productEditor.client
+      .from("products")
+      .delete()
+      .eq("id", randomUUID());
+
+    expectPermissionDenied(directUpdate.error);
+    expectPermissionDenied(directDelete.error);
   });
 });

@@ -83,6 +83,19 @@ export type ProductUpdateResult =
   | { ok: true; value: { productId: string } }
   | { ok: false; error: ProductUpdateError };
 
+export interface ProductArchiveError {
+  code:
+    | "access_denied"
+    | "product_archived"
+    | "product_not_found"
+    | "product_archive_failed";
+  message: string;
+}
+
+export type ProductArchiveResult =
+  | { ok: true; value: { productId: string } }
+  | { ok: false; error: ProductArchiveError };
+
 interface CreatedProductRow {
   product_id: string;
   serial_number: string;
@@ -350,6 +363,43 @@ function updateFailure(code?: string): ProductUpdateResult {
   }
 }
 
+function archiveFailure(code?: string): ProductArchiveResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to archive Products.",
+        },
+      };
+    case "PRD01":
+      return {
+        ok: false,
+        error: {
+          code: "product_archived",
+          message: "This Product is already archived and cannot be archived again.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "product_not_found",
+          message: "The Product could not be found.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "product_archive_failed",
+          message: "The Product could not be archived. Please try again.",
+        },
+      };
+  }
+}
+
 export async function createProduct(
   input: CreateProductInput,
 ): Promise<ProductCreationResult> {
@@ -481,5 +531,22 @@ export async function updateProduct(
     return { ok: true, value: { productId: data } };
   } catch {
     return updateFailure();
+  }
+}
+
+export async function archiveProduct(
+  productId: string,
+): Promise<ProductArchiveResult> {
+  try {
+    const { data, error } = await supabase.rpc("archive_product", {
+      p_product_id: productId,
+    });
+
+    if (error) return archiveFailure(error.code);
+    if (typeof data !== "string" || data.length === 0) return archiveFailure();
+
+    return { ok: true, value: { productId: data } };
+  } catch {
+    return archiveFailure();
   }
 }

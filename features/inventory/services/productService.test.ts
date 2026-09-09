@@ -17,6 +17,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 }));
 
 import {
+  archiveProduct,
   createProduct,
   getProduct,
   listProducts,
@@ -333,5 +334,39 @@ describe("productService", () => {
       category: "Control",
       brandId: null,
     })).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("archives only through the trusted archive_product RPC", async () => {
+    productServiceMocks.rpc.mockResolvedValue({ data: "product-1", error: null });
+
+    await expect(archiveProduct("product-1")).resolves.toEqual({
+      ok: true,
+      value: { productId: "product-1" },
+    });
+    expect(productServiceMocks.rpc).toHaveBeenCalledWith("archive_product", {
+      p_product_id: "product-1",
+    });
+    expect(productServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to archive Products."],
+    ["PRD01", "product_archived", "This Product is already archived and cannot be archived again."],
+    ["P0002", "product_not_found", "The Product could not be found."],
+    ["XX000", "product_archive_failed", "The Product could not be archived. Please try again."],
+  ] as const)("maps %s archive failures without raw details", async (
+    backendCode,
+    code,
+    message,
+  ) => {
+    productServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw SQL details" },
+    });
+
+    await expect(archiveProduct("product-1")).resolves.toEqual({
+      ok: false,
+      error: { code, message },
+    });
   });
 });

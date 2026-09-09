@@ -6,6 +6,7 @@ const detailPageMocks = vi.hoisted(() => ({
   useProductDetail: vi.fn(),
   refetchProduct: vi.fn(),
   refetchBrands: vi.fn(),
+  archive: vi.fn(),
   update: vi.fn(),
 }));
 
@@ -56,6 +57,7 @@ const activeProduct: ProductDetail = {
 function setHookState(options: {
   product?: ProductDetail;
   canEdit?: boolean;
+  canArchive?: boolean;
   isPending?: boolean;
   isError?: boolean;
   data?:
@@ -69,6 +71,7 @@ function setHookState(options: {
 } = {}) {
   detailPageMocks.useProductDetail.mockReturnValue({
     canEdit: options.canEdit ?? true,
+    canArchive: options.canArchive ?? options.canEdit ?? true,
     productQuery: {
       isPending: options.isPending ?? false,
       isError: options.isError ?? false,
@@ -84,6 +87,7 @@ function setHookState(options: {
       },
       refetch: detailPageMocks.refetchBrands,
     },
+    archive: detailPageMocks.archive,
     update: detailPageMocks.update,
   });
 }
@@ -99,6 +103,10 @@ function renderDetail(path = "/inventory/product-1") {
 }
 
 beforeEach(() => {
+  detailPageMocks.archive.mockResolvedValue({
+    ok: true,
+    value: { productId: "product-1" },
+  });
   detailPageMocks.update.mockResolvedValue({
     ok: true,
     value: { productId: "product-1" },
@@ -207,6 +215,59 @@ describe("ProductDetailPage", () => {
     expect(screen.getByText("Controller")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Product" }))
       .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Product" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("requires archive confirmation and Cancel leaves the Product unchanged", () => {
+    renderDetail();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive Product" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive Product" });
+
+    expect(dialog).toHaveTextContent("remain in historical records");
+    expect(dialog).toHaveTextContent("removed from normal active use");
+    expect(dialog).toHaveTextContent("reactivation is not supported");
+    expect(detailPageMocks.archive).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Archive Product" }))
+      .not.toBeInTheDocument();
+    expect(detailPageMocks.archive).not.toHaveBeenCalled();
+  });
+
+  it("blocks duplicate archive submissions and reports successful archive", async () => {
+    let resolveArchive: ((value: {
+      ok: true;
+      value: { productId: string };
+    }) => void) | undefined;
+    const pendingArchive = new Promise<{
+      ok: true;
+      value: { productId: string };
+    }>((resolve) => {
+      resolveArchive = resolve;
+    });
+    detailPageMocks.archive.mockReturnValue(pendingArchive);
+    renderDetail();
+
+    fireEvent.click(screen.getByRole("button", { name: "Archive Product" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive Product" });
+    const confirm = within(dialog).getByRole("button", {
+      name: "Archive Product",
+    });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(detailPageMocks.archive).toHaveBeenCalledOnce());
+    expect(within(dialog).getByRole("button", { name: "Archive Product…" }))
+      .toBeDisabled();
+
+    resolveArchive?.({ ok: true, value: { productId: "product-1" } });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Product archived.",
+    );
+    expect(screen.queryByRole("dialog", { name: "Archive Product" }))
+      .not.toBeInTheDocument();
   });
 
   it("prefills and validates editable master data without Serial or kind inputs", async () => {
@@ -300,14 +361,14 @@ describe("ProductDetailPage", () => {
     await pendingUpdate;
   });
 
-  it("adds no archive, quantity, Supplier, barcode, or history features", () => {
+  it("adds no Delete, Restore, quantity, Supplier, barcode, or history features", () => {
     renderDetail();
 
     expect(screen.queryByText(/quantity/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/supplier/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/barcode/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/inventory history/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /archive|delete|restore/i }))
+    expect(screen.queryByRole("button", { name: /delete|restore|reactivate/i }))
       .not.toBeInTheDocument();
   });
 });
