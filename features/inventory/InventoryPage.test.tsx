@@ -3,14 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
+  useProductCreation: vi.fn(),
   refetch: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   archive: vi.fn(),
+  createProduct: vi.fn(),
 }));
 
 vi.mock("./hooks/useBrandManagement", () => ({
   useBrandManagement: inventoryMocks.useBrandManagement,
+}));
+vi.mock("./hooks/useProductCreation", () => ({
+  useProductCreation: inventoryMocks.useProductCreation,
 }));
 
 import InventoryPage from "./InventoryPage";
@@ -36,6 +41,7 @@ const archivedBrand: Brand = {
 
 function setHookState(options: {
   canManage?: boolean;
+  canCreate?: boolean;
   isPending?: boolean;
   isError?: boolean;
   data?: { ok: true; value: Brand[] } | { ok: false; error: { code: string; message: string } };
@@ -52,6 +58,10 @@ function setHookState(options: {
     update: inventoryMocks.update,
     archive: inventoryMocks.archive,
   });
+  inventoryMocks.useProductCreation.mockReturnValue({
+    canCreate: options.canCreate ?? true,
+    create: inventoryMocks.createProduct,
+  });
 }
 
 beforeEach(() => {
@@ -66,6 +76,10 @@ beforeEach(() => {
   inventoryMocks.archive.mockResolvedValue({
     ok: true,
     value: { brandId: "brand-active" },
+  });
+  inventoryMocks.createProduct.mockResolvedValue({
+    ok: true,
+    value: { productId: "product-new", serialNumber: "0000123" },
   });
   setHookState();
 });
@@ -110,7 +124,7 @@ describe("InventoryPage", () => {
   });
 
   it("hides every management action for an Inventory view-only user", () => {
-    setHookState({ canManage: false });
+    setHookState({ canManage: false, canCreate: false });
     render(<InventoryPage />);
 
     expect(screen.getByText("ABB")).toBeInTheDocument();
@@ -118,6 +132,43 @@ describe("InventoryPage", () => {
     expect(screen.queryByRole("button", { name: "Add Brand" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Component" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("creates a Component with an active optional Brand and shows its generated Serial", async () => {
+    render(<InventoryPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Component" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Component" });
+    const brandSelect = within(dialog).getByLabelText(/Brand/);
+
+    expect(within(brandSelect).getByRole("option", { name: "ABB" }))
+      .toBeInTheDocument();
+    expect(within(brandSelect).queryByRole("option", { name: "Bosch" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "  Resistor  " },
+    });
+    fireEvent.change(within(dialog).getByLabelText("Category"), {
+      target: { value: "  Passive  " },
+    });
+    fireEvent.change(brandSelect, { target: { value: "brand-active" } });
+    fireEvent.click(within(dialog).getByRole("button", {
+      name: "Add Component",
+    }));
+
+    await waitFor(() => expect(inventoryMocks.createProduct).toHaveBeenCalledWith({
+      name: "Resistor",
+      category: "Passive",
+      brandId: "brand-active",
+    }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Component created. Serial Number: 0000123",
+    );
+    expect(screen.queryByRole("dialog", { name: "Add Component" }))
+      .not.toBeInTheDocument();
   });
 
   it("shows Add/Edit/Archive to managers, but no archived or destructive actions", () => {

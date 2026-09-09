@@ -5,20 +5,25 @@ import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import AddComponentDialog from "./components/AddComponentDialog";
 import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
 import { useBrandManagement } from "./hooks/useBrandManagement";
+import { useProductCreation } from "./hooks/useProductCreation";
 import type { Brand } from "./services/brandService";
 
 function InventoryPage() {
-  const { brandsQuery, canManage, create, update, archive } =
+  const { brandsQuery, canManage, create: createBrand, update, archive } =
     useBrandManagement();
+  const { canCreate, create: createProduct } = useProductCreation();
   const archiveLockRef = useRef(false);
+  const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Brand | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   function openCreateDialog() {
@@ -101,7 +106,25 @@ function InventoryPage() {
       <PageHeader
         title="Inventory"
         description="Manage AlfaEV Inventory reference data."
+        actions={canCreate ? (
+          <button
+            type="button"
+            onClick={() => {
+              setProductSuccessMessage(null);
+              setIsComponentDialogOpen(true);
+            }}
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+          >
+            Add Component
+          </button>
+        ) : undefined}
       />
+
+      {productSuccessMessage && (
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          {productSuccessMessage}
+        </p>
+      )}
 
       <section className="space-y-5" aria-labelledby="brands-heading">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -148,13 +171,34 @@ function InventoryPage() {
         onSubmit={(name) =>
           formMode === "edit" && selectedBrand
             ? update(selectedBrand.id, name)
-            : create(name)
+            : createBrand(name)
         }
         onSucceeded={() => {
           setSuccessMessage(
             formMode === "edit" ? "Brand updated." : "Brand added.",
           );
           setActionError(null);
+        }}
+      />
+
+      <AddComponentDialog
+        open={isComponentDialogOpen}
+        brands={brandsQuery.data?.ok ? brandsQuery.data.value : []}
+        isBrandsLoading={brandsQuery.isPending}
+        brandLoadError={
+          brandsQuery.isError || brandsQuery.data?.ok === false
+            ? brandsQuery.data?.ok === false
+              ? brandsQuery.data.error.message
+              : "The Brand list could not be loaded."
+            : null
+        }
+        onRetryBrands={() => void brandsQuery.refetch()}
+        onClose={() => setIsComponentDialogOpen(false)}
+        onSubmit={createProduct}
+        onSucceeded={(product) => {
+          setProductSuccessMessage(
+            `Component created. Serial Number: ${product.serialNumber}`,
+          );
         }}
       />
 
