@@ -198,6 +198,20 @@ interface ProductAuditRow {
   entity_type: string;
 }
 
+interface ProductSupplierRow {
+  archived_at: Date | null;
+  archived_by_user_id: string | null;
+  catalog_number: string | null;
+  created_at: Date;
+  created_by_user_id: string;
+  id: string;
+  is_active: boolean;
+  product_id: string;
+  supplier_id: string;
+  updated_at: Date;
+  updated_by_user_id: string;
+}
+
 interface CreatedProductRow {
   product_id: string;
   serial_number: string;
@@ -6119,6 +6133,460 @@ describe("Supabase security helpers", () => {
       .delete()
       .eq("id", randomUUID());
 
+    expectPermissionDenied(directUpdate.error);
+    expectPermissionDenied(directDelete.error);
+  });
+
+  it("enforces ProductSupplier schema, duplicate, FK, and lifecycle invariants", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const productOneId = randomUUID();
+      const productTwoId = randomUUID();
+      const supplierId = randomUUID();
+      const nullCatalogRelationId = randomUUID();
+      const catalogRelationId = randomUUID();
+      const differentCatalogRelationId = randomUUID();
+      const sharedCatalogRelationId = randomUUID();
+      const productOneSerial = createTestSerialNumber();
+      let productTwoSerial = createTestSerialNumber();
+
+      while (productTwoSerial === productOneSerial) {
+        productTwoSerial = createTestSerialNumber();
+      }
+
+      await database.query(
+        `insert into public.suppliers (
+           id,
+           name,
+           country,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Germany', $3::uuid, $3::uuid)`,
+        [supplierId, `ProductSupplier Test ${randomUUID()}`, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values
+           ($1::uuid, $2::text, 'Linked Product One', 'Components',
+            'component', $5::uuid, $5::uuid),
+           ($3::uuid, $4::text, 'Linked Product Two', 'Components',
+            'component', $5::uuid, $5::uuid)`,
+        [
+          productOneId,
+          productOneSerial,
+          productTwoId,
+          productTwoSerial,
+          actorId,
+        ],
+      );
+      await database.query(
+        `insert into public.product_suppliers (
+           id,
+           product_id,
+           supplier_id,
+           catalog_number,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values
+           ($1::uuid, $5::uuid, $7::uuid, null, $8::uuid, $8::uuid),
+           ($2::uuid, $5::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid),
+           ($3::uuid, $5::uuid, $7::uuid, 'CAT-OTHER', $8::uuid, $8::uuid),
+           ($4::uuid, $6::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid)`,
+        [
+          nullCatalogRelationId,
+          catalogRelationId,
+          differentCatalogRelationId,
+          sharedCatalogRelationId,
+          productOneId,
+          productTwoId,
+          supplierId,
+          actorId,
+        ],
+      );
+
+      const validRows = await database.query<ProductSupplierRow>(
+        `select *
+         from public.product_suppliers
+         where id = any($1::uuid[])
+         order by id`,
+        [[
+          nullCatalogRelationId,
+          catalogRelationId,
+          differentCatalogRelationId,
+          sharedCatalogRelationId,
+        ]],
+      );
+      const nullCatalog = validRows.rows.find(
+        (row) => row.id === nullCatalogRelationId,
+      );
+      const preservedCase = validRows.rows.find(
+        (row) => row.id === catalogRelationId,
+      );
+
+      expect(validRows.rows).toHaveLength(4);
+      expect(nullCatalog).toMatchObject({
+        archived_at: null,
+        archived_by_user_id: null,
+        catalog_number: null,
+        is_active: true,
+        product_id: productOneId,
+        supplier_id: supplierId,
+      });
+      expect(nullCatalog?.created_at).toEqual(nullCatalog?.updated_at);
+      expect(preservedCase?.catalog_number).toBe("Cat-AbC");
+
+      for (const catalogNumber of [null, "Cat-AbC"] as const) {
+        await database.query("savepoint duplicate_product_supplier");
+        await expect(
+          database.query(
+            `insert into public.product_suppliers (
+               product_id,
+               supplier_id,
+               catalog_number,
+               created_by_user_id,
+               updated_by_user_id
+             )
+             values ($1::uuid, $2::uuid, $3::text, $4::uuid, $4::uuid)`,
+            [productOneId, supplierId, catalogNumber, actorId],
+          ),
+        ).rejects.toMatchObject({ code: "23505" });
+        await database.query("rollback to savepoint duplicate_product_supplier");
+      }
+
+      for (const catalogNumber of ["", "   ", " Untrimmed"] as const) {
+        await database.query("savepoint invalid_product_supplier_catalog");
+        await expect(
+          database.query(
+            `insert into public.product_suppliers (
+               product_id,
+               supplier_id,
+               catalog_number,
+               created_by_user_id,
+               updated_by_user_id
+             )
+             values ($1::uuid, $2::uuid, $3::text, $4::uuid, $4::uuid)`,
+            [productTwoId, supplierId, catalogNumber, actorId],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+        await database.query("rollback to savepoint invalid_product_supplier_catalog");
+      }
+
+      for (const [isActive, archivedAt, archivedBy] of [
+        [true, new Date(), actorId],
+        [false, null, null],
+      ] as const) {
+        await database.query("savepoint invalid_product_supplier_lifecycle");
+        await expect(
+          database.query(
+            `insert into public.product_suppliers (
+               product_id,
+               supplier_id,
+               catalog_number,
+               is_active,
+               created_by_user_id,
+               updated_by_user_id,
+               archived_at,
+               archived_by_user_id
+             )
+             values ($1::uuid, $2::uuid, $3::text, $4::boolean,
+                     $5::uuid, $5::uuid, $6::timestamptz, $7::uuid)`,
+            [
+              productTwoId,
+              supplierId,
+              `STATE-${randomUUID()}`,
+              isActive,
+              actorId,
+              archivedAt,
+              archivedBy,
+            ],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+        await database.query("rollback to savepoint invalid_product_supplier_lifecycle");
+      }
+
+      await database.query(
+        `update public.product_suppliers
+         set is_active = false,
+             updated_at = pg_catalog.now(),
+             updated_by_user_id = $2::uuid,
+             archived_at = pg_catalog.now(),
+             archived_by_user_id = $2::uuid
+         where id = $1::uuid`,
+        [catalogRelationId, actorId],
+      );
+      const archivedBefore = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [catalogRelationId],
+      );
+
+      expect(archivedBefore.rows[0]).toMatchObject({
+        archived_by_user_id: actorId,
+        catalog_number: "Cat-AbC",
+        is_active: false,
+      });
+      expect(archivedBefore.rows[0]?.archived_at).toBeInstanceOf(Date);
+
+      await database.query("savepoint immutable_archived_product_supplier");
+      await expect(
+        database.query(
+          `update public.product_suppliers
+           set catalog_number = 'FORBIDDEN'
+           where id = $1::uuid`,
+          [catalogRelationId],
+        ),
+      ).rejects.toMatchObject({ code: "PSR01" });
+      await database.query("rollback to savepoint immutable_archived_product_supplier");
+
+      const archivedAfter = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [catalogRelationId],
+      );
+      expect(archivedAfter.rows).toEqual(archivedBefore.rows);
+
+      await database.query("savepoint referenced_product_delete");
+      await expect(
+        database.query(
+          "delete from public.products where id = $1::uuid",
+          [productOneId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await database.query("rollback to savepoint referenced_product_delete");
+
+      await database.query("savepoint referenced_supplier_delete");
+      await expect(
+        database.query(
+          "delete from public.suppliers where id = $1::uuid",
+          [supplierId],
+        ),
+      ).rejects.toMatchObject({ code: "23503" });
+      await database.query("rollback to savepoint referenced_supplier_delete");
+
+      const tableSecurity = await database.query<{
+        authenticated_delete: boolean;
+        authenticated_insert: boolean;
+        authenticated_select: boolean;
+        authenticated_update: boolean;
+        row_security: boolean;
+      }>(
+        `select
+           table_info.relrowsecurity as row_security,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'select') as authenticated_select,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'insert') as authenticated_insert,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'update') as authenticated_update,
+           pg_catalog.has_table_privilege('authenticated', table_info.oid, 'delete') as authenticated_delete
+         from pg_catalog.pg_class as table_info
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = table_info.relnamespace
+         where namespace.nspname = 'public'
+           and table_info.relname = 'product_suppliers'`,
+      );
+      const duplicateConstraint = await database.query<{
+        nulls_not_distinct: boolean;
+      }>(
+        `select index_info.indnullsnotdistinct as nulls_not_distinct
+         from pg_catalog.pg_index as index_info
+         join pg_catalog.pg_class as index_object
+           on index_object.oid = index_info.indexrelid
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = index_object.relnamespace
+         where namespace.nspname = 'public'
+           and index_object.relname = 'product_suppliers_product_supplier_catalog_key'`,
+      );
+      const lifecycleFunction = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        settings: string[];
+      }>(
+        `select
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'enforce_product_supplier_lifecycle_immutability'`,
+      );
+      const mutationFunctions = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'create_product_supplier',
+             'update_product_supplier',
+             'archive_product_supplier',
+             'delete_product_supplier',
+             'restore_product_supplier',
+             'reactivate_product_supplier',
+             'unarchive_product_supplier'
+           )`,
+      );
+
+      expect(tableSecurity.rows).toEqual([
+        {
+          authenticated_delete: false,
+          authenticated_insert: false,
+          authenticated_select: true,
+          authenticated_update: false,
+          row_security: true,
+        },
+      ]);
+      expect(duplicateConstraint.rows).toEqual([{ nulls_not_distinct: true }]);
+      expect(lifecycleFunction.rows).toEqual([
+        {
+          anonymous_execute: false,
+          authenticated_execute: false,
+          settings: ["search_path=\"\""],
+        },
+      ]);
+      expect(mutationFunctions.rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("allows either ProductSupplier view permission and denies all direct client writes", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const productId = randomUUID();
+      const supplierId = randomUUID();
+      const activeRelationId = randomUUID();
+      const archivedRelationId = randomUUID();
+
+      await database.query(
+        `insert into public.suppliers (
+           id,
+           name,
+           country,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'Germany', $3::uuid, $3::uuid)`,
+        [supplierId, `RLS Supplier ${randomUUID()}`, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id,
+           serial_number,
+           name,
+           category,
+           product_kind,
+           created_by_user_id,
+           updated_by_user_id
+         )
+         values ($1::uuid, $2::text, 'RLS Product', 'Components',
+                 'component', $3::uuid, $3::uuid)`,
+        [productId, createTestSerialNumber(), actorId],
+      );
+      await database.query(
+        `insert into public.product_suppliers (
+           id,
+           product_id,
+           supplier_id,
+           catalog_number,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values
+           ($1::uuid, $3::uuid, $4::uuid, 'ACTIVE', true,
+            $5::uuid, $5::uuid, null, null),
+           ($2::uuid, $3::uuid, $4::uuid, 'ARCHIVED', false,
+            $5::uuid, $5::uuid, pg_catalog.now(), $5::uuid)`,
+        [activeRelationId, archivedRelationId, productId, supplierId, actorId],
+      );
+
+      for (const actor of [
+        fixture.actors.admin,
+        fixture.actors.brandManager,
+        fixture.actors.supplierViewer,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const visible = await database.query<{ id: string }>(
+          `select id
+           from public.product_suppliers
+           where id = any($1::uuid[])
+           order by id`,
+          [[activeRelationId, archivedRelationId]],
+        );
+        await database.query("reset role");
+
+        expect(visible.rows.map((row) => row.id).sort()).toEqual(
+          [activeRelationId, archivedRelationId].sort(),
+        );
+      }
+
+      for (const actor of [
+        fixture.actors.productCreator,
+        fixture.actors.productEditor,
+        fixture.actors.supplierEditor,
+        fixture.actors.unpermitted,
+        fixture.actors.inactiveBrandManager,
+        fixture.actors.inactiveSupplierManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const hidden = await database.query<{ id: string }>(
+          `select id
+           from public.product_suppliers
+           where id = any($1::uuid[])`,
+          [[activeRelationId, archivedRelationId]],
+        );
+        await database.query("reset role");
+
+        expect(hidden.rows).toEqual([]);
+      }
+
+      await database.query("savepoint anonymous_product_supplier_read");
+      await database.query("set local role anon");
+      await expect(
+        database.query("select id from public.product_suppliers limit 1"),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_product_supplier_read");
+      await database.query("reset role");
+    });
+
+    const client = fixture.actors.supplierViewer.client;
+    const directInsert = await client.from("product_suppliers").insert({
+      product_id: randomUUID(),
+      supplier_id: randomUUID(),
+      catalog_number: "DIRECT",
+      created_by_user_id: fixture.actors.supplierViewer.profileId,
+      updated_by_user_id: fixture.actors.supplierViewer.profileId,
+    });
+    const directUpdate = await client
+      .from("product_suppliers")
+      .update({ catalog_number: "FORBIDDEN" })
+      .eq("id", randomUUID());
+    const directDelete = await client
+      .from("product_suppliers")
+      .delete()
+      .eq("id", randomUUID());
+
+    expectPermissionDenied(directInsert.error);
     expectPermissionDenied(directUpdate.error);
     expectPermissionDenied(directDelete.error);
   });
