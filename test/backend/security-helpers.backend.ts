@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
+import type { PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PERMISSION_KEYS } from "../../app/auth/permissions";
@@ -224,6 +225,81 @@ function createTestSerialNumber(): string {
   ) % 10_000_000;
 
   return randomValue.toString().padStart(7, "0");
+}
+
+async function createProductSupplierEndpoints(
+  database: PoolClient,
+  actorId: string,
+  options: { productActive?: boolean; supplierActive?: boolean } = {},
+): Promise<{ productId: string; supplierId: string }> {
+  const productId = randomUUID();
+  const supplierId = randomUUID();
+  const productActive = options.productActive ?? true;
+  const supplierActive = options.supplierActive ?? true;
+
+  await database.query(
+    `insert into public.products (
+       id,
+       serial_number,
+       name,
+       category,
+       product_kind,
+       is_active,
+       created_by_user_id,
+       updated_by_user_id,
+       archived_at,
+       archived_by_user_id
+     )
+     values (
+       $1::uuid,
+       $2::text,
+       $3::text,
+       'Components',
+       'component',
+       $4::boolean,
+       $5::uuid,
+       $5::uuid,
+       case when $4::boolean then null else pg_catalog.now() end,
+       case when $4::boolean then null else $5::uuid end
+     )`,
+    [
+      productId,
+      createTestSerialNumber(),
+      `ProductSupplier Endpoint ${randomUUID()}`,
+      productActive,
+      actorId,
+    ],
+  );
+  await database.query(
+    `insert into public.suppliers (
+       id,
+       name,
+       country,
+       is_active,
+       created_by_user_id,
+       updated_by_user_id,
+       archived_at,
+       archived_by_user_id
+     )
+     values (
+       $1::uuid,
+       $2::text,
+       'Germany',
+       $3::boolean,
+       $4::uuid,
+       $4::uuid,
+       case when $3::boolean then null else pg_catalog.now() end,
+       case when $3::boolean then null else $4::uuid end
+     )`,
+    [
+      supplierId,
+      `ProductSupplier Endpoint ${randomUUID()}`,
+      supplierActive,
+      actorId,
+    ],
+  );
+
+  return { productId, supplierId };
 }
 
 function isPermissionMatrixRow(value: unknown): value is PermissionMatrixRow {
@@ -6419,16 +6495,13 @@ describe("Supabase security helpers", () => {
          where namespace.nspname = 'public'
            and routine.proname = 'enforce_product_supplier_lifecycle_immutability'`,
       );
-      const mutationFunctions = await database.query<CountResultRow>(
+      const unsupportedMutationFunctions = await database.query<CountResultRow>(
         `select count(*)::integer as count
          from pg_catalog.pg_proc as routine
          join pg_catalog.pg_namespace as namespace
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and routine.proname in (
-             'create_product_supplier',
-             'update_product_supplier',
-             'archive_product_supplier',
              'delete_product_supplier',
              'restore_product_supplier',
              'reactivate_product_supplier',
@@ -6453,7 +6526,7 @@ describe("Supabase security helpers", () => {
           settings: ["search_path=\"\""],
         },
       ]);
-      expect(mutationFunctions.rows).toEqual([{ count: 0 }]);
+      expect(unsupportedMutationFunctions.rows).toEqual([{ count: 0 }]);
     });
   });
 
@@ -6589,5 +6662,603 @@ describe("Supabase security helpers", () => {
     expectPermissionDenied(directInsert.error);
     expectPermissionDenied(directUpdate.error);
     expectPermissionDenied(directDelete.error);
+  });
+
+  it("lets Admin create, edit, and archive ProductSupplier history with trusted audit", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const endpoints = await createProductSupplierEndpoints(
+        database,
+        actor.profileId,
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [actor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const created = await database.query<{ relation_id: string }>(
+        `select public.create_product_supplier(
+           $1::uuid,
+           $2::uuid,
+           '  Cat-AbC  '
+         ) as relation_id`,
+        [endpoints.productId, endpoints.supplierId],
+      );
+      await database.query("reset role");
+      const relationId = created.rows[0]?.relation_id;
+
+      expect(relationId).toBeTypeOf("string");
+      const afterCreate = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [relationId],
+      );
+      expect(afterCreate.rows[0]).toMatchObject({
+        archived_at: null,
+        archived_by_user_id: null,
+        catalog_number: "Cat-AbC",
+        created_by_user_id: actor.profileId,
+        is_active: true,
+        product_id: endpoints.productId,
+        supplier_id: endpoints.supplierId,
+        updated_by_user_id: actor.profileId,
+      });
+      expect(afterCreate.rows[0]?.created_at)
+        .toEqual(afterCreate.rows[0]?.updated_at);
+
+      await database.query("set local role authenticated");
+      const updated = await database.query<{ relation_id: string }>(
+        `select public.update_product_supplier(
+           $1::uuid,
+           '  Next-Catalog  '
+         ) as relation_id`,
+        [relationId],
+      );
+      await database.query("reset role");
+      const afterUpdate = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [relationId],
+      );
+
+      expect(updated.rows).toEqual([{ relation_id: relationId }]);
+      expect(afterUpdate.rows[0]).toMatchObject({
+        catalog_number: "Next-Catalog",
+        product_id: endpoints.productId,
+        supplier_id: endpoints.supplierId,
+        updated_by_user_id: actor.profileId,
+      });
+
+      const updatedAuditBeforeNoop = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product_supplier.updated'`,
+        [relationId],
+      );
+      await database.query("set local role authenticated");
+      const noop = await database.query<{ relation_id: string }>(
+        `select public.update_product_supplier(
+           $1::uuid,
+           ' Next-Catalog '
+         ) as relation_id`,
+        [relationId],
+      );
+      await database.query("reset role");
+      const afterNoop = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [relationId],
+      );
+      const updatedAuditAfterNoop = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'product_supplier.updated'`,
+        [relationId],
+      );
+
+      expect(noop.rows).toEqual([{ relation_id: relationId }]);
+      expect(afterNoop.rows).toEqual(afterUpdate.rows);
+      expect(updatedAuditAfterNoop.rows).toEqual(updatedAuditBeforeNoop.rows);
+
+      await database.query("set local role authenticated");
+      const archived = await database.query<{ relation_id: string }>(
+        `select public.archive_product_supplier($1::uuid) as relation_id`,
+        [relationId],
+      );
+      await database.query("reset role");
+      const afterArchive = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [relationId],
+      );
+
+      expect(archived.rows).toEqual([{ relation_id: relationId }]);
+      expect(afterArchive.rows[0]).toMatchObject({
+        archived_by_user_id: actor.profileId,
+        catalog_number: "Next-Catalog",
+        is_active: false,
+        product_id: endpoints.productId,
+        supplier_id: endpoints.supplierId,
+        updated_by_user_id: actor.profileId,
+      });
+      expect(afterArchive.rows[0]?.archived_at).toBeInstanceOf(Date);
+      expect(afterArchive.rows[0]?.updated_at)
+        .toEqual(afterArchive.rows[0]?.archived_at);
+
+      await database.query("set local role authenticated");
+      await database.query("savepoint repeated_product_supplier_archive");
+      await expect(
+        database.query(
+          "select public.archive_product_supplier($1::uuid)",
+          [relationId],
+        ),
+      ).rejects.toMatchObject({ code: "PSR01" });
+      await database.query("rollback to savepoint repeated_product_supplier_archive");
+      await database.query("savepoint archived_product_supplier_edit");
+      await expect(
+        database.query(
+          "select public.update_product_supplier($1::uuid, 'FORBIDDEN')",
+          [relationId],
+        ),
+      ).rejects.toMatchObject({ code: "PSR01" });
+      await database.query("rollback to savepoint archived_product_supplier_edit");
+      await database.query("reset role");
+
+      const afterFailures = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [relationId],
+      );
+      const audits = await database.query<ProductAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type in (
+             'product_supplier.created',
+             'product_supplier.updated',
+             'product_supplier.archived'
+           )
+         order by created_at`,
+        [relationId],
+      );
+
+      expect(afterFailures.rows).toEqual(afterArchive.rows);
+      expect(audits.rows).toHaveLength(3);
+      expect(audits.rows.map((row) => row.action_type)).toEqual([
+        "product_supplier.created",
+        "product_supplier.updated",
+        "product_supplier.archived",
+      ]);
+      expect(audits.rows.every((row) =>
+        row.actor_user_id === actor.profileId &&
+        row.entity_type === "product_supplier" &&
+        row.entity_id === relationId
+      )).toBe(true);
+      expect(audits.rows[0]?.after_data).toEqual({
+        catalog_number: "Cat-AbC",
+        is_active: true,
+        product_id: endpoints.productId,
+        supplier_id: endpoints.supplierId,
+      });
+      expect(audits.rows[1]).toMatchObject({
+        before_data: {
+          catalog_number: "Cat-AbC",
+          is_active: true,
+          product_id: endpoints.productId,
+          supplier_id: endpoints.supplierId,
+        },
+        after_data: {
+          catalog_number: "Next-Catalog",
+          is_active: true,
+          product_id: endpoints.productId,
+          supplier_id: endpoints.supplierId,
+        },
+      });
+      expect(audits.rows[2]?.after_data).toMatchObject({
+        archived_by_user_id: actor.profileId,
+        catalog_number: "Next-Catalog",
+        is_active: false,
+        product_id: endpoints.productId,
+        supplier_id: endpoints.supplierId,
+      });
+
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        arguments: string;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        name: string;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           routine.proname as name,
+           pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'archive_product_supplier',
+             'create_product_supplier',
+             'current_product_supplier_mutation_actor_id',
+             'update_product_supplier'
+           )
+         order by routine.proname`,
+      );
+
+      expect(functionSecurity.rows).toEqual([
+        {
+          anonymous_execute: false,
+          arguments: "p_product_supplier_id uuid",
+          authenticated_execute: true,
+          is_security_definer: true,
+          name: "archive_product_supplier",
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+        {
+          anonymous_execute: false,
+          arguments: "p_product_id uuid, p_supplier_id uuid, p_catalog_number text DEFAULT NULL::text",
+          authenticated_execute: true,
+          is_security_definer: true,
+          name: "create_product_supplier",
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+        {
+          anonymous_execute: false,
+          arguments: "",
+          authenticated_execute: false,
+          is_security_definer: true,
+          name: "current_product_supplier_mutation_actor_id",
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+        {
+          anonymous_execute: false,
+          arguments: "p_product_supplier_id uuid, p_catalog_number text",
+          authenticated_execute: true,
+          is_security_definer: true,
+          name: "update_product_supplier",
+          result_type: "uuid",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+    });
+  });
+
+  it("uses the same ProductSupplier authority for Product and Supplier editors", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      for (const [label, actor] of [
+        ["PRODUCT", fixture.actors.productEditor],
+        ["SUPPLIER", fixture.actors.supplierEditor],
+      ] as const) {
+        const endpoints = await createProductSupplierEndpoints(
+          database,
+          fixture.actors.admin.profileId,
+        );
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const created = await database.query<{ relation_id: string }>(
+          `select public.create_product_supplier(
+             $1::uuid,
+             $2::uuid,
+             $3::text
+           ) as relation_id`,
+          [endpoints.productId, endpoints.supplierId, `${label}-CREATE`],
+        );
+        const relationId = created.rows[0]?.relation_id;
+        await database.query(
+          "select public.update_product_supplier($1::uuid, $2::text)",
+          [relationId, `${label}-UPDATE`],
+        );
+        await database.query(
+          "select public.archive_product_supplier($1::uuid)",
+          [relationId],
+        );
+        await database.query("reset role");
+
+        const relation = await database.query<ProductSupplierRow>(
+          "select * from public.product_suppliers where id = $1::uuid",
+          [relationId],
+        );
+        const audits = await database.query<ProductAuditRow>(
+          `select actor_user_id, action_type, entity_type, entity_id,
+                  before_data, after_data
+           from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type like 'product_supplier.%'
+           order by created_at`,
+          [relationId],
+        );
+
+        expect(relation.rows[0]).toMatchObject({
+          archived_by_user_id: actor.profileId,
+          catalog_number: `${label}-UPDATE`,
+          is_active: false,
+          updated_by_user_id: actor.profileId,
+        });
+        expect(audits.rows).toHaveLength(3);
+        expect(audits.rows.every((row) =>
+          row.actor_user_id === actor.profileId
+        )).toBe(true);
+      }
+    });
+  });
+
+  it("rejects unauthorized ProductSupplier mutations before target access", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      for (const actor of [
+        fixture.actors.brandManager,
+        fixture.actors.supplierViewer,
+        fixture.actors.productCreator,
+        fixture.actors.supplierCreator,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+        fixture.actors.inactiveSupplierManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+
+        for (const [savepoint, sql, values] of [
+          [
+            "denied_product_supplier_create",
+            "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+            [randomUUID(), randomUUID()],
+          ],
+          [
+            "denied_product_supplier_update",
+            "select public.update_product_supplier($1::uuid, null)",
+            [randomUUID()],
+          ],
+          [
+            "denied_product_supplier_archive",
+            "select public.archive_product_supplier($1::uuid)",
+            [randomUUID()],
+          ],
+        ] as const) {
+          await database.query(`savepoint ${savepoint}`);
+          await expect(database.query(sql, [...values]))
+            .rejects.toMatchObject({ code: "42501" });
+          await database.query(`rollback to savepoint ${savepoint}`);
+        }
+
+        await database.query("reset role");
+      }
+
+      await database.query("savepoint anonymous_product_supplier_mutation");
+      await database.query("set local role anon");
+      await expect(
+        database.query(
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [randomUUID(), randomUUID()],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_product_supplier_mutation");
+      await database.query("reset role");
+    });
+  });
+
+  it("normalizes ProductSupplier input and fails endpoint or duplicate conflicts atomically", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const active = await createProductSupplierEndpoints(
+        database,
+        actor.profileId,
+      );
+      const archivedProduct = await createProductSupplierEndpoints(
+        database,
+        actor.profileId,
+        { productActive: false },
+      );
+      const archivedSupplier = await createProductSupplierEndpoints(
+        database,
+        actor.profileId,
+        { supplierActive: false },
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [actor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const nullCatalog = await database.query<{ relation_id: string }>(
+        `select public.create_product_supplier(
+           $1::uuid,
+           $2::uuid,
+           '   '
+         ) as relation_id`,
+        [active.productId, active.supplierId],
+      );
+      const firstCatalog = await database.query<{ relation_id: string }>(
+        `select public.create_product_supplier(
+           $1::uuid,
+           $2::uuid,
+           '  Case-Kept  '
+         ) as relation_id`,
+        [active.productId, active.supplierId],
+      );
+      const differentCatalog = await database.query<{ relation_id: string }>(
+        `select public.create_product_supplier(
+           $1::uuid,
+           $2::uuid,
+           'DIFFERENT'
+         ) as relation_id`,
+        [active.productId, active.supplierId],
+      );
+
+      for (const [savepoint, sql, values, errorCode] of [
+        [
+          "null_product_supplier_product",
+          "select public.create_product_supplier(null, $1::uuid, null)",
+          [active.supplierId],
+          "22023",
+        ],
+        [
+          "null_product_supplier_supplier",
+          "select public.create_product_supplier($1::uuid, null, null)",
+          [active.productId],
+          "22023",
+        ],
+        [
+          "duplicate_null_product_supplier",
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [active.productId, active.supplierId],
+          "PSR04",
+        ],
+        [
+          "duplicate_catalog_product_supplier",
+          "select public.create_product_supplier($1::uuid, $2::uuid, ' Case-Kept ')",
+          [active.productId, active.supplierId],
+          "PSR04",
+        ],
+        [
+          "missing_product_supplier_product",
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [randomUUID(), active.supplierId],
+          "PSR02",
+        ],
+        [
+          "archived_product_supplier_product",
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [archivedProduct.productId, active.supplierId],
+          "PSR02",
+        ],
+        [
+          "missing_product_supplier_supplier",
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [active.productId, randomUUID()],
+          "PSR03",
+        ],
+        [
+          "archived_product_supplier_supplier",
+          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          [active.productId, archivedSupplier.supplierId],
+          "PSR03",
+        ],
+      ] as const) {
+        await database.query(`savepoint ${savepoint}`);
+        await expect(database.query(sql, [...values]))
+          .rejects.toMatchObject({ code: errorCode });
+        await database.query(`rollback to savepoint ${savepoint}`);
+      }
+
+      await database.query("savepoint duplicate_product_supplier_edit");
+      await expect(
+        database.query(
+          "select public.update_product_supplier($1::uuid, null)",
+          [differentCatalog.rows[0]?.relation_id],
+        ),
+      ).rejects.toMatchObject({ code: "PSR04" });
+      await database.query("rollback to savepoint duplicate_product_supplier_edit");
+
+      for (const [savepoint, sql, values] of [
+        [
+          "null_product_supplier_update",
+          "select public.update_product_supplier(null, null)",
+          [],
+        ],
+        [
+          "null_product_supplier_archive",
+          "select public.archive_product_supplier(null)",
+          [],
+        ],
+        [
+          "missing_product_supplier_update",
+          "select public.update_product_supplier($1::uuid, null)",
+          [randomUUID()],
+        ],
+        [
+          "missing_product_supplier_archive",
+          "select public.archive_product_supplier($1::uuid)",
+          [randomUUID()],
+        ],
+      ] as const) {
+        await database.query(`savepoint ${savepoint}`);
+        await expect(database.query(sql, [...values]))
+          .rejects.toMatchObject({
+            code: savepoint.startsWith("null_") ? "22023" : "P0002",
+          });
+        await database.query(`rollback to savepoint ${savepoint}`);
+      }
+      await database.query("reset role");
+
+      const relations = await database.query<ProductSupplierRow>(
+        `select *
+         from public.product_suppliers
+         where id = any($1::uuid[])
+         order by id`,
+        [[
+          nullCatalog.rows[0]?.relation_id,
+          firstCatalog.rows[0]?.relation_id,
+          differentCatalog.rows[0]?.relation_id,
+        ]],
+      );
+      const auditCount = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = any($1::uuid[])
+           and action_type like 'product_supplier.%'`,
+        [[
+          nullCatalog.rows[0]?.relation_id,
+          firstCatalog.rows[0]?.relation_id,
+          differentCatalog.rows[0]?.relation_id,
+        ]],
+      );
+
+      expect(relations.rows).toHaveLength(3);
+      expect(relations.rows.map((row) => row.catalog_number).sort()).toEqual([
+        "Case-Kept",
+        "DIFFERENT",
+        null,
+      ]);
+      expect(auditCount.rows).toEqual([{ count: 3 }]);
+
+      await database.query(
+        `update public.products
+         set is_active = false,
+             updated_at = pg_catalog.now(),
+             updated_by_user_id = $2::uuid,
+             archived_at = pg_catalog.now(),
+             archived_by_user_id = $2::uuid
+         where id = $1::uuid`,
+        [active.productId, actor.profileId],
+      );
+      await database.query("set local role authenticated");
+      await database.query(
+        "select public.update_product_supplier($1::uuid, 'HISTORICAL')",
+        [firstCatalog.rows[0]?.relation_id],
+      );
+      await database.query("reset role");
+
+      const historicalEdit = await database.query<ProductSupplierRow>(
+        "select * from public.product_suppliers where id = $1::uuid",
+        [firstCatalog.rows[0]?.relation_id],
+      );
+      expect(historicalEdit.rows[0]).toMatchObject({
+        catalog_number: "HISTORICAL",
+        product_id: active.productId,
+        supplier_id: active.supplierId,
+      });
+    });
   });
 });
