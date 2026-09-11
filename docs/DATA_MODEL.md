@@ -383,25 +383,44 @@ Fields:
 - `product_id`
 - `supplier_id`
 - `catalog_number`
+  - nullable
   - supplier-specific
-  - not unique
+  - trimmed when provided
+  - blank stored as `NULL`
+  - entered casing preserved
+  - not globally unique
 - `is_active`
 - `created_at`
 - `created_by_user_id`
 - `updated_at`
 - `updated_by_user_id`
+- `archived_at`
+  - nullable
+- `archived_by_user_id`
+  - nullable
 
-Recommended constraint:
+Required duplicate-prevention constraint:
 
 - unique `(product_id, supplier_id, catalog_number)` only to prevent accidental duplicate copies of the exact same relation
+- uniqueness must treat two `NULL` Catalog Numbers for the same Product and Supplier as duplicates
 - do NOT make `catalog_number` globally unique
 
 Rules:
 
 - One Product may have multiple Suppliers.
-- The same Product may have a different Catalog Number for each Supplier.
+- The same Product and Supplier may have multiple relationships when their Catalog Numbers differ.
 - Different Products may share the same Catalog Number.
 - Catalog Number must never be used as the Product identity.
+- A new ProductSupplier relationship starts active.
+- Creating a new relationship requires both the referenced Product and Supplier to exist and be active.
+- Existing relationships remain historically valid if the Product or Supplier is archived later; Product or Supplier archive must not delete or cascade ProductSupplier history.
+- ProductSupplier relationships are archived/deactivated rather than hard-deleted through normal application workflows.
+- Archived ProductSupplier relationships remain readable for authorized historical use and are immutable.
+- ProductSupplier reactivation/unarchive is not supported in the current scope.
+- Meaningful add/edit/archive changes create immutable AuditLog history; normalized no-op changes do not create audit noise.
+- ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required.
+- Add/edit/archive uses one trusted backend authority and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, regardless of whether the operation originates from Product detail or Supplier detail.
+- No separate ProductSupplier permission key exists.
 
 ---
 
@@ -1097,7 +1116,7 @@ ProcurementRequest
 | UserPermission | Yes, Admin-controlled | Every change audited |
 | Brand | Yes until archived | Never hard-deleted through normal workflows; archived records are immutable and cannot be reactivated in the current scope |
 | Product | Yes until archived | Serial Number never changes/reuses |
-| ProductSupplier | Yes | History/audit required for meaningful changes |
+| ProductSupplier | Yes until archived | Never hard-deleted through normal workflows; archived relationships are historically readable, immutable, and cannot be reactivated in the current scope |
 | InventoryBalance | Transactionally mutable | Never directly mutated without movement |
 | InventoryMovement | No | Immutable ledger |
 | Project | Yes until Completed | Completed read-only; Admin may reopen |

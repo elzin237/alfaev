@@ -1008,25 +1008,44 @@ Archive/deactivate must remain a trusted backend lifecycle mutation. This is the
 ## 053 — Create ProductSupplier Schema
 
 Goal:
-- many-to-many Product↔Supplier
+- create the ProductSupplier schema and read/RLS security baseline only
 
 Include:
-- supplier-specific Catalog Number
-- Catalog Number non-unique
-- relationship active state
+- many-to-many Product↔Supplier structure
+- history-preserving Product and Supplier foreign keys
+- optional/nullable supplier-specific Catalog Number
+- trim Catalog Number when provided, store blank as `NULL`, and preserve entered casing
+- Catalog Number is not globally unique and is not Product identity
+- exact duplicate prevention on `(product_id, supplier_id, catalog_number)`, including treating two `NULL` Catalog Numbers for the same Product and Supplier as duplicates
+- canonical active/archive lifecycle and actor/timestamp metadata
+- new relationships start active
+- archived relationships remain historically readable and immutable
+- Product or Supplier archive does not delete/cascade historical relationships
+- RLS SELECT policy allowing an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required
 
-Add correct uniqueness constraints only for duplicate relation prevention.
+Do not add mutation RPCs, UI, hard delete, or restore/reactivation behavior in this task.
 
 ---
 
 ## 054 — Add ProductSupplier Backend Operations
 
 Goal:
-- authorized link/add/edit/archive operations
+- trusted add/edit/archive operations with immutable audit
 
 Requirements:
-- Product and Supplier validity
-- audit meaningful changes
+- require an active Admin, `inventory.products.edit`, or `suppliers.edit`
+- use one shared backend authority regardless of whether the operation originates from Product detail or Supplier detail
+- require an active Product and active Supplier when creating a new relationship
+- preserve existing historical relationships when a Product or Supplier is archived later
+- normalize Catalog Number by trimming, storing blank as `NULL`, and preserving entered casing
+- prevent exact duplicate relationships, including duplicate `NULL` Catalog Number relationships
+- archive/deactivate rather than hard-delete
+- archived relationships are immutable
+- no restore/reactivation operation
+- audit meaningful add/edit/archive changes atomically
+- normalized no-op edits create no audit noise
+
+Do not add a ProductSupplier permission key or UI in this task.
 
 ---
 
@@ -1037,6 +1056,8 @@ Goal:
   - Supplier
   - Catalog Number
 
+Reuse the Task 054 trusted ProductSupplier backend operations. Do not duplicate authorization or mutation rules in the Product UI.
+
 Do not mix Inventory quantities into this task.
 
 ---
@@ -1046,7 +1067,7 @@ Do not mix Inventory quantities into this task.
 Goal:
 - Supplier detail shows linked Products and Catalog Numbers
 
-Reuse ProductSupplier backend/query logic.
+Reuse the Task 054 trusted ProductSupplier backend operations and shared query logic. Do not create a second Supplier-origin mutation authority.
 
 ---
 

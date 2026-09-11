@@ -199,11 +199,27 @@ The sequence must be generated safely by trusted backend/database logic to preve
 - separate from Serial Number
 - supplier-related
 - belongs to the Product–Supplier relationship
+- optional and nullable
+- trimmed when provided, with blank input stored as `NULL`
+- preserves entered casing
 - one product/component may have multiple Suppliers
-- each Supplier may have its own Catalog Number for the same product/component
-- not unique
+- the same Product and Supplier may have multiple relationships when their Catalog Numbers differ
+- not globally unique
 - may be shared by multiple different products/components
 - must not be used as primary identifier
+
+### ProductSupplier Relationships
+
+- An exact duplicate `(product_id, supplier_id, catalog_number)` relationship is not allowed.
+- Two rows with the same Product and Supplier and a `NULL` Catalog Number also count as duplicates.
+- A new ProductSupplier relationship starts active and may be created only between an active Product and an active Supplier.
+- If a related Product or Supplier is archived later, the existing ProductSupplier relationship remains historically valid and is not deleted or cascaded away.
+- ProductSupplier relationships are never hard-deleted through normal application workflows; archive/deactivate is the removal path.
+- Archived ProductSupplier relationships remain historically readable and are immutable.
+- ProductSupplier reactivation/unarchive is not supported in the current scope.
+- Meaningful ProductSupplier add/edit/archive changes create immutable AuditLog history; normalized no-op edits do not create audit noise.
+- ProductSupplier add/edit/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, enforced through one shared trusted backend authority regardless of the originating detail screen.
+- No separate ProductSupplier permission key is added.
 
 ---
 

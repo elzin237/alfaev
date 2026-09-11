@@ -138,6 +138,17 @@ Product authorization:
 - archived Products remain readable for authorized historical access but are immutable through normal Product editing
 - no normal hard-delete or reactivation/unarchive workflow is supported
 
+ProductSupplier authorization:
+
+- ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required
+- direct client ProductSupplier mutation is not authoritative authorization
+- trusted ProductSupplier add/edit/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
+- one shared trusted backend authority applies regardless of whether the operation originates from Product detail or Supplier detail
+- new relationships must re-check that both the Product and Supplier are active
+- archived relationships are immutable, historically readable where authorized, and cannot be hard-deleted or reactivated through normal workflows
+- Product or Supplier archive must not delete or cascade historical ProductSupplier relationships
+- no separate ProductSupplier permission key is added
+
 ---
 
 # 6. Row Level Security
@@ -191,6 +202,7 @@ At minimum, trusted backend/database operations are required for:
 - account activation/deactivation
 - Brand create/edit/archive
 - Supplier create/edit/archive
+- ProductSupplier add/edit/archive
 
 These operations must re-check authorization and current state at execution time.
 

@@ -130,6 +130,10 @@ Product creation and editing use the existing Add Products/Components (`inventor
 
 Product archive/deactivate requires an active Admin or Edit Product/Component Data (`inventory.products.edit`). Add Products/Components (`inventory.products.create`) does not authorize archive, View Inventory (`inventory.view`) remains read-only, and no separate `inventory.products.archive` permission is added. Archive remains a trusted backend lifecycle mutation and does not authorize hard deletion or reactivation/unarchive.
 
+ProductSupplier add/edit/archive requires an active Admin or either existing capability: Edit Product/Component Data (`inventory.products.edit`) or Edit Suppliers (`suppliers.edit`). The same trusted backend authority applies whether the operation originates from Product detail or Supplier detail. No separate ProductSupplier permission key is added, and direct client mutation is not authoritative authorization.
+
+ProductSupplier reads require an active Admin, View Inventory (`inventory.view`), or View Suppliers (`suppliers.view`). Either view permission is sufficient; a user does not need both. This allows authorized Inventory readers to see Supplier links from Product detail and authorized Supplier readers to see Product links from Supplier detail.
+
 ### PCB Cards
 
 - View PCB Cards
