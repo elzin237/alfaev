@@ -1056,7 +1056,15 @@ Goal:
   - Supplier
   - Catalog Number
 
+Add the minimal trusted cross-domain read backend required by this Product-side UI:
+- a ProductSupplier relationship read for an active Admin, `inventory.view`, or `suppliers.view`, returning only relationship data plus the related Supplier ID, Name, and active/archive state required for display
+- an active-Supplier choice lookup for an active Admin, `inventory.products.edit`, or `suppliers.edit`, returning only Supplier ID and Name
+- do not expose Supplier Country, Contact Person, Phone, Email, or other Supplier details through either operation
+- do not broaden normal Supplier RLS; general Supplier reads remain restricted to an active Admin or `suppliers.view`
+
 Reuse the Task 054 trusted ProductSupplier backend operations. Do not duplicate authorization or mutation rules in the Product UI.
+
+This cross-domain read correction belongs to Task 055 and is not Supplier-detail Product-link work from Task 056.
 
 Do not mix Inventory quantities into this task.
 

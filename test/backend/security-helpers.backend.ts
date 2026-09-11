@@ -213,6 +213,20 @@ interface ProductSupplierRow {
   updated_by_user_id: string;
 }
 
+interface ProductSupplierReadRow {
+  catalog_number: string | null;
+  relationship_id: string;
+  relationship_is_active: boolean;
+  supplier_id: string;
+  supplier_is_active: boolean;
+  supplier_name: string;
+}
+
+interface ProductSupplierChoiceRow {
+  supplier_id: string;
+  supplier_name: string;
+}
+
 interface CreatedProductRow {
   product_id: string;
   serial_number: string;
@@ -6662,6 +6676,284 @@ describe("Supabase security helpers", () => {
     expectPermissionDenied(directInsert.error);
     expectPermissionDenied(directUpdate.error);
     expectPermissionDenied(directDelete.error);
+  });
+
+  it("exposes only minimal trusted ProductSupplier reads without broadening Supplier RLS", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const endpoints = await createProductSupplierEndpoints(database, actorId);
+      const archivedSupplierId = randomUUID();
+      const activeRelationId = randomUUID();
+      const archivedRelationId = randomUUID();
+      const activeSupplierName = `Active Choice ${randomUUID()}`;
+      const archivedSupplierName = `Archived History ${randomUUID()}`;
+
+      await database.query(
+        `update public.suppliers
+         set name = $2::text
+         where id = $1::uuid`,
+        [endpoints.supplierId, activeSupplierName],
+      );
+      await database.query(
+        `insert into public.suppliers (
+           id,
+           name,
+           country,
+           contact_person_name,
+           contact_phone,
+           contact_email,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values (
+           $1::uuid,
+           $2::text,
+           'Secret Country',
+           'Secret Contact',
+           '+000000000',
+           'secret@example.com',
+           false,
+           $3::uuid,
+           $3::uuid,
+           pg_catalog.now(),
+           $3::uuid
+         )`,
+        [archivedSupplierId, archivedSupplierName, actorId],
+      );
+      await database.query(
+        `insert into public.product_suppliers (
+           id,
+           product_id,
+           supplier_id,
+           catalog_number,
+           is_active,
+           created_by_user_id,
+           updated_by_user_id,
+           archived_at,
+           archived_by_user_id
+         )
+         values
+           ($1::uuid, $3::uuid, $4::uuid, 'ACTIVE-CAT', true,
+            $6::uuid, $6::uuid, null, null),
+           ($2::uuid, $3::uuid, $5::uuid, null, false,
+            $6::uuid, $6::uuid, pg_catalog.now(), $6::uuid)`,
+        [
+          activeRelationId,
+          archivedRelationId,
+          endpoints.productId,
+          endpoints.supplierId,
+          archivedSupplierId,
+          actorId,
+        ],
+      );
+
+      for (const actor of [
+        fixture.actors.admin,
+        fixture.actors.brandManager,
+        fixture.actors.supplierViewer,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const rows = await database.query<ProductSupplierReadRow>(
+          `select *
+           from public.get_product_suppliers_for_product($1::uuid)`,
+          [endpoints.productId],
+        );
+        await database.query("reset role");
+
+        expect(rows.rows).toEqual([
+          {
+            catalog_number: "ACTIVE-CAT",
+            relationship_id: activeRelationId,
+            relationship_is_active: true,
+            supplier_id: endpoints.supplierId,
+            supplier_is_active: true,
+            supplier_name: activeSupplierName,
+          },
+          {
+            catalog_number: null,
+            relationship_id: archivedRelationId,
+            relationship_is_active: false,
+            supplier_id: archivedSupplierId,
+            supplier_is_active: false,
+            supplier_name: archivedSupplierName,
+          },
+        ]);
+        expect(Object.keys(rows.rows[0] ?? {}).sort()).toEqual([
+          "catalog_number",
+          "relationship_id",
+          "relationship_is_active",
+          "supplier_id",
+          "supplier_is_active",
+          "supplier_name",
+        ]);
+      }
+
+      for (const actor of [
+        fixture.actors.productCreator,
+        fixture.actors.productEditor,
+        fixture.actors.supplierEditor,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+        fixture.actors.inactiveSupplierManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query("savepoint denied_product_supplier_read_rpc");
+        await expect(
+          database.query(
+            "select * from public.get_product_suppliers_for_product($1::uuid)",
+            [endpoints.productId],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query("rollback to savepoint denied_product_supplier_read_rpc");
+        await database.query("reset role");
+      }
+
+      for (const actor of [
+        fixture.actors.admin,
+        fixture.actors.productEditor,
+        fixture.actors.supplierEditor,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const choices = await database.query<ProductSupplierChoiceRow>(
+          `select *
+           from public.list_active_supplier_choices_for_product_supplier()`,
+        );
+        await database.query("reset role");
+
+        expect(choices.rows).toContainEqual({
+          supplier_id: endpoints.supplierId,
+          supplier_name: activeSupplierName,
+        });
+        expect(choices.rows).not.toContainEqual({
+          supplier_id: archivedSupplierId,
+          supplier_name: archivedSupplierName,
+        });
+        expect(Object.keys(choices.rows[0] ?? {}).sort()).toEqual([
+          "supplier_id",
+          "supplier_name",
+        ]);
+
+        const sortedChoices = [...choices.rows].sort((left, right) =>
+          left.supplier_name.localeCompare(right.supplier_name, undefined, {
+            sensitivity: "base",
+          }) || left.supplier_name.localeCompare(right.supplier_name) ||
+          left.supplier_id.localeCompare(right.supplier_id));
+        expect(choices.rows).toEqual(sortedChoices);
+      }
+
+      for (const actor of [
+        fixture.actors.brandManager,
+        fixture.actors.supplierViewer,
+        fixture.actors.productCreator,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+        fixture.actors.inactiveSupplierManager,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query("savepoint denied_supplier_choice_rpc");
+        await expect(
+          database.query(
+            "select * from public.list_active_supplier_choices_for_product_supplier()",
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query("rollback to savepoint denied_supplier_choice_rpc");
+        await database.query("reset role");
+      }
+
+      for (const actor of [
+        fixture.actors.brandManager,
+        fixture.actors.productEditor,
+        fixture.actors.supplierEditor,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const hiddenSuppliers = await database.query<{ id: string }>(
+          `select id
+           from public.suppliers
+           where id = any($1::uuid[])`,
+          [[endpoints.supplierId, archivedSupplierId]],
+        );
+        await database.query("reset role");
+
+        expect(hiddenSuppliers.rows).toEqual([]);
+      }
+
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        is_security_definer: boolean;
+        name: string;
+        settings: string[];
+      }>(
+        `select
+           routine.proname as name,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute,
+           pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname in (
+             'get_product_suppliers_for_product',
+             'list_active_supplier_choices_for_product_supplier'
+           )
+         order by routine.proname`,
+      );
+
+      expect(functionSecurity.rows).toEqual([
+        {
+          anonymous_execute: false,
+          authenticated_execute: true,
+          is_security_definer: true,
+          name: "get_product_suppliers_for_product",
+          settings: ["search_path=\"\""],
+        },
+        {
+          anonymous_execute: false,
+          authenticated_execute: true,
+          is_security_definer: true,
+          name: "list_active_supplier_choices_for_product_supplier",
+          settings: ["search_path=\"\""],
+        },
+      ]);
+    });
+
+    const anonymousRelationshipRead = await fixture.anonymousClient.rpc(
+      "get_product_suppliers_for_product",
+      { p_product_id: randomUUID() },
+    );
+    const anonymousChoices = await fixture.anonymousClient.rpc(
+      "list_active_supplier_choices_for_product_supplier",
+    );
+
+    expectPermissionDenied(anonymousRelationshipRead.error);
+    expectPermissionDenied(anonymousChoices.error);
   });
 
   it("lets Admin create, edit, and archive ProductSupplier history with trusted audit", async () => {

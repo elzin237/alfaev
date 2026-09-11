@@ -7,6 +7,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import ProductEditDialog from "./components/ProductEditDialog";
+import ProductSuppliersSection from "./components/ProductSuppliersSection";
 import { useProductDetail } from "./hooks/useProductDetail";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -173,6 +174,12 @@ function ProductDetailPage() {
             </dl>
           </aside>
         </div>
+
+        <ProductSuppliersSection
+          productId={product.id}
+          productName={product.name}
+          productIsActive={product.isActive}
+        />
 
         <ProductEditDialog
           open={isEditOpen}

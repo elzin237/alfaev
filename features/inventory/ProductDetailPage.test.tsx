@@ -13,6 +13,17 @@ const detailPageMocks = vi.hoisted(() => ({
 vi.mock("./hooks/useProductDetail", () => ({
   useProductDetail: detailPageMocks.useProductDetail,
 }));
+vi.mock("./components/ProductSuppliersSection", () => ({
+  default: ({ productId, productName, productIsActive }: {
+    productId: string;
+    productName: string;
+    productIsActive: boolean;
+  }) => (
+    <section aria-label="Product Supplier links">
+      Suppliers for {productName} ({productId}) — {productIsActive ? "active" : "archived"}
+    </section>
+  ),
+}));
 
 import ProductDetailPage from "./ProductDetailPage";
 import type { Brand } from "./services/brandService";
@@ -361,11 +372,12 @@ describe("ProductDetailPage", () => {
     await pendingUpdate;
   });
 
-  it("adds no Delete, Restore, quantity, Supplier, barcode, or history features", () => {
+  it("renders the Product-side Supplier section without unrelated Product features", () => {
     renderDetail();
 
+    expect(screen.getByRole("region", { name: "Product Supplier links" }))
+      .toHaveTextContent("Suppliers for Controller (product-1) — active");
     expect(screen.queryByText(/quantity/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/supplier/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/barcode/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/inventory history/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete|restore|reactivate/i }))

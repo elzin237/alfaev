@@ -419,6 +419,9 @@ Rules:
 - ProductSupplier reactivation/unarchive is not supported in the current scope.
 - Meaningful add/edit/archive changes create immutable AuditLog history; normalized no-op changes do not create audit noise.
 - ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required.
+- Trusted ProductSupplier reads may include only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship; they do not expose general Supplier contact/details.
+- A trusted ProductSupplier Supplier-choice lookup may return only active Supplier IDs and Names and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`.
+- General Supplier-table reads remain restricted to an active Admin or `suppliers.view`; the narrow ProductSupplier read boundary does not broaden Supplier RLS.
 - Add/edit/archive uses one trusted backend authority and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, regardless of whether the operation originates from Product detail or Supplier detail.
 - No separate ProductSupplier permission key exists.
 

@@ -132,7 +132,9 @@ Product archive/deactivate requires an active Admin or Edit Product/Component Da
 
 ProductSupplier add/edit/archive requires an active Admin or either existing capability: Edit Product/Component Data (`inventory.products.edit`) or Edit Suppliers (`suppliers.edit`). The same trusted backend authority applies whether the operation originates from Product detail or Supplier detail. No separate ProductSupplier permission key is added, and direct client mutation is not authoritative authorization.
 
-ProductSupplier reads require an active Admin, View Inventory (`inventory.view`), or View Suppliers (`suppliers.view`). Either view permission is sufficient; a user does not need both. This allows authorized Inventory readers to see Supplier links from Product detail and authorized Supplier readers to see Product links from Supplier detail.
+ProductSupplier reads require an active Admin, View Inventory (`inventory.view`), or View Suppliers (`suppliers.view`). Either view permission is sufficient; a user does not need both. A trusted ProductSupplier read may expose only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship. This allows authorized Inventory readers to see Supplier links from Product detail and authorized Supplier readers to see Product links from Supplier detail without granting general Supplier-table access or exposing Supplier contact/details.
+
+A trusted minimal Supplier-choice lookup used to create ProductSupplier relationships may return only active Supplier IDs and Names. It requires an active Admin, Edit Product/Component Data (`inventory.products.edit`), or Edit Suppliers (`suppliers.edit`). General Supplier reads remain restricted to an active Admin or View Suppliers (`suppliers.view`).
 
 ### PCB Cards
 
