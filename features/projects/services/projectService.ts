@@ -28,6 +28,26 @@ export type ProjectListResult =
   | { ok: true; value: ProjectListItem[] }
   | { ok: false; error: ProjectListError };
 
+export interface ProjectCreateInput {
+  name: string;
+  customerName: string;
+  startDate: string;
+  deliveryDate: string;
+}
+
+export interface CreatedProject {
+  projectId: string;
+}
+
+export interface ProjectCreateError {
+  code: "access_denied" | "project_invalid" | "project_create_failed";
+  message: string;
+}
+
+export type ProjectCreateResult =
+  | { ok: true; value: CreatedProject }
+  | { ok: false; error: ProjectCreateError };
+
 const projectListFields =
   "id,name,customer_name,status,start_date,delivery_date";
 const uuidPattern =
@@ -98,6 +118,36 @@ function listFailure(): ProjectListResult {
   };
 }
 
+function createFailure(code?: string): ProjectCreateResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You do not have permission to create Projects.",
+      },
+    };
+  }
+
+  if (["22007", "22008", "22023", "23514"].includes(code ?? "")) {
+    return {
+      ok: false,
+      error: {
+        code: "project_invalid",
+        message: "Enter valid Project details and dates.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "project_create_failed",
+      message: "The Project could not be created. Please try again.",
+    },
+  };
+}
+
 export async function listProjects(): Promise<ProjectListResult> {
   try {
     const { data, error } = await supabase
@@ -114,5 +164,27 @@ export async function listProjects(): Promise<ProjectListResult> {
     };
   } catch {
     return listFailure();
+  }
+}
+
+export async function createProject(
+  input: ProjectCreateInput,
+): Promise<ProjectCreateResult> {
+  try {
+    const { data, error } = await supabase.rpc("create_project", {
+      p_name: input.name.trim(),
+      p_customer_name: input.customerName.trim(),
+      p_start_date: input.startDate,
+      p_delivery_date: input.deliveryDate,
+    });
+
+    if (error) return createFailure(error.code);
+    if (typeof data !== "string" || !uuidPattern.test(data)) {
+      return createFailure();
+    }
+
+    return { ok: true, value: { projectId: data } };
+  } catch {
+    return createFailure();
   }
 }

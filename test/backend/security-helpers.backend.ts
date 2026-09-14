@@ -205,6 +205,15 @@ interface ProjectRow {
   updated_by_user_id: string;
 }
 
+interface ProjectAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  after_data: Record<string, unknown> | null;
+  before_data: Record<string, unknown> | null;
+  entity_id: string;
+  entity_type: string;
+}
+
 interface InventoryBalanceRow {
   product_id: string;
   quantity: string;
@@ -10938,7 +10947,7 @@ describe("Supabase security helpers", () => {
 
       const invalidCases: Array<{
         label: string;
-        values: readonly unknown[];
+        values: unknown[];
       }> = [
         {
           label: "blank_name",
@@ -11170,7 +11179,6 @@ describe("Supabase security helpers", () => {
          where namespace.nspname = 'public'
            and routine.proname = any($1::text[])`,
         [[
-          "create_project",
           "update_project",
           "set_project_status",
           "archive_project",
@@ -11207,5 +11215,384 @@ describe("Supabase security helpers", () => {
       .select("id")
       .limit(1);
     expectPermissionDenied(anonymousRead.error);
+  });
+
+  it("creates only planned Projects for active Admins and delegated Project creators", async () => {
+    const fixture = requireHarness();
+    const delegatedActor = fixture.actors.productCreator;
+    const unrelatedActor = fixture.actors.unpermitted;
+    const delegatedName = `Delegated Project ${randomUUID()}`;
+    const adminName = `Admin Project ${randomUUID()}`;
+    const deniedName = `Denied Project ${randomUUID()}`;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.user_permissions (
+           user_id,
+           permission_definition_id,
+           granted_by_user_id
+         )
+         select $1::uuid, definition.id, $2::uuid
+         from public.permission_definitions as definition
+         where definition.key = any($3::text[])`,
+        [
+          unrelatedActor.profileId,
+          fixture.actors.admin.profileId,
+          ["projects.edit", "projects.archive"],
+        ],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [unrelatedActor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint unrelated_project_permissions");
+      await expect(
+        database.query(
+          `select public.create_project(
+             $1::text, $2::text, $3::date, $4::date
+           )`,
+          [deniedName, "Denied Customer", "2026-09-01", "2026-09-10"],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint unrelated_project_permissions");
+      await database.query("reset role");
+
+      await database.query(
+        `insert into public.user_permissions (
+           user_id,
+           permission_definition_id,
+           granted_by_user_id
+         )
+         select $1::uuid, definition.id, $2::uuid
+         from public.permission_definitions as definition
+         where definition.key = 'projects.create'`,
+        [delegatedActor.profileId, fixture.actors.admin.profileId],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [delegatedActor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const delegatedPermissions = await database.query<{
+        can_create: boolean;
+        can_view: boolean;
+      }>(
+        `select
+           public.has_permission('projects.create') as can_create,
+           public.has_permission('projects.view') as can_view`,
+      );
+      const delegatedCreation = await database.query<{ project_id: string }>(
+        `select public.create_project(
+           $1::text, $2::text, $3::date, $4::date
+         ) as project_id`,
+        [
+          `  ${delegatedName}  `,
+          "  Delegated Customer  ",
+          "2026-09-01",
+          "2026-09-10",
+        ],
+      );
+      await database.query("reset role");
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const adminCreation = await database.query<{ project_id: string }>(
+        `select public.create_project(
+           $1::text, $2::text, $3::date, $4::date
+         ) as project_id`,
+        [adminName, "Admin Customer", "2026-10-01", "2026-10-01"],
+      );
+      await database.query("reset role");
+
+      const projectIds = [
+        delegatedCreation.rows[0]?.project_id,
+        adminCreation.rows[0]?.project_id,
+      ];
+      if (projectIds.some((projectId) => !projectId)) {
+        throw new Error("Trusted Project creation returned no ID");
+      }
+
+      const projects = await database.query<ProjectRow>(
+        `select
+           id,
+           name,
+           customer_name,
+           status,
+           start_date::text as start_date,
+           delivery_date::text as delivery_date,
+           created_at,
+           created_by_user_id,
+           updated_at,
+           updated_by_user_id,
+           completed_at,
+           cancelled_at
+         from public.projects
+         where id = any($1::uuid[])
+         order by name`,
+        [projectIds],
+      );
+      const audits = await database.query<ProjectAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = any($1::uuid[])
+           and action_type = 'project.created'
+         order by entity_id`,
+        [projectIds],
+      );
+      const delegatedProject = projects.rows.find(
+        (project) => project.id === delegatedCreation.rows[0]?.project_id,
+      );
+      const adminProject = projects.rows.find(
+        (project) => project.id === adminCreation.rows[0]?.project_id,
+      );
+
+      expect(delegatedPermissions.rows).toEqual([{
+        can_create: true,
+        can_view: false,
+      }]);
+      expect(projects.rows).toHaveLength(2);
+      expect(delegatedProject).toMatchObject({
+        cancelled_at: null,
+        completed_at: null,
+        created_by_user_id: delegatedActor.profileId,
+        customer_name: "Delegated Customer",
+        delivery_date: "2026-09-10",
+        name: delegatedName,
+        start_date: "2026-09-01",
+        status: "planned",
+        updated_by_user_id: delegatedActor.profileId,
+      });
+      expect(delegatedProject?.created_at).toEqual(delegatedProject?.updated_at);
+      expect(adminProject).toMatchObject({
+        cancelled_at: null,
+        completed_at: null,
+        created_by_user_id: fixture.actors.admin.profileId,
+        customer_name: "Admin Customer",
+        delivery_date: "2026-10-01",
+        name: adminName,
+        start_date: "2026-10-01",
+        status: "planned",
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(adminProject?.created_at).toEqual(adminProject?.updated_at);
+      expect(audits.rows).toHaveLength(2);
+      expect(audits.rows).toEqual(expect.arrayContaining([
+        {
+          action_type: "project.created",
+          actor_user_id: delegatedActor.profileId,
+          after_data: {
+            cancelled_at: null,
+            completed_at: null,
+            customer_name: "Delegated Customer",
+            delivery_date: "2026-09-10",
+            name: delegatedName,
+            start_date: "2026-09-01",
+            status: "planned",
+          },
+          before_data: null,
+          entity_id: delegatedCreation.rows[0]?.project_id,
+          entity_type: "project",
+        },
+        {
+          action_type: "project.created",
+          actor_user_id: fixture.actors.admin.profileId,
+          after_data: {
+            cancelled_at: null,
+            completed_at: null,
+            customer_name: "Admin Customer",
+            delivery_date: "2026-10-01",
+            name: adminName,
+            start_date: "2026-10-01",
+            status: "planned",
+          },
+          before_data: null,
+          entity_id: adminCreation.rows[0]?.project_id,
+          entity_type: "project",
+        },
+      ]));
+
+      const denied = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.projects
+         where name = $1::text`,
+        [deniedName],
+      );
+      const deniedAudit = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'project.created'
+           and after_data ->> 'name' = $1::text`,
+        [deniedName],
+      );
+      expect(denied.rows).toEqual([{ count: 0 }]);
+      expect(deniedAudit.rows).toEqual([{ count: 0 }]);
+
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        identity_arguments: string;
+        is_security_definer: boolean;
+        settings: string[];
+      }>(
+        `select
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.pg_get_function_identity_arguments(routine.oid)
+             as identity_arguments,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'create_project'`,
+      );
+      expect(functionSecurity.rows).toEqual([{
+        anonymous_execute: false,
+        authenticated_execute: true,
+        identity_arguments:
+          "p_name text, p_customer_name text, p_start_date date, p_delivery_date date",
+        is_security_definer: true,
+        settings: ["search_path=\"\""],
+      }]);
+    });
+  });
+
+  it("rejects invalid Project creation without persisting a Project or audit", async () => {
+    const fixture = requireHarness();
+    const namePrefix = `Invalid Project ${randomUUID()}`;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const projectsBefore = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.projects",
+      );
+      const auditsBefore = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.audit_logs",
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+
+      const invalidCases: ReadonlyArray<{
+        expectedCode: string;
+        label: string;
+        values: unknown[];
+      }> = [
+        {
+          expectedCode: "22023",
+          label: "blank_name",
+          values: ["   ", "Customer", "2026-09-01", "2026-09-10"],
+        },
+        {
+          expectedCode: "22023",
+          label: "blank_customer",
+          values: [`${namePrefix} blank customer`, "   ", "2026-09-01", "2026-09-10"],
+        },
+        {
+          expectedCode: "22023",
+          label: "missing_start",
+          values: [`${namePrefix} missing start`, "Customer", null, "2026-09-10"],
+        },
+        {
+          expectedCode: "22023",
+          label: "missing_delivery",
+          values: [`${namePrefix} missing delivery`, "Customer", "2026-09-01", null],
+        },
+        {
+          expectedCode: "22007",
+          label: "invalid_date",
+          values: [`${namePrefix} invalid date`, "Customer", "not-a-date", "2026-09-10"],
+        },
+        {
+          expectedCode: "22023",
+          label: "delivery_before_start",
+          values: [`${namePrefix} date order`, "Customer", "2026-09-10", "2026-09-01"],
+        },
+      ];
+
+      for (const invalid of invalidCases) {
+        await database.query(`savepoint invalid_project_create_${invalid.label}`);
+        await expect(
+          database.query(
+            `select public.create_project(
+               $1::text, $2::text, $3::date, $4::date
+             )`,
+            invalid.values,
+          ),
+        ).rejects.toMatchObject({ code: invalid.expectedCode });
+        await database.query(
+          `rollback to savepoint invalid_project_create_${invalid.label}`,
+        );
+      }
+      await database.query("reset role");
+
+      const projectsAfter = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.projects",
+      );
+      const auditsAfter = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.audit_logs",
+      );
+      expect(projectsAfter.rows).toEqual(projectsBefore.rows);
+      expect(auditsAfter.rows).toEqual(auditsBefore.rows);
+    });
+  });
+
+  it("denies Project creation without active Admin or projects.create authority", async () => {
+    const fixture = requireHarness();
+    const deniedNamePrefix = `Denied RPC Project ${randomUUID()}`;
+    const deniedActors = [
+      fixture.actors.permitted,
+      fixture.actors.productCreator,
+      fixture.actors.brandManager,
+      fixture.actors.unpermitted,
+      fixture.actors.inactive,
+    ];
+
+    for (const [index, actor] of deniedActors.entries()) {
+      const denied = await actor.client.rpc("create_project", {
+        p_name: `${deniedNamePrefix} ${index}`,
+        p_customer_name: "Denied Customer",
+        p_start_date: "2026-09-01",
+        p_delivery_date: "2026-09-10",
+      });
+      expectPermissionDenied(denied.error);
+    }
+
+    const anonymous = await fixture.anonymousClient.rpc("create_project", {
+      p_name: `${deniedNamePrefix} anonymous`,
+      p_customer_name: "Denied Customer",
+      p_start_date: "2026-09-01",
+      p_delivery_date: "2026-09-10",
+    });
+    expectPermissionDenied(anonymous.error);
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const projects = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.projects
+         where name like $1::text`,
+        [`${deniedNamePrefix}%`],
+      );
+      const audits = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where action_type = 'project.created'
+           and after_data ->> 'name' like $1::text`,
+        [`${deniedNamePrefix}%`],
+      );
+      expect(projects.rows).toEqual([{ count: 0 }]);
+      expect(audits.rows).toEqual([{ count: 0 }]);
+    });
   });
 });

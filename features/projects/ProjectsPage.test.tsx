@@ -1,13 +1,25 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const projectsPageMocks = vi.hoisted(() => ({
+  create: vi.fn(),
   refetch: vi.fn(),
+  useProjectCreation: vi.fn(),
   useProjects: vi.fn(),
 }));
 
 vi.mock("./hooks/useProjects", () => ({
   useProjects: projectsPageMocks.useProjects,
+}));
+vi.mock("./hooks/useProjectCreation", () => ({
+  useProjectCreation: projectsPageMocks.useProjectCreation,
 }));
 
 import ProjectsPage from "./ProjectsPage";
@@ -79,7 +91,17 @@ function visibleProjectNames(): string[] {
     .map((row) => within(row).getByRole("rowheader").textContent ?? "");
 }
 
-beforeEach(() => setQueryState());
+beforeEach(() => {
+  setQueryState();
+  projectsPageMocks.create.mockResolvedValue({
+    ok: true,
+    value: { projectId: "00000000-0000-4000-8000-000000000010" },
+  });
+  projectsPageMocks.useProjectCreation.mockReturnValue({
+    canCreate: true,
+    create: projectsPageMocks.create,
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -181,11 +203,51 @@ describe("ProjectsPage", () => {
     expect(screen.queryByLabelText("Filter by status")).not.toBeInTheDocument();
   });
 
-  it("is read-only and adds no Task 070+ controls or detail navigation", () => {
+  it("hides Create Project when the viewer lacks creation authority", () => {
+    projectsPageMocks.useProjectCreation.mockReturnValue({
+      canCreate: false,
+      create: projectsPageMocks.create,
+    });
+
+    render(<ProjectsPage />);
+
+    expect(screen.queryByRole("button", { name: "Create Project" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("opens the authorized create form and confirms successful creation", async () => {
+    render(<ProjectsPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
+    expect(screen.getByRole("dialog", { name: "Create Project" }))
+      .toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Project Name"), {
+      target: { value: "New Project" },
+    });
+    fireEvent.change(screen.getByLabelText("Customer"), {
+      target: { value: "Customer" },
+    });
+    fireEvent.change(screen.getByLabelText("Start Date"), {
+      target: { value: "2026-09-15" },
+    });
+    fireEvent.change(screen.getByLabelText("Delivery Date"), {
+      target: { value: "2026-09-30" },
+    });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Create Project",
+    }));
+
+    await waitFor(() => expect(projectsPageMocks.create).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Project created.");
+  });
+
+  it("does not add detail or later Project mutation controls", () => {
     render(<ProjectsPage />);
 
     expect(screen.queryByRole("button", {
-      name: /create|add|edit|status|archive|cancel|reopen/i,
+      name: /edit|archive|cancel|reopen/i,
     })).not.toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });

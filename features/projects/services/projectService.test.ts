@@ -2,14 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const projectServiceMocks = vi.hoisted(() => ({
   from: vi.fn(),
+  rpc: vi.fn(),
   select: vi.fn(),
 }));
 
 vi.mock("../../../lib/supabase/client", () => ({
-  supabase: { from: projectServiceMocks.from },
+  supabase: {
+    from: projectServiceMocks.from,
+    rpc: projectServiceMocks.rpc,
+  },
 }));
 
-import { listProjects } from "./projectService";
+import { createProject, listProjects } from "./projectService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -152,6 +156,84 @@ describe("projectService", () => {
         code: "project_list_failed",
         message: "The Project list could not be loaded.",
       },
+    });
+  });
+
+  it("creates through only the trusted RPC with normalized canonical inputs", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: "00000000-0000-4000-8000-000000000010",
+      error: null,
+    });
+
+    await expect(createProject({
+      name: "  Control Cabinet  ",
+      customerName: "  Alfa Customer  ",
+      startDate: "2026-09-01",
+      deliveryDate: "2026-09-30",
+    })).resolves.toEqual({
+      ok: true,
+      value: { projectId: "00000000-0000-4000-8000-000000000010" },
+    });
+    expect(projectServiceMocks.rpc).toHaveBeenCalledWith("create_project", {
+      p_name: "Control Cabinet",
+      p_customer_name: "Alfa Customer",
+      p_start_date: "2026-09-01",
+      p_delivery_date: "2026-09-30",
+    });
+    expect(projectServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to create Projects."],
+    ["22007", "project_invalid", "Enter valid Project details and dates."],
+    ["22008", "project_invalid", "Enter valid Project details and dates."],
+    ["22023", "project_invalid", "Enter valid Project details and dates."],
+    ["23514", "project_invalid", "Enter valid Project details and dates."],
+    ["XX000", "project_create_failed", "The Project could not be created. Please try again."],
+  ])("maps %s creation failures to safe error %s", async (
+    backendCode,
+    code,
+    message,
+  ) => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw provider details" },
+    });
+
+    await expect(createProject({
+      name: "Project",
+      customerName: "Customer",
+      startDate: "2026-09-01",
+      deliveryDate: "2026-09-30",
+    })).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("fails safely when creation returns malformed data or throws", async () => {
+    projectServiceMocks.rpc.mockResolvedValueOnce({
+      data: "not-a-project-id",
+      error: null,
+    });
+    await expect(createProject({
+      name: "Project",
+      customerName: "Customer",
+      startDate: "2026-09-01",
+      deliveryDate: "2026-09-30",
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_create_failed" },
+    });
+
+    projectServiceMocks.rpc.mockRejectedValueOnce(
+      new Error("raw network details"),
+    );
+    await expect(createProject({
+      name: "Project",
+      customerName: "Customer",
+      startDate: "2026-09-01",
+      deliveryDate: "2026-09-30",
+    })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_create_failed" },
     });
   });
 });

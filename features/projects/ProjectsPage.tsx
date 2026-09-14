@@ -4,7 +4,9 @@ import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import CreateProjectDialog from "./components/CreateProjectDialog";
 import ProjectList from "./components/ProjectList";
+import { useProjectCreation } from "./hooks/useProjectCreation";
 import { useProjects } from "./hooks/useProjects";
 import {
   isProjectStatusFilter,
@@ -14,7 +16,10 @@ import {
 
 function ProjectsPage() {
   const projectsQuery = useProjects();
+  const { canCreate, create } = useProjectCreation();
   const [statusFilter, setStatusFilter] = useState<ProjectStatusFilter>("all");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const projects = projectsQuery.data?.ok ? projectsQuery.data.value : [];
   const filteredProjects = useMemo(
     () => statusFilter === "all"
@@ -63,7 +68,25 @@ function ProjectsPage() {
       <PageHeader
         title="Projects"
         description="Track AlfaEV Projects, current status, and delivery dates."
+        actions={canCreate ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSuccessMessage(null);
+              setIsCreateOpen(true);
+            }}
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+          >
+            Create Project
+          </button>
+        ) : undefined}
       />
+
+      {successMessage && (
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          {successMessage}
+        </p>
+      )}
 
       {!projectsQuery.isPending && projectsQuery.data?.ok && projects.length > 0 && (
         <div className="max-w-sm rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -93,6 +116,13 @@ function ProjectsPage() {
       )}
 
       {content}
+
+      <CreateProjectDialog
+        open={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onSubmit={create}
+        onCreated={() => setSuccessMessage("Project created.")}
+      />
     </section>
   );
 }
