@@ -7,7 +7,7 @@ import PermissionRoute from "../guards/PermissionRoute";
 import LoginPage from "../../pages/auth/LoginPage";
 
 import DashboardPage from "../../features/dashboard/DashboardPage";
-import ProjectsPage from "../../pages/projects/ProjectsPage";
+import ProjectsPage from "../../features/projects/ProjectsPage";
 import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import SuppliersPage from "../../features/suppliers/SuppliersPage";
 import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
