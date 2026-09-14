@@ -41,6 +41,11 @@ vi.mock("./components/InventoryHistorySection", () => ({
     </section>
   ),
 }));
+vi.mock("./components/ProductBarcodeSection", () => ({
+  default: () => (
+    <section aria-label="Product barcode">Barcode preview available</section>
+  ),
+}));
 
 import ProductDetailPage from "./ProductDetailPage";
 import type { Brand } from "./services/brandService";
@@ -233,6 +238,8 @@ describe("ProductDetailPage", () => {
 
     expect(screen.getByText("Legacy Brand (archived)")).toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Product barcode" }))
+      .toHaveTextContent("Barcode preview available");
     expect(screen.queryByRole("button", {
       name: /edit|archive|delete|restore|reactivate/i,
     })).not.toBeInTheDocument();
@@ -391,15 +398,16 @@ describe("ProductDetailPage", () => {
     await pendingUpdate;
   });
 
-  it("renders Product Supplier and read-only Inventory history sections without later features", () => {
+  it("renders Product Supplier, Inventory history, and Barcode sections without later features", () => {
     renderDetail();
 
     expect(screen.getByRole("region", { name: "Product Supplier links" }))
       .toHaveTextContent("Suppliers for Controller (product-1) — active");
     expect(screen.getByRole("region", { name: "Product Inventory history" }))
       .toHaveTextContent("Inventory history for product-1");
+    expect(screen.getByRole("region", { name: "Product barcode" }))
+      .toHaveTextContent("Barcode preview available");
     expect(screen.queryByText(/quantity/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/barcode/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete|restore|reactivate/i }))
       .not.toBeInTheDocument();
   });
