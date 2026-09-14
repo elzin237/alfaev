@@ -7,6 +7,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import SupplierFormDialog from "./components/SupplierFormDialog";
+import SupplierProductsSection from "./components/SupplierProductsSection";
 import { useSupplierDetail } from "./hooks/useSupplierDetail";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -173,6 +174,12 @@ function SupplierDetailPage() {
             </dl>
           </aside>
         </div>
+
+        <SupplierProductsSection
+          supplierId={supplier.id}
+          supplierName={supplier.name}
+          supplierIsActive={supplier.isActive}
+        />
 
         <SupplierFormDialog
           open={isEditOpen}

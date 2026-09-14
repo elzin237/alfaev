@@ -16,3 +16,21 @@ export function productSupplierChoiceQueryKey(
 ) {
   return ["inventory", "product-suppliers", "choices", profileId] as const;
 }
+
+export function supplierProductListQueryKey(
+  profileId: string | undefined,
+  supplierId: string,
+) {
+  return [
+    "suppliers",
+    "product-suppliers",
+    profileId,
+    supplierId,
+  ] as const;
+}
+
+export function supplierProductChoiceQueryKey(
+  profileId: string | undefined,
+) {
+  return ["suppliers", "product-suppliers", "choices", profileId] as const;
+}

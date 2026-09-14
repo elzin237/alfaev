@@ -13,8 +13,10 @@ vi.mock("../../../lib/supabase/client", () => ({
 import {
   archiveProductSupplier,
   createProductSupplier,
+  listActiveProductChoices,
   listActiveSupplierChoices,
   listProductSuppliers,
+  listSupplierProducts,
   updateProductSupplier,
 } from "./productSupplierService";
 
@@ -151,6 +153,103 @@ describe("productSupplierService", () => {
         message: "The active Supplier choices could not be loaded.",
       },
     });
+  });
+
+  it("reads and maps Supplier-side Product links through the trusted RPC", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [
+        {
+          relationship_id: "relation-2",
+          product_id: "product-2",
+          product_serial_number: "0000002",
+          product_name: "Legacy Controller",
+          product_is_active: false,
+          catalog_number: null,
+          relationship_is_active: false,
+        },
+        {
+          relationship_id: "relation-1",
+          product_id: "product-1",
+          product_serial_number: "0000001",
+          product_name: "Controller",
+          product_is_active: true,
+          catalog_number: "AbC-42",
+          relationship_is_active: true,
+        },
+      ],
+      error: null,
+    });
+
+    await expect(listSupplierProducts("supplier-1")).resolves.toEqual({
+      ok: true,
+      value: [
+        {
+          relationId: "relation-1",
+          productId: "product-1",
+          productSerialNumber: "0000001",
+          productName: "Controller",
+          productIsActive: true,
+          catalogNumber: "AbC-42",
+          isActive: true,
+        },
+        {
+          relationId: "relation-2",
+          productId: "product-2",
+          productSerialNumber: "0000002",
+          productName: "Legacy Controller",
+          productIsActive: false,
+          catalogNumber: null,
+          isActive: false,
+        },
+      ],
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledWith(
+      "get_product_suppliers_for_supplier",
+      { p_supplier_id: "supplier-1" },
+    );
+  });
+
+  it("fails malformed Supplier-side Product link responses safely", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{ product_id: "product-1", product_serial_number: "bad" }],
+      error: null,
+    });
+
+    await expect(listSupplierProducts("supplier-1")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_link_list_failed",
+        message: "The Product links could not be loaded.",
+      },
+    });
+  });
+
+  it("loads only minimal active Product choices through the trusted RPC", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [
+        {
+          product_id: "product-1",
+          product_serial_number: "0000001",
+          product_name: "Controller",
+        },
+      ],
+      error: null,
+    });
+
+    await expect(listActiveProductChoices()).resolves.toEqual({
+      ok: true,
+      value: [{
+        productId: "product-1",
+        serialNumber: "0000001",
+        productName: "Controller",
+      }],
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledWith(
+      "list_active_product_choices_for_product_supplier",
+    );
+    expect(JSON.stringify(serviceMocks.rpc.mock.calls[0])).not.toMatch(
+      /category|brand|created|updated|archived/i,
+    );
   });
 
   it("creates through the trusted RPC with normalized Catalog Number only", async () => {

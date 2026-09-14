@@ -7,10 +7,21 @@ const detailPageMocks = vi.hoisted(() => ({
   archive: vi.fn(),
   refetch: vi.fn(),
   update: vi.fn(),
+  supplierProductsSection: vi.fn(),
 }));
 
 vi.mock("./hooks/useSupplierDetail", () => ({
   useSupplierDetail: detailPageMocks.useSupplierDetail,
+}));
+vi.mock("./components/SupplierProductsSection", () => ({
+  default: (props: {
+    supplierId: string;
+    supplierName: string;
+    supplierIsActive: boolean;
+  }) => {
+    detailPageMocks.supplierProductsSection(props);
+    return <section aria-label="Supplier Product links">Product links</section>;
+  },
 }));
 
 import SupplierDetailPage from "./SupplierDetailPage";
@@ -138,6 +149,11 @@ describe("SupplierDetailPage", () => {
     expect(screen.getByText("Not archived")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Suppliers" }))
       .toHaveAttribute("href", "/suppliers");
+    expect(detailPageMocks.supplierProductsSection).toHaveBeenCalledWith({
+      supplierId: "supplier-1",
+      supplierName: "Bosch",
+      supplierIsActive: true,
+    });
   });
 
   it("keeps archived Suppliers readable and exposes no edit/archive/restore controls", () => {
@@ -310,12 +326,13 @@ describe("SupplierDetailPage", () => {
       .toBeInTheDocument();
   });
 
-  it("does not add archive, ProductSupplier, Catalog Number, or procurement sections", () => {
+  it("adds Product links without inventory quantity or procurement functionality", () => {
     renderDetail();
 
-    expect(screen.queryByText(/ProductSupplier/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Catalog Number/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Supplier Product links" }))
+      .toBeInTheDocument();
     expect(screen.queryByText(/procurement history/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/quantity|stock/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /delete|restore|reactivate/i }))
       .not.toBeInTheDocument();
   });
