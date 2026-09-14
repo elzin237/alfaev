@@ -537,15 +537,28 @@ Fields:
 
 - `id`
 - `name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not unique
 - `customer_name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not unique
 - `status`
+  - required
+  - default `planned`
   - `planned`
   - `in_progress`
   - `on_hold`
   - `completed`
   - `cancelled`
 - `start_date`
+  - required SQL `date`
 - `delivery_date`
+  - required SQL `date`
+  - must be on or after `start_date`
 - `created_at`
 - `created_by_user_id`
 - `updated_at`
@@ -557,10 +570,18 @@ Fields:
 
 Rules:
 
+- The allowed Project status values are exactly `planned`, `in_progress`, `on_hold`, `completed`, and `cancelled`.
+- Do not impose a rigid general status-transition graph beyond the explicitly locked lifecycle rules.
+- `completed_at` is non-null only while the current status is `completed`.
+- `cancelled_at` is non-null only while the current status is `cancelled`.
+- All other statuses require both `completed_at` and `cancelled_at` to be `NULL`.
 - Completed Projects are read-only for normal business fields.
 - Admin may reopen a Completed Project by explicitly changing it to `in_progress`.
-- Reopening is audited.
-- Projects with linked history are not hard-deleted.
+- Reopening clears the current `completed_at` and is audited; immutable AuditLog entries preserve historical completion and reopen events.
+- `cancelled` is the Project removal/archive lifecycle state, and the later trusted cancel/archive operation requires an active Admin or `projects.archive`.
+- Project does not use separate `is_active`, `archived_at`, or archived-by fields.
+- Projects are not hard-deleted through normal application workflows, and Cancelled Projects remain historically readable.
+- Cancelled Project restore/reactivation is not supported in the current scope unless a later canonical decision explicitly adds it.
 - Customer is currently stored directly on Project because no separate Customer module/entity is in the locked scope.
 
 ---
@@ -1140,7 +1161,7 @@ ProcurementRequest
 | ProductSupplier | Yes until archived | Never hard-deleted through normal workflows; archived relationships are historically readable, immutable, and cannot be reactivated in the current scope |
 | InventoryBalance | Transactionally mutable | Never directly mutated without movement |
 | InventoryMovement | No | Immutable ledger |
-| Project | Yes until Completed | Completed read-only; Admin may reopen |
+| Project | Yes subject to lifecycle | Completed is normally read-only and may be explicitly reopened only by Admin; Cancelled is the historical removal/archive state with no current restore workflow |
 | ProcurementRequest | Yes | Resolved stays historical |
 | PcbCard | Yes subject to history | Archive if production history exists |
 | Used PcbBomVersion | No | Immutable |

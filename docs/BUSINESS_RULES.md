@@ -31,15 +31,43 @@ Dashboard inherits module permissions.
 
 ## 3. Project Rules
 
+### Core fields and dates
+
+- Project Name is required, trimmed before persistence, nonblank, and not unique.
+- Customer is required, trimmed before persistence, nonblank, and not unique.
+- Start Date and Delivery Date are required calendar dates.
+- Delivery Date must be on or after Start Date.
+
 ### Statuses
 
-Allowed statuses:
+Allowed database status values are exactly:
 
-- Planned
-- In Progress
-- On Hold
-- Completed
-- Cancelled
+- `planned`
+- `in_progress`
+- `on_hold`
+- `completed`
+- `cancelled`
+
+The default status is `planned`.
+
+Do not impose a rigid general Project status-transition graph beyond the explicitly locked lifecycle rules.
+
+### Lifecycle metadata
+
+- `completed_at` is populated only while the current status is `completed`.
+- `cancelled_at` is populated only while the current status is `cancelled`.
+- Every other status requires both `completed_at` and `cancelled_at` to be `NULL`.
+- An Admin-only `completed` to `in_progress` reopen clears the current `completed_at`; immutable AuditLog history preserves the completion and reopen events.
+
+### Cancelled Projects
+
+`cancelled` is the Project removal/archive lifecycle state.
+
+- Project cancellation/archive is a later trusted operation authorized by an active Admin or `projects.archive`.
+- Cancelled Projects remain historically readable.
+- Projects are not hard-deleted through normal application workflows.
+- Project does not use separate `is_active`, `archived_at`, or archived-by fields.
+- Cancelled Projects cannot be restored/reactivated in the current scope unless a later canonical decision explicitly adds that workflow.
 
 ### Material usage
 
@@ -59,7 +87,7 @@ When status becomes Completed:
 
 - normal business fields become read-only
 - historical material usage remains preserved
-- Project cannot be hard-deleted if it has linked history
+- Project remains preserved rather than being hard-deleted
 
 Admin may explicitly reopen a Completed Project by changing it back to In Progress.
 

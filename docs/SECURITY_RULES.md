@@ -470,15 +470,22 @@ Brand-new Product request:
 
 # 20. Project Security
 
-Project writes require corresponding permission or Admin.
+Project reads require an active Admin or `projects.view`.
+
+Direct normal-client Project INSERT, UPDATE, and DELETE are denied. Project writes require a later trusted operation that re-checks the active actor's corresponding `projects.create`, `projects.edit`, or `projects.archive` permission, or Admin status.
+
+The `cancelled` status is the Project archive/removal state. Cancellation requires an active Admin or `projects.archive`, never hard-deletes the Project, and has no restore/reactivation path in the current scope. Do not add separate Project `is_active`, `archived_at`, or archived-by fields.
 
 Completed Project:
 
 - protected from normal edits
 - can only be reopened by Admin
-- reopening must be explicit and audited
+- reopening is only the explicit `completed` to `in_progress` transition
+- reopening clears the current `completed_at` and must be audited
 
 Do not let a generic update endpoint silently change Completed Project fields.
+
+Project status/timestamp consistency must be enforced at the database boundary: only `completed` may have `completed_at`, only `cancelled` may have `cancelled_at`, and all other statuses require both values to be `NULL`.
 
 Project material usage is derived from trusted completed movement sources.
 

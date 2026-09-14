@@ -83,6 +83,8 @@ The Admin user-management UI should expose a clear checkbox/toggle matrix for no
 - Edit Projects
 - Delete/Archive Projects
 
+Project reads require an active Admin or View Projects (`projects.view`). Create, edit/status, and archive/cancel use the existing `projects.create`, `projects.edit`, and `projects.archive` permissions respectively through later trusted operations. Delete/Archive Projects (`projects.archive`) authorizes an active user through the trusted transition to the `cancelled` lifecycle state; it does not authorize hard deletion or restoration/reactivation. No additional Project permission key is added.
+
 ### Nabavka / Procurement
 
 - View Nabavka

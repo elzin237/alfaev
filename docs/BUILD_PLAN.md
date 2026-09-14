@@ -1284,21 +1284,43 @@ Do not add new UI.
 ## 068 — Create Project Schema + RLS
 
 Goal:
-- implement Project data model/security
+- implement Project schema, constraints, and SELECT RLS/read baseline only
 
 Fields:
-- Name
-- Customer
-- Status
-- Start Date
-- Delivery Date
+- Name: required, trimmed, nonblank, not unique
+- Customer: required, trimmed, nonblank, not unique
+- Status: required, default `planned`
+- Start Date: required SQL `date`
+- Delivery Date: required SQL `date`, on or after Start Date
+- canonical creation/update actor and timestamp metadata
+- `completed_at`: non-null only while status is `completed`
+- `cancelled_at`: non-null only while status is `cancelled`
 
-Statuses:
-- Planned
-- In Progress
-- On Hold
-- Completed
-- Cancelled
+Allowed database statuses exactly:
+- `planned`
+- `in_progress`
+- `on_hold`
+- `completed`
+- `cancelled`
+
+Lifecycle baseline:
+- `cancelled` is the Project removal/archive state
+- do not add separate `is_active`, `archived_at`, or archived-by fields
+- no normal hard delete
+- Cancelled Projects remain historically readable
+- no Cancelled Project restore/reactivation in the current scope
+- do not impose a rigid general status-transition graph beyond the explicitly locked lifecycle rules
+
+Security:
+- SELECT requires an active Admin or `projects.view`
+- deny direct normal-client INSERT, UPDATE, and DELETE
+- do not add trusted create, edit, status, cancel/archive, or reopen RPCs yet
+
+Sequencing:
+- Task 070 owns trusted Project creation and its UI
+- Task 072 owns normal Project edits and status changes
+- Task 073 owns the Completed Project normal-edit lock
+- Task 074 owns the explicit Admin-only `completed` to `in_progress` reopen, including clearing current `completed_at` and auditing the historical transition
 
 ---
 
@@ -1317,7 +1339,7 @@ No create/edit in this task.
 ## 070 — Build Create Project
 
 Goal:
-- authorized create form
+- trusted authorized Project creation operation and create form
 - validation
 - audit creation
 
