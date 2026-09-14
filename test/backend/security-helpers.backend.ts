@@ -212,6 +212,12 @@ interface InventoryMovementRow {
   source_type: string | null;
 }
 
+interface AppliedInventoryDeltaRow {
+  movement_id: string;
+  quantity_after: string;
+  quantity_before: string;
+}
+
 interface ProductAuditRow {
   action_type: string;
   actor_user_id: string;
@@ -6286,16 +6292,19 @@ describe("Supabase security helpers", () => {
         settings: ["search_path=\"\""],
         trigger_count: 1,
       }]);
-      const trustedInserters = await database.query<CountResultRow>(
-        `select count(*)::integer as count
+      const trustedInserters = await database.query<{ function_name: string }>(
+        `select routine.proname as function_name
          from pg_catalog.pg_proc as routine
          join pg_catalog.pg_namespace as namespace
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and routine.prorettype <> 'trigger'::pg_catalog.regtype
-           and routine.prosrc ilike '%insert into public.inventory_movements%'`,
+           and routine.prosrc ilike '%insert into public.inventory_movements%'
+         order by routine.proname`,
       );
-      expect(trustedInserters.rows).toEqual([{ count: 0 }]);
+      expect(trustedInserters.rows).toEqual([
+        { function_name: "apply_inventory_delta" },
+      ]);
     });
   });
 
@@ -6434,6 +6443,513 @@ describe("Supabase security helpers", () => {
       .select("id")
       .limit(1);
     expectPermissionDenied(anonymousRead.error);
+  });
+
+  it("applies trusted Inventory deltas atomically with normalized movement context and no generic audit", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const productId = randomUUID();
+      const sourceId = randomUUID();
+      const projectId = randomUUID();
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Delta Product', 'Components', 'component',
+           $3::uuid, $3::uuid
+         )`,
+        [productId, createTestSerialNumber(), actor.profileId],
+      );
+      const auditBefore = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.audit_logs",
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [actor.authUserId],
+      );
+
+      const positive = await database.query<AppliedInventoryDeltaRow>(
+        `select *
+         from public.apply_inventory_delta(
+           $1::uuid,
+           10,
+           '  stock_in  ',
+           '  Initial receipt  ',
+           '  fixture_source  ',
+           $2::uuid,
+           $3::uuid,
+           null
+         )`,
+        [productId, sourceId, projectId],
+      );
+      expect(positive.rows).toEqual([{
+        movement_id: expect.any(String),
+        quantity_after: "10",
+        quantity_before: "0",
+      }]);
+
+      const negative = await database.query<AppliedInventoryDeltaRow>(
+        `select *
+         from public.apply_inventory_delta(
+           $1::uuid,
+           -4,
+           ' stock_out ',
+           '   ',
+           '',
+           null,
+           null,
+           null
+         )`,
+        [productId],
+      );
+      expect(negative.rows).toEqual([{
+        movement_id: expect.any(String),
+        quantity_after: "6",
+        quantity_before: "10",
+      }]);
+
+      const movementRows = await database.query<InventoryMovementRow>(
+        `select *
+         from public.inventory_movements
+         where id = any($1::uuid[])
+         order by created_at, id`,
+        [[positive.rows[0]?.movement_id, negative.rows[0]?.movement_id]],
+      );
+      expect(movementRows.rows).toHaveLength(2);
+      expect(movementRows.rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          actor_user_id: actor.profileId,
+          id: positive.rows[0]?.movement_id,
+          movement_type: "stock_in",
+          product_id: productId,
+          project_id: projectId,
+          quantity_after: "10",
+          quantity_before: "0",
+          quantity_delta: "10",
+          reason: "Initial receipt",
+          source_id: sourceId,
+          source_type: "fixture_source",
+        }),
+        expect.objectContaining({
+          actor_user_id: actor.profileId,
+          id: negative.rows[0]?.movement_id,
+          movement_type: "stock_out",
+          project_id: null,
+          quantity_after: "6",
+          quantity_before: "10",
+          quantity_delta: "-4",
+          reason: null,
+          source_id: null,
+          source_type: null,
+        }),
+      ]));
+      const balance = await database.query<InventoryBalanceRow>(
+        `select product_id, quantity, updated_at
+         from public.inventory_balances
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      expect(balance.rows[0]).toMatchObject({
+        product_id: productId,
+        quantity: "6",
+      });
+      expect(balance.rows[0]?.updated_at).toEqual(
+        movementRows.rows.find((row) =>
+          row.id === negative.rows[0]?.movement_id)?.created_at,
+      );
+
+      await database.query("savepoint outer_inventory_operation");
+      const rolledBack = await database.query<AppliedInventoryDeltaRow>(
+        `select *
+         from public.apply_inventory_delta($1::uuid, 2, 'stock_in')`,
+        [productId],
+      );
+      await database.query("rollback to savepoint outer_inventory_operation");
+      const afterOuterRollback = await database.query<InventoryBalanceRow>(
+        `select product_id, quantity, updated_at
+         from public.inventory_balances
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      const rolledBackMovement = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.inventory_movements
+         where id = $1::uuid`,
+        [rolledBack.rows[0]?.movement_id],
+      );
+      expect(afterOuterRollback.rows).toEqual(balance.rows);
+      expect(rolledBackMovement.rows).toEqual([{ count: 0 }]);
+
+      const auditAfter = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.audit_logs",
+      );
+      expect(auditAfter.rows).toEqual(auditBefore.rows);
+    });
+  });
+
+  it("fails Inventory deltas closed without leaving a balance or movement change", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const productId = randomUUID();
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Failed Delta Product', 'Components',
+           'component', $3::uuid, $3::uuid
+         )`,
+        [productId, createTestSerialNumber(), actor.profileId],
+      );
+      await database.query(
+        `update public.inventory_balances
+         set quantity = 3
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [actor.authUserId],
+      );
+
+      for (const [savepoint, sql, values, errorCode] of [
+        [
+          "negative_inventory_result",
+          "select * from public.apply_inventory_delta($1::uuid, -4, 'stock_out')",
+          [productId],
+          "IVB02",
+        ],
+        [
+          "blank_inventory_movement_type",
+          "select * from public.apply_inventory_delta($1::uuid, 1, '   ')",
+          [productId],
+          "22023",
+        ],
+        [
+          "null_inventory_delta",
+          "select * from public.apply_inventory_delta($1::uuid, null, 'stock_in')",
+          [productId],
+          "22023",
+        ],
+        [
+          "failed_inventory_movement_insert",
+          `select *
+           from public.apply_inventory_delta(
+             $1::uuid, 1, 'correction_reversal', null, null, null, null,
+             $2::uuid
+           )`,
+          [productId, randomUUID()],
+          "23503",
+        ],
+      ] as const) {
+        await database.query(`savepoint ${savepoint}`);
+        await expect(database.query(sql, [...values]))
+          .rejects.toMatchObject({ code: errorCode });
+        await database.query(`rollback to savepoint ${savepoint}`);
+
+        const unchangedBalance = await database.query<{ quantity: string }>(
+          `select quantity
+           from public.inventory_balances
+           where product_id = $1::uuid`,
+          [productId],
+        );
+        const movementCount = await database.query<CountResultRow>(
+          `select count(*)::integer as count
+           from public.inventory_movements
+           where product_id = $1::uuid`,
+          [productId],
+        );
+        expect(unchangedBalance.rows).toEqual([{ quantity: "3" }]);
+        expect(movementCount.rows).toEqual([{ count: 0 }]);
+      }
+
+      await database.query(
+        `update public.inventory_balances
+         set quantity = 9223372036854775807
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      await database.query("savepoint overflowing_inventory_delta");
+      await expect(
+        database.query(
+          "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "22003" });
+      await database.query("rollback to savepoint overflowing_inventory_delta");
+      const afterOverflow = await database.query<{ quantity: string }>(
+        `select quantity
+         from public.inventory_balances
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      expect(afterOverflow.rows).toEqual([{ quantity: "9223372036854775807" }]);
+
+      await database.query(
+        "delete from public.inventory_balances where product_id = $1::uuid",
+        [productId],
+      );
+      await database.query("savepoint missing_inventory_balance");
+      await expect(
+        database.query(
+          "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "IVB01" });
+      await database.query("rollback to savepoint missing_inventory_balance");
+
+      await database.query(
+        `insert into public.inventory_balances (product_id, quantity)
+         values ($1::uuid, 0)`,
+        [productId],
+      );
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.inactive.authUserId],
+      );
+      await database.query("savepoint inactive_inventory_actor");
+      await expect(
+        database.query(
+          "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint inactive_inventory_actor");
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', '', true)",
+      );
+      await database.query("savepoint anonymous_inventory_actor");
+      await expect(
+        database.query(
+          "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_inventory_actor");
+      const finalBalance = await database.query<{ quantity: string }>(
+        `select quantity
+         from public.inventory_balances
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      expect(finalBalance.rows).toEqual([{ quantity: "0" }]);
+    });
+  });
+
+  it("serializes competing deductions on one Product and prevents overspending", async () => {
+    const fixture = requireHarness();
+    const productId = randomUUID();
+    const applicationName = `alfaev-inventory-wait-${randomUUID()}`;
+
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const first = clients[0];
+      const second = clients[1];
+      const observer = clients[2];
+      if (!first || !second || !observer) {
+        throw new Error("Inventory concurrency clients are unavailable");
+      }
+
+      await observer.query("begin");
+      await observer.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Concurrent Delta Product', 'Components',
+           'component', $3::uuid, $3::uuid
+         )`,
+        [
+          productId,
+          createTestSerialNumber(),
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await observer.query(
+        `update public.inventory_balances
+         set quantity = 5
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      await observer.query("commit");
+
+      try {
+        await first.query("begin");
+        await first.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        const firstDeduction = await first.query<AppliedInventoryDeltaRow>(
+          "select * from public.apply_inventory_delta($1::uuid, -4, 'stock_out')",
+          [productId],
+        );
+        expect(firstDeduction.rows).toEqual([{
+          movement_id: expect.any(String),
+          quantity_after: "1",
+          quantity_before: "5",
+        }]);
+
+        await second.query("begin");
+        await second.query(
+          "select pg_catalog.set_config('application_name', $1::text, true)",
+          [applicationName],
+        );
+        await second.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        const competingDeduction = second.query(
+          "select * from public.apply_inventory_delta($1::uuid, -6, 'stock_out')",
+          [productId],
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+        let observedBalanceWait = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const activity = await observer.query<ActivityWaitRow>(
+            `select wait_event_type, wait_event
+             from pg_catalog.pg_stat_activity
+             where application_name = $1::text`,
+            [applicationName],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            observedBalanceWait = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(observedBalanceWait).toBe(true);
+
+        const committedWhileWaiting = await observer.query<{
+          movement_count: number;
+          quantity: string;
+        }>(
+          `select
+             balance.quantity,
+             (
+               select count(*)::integer
+               from public.inventory_movements as movement
+               where movement.product_id = balance.product_id
+             ) as movement_count
+           from public.inventory_balances as balance
+           where balance.product_id = $1::uuid`,
+          [productId],
+        );
+        expect(committedWhileWaiting.rows).toEqual([{
+          movement_count: 0,
+          quantity: "5",
+        }]);
+
+        await first.query("rollback");
+        const competingError = await competingDeduction;
+        expect(competingError).toMatchObject({ code: "IVB02" });
+        await second.query("rollback");
+
+        const finalState = await observer.query<{
+          movement_count: number;
+          quantity: string;
+        }>(
+          `select
+             balance.quantity,
+             (
+               select count(*)::integer
+               from public.inventory_movements as movement
+               where movement.product_id = balance.product_id
+             ) as movement_count
+           from public.inventory_balances as balance
+           where balance.product_id = $1::uuid`,
+          [productId],
+        );
+        expect(finalState.rows).toEqual([{
+          movement_count: 0,
+          quantity: "5",
+        }]);
+      } finally {
+        await first.query("rollback");
+        await second.query("rollback");
+        await observer.query("begin");
+        await observer.query(
+          "delete from public.inventory_balances where product_id = $1::uuid",
+          [productId],
+        );
+        await observer.query(
+          "delete from public.products where id = $1::uuid",
+          [productId],
+        );
+        await observer.query("commit");
+      }
+    });
+  });
+
+  it("keeps the Inventory primitive internal, permission-neutral, and client inaccessible", async () => {
+    const fixture = requireHarness();
+    const rpcArguments = {
+      p_product_id: randomUUID(),
+      p_quantity_delta: 1,
+      p_movement_type: "stock_in",
+    };
+
+    for (const client of [
+      fixture.anonymousClient,
+      fixture.actors.admin.client,
+      fixture.actors.unpermitted.client,
+    ]) {
+      const { error } = await client.rpc("apply_inventory_delta", rpcArguments);
+      expectPermissionDenied(error);
+    }
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const primitive = await database.query<{
+        anonymous_execute: boolean;
+        arguments: string;
+        authenticated_execute: boolean;
+        definition: string;
+        is_security_definer: boolean;
+        result_type: string;
+        settings: string[];
+      }>(
+        `select
+           pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+           pg_catalog.pg_get_function_result(routine.oid) as result_type,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'apply_inventory_delta'`,
+      );
+      expect(primitive.rows).toHaveLength(1);
+      expect(primitive.rows[0]).toMatchObject({
+        anonymous_execute: false,
+        authenticated_execute: false,
+        is_security_definer: true,
+        result_type: "TABLE(movement_id uuid, quantity_before bigint, quantity_after bigint)",
+        settings: ["search_path=\"\""],
+      });
+      expect(primitive.rows[0]?.arguments).not.toMatch(/actor/i);
+      const definition = primitive.rows[0]?.definition.toLowerCase() ?? "";
+      expect(definition).toContain("current_active_user_profile_id");
+      expect(definition).toContain("for update");
+      expect(definition).toContain("for share");
+      expect(definition).not.toContain("has_permission");
+      expect(definition).not.toContain("current_user_is_admin");
+      expect(definition).not.toContain("append_audit_log");
+    });
   });
 
   it("lets Admin update normalized Product master data with an active Brand and one audit", async () => {
