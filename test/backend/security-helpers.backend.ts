@@ -212,6 +212,22 @@ interface InventoryMovementRow {
   source_type: string | null;
 }
 
+interface InventoryMovementHistoryRow {
+  actor_full_name: string;
+  actor_user_id: string;
+  created_at: Date;
+  movement_id: string;
+  movement_type: string;
+  project_id: string | null;
+  quantity_after: string;
+  quantity_before: string;
+  quantity_delta: string;
+  reason: string | null;
+  reversal_of_movement_id: string | null;
+  source_id: string | null;
+  source_type: string | null;
+}
+
 interface AppliedInventoryDeltaRow {
   movement_id: string;
   quantity_after: string;
@@ -10239,5 +10255,249 @@ describe("Supabase security helpers", () => {
       { p_search: null },
     );
     expectPermissionDenied(anonymous.error);
+  });
+
+  it("returns Product-specific immutable Inventory history with only the actor display name", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const activeProductId = randomUUID();
+      const archivedProductId = randomUUID();
+      const olderMovementId = randomUUID();
+      const tieMovementIds = [randomUUID(), randomUUID()].sort();
+      const lowerTieMovementId = tieMovementIds[0];
+      const higherTieMovementId = tieMovementIds[1];
+      if (!lowerTieMovementId || !higherTieMovementId) {
+        throw new Error("Movement fixture IDs are unavailable");
+      }
+      const archivedMovementId = randomUUID();
+      const activeProductSerial = createTestSerialNumber();
+      let archivedProductSerial = createTestSerialNumber();
+      while (archivedProductSerial === activeProductSerial) {
+        archivedProductSerial = createTestSerialNumber();
+      }
+
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind, is_active,
+           created_by_user_id, updated_by_user_id, archived_at,
+           archived_by_user_id
+         ) values
+           ($1::uuid, $3::text, 'History Active Product', 'Components',
+            'component', true, $5::uuid, $5::uuid, null, null),
+           ($2::uuid, $4::text, 'History Archived Product', 'Components',
+            'component', false, $5::uuid, $5::uuid,
+            pg_catalog.now(), $5::uuid)`,
+        [
+          activeProductId,
+          archivedProductId,
+          activeProductSerial,
+          archivedProductSerial,
+          actor.profileId,
+        ],
+      );
+      await database.query(
+        `insert into public.inventory_movements (
+           id, product_id, movement_type, quantity_delta,
+           quantity_before, quantity_after, reason, source_type, source_id,
+           project_id, actor_user_id, created_at,
+           reversal_of_movement_id
+         ) values
+           ($1::uuid, $5::uuid, 'manual_add', 10, 0, 10, null, null, null,
+            null, $7::uuid, '2026-09-14T10:00:00Z'::timestamptz, null),
+           ($2::uuid, $5::uuid, 'manual_remove', -2, 10, 8,
+            'Issued to workshop', 'manual_adjustment', $8::uuid,
+            null, $7::uuid, '2026-09-14T12:00:00Z'::timestamptz, null),
+           ($3::uuid, $5::uuid, 'manual_correction', 1, 8, 9,
+            'Count corrected', 'manual_adjustment', null,
+            null, $7::uuid, '2026-09-14T12:00:00Z'::timestamptz, $1::uuid),
+           ($4::uuid, $6::uuid, 'manual_add', 4, 0, 4,
+            'Historical receipt', null, null, null, $7::uuid,
+            '2026-09-13T09:00:00Z'::timestamptz, null)`,
+        [
+          olderMovementId,
+          lowerTieMovementId,
+          higherTieMovementId,
+          archivedMovementId,
+          activeProductId,
+          archivedProductId,
+          actor.profileId,
+          randomUUID(),
+        ],
+      );
+
+      const readAs = async (
+        authUserId: string,
+        productId: string,
+      ): Promise<InventoryMovementHistoryRow[]> => {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        const result = await database.query<InventoryMovementHistoryRow>(
+          `select *
+           from public.get_inventory_movements_for_product($1::uuid)`,
+          [productId],
+        );
+        await database.query("reset role");
+        return result.rows;
+      };
+
+      const adminRows = await readAs(
+        fixture.actors.admin.authUserId,
+        activeProductId,
+      );
+      const inventoryViewerRows = await readAs(
+        fixture.actors.brandManager.authUserId,
+        archivedProductId,
+      );
+
+      expect(adminRows.map((row) => row.movement_id)).toEqual([
+        higherTieMovementId,
+        lowerTieMovementId,
+        olderMovementId,
+      ]);
+      expect(inventoryViewerRows.map((row) => row.movement_id))
+        .toEqual([archivedMovementId]);
+      expect(adminRows.every((row) => row.actor_user_id === actor.profileId))
+        .toBe(true);
+      expect(adminRows.every((row) => row.actor_full_name.length > 0))
+        .toBe(true);
+      expect(adminRows[0]).toMatchObject({
+        movement_type: "manual_correction",
+        quantity_delta: "1",
+        quantity_before: "8",
+        quantity_after: "9",
+        reason: "Count corrected",
+        reversal_of_movement_id: olderMovementId,
+      });
+      expect(Object.keys(adminRows[0] ?? {}).sort()).toEqual([
+        "actor_full_name",
+        "actor_user_id",
+        "created_at",
+        "movement_id",
+        "movement_type",
+        "project_id",
+        "quantity_after",
+        "quantity_before",
+        "quantity_delta",
+        "reason",
+        "reversal_of_movement_id",
+        "source_id",
+        "source_type",
+      ]);
+
+      for (const [label, authUserId] of [
+        ["unpermitted_history", fixture.actors.unpermitted.authUserId],
+        ["inactive_history", fixture.actors.inactive.authUserId],
+      ] as const) {
+        await database.query(`savepoint ${label}`);
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        await expect(
+          database.query(
+            "select * from public.get_inventory_movements_for_product($1::uuid)",
+            [activeProductId],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint ${label}`);
+        await database.query("reset role");
+      }
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [actor.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint null_history_product");
+      await expect(
+        database.query(
+          "select * from public.get_inventory_movements_for_product(null::uuid)",
+        ),
+      ).rejects.toMatchObject({ code: "22023" });
+      await database.query("rollback to savepoint null_history_product");
+      await database.query("reset role");
+
+      await database.query("savepoint immutable_history_update");
+      await expect(
+        database.query(
+          `update public.inventory_movements
+           set reason = 'Forbidden'
+           where id = $1::uuid`,
+          [olderMovementId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await database.query("rollback to savepoint immutable_history_update");
+      await database.query("savepoint immutable_history_delete");
+      await expect(
+        database.query(
+          "delete from public.inventory_movements where id = $1::uuid",
+          [olderMovementId],
+        ),
+      ).rejects.toMatchObject({ code: "55000" });
+      await database.query("rollback to savepoint immutable_history_delete");
+
+      const security = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        definition: string;
+        index_definition: string;
+        is_security_definer: boolean;
+        settings: string[];
+      }>(
+        `select
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition,
+           routine.prosecdef as is_security_definer,
+           routine.proconfig as settings,
+           pg_catalog.pg_get_indexdef(history_index.indexrelid)
+             as index_definition
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as function_namespace
+           on function_namespace.oid = routine.pronamespace
+          and function_namespace.nspname = 'public'
+         join pg_catalog.pg_index as history_index
+           on history_index.indexrelid =
+             'public.inventory_movements_product_created_id_idx'::regclass
+         where routine.proname = 'get_inventory_movements_for_product'`,
+      );
+      expect(security.rows).toHaveLength(1);
+      expect(security.rows[0]).toMatchObject({
+        anonymous_execute: false,
+        authenticated_execute: true,
+        is_security_definer: true,
+        settings: ["search_path=\"\""],
+      });
+      expect(security.rows[0]?.definition).toContain("actor.full_name");
+      expect(security.rows[0]?.definition).not.toMatch(
+        /actor\.(email|birthday|is_admin)/,
+      );
+      expect(security.rows[0]?.index_definition).toContain(
+        "product_id, created_at DESC, id DESC",
+      );
+    });
+
+    const anonymous = await fixture.anonymousClient.rpc(
+      "get_inventory_movements_for_product",
+      { p_product_id: randomUUID() },
+    );
+    expectPermissionDenied(anonymous.error);
+
+    const crossProfileRead = await fixture.actors.brandManager.client
+      .from("user_profiles")
+      .select("id,full_name,email,is_admin,birthday")
+      .eq("id", fixture.actors.admin.profileId);
+    expect(crossProfileRead.error).toBeNull();
+    expect(crossProfileRead.data).toEqual([]);
   });
 });

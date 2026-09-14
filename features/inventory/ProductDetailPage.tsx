@@ -7,6 +7,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import InventoryBalanceSection from "./components/InventoryBalanceSection";
+import InventoryHistorySection from "./components/InventoryHistorySection";
 import ProductEditDialog from "./components/ProductEditDialog";
 import ProductSuppliersSection from "./components/ProductSuppliersSection";
 import { useProductDetail } from "./hooks/useProductDetail";
@@ -180,6 +181,8 @@ function ProductDetailPage() {
           productId={product.id}
           productIsActive={product.isActive}
         />
+
+        <InventoryHistorySection productId={product.id} />
 
         <ProductSuppliersSection
           productId={product.id}
