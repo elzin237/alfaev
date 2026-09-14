@@ -126,6 +126,8 @@ Creating, editing, or archiving Brands requires Admin access or Manage Brands (`
 
 Product reads require Admin access or View Inventory (`inventory.view`).
 
+Inventory Movement history reads require an active Admin or View Inventory (`inventory.view`). A trusted history read may expose the InventoryMovement fields required by the UI plus only the actor's `actor_user_id` and Full Name. It does not grant general UserProfile access or expose actor email, birthday, Admin status, permissions, or other profile fields.
+
 Product creation and editing use the existing Add Products/Components (`inventory.products.create`) and Edit Product/Component Data (`inventory.products.edit`) permissions respectively. Trusted backend/database operations remain authoritative; direct client Product mutation is not permitted.
 
 Product archive/deactivate requires an active Admin or Edit Product/Component Data (`inventory.products.edit`). Add Products/Components (`inventory.products.create`) does not authorize archive, View Inventory (`inventory.view`) remains read-only, and no separate `inventory.products.archive` permission is added. Archive remains a trusted backend lifecycle mutation and does not authorize hard deletion or reactivation/unarchive.

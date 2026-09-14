@@ -1214,18 +1214,27 @@ Keep query typed and indexed appropriately.
 ## 064 — Build Inventory Movement History UI
 
 Goal:
-- Product detail history table
+- read-only Product detail Inventory Movement history table
 
 Show:
 - Date
-- Type/source
+- Type / Source
 - Delta
 - Before
 - After
 - User
-- Reason/context
+- Reason / Context
 
-Read-only.
+Authorization:
+- active Admin or `inventory.view`
+
+Behavior:
+- include movements for active and archived Products
+- order newest movements first
+- preserve existing InventoryMovement immutability
+- add no UPDATE, DELETE, or reversal action
+
+Task 064 may add the minimal trusted movement-history read RPC required to resolve the actor display name safely. That read may return only the InventoryMovement fields required by this UI, `actor_user_id`, and the actor's `full_name`. It must not expose actor email, birthday, Admin status, permissions, or other UserProfile fields, and it must not broaden UserProfile RLS.
 
 ---
 

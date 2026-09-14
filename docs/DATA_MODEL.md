@@ -523,6 +523,9 @@ Rules:
 - Work Order and PCB production movements are generated automatically by those workflows.
 - A meaningful manual Admin adjustment calls the central Inventory mutation primitive exactly once, creates exactly one InventoryMovement through it, and appends exactly one immutable AuditLog entry in the same transaction.
 - Any failure rolls back the balance change, InventoryMovement, and AuditLog together.
+- Inventory Movement history reads require an active Admin or `inventory.view` and include movements for active and archived Products, ordered newest first.
+- A trusted movement-history read may join UserProfile only to return `actor_user_id` and the actor's `full_name` alongside the InventoryMovement fields required by the history UI. It must not expose actor email, birthday, Admin status, permissions, or other UserProfile fields, and it does not broaden general UserProfile RLS.
+- Movement history is read-only. Task 064 adds no UPDATE, DELETE, or reversal action and does not weaken InventoryMovement immutability.
 
 ---
 

@@ -584,6 +584,12 @@ Movements are created through trusted Inventory operations.
 
 Source references must correspond to the real operation that caused the movement.
 
+Inventory Movement history reads require an active Admin or `inventory.view`.
+
+A trusted movement-history read may return the InventoryMovement fields required by the history UI together with `actor_user_id` and the actor's `full_name`. It must not expose the actor's email, birthday, Admin status, permissions, or any other UserProfile field. This narrow actor display boundary does not broaden general UserProfile RLS or UserProfile access.
+
+Movement history includes movements for active and archived Products and is ordered newest first. It is read-only: the history UI and its read operation provide no UPDATE, DELETE, or reversal action, and existing InventoryMovement immutability remains authoritative.
+
 ---
 
 # 26. Historical Record Protection

@@ -286,6 +286,14 @@ Every meaningful manual adjustment creates exactly one InventoryMovement and exa
 
 Work Order and PCB changes are recorded under their own source event rather than pretending to be manual adjustments.
 
+### Inventory Movement history
+
+Inventory Movement history is available to an active Admin or a user with `inventory.view`.
+
+History includes movements for active and archived Products, is ordered newest first, and is read-only. Task 064 adds no movement update, deletion, or reversal action.
+
+Where the history identifies the actor, a trusted read may expose only `actor_user_id` and the actor's Full Name in addition to the InventoryMovement fields required by the UI. It must not expose other UserProfile data or broaden general UserProfile access.
+
 ---
 
 ## 7. Barcode Rules
