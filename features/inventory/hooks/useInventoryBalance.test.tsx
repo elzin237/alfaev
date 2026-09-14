@@ -73,7 +73,7 @@ describe("useInventoryBalance", () => {
     expect(hookMocks.getInventoryBalance).toHaveBeenCalledWith("product-1");
   });
 
-  it("invalidates only the exact balance query after successful adjustment", async () => {
+  it("invalidates the exact balance and profile-scoped Product list after successful adjustment", async () => {
     const { result, queryClient } = renderBalanceHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     await waitFor(() => expect(result.current.balanceQuery.isSuccess).toBe(true));
@@ -91,7 +91,7 @@ describe("useInventoryBalance", () => {
       quantity: 5,
       reason: "Delivery",
     });
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: [
         "inventory",
@@ -100,6 +100,10 @@ describe("useInventoryBalance", () => {
         "profile-1",
         "product-1",
       ],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["inventory", "products", "profile-1"],
       exact: true,
     });
   });

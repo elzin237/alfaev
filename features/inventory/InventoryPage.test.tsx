@@ -26,7 +26,7 @@ vi.mock("./hooks/useProducts", () => ({
 
 import InventoryPage from "./InventoryPage";
 import type { Brand } from "./services/brandService";
-import type { Product, ProductListResult } from "./services/productService";
+import type { ProductListItem, ProductListResult } from "./services/productService";
 
 const activeBrand: Brand = {
   id: "brand-active",
@@ -46,7 +46,7 @@ const archivedBrand: Brand = {
   archivedAt: "2026-08-02T00:00:00.000Z",
 };
 
-const activeProduct: Product = {
+const activeProduct: ProductListItem = {
   id: "product-active",
   serialNumber: "0000001",
   name: "Resistor",
@@ -55,9 +55,10 @@ const activeProduct: Product = {
   brandName: null,
   productKind: "component",
   isActive: true,
+  quantity: 0,
 };
 
-const archivedProduct: Product = {
+const archivedProduct: ProductListItem = {
   id: "product-archived",
   serialNumber: "0000002",
   name: "Legacy Controller",
@@ -66,6 +67,7 @@ const archivedProduct: Product = {
   brandName: "Bosch",
   productKind: "pcb_finished_good",
   isActive: false,
+  quantity: 27,
 };
 
 function setHookState(options: {
@@ -210,15 +212,17 @@ describe("InventoryPage", () => {
     ).toBeTruthy();
 
     const activeRow = screen.getByRole("row", {
-      name: /0000001 Resistor Passive — Active/,
+      name: /0000001 Resistor Passive — 0 Active/,
     });
     const archivedRow = screen.getByRole("row", {
-      name: /0000002 Legacy Controller Control Bosch Archived/,
+      name: /0000002 Legacy Controller Control Bosch 27 Archived/,
     });
     expect(within(activeRow).getByText("—")).toBeInTheDocument();
+    expect(within(activeRow).getByText("0")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Bosch")).toBeInTheDocument();
+    expect(within(archivedRow).getByText("27")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
-    expect(screen.queryByText("Quantity")).not.toBeInTheDocument();
+    expect(screen.getByText("Quantity")).toBeInTheDocument();
   });
 
   it("hides every management action for an Inventory view-only user", () => {

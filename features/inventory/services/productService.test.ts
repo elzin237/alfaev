@@ -127,6 +127,7 @@ describe("productService", () => {
           brand: { name: "Legacy Brand" },
           product_kind: "pcb_finished_good",
           is_active: false,
+          inventory_balance: { quantity: "14" },
         },
         {
           id: "product-1",
@@ -137,6 +138,7 @@ describe("productService", () => {
           brand: null,
           product_kind: "component",
           is_active: true,
+          inventory_balance: { quantity: 0 },
         },
       ],
       error: null,
@@ -154,6 +156,7 @@ describe("productService", () => {
           brandName: null,
           productKind: "component",
           isActive: true,
+          quantity: 0,
         },
         {
           id: "product-2",
@@ -164,22 +167,51 @@ describe("productService", () => {
           brandName: "Legacy Brand",
           productKind: "pcb_finished_good",
           isActive: false,
+          quantity: 14,
         },
       ],
     });
     expect(productServiceMocks.from).toHaveBeenCalledWith("products");
     expect(productServiceMocks.select).toHaveBeenCalledWith(
-      "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name)",
+      "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name),inventory_balance:inventory_balances(quantity)",
     );
     expect(productServiceMocks.order).toHaveBeenCalledWith("serial_number", {
       ascending: true,
     });
   });
 
-  it("fails safely when the Product response is malformed or the read fails", async () => {
+  it("fails safely when the Product or required balance response is malformed or missing", async () => {
     productServiceMocks.order
       .mockResolvedValueOnce({
         data: [{ id: "product-1", serial_number: "invalid" }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          id: "product-1",
+          serial_number: "0000001",
+          name: "Resistor",
+          category: "Passive",
+          brand_id: null,
+          brand: null,
+          product_kind: "component",
+          is_active: true,
+          inventory_balance: null,
+        }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          id: "product-1",
+          serial_number: "0000001",
+          name: "Resistor",
+          category: "Passive",
+          brand_id: null,
+          brand: null,
+          product_kind: "component",
+          is_active: true,
+          inventory_balance: { quantity: -1 },
+        }],
         error: null,
       })
       .mockResolvedValueOnce({
@@ -188,6 +220,8 @@ describe("productService", () => {
       });
 
     const malformed = await listProducts();
+    const missingBalance = await listProducts();
+    const malformedBalance = await listProducts();
     const failed = await listProducts();
 
     expect(malformed).toEqual({
@@ -197,6 +231,8 @@ describe("productService", () => {
         message: "The Product list could not be loaded.",
       },
     });
+    expect(missingBalance).toEqual(malformed);
+    expect(malformedBalance).toEqual(malformed);
     expect(failed).toEqual(malformed);
     expect(JSON.stringify(failed)).not.toContain("raw database details");
   });

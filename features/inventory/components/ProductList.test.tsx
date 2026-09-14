@@ -2,10 +2,10 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryRouter } from "react-router";
 
-import type { Product } from "../services/productService";
+import type { ProductListItem } from "../services/productService";
 import ProductList from "./ProductList";
 
-const products: Product[] = [
+const products: ProductListItem[] = [
   {
     id: "product-1",
     serialNumber: "0000001",
@@ -15,6 +15,7 @@ const products: Product[] = [
     brandName: null,
     productKind: "component",
     isActive: true,
+    quantity: 0,
   },
   {
     id: "product-2",
@@ -25,6 +26,7 @@ const products: Product[] = [
     brandName: "Archived Brand",
     productKind: "pcb_finished_good",
     isActive: false,
+    quantity: 14,
   },
 ];
 
@@ -35,22 +37,24 @@ describe("ProductList", () => {
     render(<MemoryRouter><ProductList products={products} /></MemoryRouter>);
 
     const activeRow = screen.getByRole("row", {
-      name: /0000001 Resistor Passive — Active/,
+      name: /0000001 Resistor Passive — 0 Active/,
     });
     const archivedRow = screen.getByRole("row", {
-      name: /0000002 Legacy Controller Control Archived Brand Archived/,
+      name: /0000002 Legacy Controller Control Archived Brand 14 Archived/,
     });
 
     expect(within(activeRow).getByText("—")).toBeInTheDocument();
+    expect(within(activeRow).getByText("0")).toBeInTheDocument();
     expect(within(activeRow).getByText("Active")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived Brand")).toBeInTheDocument();
+    expect(within(archivedRow).getByText("14")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
   });
 
-  it("links Product names to detail without quantity or mutation actions", () => {
+  it("links Product names to detail without quantity mutation actions", () => {
     render(<MemoryRouter><ProductList products={products} /></MemoryRouter>);
 
-    expect(screen.queryByText("Quantity")).not.toBeInTheDocument();
+    expect(screen.getByText("Quantity")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Resistor" })).toHaveAttribute(
       "href",

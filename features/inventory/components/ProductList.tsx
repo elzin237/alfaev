@@ -1,10 +1,10 @@
 import { Link } from "react-router";
 
 import StatusBadge from "../../../shared/components/StatusBadge";
-import type { Product } from "../services/productService";
+import type { ProductListItem } from "../services/productService";
 
 export interface ProductListProps {
-  products: Product[];
+  products: ProductListItem[];
 }
 
 function ProductList({ products }: ProductListProps) {
@@ -14,7 +14,7 @@ function ProductList({ products }: ProductListProps) {
         <table className="min-w-full divide-y divide-zinc-200">
           <thead className="bg-zinc-50">
             <tr>
-              {["Serial Number", "Name", "Category", "Brand", "Status"].map(
+              {["Serial Number", "Name", "Category", "Brand", "Quantity", "Status"].map(
                 (heading) => (
                   <th
                     key={heading}
@@ -43,6 +43,9 @@ function ProductList({ products }: ProductListProps) {
                 </td>
                 <td className="px-5 py-4">{product.category}</td>
                 <td className="px-5 py-4">{product.brandName ?? "—"}</td>
+                <td className="whitespace-nowrap px-5 py-4 tabular-nums">
+                  {product.quantity}
+                </td>
                 <td className="whitespace-nowrap px-5 py-4">
                   <StatusBadge
                     label={product.isActive ? "Active" : "Archived"}

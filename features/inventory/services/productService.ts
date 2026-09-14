@@ -13,6 +13,10 @@ export interface Product {
   isActive: boolean;
 }
 
+export interface ProductListItem extends Product {
+  quantity: number;
+}
+
 export interface ProductDetail extends Product {
   brandIsActive: boolean | null;
   createdAt: string;
@@ -26,7 +30,7 @@ export interface ProductListError {
 }
 
 export type ProductListResult =
-  | { ok: true; value: Product[] }
+  | { ok: true; value: ProductListItem[] }
   | { ok: false; error: ProductListError };
 
 export interface ProductDetailError {
@@ -110,6 +114,7 @@ interface ProductRow {
   brand: { name: string } | null;
   product_kind: ProductKind;
   is_active: boolean;
+  inventory_balance: { quantity: unknown } | null;
 }
 
 interface ProductDetailRow {
@@ -127,7 +132,7 @@ interface ProductDetailRow {
 }
 
 const productListFields =
-  "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name)";
+  "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name),inventory_balance:inventory_balances(quantity)";
 const productDetailFields =
   "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)";
 
@@ -137,6 +142,18 @@ function isDateTime(value: string): boolean {
 
 function isProductKind(value: unknown): value is ProductKind {
   return value === "component" || value === "pcb_finished_good";
+}
+
+function parseQuantity(value: unknown): number | null {
+  const parsed = typeof value === "string" && /^[0-9]+$/.test(value)
+    ? Number(value)
+    : value;
+
+  return typeof parsed === "number" &&
+    Number.isSafeInteger(parsed) &&
+    parsed >= 0
+    ? parsed
+    : null;
 }
 
 function isProductRow(value: unknown): value is ProductRow {
@@ -169,11 +186,19 @@ function isProductRow(value: unknown): value is ProductRow {
     "product_kind" in value &&
     isProductKind(value.product_kind) &&
     "is_active" in value &&
-    typeof value.is_active === "boolean"
+    typeof value.is_active === "boolean" &&
+    "inventory_balance" in value &&
+    typeof value.inventory_balance === "object" &&
+    value.inventory_balance !== null &&
+    "quantity" in value.inventory_balance &&
+    parseQuantity(value.inventory_balance.quantity) !== null
   );
 }
 
-function mapProduct(row: ProductRow): Product {
+function mapProduct(row: ProductRow): ProductListItem | null {
+  const quantity = parseQuantity(row.inventory_balance?.quantity);
+  if (quantity === null) return null;
+
   return {
     id: row.id,
     serialNumber: row.serial_number,
@@ -183,6 +208,7 @@ function mapProduct(row: ProductRow): Product {
     brandName: row.brand?.name ?? null,
     productKind: row.product_kind,
     isActive: row.is_active,
+    quantity,
   };
 }
 
@@ -445,10 +471,12 @@ export async function listProducts(): Promise<ProductListResult> {
       return listFailure();
     }
 
-    const products: Product[] = [];
+    const products: ProductListItem[] = [];
     for (const row of data) {
       if (!isProductRow(row)) return listFailure();
-      products.push(mapProduct(row));
+      const product = mapProduct(row);
+      if (product === null) return listFailure();
+      products.push(product);
     }
 
     return {
