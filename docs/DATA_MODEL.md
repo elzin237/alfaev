@@ -575,13 +575,20 @@ Rules:
 - `completed_at` is non-null only while the current status is `completed`.
 - `cancelled_at` is non-null only while the current status is `cancelled`.
 - All other statuses require both `completed_at` and `cancelled_at` to be `NULL`.
+- Trusted operations assign lifecycle timestamps server-side; clients do not provide them.
+- Normal Project editing requires an active Admin or `projects.edit` and may change only `name`, `customer_name`, `start_date`, `delivery_date`, and a normal status where allowed.
+- The normal edit operation accepts only `planned`, `in_progress`, `on_hold`, or `completed`; it never sets `cancelled`.
+- Entering `completed` sets `completed_at` and leaves `cancelled_at` `NULL`.
+- A normal edit/status operation cannot move a Project out of `completed`.
 - Completed Projects are read-only for normal business fields.
 - Admin may reopen a Completed Project by explicitly changing it to `in_progress`.
 - Reopening clears the current `completed_at` and is audited; immutable AuditLog entries preserve historical completion and reopen events.
-- `cancelled` is the Project removal/archive lifecycle state, and the later trusted cancel/archive operation requires an active Admin or `projects.archive`.
+- `cancelled` is the Project removal/archive lifecycle state. A separate trusted cancellation operation requires an active Admin or `projects.archive`; `projects.edit` alone is insufficient.
+- Cancellation is allowed only from `planned`, `in_progress`, or `on_hold`, sets `cancelled_at` server-side, and leaves `completed_at` `NULL`. Completed Projects cannot be cancelled directly.
 - Project does not use separate `is_active`, `archived_at`, or archived-by fields.
 - Projects are not hard-deleted through normal application workflows, and Cancelled Projects remain historically readable.
-- Cancelled Project restore/reactivation is not supported in the current scope unless a later canonical decision explicitly adds it.
+- Cancelled Projects are immutable, cannot be normally edited or change status, and have no restore/reactivation workflow in the current scope.
+- Every meaningful edit, normal status change, or cancellation appends exactly one AuditLog entry atomically. Normalized no-op edits/status submissions create no update or audit, and denied/failed operations persist neither.
 - Customer is currently stored directly on Project because no separate Customer module/entity is in the locked scope.
 
 ---

@@ -472,9 +472,11 @@ Brand-new Product request:
 
 Project reads require an active Admin or `projects.view`.
 
-Direct normal-client Project INSERT, UPDATE, and DELETE are denied. Project writes require a later trusted operation that re-checks the active actor's corresponding `projects.create`, `projects.edit`, or `projects.archive` permission, or Admin status.
+Direct normal-client Project INSERT, UPDATE, and DELETE are denied. Project writes require a trusted operation that re-checks the active actor's corresponding `projects.create`, `projects.edit`, or `projects.archive` permission, or Admin status.
 
-The `cancelled` status is the Project archive/removal state. Cancellation requires an active Admin or `projects.archive`, never hard-deletes the Project, and has no restore/reactivation path in the current scope. Do not add separate Project `is_active`, `archived_at`, or archived-by fields.
+Normal Project field and status edits require an active Admin or `projects.edit`. The normal edit operation may change only `name`, `customer_name`, `start_date`, `delivery_date`, and a normal status of `planned`, `in_progress`, `on_hold`, or `completed`; it must never set `cancelled`. When the operation enters `completed`, it sets `completed_at` server-side and keeps `cancelled_at` `NULL`. Clients never provide lifecycle timestamps. A normal edit/status operation must not move a Project out of `completed`, even before the full Completed Project edit lock is added.
+
+The `cancelled` status is the Project archive/removal state. Cancellation is a separate trusted operation requiring an active Admin or `projects.archive`; `projects.edit` alone never authorizes cancellation. Only a Project currently in `planned`, `in_progress`, or `on_hold` may be cancelled. Cancellation sets `status = 'cancelled'` and `cancelled_at` server-side while leaving `completed_at` `NULL`. A Completed Project cannot be cancelled directly. Cancellation never hard-deletes the Project. Cancelled Projects remain historically readable, are immutable, cannot change status, and have no restore/reactivation path in the current scope. Do not add separate Project `is_active`, `archived_at`, or archived-by fields.
 
 Completed Project:
 
@@ -486,6 +488,8 @@ Completed Project:
 Do not let a generic update endpoint silently change Completed Project fields.
 
 Project status/timestamp consistency must be enforced at the database boundary: only `completed` may have `completed_at`, only `cancelled` may have `cancelled_at`, and all other statuses require both values to be `NULL`.
+
+Every meaningful Project edit, normal status change, or cancellation appends exactly one AuditLog entry atomically with the mutation. A normalized no-op normal edit/status submission creates no update and no audit noise. Denied or failed operations persist neither mutation nor audit.
 
 Project material usage is derived from trusted completed movement sources.
 

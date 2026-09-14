@@ -1318,7 +1318,7 @@ Security:
 
 Sequencing:
 - Task 070 owns trusted Project creation and its UI
-- Task 072 owns normal Project edits and status changes
+- Task 072 owns normal Project edits/status changes and the separate trusted cancellation operation/UI
 - Task 073 owns the Completed Project normal-edit lock
 - Task 074 owns the explicit Admin-only `completed` to `in_progress` reopen, including clearing current `completed_at` and auditing the historical transition
 
@@ -1361,23 +1361,63 @@ Include:
 ## 072 — Add Project Edit + Status Changes
 
 Goal:
-- authorized edit
-- allowed status values
-- audit before/after
+- trusted normal Project edit/status operation and edit UI
+- explicit trusted Project cancellation operation and confirmation UI
+- atomic AuditLog history for every meaningful edit, normal status change, and cancellation
 
-Do not implement Completed lock separately here.
+Normal edit authorization:
+- active Admin or `projects.edit`
+
+Normal editable fields:
+- Name
+- Customer
+- Start Date
+- Delivery Date
+- normal status where allowed
+
+Normal edit status values:
+- `planned`
+- `in_progress`
+- `on_hold`
+- `completed`
+
+Normal edit rules:
+- never set `cancelled`
+- entering `completed` sets `completed_at` server-side and leaves `cancelled_at` `NULL`
+- clients never provide lifecycle timestamps
+- do not allow a normal edit/status operation to move a Project out of `completed`
+- normalized no-op edit/status submissions create no update or audit noise
+- do not introduce a broader rigid status-transition graph
+
+Cancellation authorization:
+- active Admin or `projects.archive`
+- `projects.edit` alone is insufficient
+
+Cancellation rules:
+- allowed only from `planned`, `in_progress`, or `on_hold`
+- set status to `cancelled`
+- set `cancelled_at` server-side and leave `completed_at` `NULL`
+- do not allow direct cancellation from `completed`
+- Cancelled Projects remain historically readable and become immutable
+- no hard delete and no restore/reactivation
+
+Every meaningful mutation and its one AuditLog entry must be atomic. Denied or failed operations persist neither mutation nor audit.
+
+Do not implement the full Completed Project normal-edit lock here; Task 073 owns that backend rule. Task 072 must still prevent a normal `projects.edit` operation from reopening Completed Projects. Do not implement the Admin reopen from Task 074.
 
 ---
 
 ## 073 — Enforce Completed Project Lock
 
 Goal:
-- backend prevents normal edits while Completed
+- backend prevents all ordinary field edits while a Project is already Completed
 
 UI:
 - read-only completed state
 
 Add tests proving direct update bypass fails.
+
+Task 073 does not broaden reopen authority; Task 074 remains the only explicit reopen path.
 
 ---
 

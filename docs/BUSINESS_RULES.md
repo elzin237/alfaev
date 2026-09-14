@@ -57,17 +57,37 @@ Do not impose a rigid general Project status-transition graph beyond the explici
 - `completed_at` is populated only while the current status is `completed`.
 - `cancelled_at` is populated only while the current status is `cancelled`.
 - Every other status requires both `completed_at` and `cancelled_at` to be `NULL`.
+- Lifecycle timestamps are assigned by trusted backend operations and are never client inputs.
 - An Admin-only `completed` to `in_progress` reopen clears the current `completed_at`; immutable AuditLog history preserves the completion and reopen events.
+
+### Normal Project editing
+
+- Normal Project editing requires an active Admin or `projects.edit`.
+- Normal editable fields are Name, Customer, Start Date, Delivery Date, and normal status where allowed.
+- The normal edit operation handles only `planned`, `in_progress`, `on_hold`, and `completed`; it cannot set `cancelled`.
+- Entering `completed` sets `completed_at` server-side and keeps `cancelled_at` `NULL`.
+- Normal edit/status mutation cannot move a Project out of `completed`. The only reopen is the explicit Admin-only `completed` to `in_progress` operation, which clears the current `completed_at` and is audited.
+- These explicit lifecycle rules do not establish a broader rigid status-transition graph.
 
 ### Cancelled Projects
 
-`cancelled` is the Project removal/archive lifecycle state.
+`cancelled` is the Project removal/archive lifecycle state and is reached only through an explicit trusted cancellation operation.
 
-- Project cancellation/archive is a later trusted operation authorized by an active Admin or `projects.archive`.
+- Project cancellation/archive requires an active Admin or `projects.archive`; `projects.edit` alone does not authorize it.
+- Only `planned`, `in_progress`, or `on_hold` Projects may be cancelled.
+- Cancellation sets `cancelled_at` server-side and leaves `completed_at` `NULL`.
+- Completed Projects cannot be cancelled directly.
 - Cancelled Projects remain historically readable.
+- Cancelled Projects are immutable, cannot change status, and cannot be normally edited.
 - Projects are not hard-deleted through normal application workflows.
 - Project does not use separate `is_active`, `archived_at`, or archived-by fields.
-- Cancelled Projects cannot be restored/reactivated in the current scope unless a later canonical decision explicitly adds that workflow.
+- Cancelled Projects cannot be restored/reactivated in the current scope.
+
+### Mutation audit behavior
+
+- Every meaningful Project edit, normal status change, or cancellation creates exactly one immutable AuditLog entry in the same atomic operation as the mutation.
+- A normalized no-op normal edit/status submission creates no update and no audit entry.
+- Denied or failed mutations leave both Project state and AuditLog unchanged.
 
 ### Material usage
 
