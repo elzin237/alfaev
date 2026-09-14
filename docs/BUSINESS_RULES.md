@@ -219,9 +219,12 @@ The sequence must be generated safely by trusted backend/database logic to preve
 - ProductSupplier reactivation/unarchive is not supported in the current scope.
 - Meaningful ProductSupplier add/edit/archive changes create immutable AuditLog history; normalized no-op edits do not create audit noise.
 - ProductSupplier add/edit/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, enforced through one shared trusted backend authority regardless of the originating detail screen.
-- Trusted ProductSupplier relationship reads may expose only the related Supplier ID, Name, and active/archive state required to display the relationship to an active Admin or a user with `inventory.view` or `suppliers.view`.
+- Trusted Product-side ProductSupplier relationship reads may expose only the related Supplier ID, Name, and active/archive state required to display the relationship to an active Admin or a user with `inventory.view` or `suppliers.view`.
 - A trusted Supplier-choice lookup for ProductSupplier management may expose only active Supplier IDs and Names to an active Admin or a user with `inventory.products.edit` or `suppliers.edit`.
 - These narrow ProductSupplier reads do not provide general Supplier access or Supplier contact/details; normal Supplier reads still require an active Admin or `suppliers.view`.
+- Trusted Supplier-side ProductSupplier relationship reads may expose only the related Product ID, Serial Number, Name, and active/archive state required to display the relationship to an active Admin or a user with `inventory.view` or `suppliers.view`.
+- A trusted Product-choice lookup for ProductSupplier management may expose only active Product IDs, Serial Numbers, and Names to an active Admin or a user with `inventory.products.edit` or `suppliers.edit`.
+- These narrow ProductSupplier reads do not provide general Product access or Product Category, Brand, lifecycle timestamps/actors, or other Product details; normal Product reads still require an active Admin or `inventory.view`.
 - No separate ProductSupplier permission key is added.
 
 ---

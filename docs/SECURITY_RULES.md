@@ -141,9 +141,12 @@ Product authorization:
 ProductSupplier authorization:
 
 - ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required
-- trusted ProductSupplier read operations may expose only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship to those authorized readers
+- trusted Product-side ProductSupplier read operations may expose only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship to those authorized readers
 - a trusted minimal Supplier-choice lookup for creating ProductSupplier relationships may return only active Supplier IDs and Names, and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
 - these narrow cross-domain reads do not grant general Supplier-table access or expose Supplier Country, Contact Person, Phone, Email, or other Supplier details; normal Supplier reads continue to require an active Admin or `suppliers.view`
+- trusted Supplier-side ProductSupplier read operations may expose only the related Product ID, Serial Number, Name, and active/archive state needed to display the relationship to those authorized readers
+- a trusted minimal Product-choice lookup for creating ProductSupplier relationships may return only active Product IDs, Serial Numbers, and Names, and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
+- these narrow cross-domain reads do not grant general Product-table access or expose Product Category, Brand, lifecycle timestamps/actors, or other Product details; normal Product reads continue to require an active Admin or `inventory.view`
 - direct client ProductSupplier mutation is not authoritative authorization
 - trusted ProductSupplier add/edit/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
 - one shared trusted backend authority applies regardless of whether the operation originates from Product detail or Supplier detail

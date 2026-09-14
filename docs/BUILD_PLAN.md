@@ -1075,7 +1075,13 @@ Do not mix Inventory quantities into this task.
 Goal:
 - Supplier detail shows linked Products and Catalog Numbers
 
-Reuse the Task 054 trusted ProductSupplier backend operations and shared query logic. Do not create a second Supplier-origin mutation authority.
+Add the minimal trusted cross-domain read backend required by this Supplier-side UI:
+- a ProductSupplier relationship read for an active Admin, `inventory.view`, or `suppliers.view`, returning only relationship data plus the related Product ID, Serial Number, Name, and active/archive state required for display
+- an active-Product choice lookup for an active Admin, `inventory.products.edit`, or `suppliers.edit`, returning only Product ID, Serial Number, and Name
+- do not expose Product Category, Brand, lifecycle timestamps/actors, or other Product details through either operation
+- do not broaden normal Product RLS; general Product reads remain restricted to an active Admin or `inventory.view`
+
+Reuse the Task 054 trusted ProductSupplier mutation operations and shared ProductSupplier query/service logic where appropriate. Do not create a second Supplier-origin mutation authority.
 
 ---
 
