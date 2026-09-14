@@ -501,6 +501,8 @@ Manual adjustment `movement_type` values are exactly:
 
 Manual adjustment semantics:
 
+- The target Product must exist and be active when the trusted adjustment executes.
+- Archived Products retain their InventoryBalance and immutable InventoryMovement history for historical reads, but cannot receive new manual `manual_add`, `manual_remove`, or `manual_correction` movements.
 - Add accepts a positive amount and records `quantity_delta = +quantity`.
 - Remove accepts a positive amount and records `quantity_delta = -quantity`; `quantity_after` cannot be negative.
 - Correction accepts the desired final quantity, which may be zero, and records `quantity_delta = target_quantity - quantity_before`.
@@ -1155,6 +1157,7 @@ The physical implementation must provide trusted atomic operations for at least:
 
 ## Inventory manual adjustment
 - active Admin authorization
+- target Product existence and active-state re-check at execution time
 - Add/Remove/Correction input and required nonblank reason validation
 - exactly one call to the central Inventory mutation primitive
 - exactly one InventoryBalance update and InventoryMovement insert through that primitive

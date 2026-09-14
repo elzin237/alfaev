@@ -247,8 +247,11 @@ Incomplete/failed PCB production never affects Inventory.
 
 Only Admin may manually adjust Inventory.
 
+The target Product must exist and be active when the adjustment executes. Archived Products remain historically readable and retain their InventoryBalance and InventoryMovement history, but cannot receive new manual Add, Remove, or Correction adjustments or movements.
+
 Required fields:
 
+- target Product
 - adjustment type:
   - Add
   - Remove

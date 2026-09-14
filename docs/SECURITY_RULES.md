@@ -236,9 +236,12 @@ Permanently Admin-only.
 
 Required input:
 
+- target Product
 - adjustment type: Add, Remove, or Correction
 - quantity interpreted according to the selected adjustment type
 - reason, trimmed and nonblank
+
+The target Product must exist and be active. The trusted Task 060 operation must re-check Product active state at execution time. Archived Products remain historically readable and retain their InventoryBalance and InventoryMovement history, but cannot receive new manual Add, Remove, or Correction adjustments or movements.
 
 Adjustment semantics:
 
@@ -252,9 +255,10 @@ Adjustment semantics:
 The trusted Task 060 operation must atomically:
 
 1. authorize the active Admin
-2. call the Task 059 Inventory mutation primitive exactly once
-3. create exactly one InventoryMovement through that primitive
-4. append exactly one immutable AuditLog entry
+2. re-check that the target Product exists and is active
+3. call the Task 059 Inventory mutation primitive exactly once
+4. create exactly one InventoryMovement through that primitive
+5. append exactly one immutable AuditLog entry
 
 If authorization, validation, balance mutation, movement insertion, or audit insertion fails, the balance change, InventoryMovement, and AuditLog must all roll back.
 
@@ -265,6 +269,7 @@ Reject:
 - Remove result below zero
 - Correction target below zero
 - Correction target equal to current stock
+- missing or archived Product
 - non-admin actor
 
 ---

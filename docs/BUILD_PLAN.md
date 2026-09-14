@@ -1140,9 +1140,16 @@ Goal:
 - permanently Admin-only Add / Remove / Correction operation
 
 Require:
+- target Product ID
 - adjustment type
 - quantity interpreted according to the selected adjustment type
 - reason trimmed before use and required to be nonblank
+
+Product lifecycle:
+- the target Product must exist and be active
+- re-check Product active state when the trusted operation executes
+- archived Products remain historically readable and retain their InventoryBalance and InventoryMovement history
+- archived Products cannot receive new manual Add, Remove, or Correction adjustments or movements
 
 Semantics:
 - Add accepts the positive amount to add; quantity must be greater than zero and `delta = +quantity`.
@@ -1154,12 +1161,13 @@ Semantics:
 
 Atomically:
 - authorize the active Admin
+- re-check that the target Product exists and is active
 - call the Task 059 Inventory mutation primitive exactly once
 - create exactly one InventoryMovement through that primitive
 - append exactly one immutable AuditLog entry
 - roll back the balance change, movement, and audit if any step fails
 
-Add authorization, direct-bypass, input-semantics, required-reason, negative-stock, no-op, exact movement-type, single-movement, single-audit, and atomic-rollback tests.
+Add authorization, direct-bypass, active-Product execution-time validation, archived-Product rejection, input-semantics, required-reason, negative-stock, no-op, exact movement-type, single-movement, single-audit, and atomic-rollback tests.
 
 ---
 
