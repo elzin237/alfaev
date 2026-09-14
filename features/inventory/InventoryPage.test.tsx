@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
@@ -51,7 +51,6 @@ const activeProduct: ProductListItem = {
   serialNumber: "0000001",
   name: "Resistor",
   category: "Passive",
-  brandId: null,
   brandName: null,
   productKind: "component",
   isActive: true,
@@ -63,7 +62,6 @@ const archivedProduct: ProductListItem = {
   serialNumber: "0000002",
   name: "Legacy Controller",
   category: "Control",
-  brandId: "brand-archived",
   brandName: "Bosch",
   productKind: "pcb_finished_good",
   isActive: false,
@@ -134,6 +132,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
@@ -223,6 +222,35 @@ describe("InventoryPage", () => {
     expect(within(archivedRow).getByText("27")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
     expect(screen.getByText("Quantity")).toBeInTheDocument();
+  });
+
+  it("debounces server-backed Product search and distinguishes no matches from an empty Inventory", () => {
+    vi.useFakeTimers();
+    setHookState({ productsData: { ok: true, value: [] }, canCreate: false });
+    renderInventory();
+
+    const search = screen.getByRole("searchbox", { name: "Search Products" });
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("heading", { name: "No Products found" }))
+      .toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "  res" } });
+    fireEvent.change(search, { target: { value: "  resistor  " } });
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+
+    act(() => vi.advanceTimersByTime(299));
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("resistor");
+    expect(screen.getByRole("heading", { name: "No matching Products" }))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Search" }));
+    expect(search).toHaveValue("");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("heading", { name: "No Products found" }))
+      .toBeInTheDocument();
   });
 
   it("hides every management action for an Inventory view-only user", () => {

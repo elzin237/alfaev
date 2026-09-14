@@ -190,7 +190,6 @@ describe("useProductDetail", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
-      exact: true,
     });
   });
 
@@ -238,7 +237,6 @@ describe("useProductDetail", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
-      exact: true,
     });
   });
 

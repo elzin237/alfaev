@@ -107,7 +107,7 @@ describe("useProductCreation", () => {
     expect(failed.result.current.canCreate).toBe(false);
   });
 
-  it("invalidates only the current profile Product list after successful creation", async () => {
+  it("invalidates the current profile Product-list prefix after successful creation", async () => {
     const { result, queryClient } = renderProductCreationHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
@@ -121,7 +121,6 @@ describe("useProductCreation", () => {
 
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
-      exact: true,
     });
   });
 

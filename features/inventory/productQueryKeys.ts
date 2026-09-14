@@ -1,5 +1,19 @@
-export function productListQueryKey(profileId: string | undefined) {
+export function normalizeProductSearch(search: string): string {
+  return search.trim();
+}
+
+export function productListQueryPrefix(profileId: string | undefined) {
   return ["inventory", "products", profileId] as const;
+}
+
+export function productListQueryKey(
+  profileId: string | undefined,
+  search = "",
+) {
+  return [
+    ...productListQueryPrefix(profileId),
+    normalizeProductSearch(search),
+  ] as const;
 }
 
 export function productDetailQueryKey(

@@ -6,7 +6,7 @@ import { hasPermission } from "../../../app/auth/permissionService";
 import { brandListQueryKey } from "../brandQueryKeys";
 import {
   productDetailQueryKey,
-  productListQueryKey,
+  productListQueryPrefix,
 } from "../productQueryKeys";
 import { listBrands } from "../services/brandService";
 import {
@@ -20,7 +20,7 @@ export function useProductDetail(productId: string) {
   const { session, profile, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const detailQueryKey = productDetailQueryKey(profile?.id, productId);
-  const listQueryKey = productListQueryKey(profile?.id);
+  const listQueryPrefix = productListQueryPrefix(profile?.id);
   const productQuery = useQuery({
     queryKey: detailQueryKey,
     queryFn: () => getProduct(productId),
@@ -55,7 +55,7 @@ export function useProductDetail(productId: string) {
   async function invalidateProductQueries(): Promise<void> {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
-      queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
+      queryClient.invalidateQueries({ queryKey: listQueryPrefix }),
     ]);
   }
 

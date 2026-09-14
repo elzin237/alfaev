@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import EmptyState from "../../shared/components/EmptyState";
@@ -18,7 +18,9 @@ function InventoryPage() {
   const { brandsQuery, canManage, create: createBrand, update, archive } =
     useBrandManagement();
   const { canCreate, create: createProduct } = useProductCreation();
-  const productsQuery = useProducts();
+  const [productSearch, setProductSearch] = useState("");
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
+  const productsQuery = useProducts(debouncedProductSearch);
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
@@ -28,6 +30,19 @@ function InventoryPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedProductSearch(productSearch.trim());
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [productSearch]);
+
+  function clearProductSearch() {
+    setProductSearch("");
+    setDebouncedProductSearch("");
+  }
 
   function openCreateDialog() {
     setSuccessMessage(null);
@@ -87,7 +102,13 @@ function InventoryPage() {
       />
     );
   } else if (productsQuery.data.value.length === 0) {
-    productContent = (
+    productContent = debouncedProductSearch ? (
+      <EmptyState
+        title="No matching Products"
+        description="No Products match the current search."
+        action={{ label: "Clear Search", onClick: clearProductSearch }}
+      />
+    ) : (
       <EmptyState
         title="No Products found"
         description="There are no Inventory Products to display."
@@ -169,6 +190,23 @@ function InventoryPage() {
           <p className="mt-1 text-sm leading-6 text-zinc-500">
             Active and archived Inventory Products.
           </p>
+        </div>
+
+        <div className="max-w-xl">
+          <label
+            htmlFor="inventory-product-search"
+            className="mb-2 block text-sm font-semibold text-zinc-700"
+          >
+            Search Products
+          </label>
+          <input
+            id="inventory-product-search"
+            type="search"
+            value={productSearch}
+            onChange={(event) => setProductSearch(event.target.value)}
+            placeholder="Name, Serial Number / Šifra, or Catalog Number"
+            className="w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          />
         </div>
 
         {productContent}

@@ -17,7 +17,7 @@ vi.mock("../services/productService", () => ({
 
 import { useProducts } from "./useProducts";
 
-function renderProductsHook() {
+function renderProductsHook(search = "") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -26,7 +26,7 @@ function renderProductsHook() {
   );
 
   return {
-    ...renderHook(() => useProducts(), { wrapper }),
+    ...renderHook(() => useProducts(search), { wrapper }),
     queryClient,
   };
 }
@@ -42,15 +42,16 @@ afterEach(() => {
 });
 
 describe("useProducts", () => {
-  it("loads Products into a profile-scoped feature query", async () => {
-    const { result, queryClient } = renderProductsHook();
+  it("loads Products into a normalized-search and profile-scoped feature query", async () => {
+    const { result, queryClient } = renderProductsHook("  resistor  ");
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(productHookMocks.listProducts).toHaveBeenCalledOnce();
+    expect(productHookMocks.listProducts).toHaveBeenCalledWith("resistor");
     expect(queryClient.getQueryData([
       "inventory",
       "products",
       "profile-1",
+      "resistor",
     ])).toEqual({ ok: true, value: [] });
   });
 

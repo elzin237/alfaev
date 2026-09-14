@@ -3,13 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
-import { productListQueryKey } from "../productQueryKeys";
+import { productListQueryPrefix } from "../productQueryKeys";
 import { createProduct } from "../services/productService";
 
 export function useProductCreation() {
   const { session, profile, isAdmin } = useAuth();
   const queryClient = useQueryClient();
-  const listQueryKey = productListQueryKey(profile?.id);
+  const listQueryPrefix = productListQueryPrefix(profile?.id);
   const permissionQuery = useQuery({
     queryKey: permissionQueryKey(
       session?.user.id,
@@ -29,8 +29,7 @@ export function useProductCreation() {
 
     if (result.ok) {
       await queryClient.invalidateQueries({
-        queryKey: listQueryKey,
-        exact: true,
+        queryKey: listQueryPrefix,
       });
     }
 

@@ -13,7 +13,14 @@ export interface Product {
   isActive: boolean;
 }
 
-export interface ProductListItem extends Product {
+export interface ProductListItem {
+  id: string;
+  serialNumber: string;
+  name: string;
+  category: string;
+  brandName: string | null;
+  productKind: ProductKind;
+  isActive: boolean;
   quantity: number;
 }
 
@@ -110,11 +117,10 @@ interface ProductRow {
   serial_number: string;
   name: string;
   category: string;
-  brand_id: string | null;
-  brand: { name: string } | null;
+  brand_name: string | null;
   product_kind: ProductKind;
   is_active: boolean;
-  inventory_balance: { quantity: unknown } | null;
+  quantity: unknown;
 }
 
 interface ProductDetailRow {
@@ -131,8 +137,6 @@ interface ProductDetailRow {
   archived_at: string | null;
 }
 
-const productListFields =
-  "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name),inventory_balance:inventory_balances(quantity)";
 const productDetailFields =
   "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)";
 
@@ -159,17 +163,6 @@ function parseQuantity(value: unknown): number | null {
 function isProductRow(value: unknown): value is ProductRow {
   if (typeof value !== "object" || value === null) return false;
 
-  const brandIsValid =
-    "brand" in value &&
-    (
-      value.brand === null ||
-      (
-        typeof value.brand === "object" &&
-        "name" in value.brand &&
-        typeof value.brand.name === "string"
-      )
-    );
-
   return (
     "id" in value &&
     typeof value.id === "string" &&
@@ -180,23 +173,19 @@ function isProductRow(value: unknown): value is ProductRow {
     typeof value.name === "string" &&
     "category" in value &&
     typeof value.category === "string" &&
-    "brand_id" in value &&
-    (typeof value.brand_id === "string" || value.brand_id === null) &&
-    brandIsValid &&
+    "brand_name" in value &&
+    (typeof value.brand_name === "string" || value.brand_name === null) &&
     "product_kind" in value &&
     isProductKind(value.product_kind) &&
     "is_active" in value &&
     typeof value.is_active === "boolean" &&
-    "inventory_balance" in value &&
-    typeof value.inventory_balance === "object" &&
-    value.inventory_balance !== null &&
-    "quantity" in value.inventory_balance &&
-    parseQuantity(value.inventory_balance.quantity) !== null
+    "quantity" in value &&
+    parseQuantity(value.quantity) !== null
   );
 }
 
 function mapProduct(row: ProductRow): ProductListItem | null {
-  const quantity = parseQuantity(row.inventory_balance?.quantity);
+  const quantity = parseQuantity(row.quantity);
   if (quantity === null) return null;
 
   return {
@@ -204,8 +193,7 @@ function mapProduct(row: ProductRow): ProductListItem | null {
     serialNumber: row.serial_number,
     name: row.name,
     category: row.category,
-    brandId: row.brand_id,
-    brandName: row.brand?.name ?? null,
+    brandName: row.brand_name,
     productKind: row.product_kind,
     isActive: row.is_active,
     quantity,
@@ -460,12 +448,12 @@ export async function createProduct(
   }
 }
 
-export async function listProducts(): Promise<ProductListResult> {
+export async function listProducts(search = ""): Promise<ProductListResult> {
   try {
-    const { data, error } = await supabase
-      .from("products")
-      .select(productListFields)
-      .order("serial_number", { ascending: true });
+    const normalizedSearch = search.trim();
+    const { data, error } = await supabase.rpc("search_inventory_products", {
+      p_search: normalizedSearch || null,
+    });
 
     if (error || !Array.isArray(data)) {
       return listFailure();

@@ -1,15 +1,19 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
-import { productListQueryKey } from "../productQueryKeys";
+import {
+  normalizeProductSearch,
+  productListQueryKey,
+} from "../productQueryKeys";
 import { listProducts } from "../services/productService";
 
-export function useProducts() {
+export function useProducts(search = "") {
   const { profile } = useAuth();
+  const normalizedSearch = normalizeProductSearch(search);
 
   return useQuery({
-    queryKey: productListQueryKey(profile?.id),
-    queryFn: listProducts,
+    queryKey: productListQueryKey(profile?.id, normalizedSearch),
+    queryFn: () => listProducts(normalizedSearch),
     enabled: Boolean(profile?.id),
     staleTime: 60_000,
   });

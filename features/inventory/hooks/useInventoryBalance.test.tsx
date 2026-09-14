@@ -104,7 +104,6 @@ describe("useInventoryBalance", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
-      exact: true,
     });
   });
 

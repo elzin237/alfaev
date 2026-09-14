@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { inventoryBalanceQueryKey } from "../inventoryBalanceQueryKeys";
-import { productListQueryKey } from "../productQueryKeys";
+import { productListQueryPrefix } from "../productQueryKeys";
 import {
   adjustInventory,
   getInventoryBalance,
@@ -13,7 +13,7 @@ export function useInventoryBalance(productId: string, enabled = true) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
   const balanceQueryKey = inventoryBalanceQueryKey(profile?.id, productId);
-  const listQueryKey = productListQueryKey(profile?.id);
+  const listQueryPrefix = productListQueryPrefix(profile?.id);
   const balanceQuery = useQuery({
     queryKey: balanceQueryKey,
     queryFn: () => getInventoryBalance(productId),
@@ -31,8 +31,7 @@ export function useInventoryBalance(productId: string, enabled = true) {
           exact: true,
         }),
         queryClient.invalidateQueries({
-          queryKey: listQueryKey,
-          exact: true,
+          queryKey: listQueryPrefix,
         }),
       ]);
     }

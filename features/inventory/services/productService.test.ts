@@ -116,35 +116,33 @@ describe("productService", () => {
   });
 
   it("reads, validates, maps, and deterministically orders Products with Brand history", async () => {
-    productServiceMocks.order.mockResolvedValue({
+    productServiceMocks.rpc.mockResolvedValue({
       data: [
         {
           id: "product-2",
           serial_number: "0000010",
           name: "Controller",
           category: "Control",
-          brand_id: "brand-archived",
-          brand: { name: "Legacy Brand" },
+          brand_name: "Legacy Brand",
           product_kind: "pcb_finished_good",
           is_active: false,
-          inventory_balance: { quantity: "14" },
+          quantity: "14",
         },
         {
           id: "product-1",
           serial_number: "0000002",
           name: "Resistor",
           category: "Passive",
-          brand_id: null,
-          brand: null,
+          brand_name: null,
           product_kind: "component",
           is_active: true,
-          inventory_balance: { quantity: 0 },
+          quantity: 0,
         },
       ],
       error: null,
     });
 
-    await expect(listProducts()).resolves.toEqual({
+    await expect(listProducts("  controller  ")).resolves.toEqual({
       ok: true,
       value: [
         {
@@ -152,7 +150,6 @@ describe("productService", () => {
           serialNumber: "0000002",
           name: "Resistor",
           category: "Passive",
-          brandId: null,
           brandName: null,
           productKind: "component",
           isActive: true,
@@ -163,7 +160,6 @@ describe("productService", () => {
           serialNumber: "0000010",
           name: "Controller",
           category: "Control",
-          brandId: "brand-archived",
           brandName: "Legacy Brand",
           productKind: "pcb_finished_good",
           isActive: false,
@@ -171,17 +167,28 @@ describe("productService", () => {
         },
       ],
     });
-    expect(productServiceMocks.from).toHaveBeenCalledWith("products");
-    expect(productServiceMocks.select).toHaveBeenCalledWith(
-      "id,serial_number,name,category,brand_id,product_kind,is_active,brand:brands(name),inventory_balance:inventory_balances(quantity)",
+    expect(productServiceMocks.rpc).toHaveBeenCalledWith(
+      "search_inventory_products",
+      { p_search: "controller" },
     );
-    expect(productServiceMocks.order).toHaveBeenCalledWith("serial_number", {
-      ascending: true,
+    expect(productServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it("sends blank Product search as null", async () => {
+    productServiceMocks.rpc.mockResolvedValue({ data: [], error: null });
+
+    await expect(listProducts("   ")).resolves.toEqual({
+      ok: true,
+      value: [],
     });
+    expect(productServiceMocks.rpc).toHaveBeenCalledWith(
+      "search_inventory_products",
+      { p_search: null },
+    );
   });
 
   it("fails safely when the Product or required balance response is malformed or missing", async () => {
-    productServiceMocks.order
+    productServiceMocks.rpc
       .mockResolvedValueOnce({
         data: [{ id: "product-1", serial_number: "invalid" }],
         error: null,
@@ -192,11 +199,9 @@ describe("productService", () => {
           serial_number: "0000001",
           name: "Resistor",
           category: "Passive",
-          brand_id: null,
-          brand: null,
+          brand_name: null,
           product_kind: "component",
           is_active: true,
-          inventory_balance: null,
         }],
         error: null,
       })
@@ -206,11 +211,10 @@ describe("productService", () => {
           serial_number: "0000001",
           name: "Resistor",
           category: "Passive",
-          brand_id: null,
-          brand: null,
+          brand_name: null,
           product_kind: "component",
           is_active: true,
-          inventory_balance: { quantity: -1 },
+          quantity: -1,
         }],
         error: null,
       })

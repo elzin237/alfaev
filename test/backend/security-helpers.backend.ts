@@ -282,6 +282,17 @@ interface CreatedProductRow {
   serial_number: string;
 }
 
+interface InventoryProductSearchRow {
+  brand_name: string | null;
+  category: string;
+  id: string;
+  is_active: boolean;
+  name: string;
+  product_kind: "component" | "pcb_finished_good";
+  quantity: string;
+  serial_number: string;
+}
+
 function createTestSerialNumber(): string {
   const randomValue = Number.parseInt(
     randomUUID().replace(/-/g, "").slice(0, 12),
@@ -9978,5 +9989,255 @@ describe("Supabase security helpers", () => {
         await observer.query("commit");
       }
     });
+  });
+
+  it("searches Inventory Products through one authorized, literal, indexed read model", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const token = randomUUID().replace(/-/g, "");
+      const activeProductId = randomUUID();
+      const archivedProductId = randomUUID();
+      const brandId = randomUUID();
+      const supplierId = randomUUID();
+      const activeSerial = createTestSerialNumber();
+      let archivedSerial = createTestSerialNumber();
+      while (archivedSerial === activeSerial) {
+        archivedSerial = createTestSerialNumber();
+      }
+
+      await database.query(
+        `insert into public.brands (
+           id, name, created_by_user_id, updated_by_user_id
+         ) values ($1::uuid, $2::text, $3::uuid, $3::uuid)`,
+        [brandId, `Search Brand ${token}`, actorId],
+      );
+      await database.query(
+        `insert into public.suppliers (
+           id, name, country, created_by_user_id, updated_by_user_id
+         ) values ($1::uuid, $2::text, 'Germany', $3::uuid, $3::uuid)`,
+        [supplierId, `Search Supplier ${token}`, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, brand_id, product_kind,
+           is_active, created_by_user_id, updated_by_user_id,
+           archived_at, archived_by_user_id
+         ) values
+           ($1::uuid, $2::text, $3::text, 'Components', $7::uuid,
+            'component', true, $8::uuid, $8::uuid, null, null),
+           ($4::uuid, $5::text, $6::text, 'Historical', null,
+            'pcb_finished_good', false, $8::uuid, $8::uuid,
+            pg_catalog.now(), $8::uuid)`,
+        [
+          activeProductId,
+          activeSerial,
+          `Alpha ${token} Sensor %_`,
+          archivedProductId,
+          archivedSerial,
+          `Archived ${token} Controller`,
+          brandId,
+          actorId,
+        ],
+      );
+      await database.query(
+        `update public.inventory_balances
+         set quantity = case
+           when product_id = $1::uuid then 12
+           when product_id = $2::uuid then 4
+           else quantity
+         end
+         where product_id = any($3::uuid[])`,
+        [activeProductId, archivedProductId, [activeProductId, archivedProductId]],
+      );
+      await database.query(
+        `insert into public.product_suppliers (
+           id, product_id, supplier_id, catalog_number, is_active,
+           created_by_user_id, updated_by_user_id, archived_at,
+           archived_by_user_id
+         ) values
+           ($1::uuid, $4::uuid, $6::uuid, $7::text, true,
+            $9::uuid, $9::uuid, null, null),
+           ($2::uuid, $4::uuid, $6::uuid, $8::text, false,
+            $9::uuid, $9::uuid, pg_catalog.now(), $9::uuid),
+           ($3::uuid, $5::uuid, $6::uuid, $10::text, false,
+            $9::uuid, $9::uuid, pg_catalog.now(), $9::uuid)`,
+        [
+          randomUUID(),
+          randomUUID(),
+          randomUUID(),
+          activeProductId,
+          archivedProductId,
+          supplierId,
+          `CAT-${token}-ONE`,
+          `cat-${token}-two`,
+          actorId,
+          `HISTORICAL-${token}`,
+        ],
+      );
+
+      const searchAs = async (
+        authUserId: string,
+        search: string | null,
+      ): Promise<InventoryProductSearchRow[]> => {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        const result = await database.query<InventoryProductSearchRow>(
+          "select * from public.search_inventory_products($1::text)",
+          [search],
+        );
+        await database.query("reset role");
+        return result.rows;
+      };
+
+      const adminBlank = await searchAs(fixture.actors.admin.authUserId, "   ");
+      const inventoryViewBlank = await searchAs(
+        fixture.actors.brandManager.authUserId,
+        null,
+      );
+      expect(adminBlank.some((row) => row.id === activeProductId)).toBe(true);
+      expect(adminBlank.some((row) => row.id === archivedProductId)).toBe(true);
+      expect(inventoryViewBlank.some((row) => row.id === activeProductId))
+        .toBe(true);
+      expect(adminBlank.map((row) => row.serial_number)).toEqual(
+        [...adminBlank.map((row) => row.serial_number)].sort(),
+      );
+
+      const nameMatch = await searchAs(
+        fixture.actors.brandManager.authUserId,
+        `ALPHA ${token.toUpperCase()}`,
+      );
+      expect(nameMatch.map((row) => row.id)).toEqual([activeProductId]);
+
+      const serialExact = await searchAs(
+        fixture.actors.admin.authUserId,
+        activeSerial,
+      );
+      const serialPrefix = await searchAs(
+        fixture.actors.admin.authUserId,
+        activeSerial.slice(0, 6),
+      );
+      expect(serialExact.map((row) => row.id)).toEqual([activeProductId]);
+      expect(serialPrefix.some((row) => row.id === activeProductId)).toBe(true);
+
+      const catalogMatches = await searchAs(
+        fixture.actors.admin.authUserId,
+        `cat-${token}`,
+      );
+      expect(catalogMatches.filter((row) => row.id === activeProductId))
+        .toHaveLength(1);
+
+      const historicalCatalog = await searchAs(
+        fixture.actors.admin.authUserId,
+        `historical-${token}`,
+      );
+      expect(historicalCatalog.map((row) => row.id))
+        .toEqual([archivedProductId]);
+
+      const literalWildcard = await searchAs(
+        fixture.actors.admin.authUserId,
+        "%_",
+      );
+      expect(literalWildcard.map((row) => row.id)).toContain(activeProductId);
+      expect(literalWildcard.every((row) => row.name.includes("%_"))).toBe(true);
+
+      const activeResult = nameMatch[0];
+      expect(activeResult).toEqual({
+        brand_name: `Search Brand ${token}`,
+        category: "Components",
+        id: activeProductId,
+        is_active: true,
+        name: `Alpha ${token} Sensor %_`,
+        product_kind: "component",
+        quantity: "12",
+        serial_number: activeSerial,
+      });
+      expect(Object.keys(activeResult ?? {}).sort()).toEqual([
+        "brand_name",
+        "category",
+        "id",
+        "is_active",
+        "name",
+        "product_kind",
+        "quantity",
+        "serial_number",
+      ]);
+
+      for (const [label, authUserId] of [
+        ["unpermitted_search", fixture.actors.unpermitted.authUserId],
+        ["inactive_search", fixture.actors.inactive.authUserId],
+      ] as const) {
+        await database.query(`savepoint ${label}`);
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        await expect(
+          database.query("select * from public.search_inventory_products(null)"),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint ${label}`);
+        await database.query("reset role");
+      }
+
+      const infrastructure = await database.query<{
+        catalog_index: string | null;
+        extension_schema: string;
+        function_definition: string;
+        name_index: string | null;
+      }>(
+        `select
+           pg_catalog.pg_get_indexdef(name_index.indexrelid) as name_index,
+           pg_catalog.pg_get_indexdef(catalog_index.indexrelid) as catalog_index,
+           extension_namespace.nspname as extension_schema,
+           pg_catalog.pg_get_functiondef(search_function.oid) as function_definition
+         from pg_catalog.pg_extension as extension
+         join pg_catalog.pg_namespace as extension_namespace
+           on extension_namespace.oid = extension.extnamespace
+         join pg_catalog.pg_proc as search_function
+           on search_function.proname = 'search_inventory_products'
+         join pg_catalog.pg_namespace as function_namespace
+           on function_namespace.oid = search_function.pronamespace
+          and function_namespace.nspname = 'public'
+         left join pg_catalog.pg_class as product_table
+           on product_table.relname = 'products'
+         left join pg_catalog.pg_namespace as product_namespace
+           on product_namespace.oid = product_table.relnamespace
+          and product_namespace.nspname = 'public'
+         left join pg_catalog.pg_index as name_index
+           on name_index.indrelid = product_table.oid
+          and name_index.indexrelid = 'public.products_name_search_trgm_idx'::regclass
+         left join pg_catalog.pg_class as relation_table
+           on relation_table.relname = 'product_suppliers'
+         left join pg_catalog.pg_namespace as relation_namespace
+           on relation_namespace.oid = relation_table.relnamespace
+          and relation_namespace.nspname = 'public'
+         left join pg_catalog.pg_index as catalog_index
+           on catalog_index.indrelid = relation_table.oid
+          and catalog_index.indexrelid =
+            'public.product_suppliers_catalog_number_search_trgm_idx'::regclass
+         where extension.extname = 'pg_trgm'`,
+      );
+      expect(infrastructure.rows).toHaveLength(1);
+      expect(infrastructure.rows[0]?.extension_schema).toBe("extensions");
+      expect(infrastructure.rows[0]?.name_index).toContain("gin_trgm_ops");
+      expect(infrastructure.rows[0]?.catalog_index).toContain("gin_trgm_ops");
+      expect(infrastructure.rows[0]?.function_definition).toContain(
+        "SECURITY DEFINER",
+      );
+      expect(infrastructure.rows[0]?.function_definition).toContain(
+        "SET search_path TO ''",
+      );
+    });
+
+    const anonymous = await fixture.anonymousClient.rpc(
+      "search_inventory_products",
+      { p_search: null },
+    );
+    expectPermissionDenied(anonymous.error);
   });
 });
