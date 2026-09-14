@@ -190,6 +190,21 @@ interface ProductRow {
   updated_by_user_id: string;
 }
 
+interface ProjectRow {
+  cancelled_at: Date | null;
+  completed_at: Date | null;
+  created_at: Date;
+  created_by_user_id: string;
+  customer_name: string;
+  delivery_date: string;
+  id: string;
+  name: string;
+  start_date: string;
+  status: "planned" | "in_progress" | "on_hold" | "completed" | "cancelled";
+  updated_at: Date;
+  updated_by_user_id: string;
+}
+
 interface InventoryBalanceRow {
   product_id: string;
   quantity: string;
@@ -10833,5 +10848,364 @@ describe("Supabase security helpers", () => {
       .eq("id", fixture.actors.admin.profileId);
     expect(crossProfileRead.error).toBeNull();
     expect(crossProfileRead.data).toEqual([]);
+  });
+
+  it("enforces the canonical Project fields, dates, statuses, and lifecycle metadata", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const sharedName = `Project ${randomUUID()}`;
+      const sharedCustomer = `Customer ${randomUUID()}`;
+      const projectIds = Array.from({ length: 5 }, () => randomUUID());
+
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, start_date, delivery_date,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, $3::text, '2026-09-01'::date,
+           '2026-09-01'::date, $4::uuid, $4::uuid
+         )`,
+        [projectIds[0], sharedName, sharedCustomer, actorId],
+      );
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           completed_at, cancelled_at, created_by_user_id, updated_by_user_id
+         ) values
+           ($1::uuid, $5::text, $6::text, 'in_progress', '2026-09-01'::date,
+            '2026-09-10'::date, null, null, $7::uuid, $7::uuid),
+           ($2::uuid, $5::text, $6::text, 'on_hold', '2026-09-01'::date,
+            '2026-09-10'::date, null, null, $7::uuid, $7::uuid),
+           ($3::uuid, $5::text, $6::text, 'completed', '2026-09-01'::date,
+            '2026-09-10'::date, '2026-09-10T10:00:00Z'::timestamptz,
+            null, $7::uuid, $7::uuid),
+           ($4::uuid, $5::text, $6::text, 'cancelled', '2026-09-01'::date,
+            '2026-09-10'::date, null,
+            '2026-09-09T10:00:00Z'::timestamptz, $7::uuid, $7::uuid)`,
+        [
+          projectIds[1],
+          projectIds[2],
+          projectIds[3],
+          projectIds[4],
+          sharedName,
+          sharedCustomer,
+          actorId,
+        ],
+      );
+      const projects = await database.query<ProjectRow>(
+        `select
+           id,
+           name,
+           customer_name,
+           status,
+           start_date::text as start_date,
+           delivery_date::text as delivery_date,
+           created_at,
+           created_by_user_id,
+           updated_at,
+           updated_by_user_id,
+           completed_at,
+           cancelled_at
+         from public.projects
+         where id = any($1::uuid[])
+         order by status, id`,
+        [projectIds],
+      );
+      expect(projects.rows).toHaveLength(5);
+      expect(projects.rows.map((project) => project.status).sort()).toEqual([
+        "cancelled",
+        "completed",
+        "in_progress",
+        "on_hold",
+        "planned",
+      ]);
+      expect(projects.rows.every((project) =>
+        project.name === sharedName && project.customer_name === sharedCustomer
+      )).toBe(true);
+      expect(projects.rows.find((project) => project.status === "planned"))
+        .toMatchObject({
+          cancelled_at: null,
+          completed_at: null,
+          delivery_date: "2026-09-01",
+          start_date: "2026-09-01",
+        });
+      expect(projects.rows.find((project) => project.status === "completed")
+        ?.completed_at).toEqual(expect.any(Date));
+      expect(projects.rows.find((project) => project.status === "cancelled")
+        ?.cancelled_at).toEqual(expect.any(Date));
+
+      const invalidCases: Array<{
+        label: string;
+        values: readonly unknown[];
+      }> = [
+        {
+          label: "blank_name",
+          values: ["   ", "Customer", "planned", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "untrimmed_name",
+          values: [" Project ", "Customer", "planned", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "blank_customer",
+          values: ["Project", "   ", "planned", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "untrimmed_customer",
+          values: ["Project", " Customer ", "planned", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "delivery_before_start",
+          values: ["Project", "Customer", "planned", "2026-09-02", "2026-09-01", null, null],
+        },
+        {
+          label: "invalid_status",
+          values: ["Project", "Customer", "archived", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "completed_without_completed_at",
+          values: ["Project", "Customer", "completed", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "cancelled_without_cancelled_at",
+          values: ["Project", "Customer", "cancelled", "2026-09-01", "2026-09-02", null, null],
+        },
+        {
+          label: "planned_with_completed_at",
+          values: ["Project", "Customer", "planned", "2026-09-01", "2026-09-02", "2026-09-02T10:00:00Z", null],
+        },
+        {
+          label: "planned_with_cancelled_at",
+          values: ["Project", "Customer", "planned", "2026-09-01", "2026-09-02", null, "2026-09-02T10:00:00Z"],
+        },
+        {
+          label: "completed_with_cancelled_at",
+          values: ["Project", "Customer", "completed", "2026-09-01", "2026-09-02", null, "2026-09-02T10:00:00Z"],
+        },
+        {
+          label: "cancelled_with_completed_at",
+          values: ["Project", "Customer", "cancelled", "2026-09-01", "2026-09-02", "2026-09-02T10:00:00Z", null],
+        },
+      ];
+
+      for (const invalid of invalidCases) {
+        await database.query(`savepoint invalid_project_${invalid.label}`);
+        await expect(
+          database.query(
+            `insert into public.projects (
+               name, customer_name, status, start_date, delivery_date,
+               completed_at, cancelled_at, created_by_user_id,
+               updated_by_user_id
+             ) values (
+               $1::text, $2::text, $3::text, $4::date, $5::date,
+               $6::timestamptz, $7::timestamptz, $8::uuid, $8::uuid
+             )`,
+            [...invalid.values, actorId],
+          ),
+        ).rejects.toMatchObject({ code: "23514" });
+        await database.query(`rollback to savepoint invalid_project_${invalid.label}`);
+      }
+
+      const columns = await database.query<{
+        column_default: string | null;
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+      }>(
+        `select column_name, data_type, is_nullable, column_default
+         from information_schema.columns
+         where table_schema = 'public'
+           and table_name = 'projects'
+         order by ordinal_position`,
+      );
+      expect(columns.rows.map((column) => column.column_name)).toEqual([
+        "id",
+        "name",
+        "customer_name",
+        "status",
+        "start_date",
+        "delivery_date",
+        "created_at",
+        "created_by_user_id",
+        "updated_at",
+        "updated_by_user_id",
+        "completed_at",
+        "cancelled_at",
+      ]);
+      expect(columns.rows.find((column) => column.column_name === "status"))
+        .toMatchObject({ column_default: "'planned'::text", is_nullable: "NO" });
+      expect(columns.rows.find((column) => column.column_name === "start_date"))
+        .toMatchObject({ data_type: "date", is_nullable: "NO" });
+      expect(columns.rows.find((column) => column.column_name === "delivery_date"))
+        .toMatchObject({ data_type: "date", is_nullable: "NO" });
+      expect(columns.rows.some((column) => [
+        "is_active",
+        "archived_at",
+        "archived_by_user_id",
+      ].includes(column.column_name))).toBe(false);
+    });
+  });
+
+  it("limits Project reads to active Project viewers and denies every direct client write", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const projectIds = [randomUUID(), randomUUID(), randomUUID()];
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           completed_at, cancelled_at, created_by_user_id,
+           updated_by_user_id
+         ) values
+           ($1::uuid, 'Readable Planned Project', 'Customer', 'planned',
+            '2026-09-01'::date, '2026-09-02'::date, null, null,
+            $4::uuid, $4::uuid),
+           ($2::uuid, 'Readable Completed Project', 'Customer', 'completed',
+            '2026-09-01'::date, '2026-09-02'::date,
+            '2026-09-02T10:00:00Z'::timestamptz, null,
+            $4::uuid, $4::uuid),
+           ($3::uuid, 'Readable Cancelled Project', 'Customer', 'cancelled',
+            '2026-09-01'::date, '2026-09-02'::date,
+            null, '2026-09-02T10:00:00Z'::timestamptz,
+            $4::uuid, $4::uuid)`,
+        [...projectIds, actorId],
+      );
+
+      for (const actor of [fixture.actors.admin, fixture.actors.permitted]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const visible = await database.query<{ id: string; status: string }>(
+          `select id, status
+           from public.projects
+           where id = any($1::uuid[])
+           order by status, id`,
+          [projectIds],
+        );
+        await database.query("reset role");
+        expect(visible.rows.map((project) => project.status).sort()).toEqual([
+          "cancelled",
+          "completed",
+          "planned",
+        ]);
+      }
+
+      for (const actor of [
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+      ]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const hidden = await database.query<{ id: string }>(
+          `select id
+           from public.projects
+           where id = any($1::uuid[])`,
+          [projectIds],
+        );
+        await database.query("reset role");
+        expect(hidden.rows).toEqual([]);
+      }
+
+      const security = await database.query<{
+        authenticated_delete: boolean;
+        authenticated_insert: boolean;
+        authenticated_select: boolean;
+        authenticated_update: boolean;
+        policy_expression: string;
+        row_security: boolean;
+      }>(
+        `select
+           class.relrowsecurity as row_security,
+           pg_catalog.has_table_privilege(
+             'authenticated', class.oid, 'select'
+           ) as authenticated_select,
+           pg_catalog.has_table_privilege(
+             'authenticated', class.oid, 'insert'
+           ) as authenticated_insert,
+           pg_catalog.has_table_privilege(
+             'authenticated', class.oid, 'update'
+           ) as authenticated_update,
+           pg_catalog.has_table_privilege(
+             'authenticated', class.oid, 'delete'
+           ) as authenticated_delete,
+           pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+             as policy_expression
+         from pg_catalog.pg_class as class
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = class.relnamespace
+         join pg_catalog.pg_policy as policy
+           on policy.polrelid = class.oid
+          and policy.polname = 'projects_select_authorized'
+         where namespace.nspname = 'public'
+           and class.relname = 'projects'`,
+      );
+      expect(security.rows).toHaveLength(1);
+      expect(security.rows[0]).toMatchObject({
+        authenticated_delete: false,
+        authenticated_insert: false,
+        authenticated_select: true,
+        authenticated_update: false,
+        row_security: true,
+      });
+      expect(security.rows[0]?.policy_expression).toContain(
+        "current_user_is_admin()",
+      );
+      expect(security.rows[0]?.policy_expression).toContain(
+        "has_permission('projects.view'::text)",
+      );
+
+      const prematureFunctions = await database.query<{ count: number }>(
+        `select count(*)::integer as count
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = any($1::text[])`,
+        [[
+          "create_project",
+          "update_project",
+          "set_project_status",
+          "archive_project",
+          "cancel_project",
+          "reopen_project",
+        ]],
+      );
+      expect(prematureFunctions.rows).toEqual([{ count: 0 }]);
+    });
+
+    const adminClient = fixture.actors.admin.client;
+    const directInsert = await adminClient.from("projects").insert({
+      name: "Forbidden Direct Project",
+      customer_name: "Forbidden Customer",
+      start_date: "2026-09-01",
+      delivery_date: "2026-09-02",
+      created_by_user_id: fixture.actors.admin.profileId,
+      updated_by_user_id: fixture.actors.admin.profileId,
+    });
+    const directUpdate = await adminClient
+      .from("projects")
+      .update({ name: "Forbidden Update" })
+      .eq("id", randomUUID());
+    const directDelete = await adminClient
+      .from("projects")
+      .delete()
+      .eq("id", randomUUID());
+    expectPermissionDenied(directInsert.error);
+    expectPermissionDenied(directUpdate.error);
+    expectPermissionDenied(directDelete.error);
+
+    const anonymousRead = await fixture.anonymousClient
+      .from("projects")
+      .select("id")
+      .limit(1);
+    expectPermissionDenied(anonymousRead.error);
   });
 });
