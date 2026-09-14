@@ -253,8 +253,22 @@ Required fields:
   - Add
   - Remove
   - Correction
-- quantity
-- required reason/note
+- quantity interpreted according to the selected adjustment type
+- required reason/note, trimmed before use and nonblank
+
+Adjustment semantics:
+
+- Add enters the positive amount to add. Quantity must be greater than zero and `delta = +quantity`.
+- Remove enters the positive amount to remove. Quantity must be greater than zero, `delta = -quantity`, and resulting stock cannot be negative.
+- Correction enters the desired final stock quantity, not a delta. The target must be greater than or equal to zero and `delta = target_quantity - current_quantity`.
+- A Correction target of zero is valid.
+- A Correction target equal to current stock is rejected as a no-op and creates no InventoryMovement or AuditLog.
+
+Manual InventoryMovement types are exactly:
+
+- `manual_add`
+- `manual_remove`
+- `manual_correction`
 
 Record:
 
@@ -265,7 +279,7 @@ Record:
 - actor
 - timestamp
 
-Every manual adjustment creates an audit event.
+Every meaningful manual adjustment creates exactly one InventoryMovement and exactly one immutable AuditLog event in the same atomic business operation. If any part fails, the balance, movement, and audit changes all roll back.
 
 Work Order and PCB changes are recorded under their own source event rather than pretending to be manual adjustments.
 

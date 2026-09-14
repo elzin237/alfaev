@@ -493,11 +493,20 @@ Fields:
   - nullable
   - used by explicit correction/reversal workflows
 
-Allowed manual adjustment subtypes should be captured in movement metadata/type:
+Manual adjustment `movement_type` values are exactly:
 
-- Add
-- Remove
-- Correction
+- `manual_add`
+- `manual_remove`
+- `manual_correction`
+
+Manual adjustment semantics:
+
+- Add accepts a positive amount and records `quantity_delta = +quantity`.
+- Remove accepts a positive amount and records `quantity_delta = -quantity`; `quantity_after` cannot be negative.
+- Correction accepts the desired final quantity, which may be zero, and records `quantity_delta = target_quantity - quantity_before`.
+- Add and Remove reject quantity zero; Correction allows target zero.
+- Correction rejects a target equal to `quantity_before` as a no-op and creates no InventoryMovement or AuditLog.
+- Every manual adjustment requires a reason that is trimmed and nonblank.
 
 Rules:
 
@@ -510,7 +519,8 @@ Rules:
   5. insert appropriate AuditLog
   6. commit atomically
 - Work Order and PCB production movements are generated automatically by those workflows.
-- Manual Admin adjustments require a reason.
+- A meaningful manual Admin adjustment calls the central Inventory mutation primitive exactly once, creates exactly one InventoryMovement through it, and appends exactly one immutable AuditLog entry in the same transaction.
+- Any failure rolls back the balance change, InventoryMovement, and AuditLog together.
 
 ---
 
@@ -1144,11 +1154,12 @@ ProcurementRequest
 The physical implementation must provide trusted atomic operations for at least:
 
 ## Inventory manual adjustment
-- permission/Admin check
-- quantity validation
-- InventoryBalance update
-- InventoryMovement insert
-- AuditLog insert
+- active Admin authorization
+- Add/Remove/Correction input and required nonblank reason validation
+- exactly one call to the central Inventory mutation primitive
+- exactly one InventoryBalance update and InventoryMovement insert through that primitive
+- exactly one immutable AuditLog insert
+- atomic rollback of balance, movement, and audit on any failure
 
 ## PCB production
 - permission check

@@ -232,30 +232,39 @@ For stock deductions use database row locking/concurrency-safe update strategy.
 
 # 10. Manual Inventory Adjustment
 
-Admin-only.
+Permanently Admin-only.
 
 Required input:
 
-- adjustment type
-- quantity
-- reason
+- adjustment type: Add, Remove, or Correction
+- quantity interpreted according to the selected adjustment type
+- reason, trimmed and nonblank
 
-Trusted operation records:
+Adjustment semantics:
 
-- quantity before
-- delta
-- quantity after
-- reason
-- actor
-- timestamp
-- InventoryMovement
-- AuditLog
+- Add uses a positive amount to add; `delta = +quantity` and quantity must be greater than zero.
+- Remove uses a positive amount to remove; `delta = -quantity`, quantity must be greater than zero, and the resulting stock cannot be negative.
+- Correction uses the desired final stock quantity, not a delta; the target must be greater than or equal to zero and `delta = target_quantity - current_quantity`.
+- A Correction target of zero is valid.
+- A Correction target equal to current stock is an invalid no-op and creates neither InventoryMovement nor AuditLog.
+- Manual movement types are exactly `manual_add`, `manual_remove`, and `manual_correction`.
+
+The trusted Task 060 operation must atomically:
+
+1. authorize the active Admin
+2. call the Task 059 Inventory mutation primitive exactly once
+3. create exactly one InventoryMovement through that primitive
+4. append exactly one immutable AuditLog entry
+
+If authorization, validation, balance mutation, movement insertion, or audit insertion fails, the balance change, InventoryMovement, and AuditLog must all roll back.
 
 Reject:
 
-- missing reason
-- zero/invalid quantity
-- result below zero
+- missing or blank reason
+- Add or Remove quantity less than or equal to zero
+- Remove result below zero
+- Correction target below zero
+- Correction target equal to current stock
 - non-admin actor
 
 ---

@@ -1137,25 +1137,37 @@ This is infrastructure, not manual-adjustment UI.
 ## 060 — Add Admin Manual Inventory Adjustment RPC
 
 Goal:
-- Admin-only Add / Remove / Correction operation
+- permanently Admin-only Add / Remove / Correction operation
 
 Require:
-- quantity
-- reason
+- adjustment type
+- quantity interpreted according to the selected adjustment type
+- reason trimmed before use and required to be nonblank
+
+Semantics:
+- Add accepts the positive amount to add; quantity must be greater than zero and `delta = +quantity`.
+- Remove accepts the positive amount to remove; quantity must be greater than zero, `delta = -quantity`, and resulting stock cannot be negative.
+- Correction accepts the desired final stock quantity, not a delta; target must be greater than or equal to zero and `delta = target_quantity - current_quantity`.
+- Correction target zero is valid.
+- Correction target equal to current stock is rejected as an invalid no-op, with no InventoryMovement or AuditLog.
+- Use movement types exactly `manual_add`, `manual_remove`, and `manual_correction`.
 
 Atomically:
-- balance
-- movement
-- audit
+- authorize the active Admin
+- call the Task 059 Inventory mutation primitive exactly once
+- create exactly one InventoryMovement through that primitive
+- append exactly one immutable AuditLog entry
+- roll back the balance change, movement, and audit if any step fails
 
-Add negative-stock and authorization tests.
+Add authorization, direct-bypass, input-semantics, required-reason, negative-stock, no-op, exact movement-type, single-movement, single-audit, and atomic-rollback tests.
 
 ---
 
 ## 061 — Build Manual Inventory Adjustment Dialog
 
 Goal:
-- Admin-only UI
+- Admin-only UI for the same Add / Remove / Correction semantics defined by Task 060
+- UI only; call the Task 060 trusted operation and do not mutate Inventory directly
 
 Show:
 - current
@@ -1163,7 +1175,7 @@ Show:
 - resulting quantity
 - reason
 
-Block invalid negative result in UX, while backend remains authoritative.
+Treat Add/Remove quantity as a positive amount and Correction quantity as the desired final stock. Allow Correction target zero, reject Add/Remove zero and Correction target equal to current stock, and block invalid negative results in UX while the backend remains authoritative.
 
 ---
 
