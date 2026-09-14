@@ -24,6 +24,16 @@ vi.mock("./components/ProductSuppliersSection", () => ({
     </section>
   ),
 }));
+vi.mock("./components/InventoryBalanceSection", () => ({
+  default: ({ productId, productIsActive }: {
+    productId: string;
+    productIsActive: boolean;
+  }) => (
+    <section aria-label="Product Inventory balance">
+      Balance for {productId} — {productIsActive ? "active" : "archived"}
+    </section>
+  ),
+}));
 
 import ProductDetailPage from "./ProductDetailPage";
 import type { Brand } from "./services/brandService";
@@ -196,6 +206,8 @@ describe("ProductDetailPage", () => {
     expect(screen.getByText("Not archived")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Inventory" }))
       .toHaveAttribute("href", "/inventory");
+    expect(screen.getByRole("region", { name: "Product Inventory balance" }))
+      .toHaveTextContent("Balance for product-1 — active");
   });
 
   it("keeps archived Products and their archived Brand readable but read-only", () => {
