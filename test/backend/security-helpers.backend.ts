@@ -9781,6 +9781,340 @@ describe("Supabase security helpers", () => {
     });
   });
 
+  it("keeps denied manual Inventory actors side-effect free across Inventory permission combinations", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const productId = randomUUID();
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Authorization Boundary Product', 'Components',
+           'component', $3::uuid, $3::uuid
+         )`,
+        [
+          productId,
+          createTestSerialNumber(),
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        `update public.inventory_balances
+         set quantity = 8
+         where product_id = $1::uuid`,
+        [productId],
+      );
+
+      for (const [label, actor] of [
+        ["inventory_view", fixture.actors.brandManager],
+        ["inventory_product_edit", fixture.actors.productEditor],
+        ["inventory_product_create", fixture.actors.productCreator],
+        ["ordinary_user", fixture.actors.unpermitted],
+        ["inactive_admin", fixture.actors.inactive],
+      ] as const) {
+        await database.query(`savepoint denied_manual_${label}`);
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await expect(
+          database.query(
+            `select *
+             from public.manual_adjust_inventory(
+               $1::uuid,
+               'remove',
+               1,
+               'Denied authorization attempt'
+             )`,
+            [productId],
+          ),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint denied_manual_${label}`);
+        await database.query("reset role");
+      }
+
+      await database.query("savepoint denied_manual_anonymous");
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', '', true)",
+      );
+      await database.query("set local role anon");
+      await expect(
+        database.query(
+          `select *
+           from public.manual_adjust_inventory(
+             $1::uuid,
+             'remove',
+             1,
+             'Anonymous authorization attempt'
+           )`,
+          [productId],
+        ),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint denied_manual_anonymous");
+      await database.query("reset role");
+
+      const unchanged = await database.query<{
+        audit_count: number;
+        movement_count: number;
+        quantity: string;
+      }>(
+        `select
+           balance.quantity,
+           (
+             select count(*)::integer
+             from public.inventory_movements as movement
+             where movement.product_id = balance.product_id
+           ) as movement_count,
+           (
+             select count(*)::integer
+             from public.audit_logs as audit
+             where audit.entity_id = balance.product_id
+               and audit.action_type = 'inventory.manual_adjusted'
+           ) as audit_count
+         from public.inventory_balances as balance
+         where balance.product_id = $1::uuid`,
+        [productId],
+      );
+      expect(unchanged.rows).toEqual([{
+        audit_count: 0,
+        movement_count: 0,
+        quantity: "8",
+      }]);
+    });
+  });
+
+  it("serializes competing Admin manual removals and commits only the affordable adjustment", async () => {
+    const fixture = requireHarness();
+    const productId = randomUUID();
+    const applicationName = `alfaev-manual-remove-wait-${randomUUID()}`;
+
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const firstAdmin = clients[0];
+      const secondAdmin = clients[1];
+      const observer = clients[2];
+      if (!firstAdmin || !secondAdmin || !observer) {
+        throw new Error("Manual removal concurrency clients are unavailable");
+      }
+
+      await observer.query("begin");
+      await observer.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Concurrent Manual Removal Product',
+           'Components', 'component', $3::uuid, $3::uuid
+         )`,
+        [
+          productId,
+          createTestSerialNumber(),
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await observer.query(
+        `update public.inventory_balances
+         set quantity = 10
+         where product_id = $1::uuid`,
+        [productId],
+      );
+      await observer.query("commit");
+
+      try {
+        await firstAdmin.query("begin");
+        await firstAdmin.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await firstAdmin.query("set local role authenticated");
+        const affordableRemoval = await firstAdmin.query<
+          ManualInventoryAdjustmentRow
+        >(
+          `select *
+           from public.manual_adjust_inventory(
+             $1::uuid,
+             'remove',
+             7,
+             'First concurrent removal'
+           )`,
+          [productId],
+        );
+        expect(affordableRemoval.rows).toEqual([{
+          movement_id: expect.any(String),
+          quantity_after: "3",
+          quantity_before: "10",
+        }]);
+
+        await secondAdmin.query("begin");
+        await secondAdmin.query(
+          "select pg_catalog.set_config('application_name', $1::text, true)",
+          [applicationName],
+        );
+        await secondAdmin.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await secondAdmin.query("set local role authenticated");
+        const unaffordableRemoval = secondAdmin.query(
+          `select *
+           from public.manual_adjust_inventory(
+             $1::uuid,
+             'remove',
+             6,
+             'Competing concurrent removal'
+           )`,
+          [productId],
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+        let observedLockWait = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const activity = await observer.query<ActivityWaitRow>(
+            `select wait_event_type, wait_event
+             from pg_catalog.pg_stat_activity
+             where application_name = $1::text`,
+            [applicationName],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            observedLockWait = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(observedLockWait).toBe(true);
+
+        const stateWhileWaiting = await observer.query<{
+          audit_count: number;
+          movement_count: number;
+          quantity: string;
+        }>(
+          `select
+             balance.quantity,
+             (
+               select count(*)::integer
+               from public.inventory_movements as movement
+               where movement.product_id = balance.product_id
+             ) as movement_count,
+             (
+               select count(*)::integer
+               from public.audit_logs as audit
+               where audit.entity_id = balance.product_id
+                 and audit.action_type = 'inventory.manual_adjusted'
+             ) as audit_count
+           from public.inventory_balances as balance
+           where balance.product_id = $1::uuid`,
+          [productId],
+        );
+        expect(stateWhileWaiting.rows).toEqual([{
+          audit_count: 0,
+          movement_count: 0,
+          quantity: "10",
+        }]);
+
+        await firstAdmin.query("commit");
+        const competingError = await unaffordableRemoval;
+        expect(competingError).toMatchObject({ code: "IVB02" });
+        await secondAdmin.query("rollback");
+
+        const committedState = await observer.query<{
+          action_type: string;
+          actor_user_id: string;
+          audit_count: number;
+          movement_count: number;
+          movement_type: string;
+          quantity: string;
+          quantity_after: string;
+          quantity_before: string;
+          quantity_delta: string;
+        }>(
+          `select
+             balance.quantity,
+             movement.movement_type,
+             movement.quantity_delta,
+             movement.quantity_before,
+             movement.quantity_after,
+             movement.actor_user_id,
+             audit.action_type,
+             (
+               select count(*)::integer
+               from public.inventory_movements as counted_movement
+               where counted_movement.product_id = balance.product_id
+             ) as movement_count,
+             (
+               select count(*)::integer
+               from public.audit_logs as counted_audit
+               where counted_audit.entity_id = balance.product_id
+                 and counted_audit.action_type = 'inventory.manual_adjusted'
+             ) as audit_count
+           from public.inventory_balances as balance
+           join public.inventory_movements as movement
+             on movement.product_id = balance.product_id
+           join public.audit_logs as audit
+             on audit.entity_id = balance.product_id
+            and audit.action_type = 'inventory.manual_adjusted'
+           where balance.product_id = $1::uuid`,
+          [productId],
+        );
+        expect(committedState.rows).toEqual([{
+          action_type: "inventory.manual_adjusted",
+          actor_user_id: fixture.actors.admin.profileId,
+          audit_count: 1,
+          movement_count: 1,
+          movement_type: "manual_remove",
+          quantity: "3",
+          quantity_after: "3",
+          quantity_before: "10",
+          quantity_delta: "-7",
+        }]);
+
+        const readableHistory = await fixture.actors.admin.client.rpc(
+          "get_inventory_movements_for_product",
+          { p_product_id: productId },
+        );
+        expect(readableHistory.error).toBeNull();
+        expect(readableHistory.data).toEqual([
+          expect.objectContaining({
+            movement_id: affordableRemoval.rows[0]?.movement_id,
+            movement_type: "manual_remove",
+            quantity_after: 3,
+            quantity_before: 10,
+            quantity_delta: -7,
+          }),
+        ]);
+      } finally {
+        await firstAdmin.query("rollback");
+        await secondAdmin.query("rollback");
+        await observer.query("begin");
+        await observer.query("set local session_replication_role = replica");
+        await observer.query(
+          `delete from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type = 'inventory.manual_adjusted'`,
+          [productId],
+        );
+        await observer.query(
+          `delete from public.inventory_movements
+           where product_id = $1::uuid`,
+          [productId],
+        );
+        await observer.query(
+          `delete from public.inventory_balances
+           where product_id = $1::uuid`,
+          [productId],
+        );
+        await observer.query(
+          "delete from public.products where id = $1::uuid",
+          [productId],
+        );
+        await observer.query("commit");
+      }
+    });
+  });
+
   it("rolls back the manual balance and movement when the required audit append fails", async () => {
     const fixture = requireHarness();
 
