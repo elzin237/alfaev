@@ -8,6 +8,7 @@ import LoginPage from "../../pages/auth/LoginPage";
 
 import DashboardPage from "../../features/dashboard/DashboardPage";
 import ProjectsPage from "../../features/projects/ProjectsPage";
+import ProjectDetailPage from "../../features/projects/ProjectDetailPage";
 import ProcurementPage from "../../pages/procurement/ProcurementPage";
 import SuppliersPage from "../../features/suppliers/SuppliersPage";
 import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
@@ -29,6 +30,10 @@ function AppRouter() {
         </Route>
         <Route element={<PermissionRoute permission="projects.view" />}>
           <Route path="/projects" element={<ProjectsPage />} />
+          <Route
+            path="/projects/:projectId"
+            element={<ProjectDetailPage />}
+          />
         </Route>
         <Route element={<PermissionRoute permission="procurement.view" />}>
           <Route path="/procurement" element={<ProcurementPage />} />

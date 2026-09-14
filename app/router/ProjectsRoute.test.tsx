@@ -15,6 +15,9 @@ vi.mock("../auth/permissionService", () => ({
 vi.mock("../../features/projects/ProjectsPage", () => ({
   default: () => <h1>Projects route content</h1>,
 }));
+vi.mock("../../features/projects/ProjectDetailPage", () => ({
+  default: () => <h1>Project detail route content</h1>,
+}));
 
 import AppRouter from "./AppRouter";
 
@@ -50,6 +53,28 @@ describe("Projects route", () => {
 
     expect(await screen.findByRole("heading", {
       name: "Projects route content",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
+      "projects.view",
+    ));
+  });
+
+  it("protects /projects/:projectId with the same projects.view boundary", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[
+          "/projects/00000000-0000-4000-8000-000000000001",
+        ]}>
+          <AppRouter />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", {
+      name: "Project detail route content",
     })).toBeInTheDocument();
     await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
       "projects.view",

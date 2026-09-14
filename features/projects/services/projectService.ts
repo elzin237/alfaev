@@ -10,6 +10,11 @@ interface ProjectListRow {
   delivery_date: string;
 }
 
+interface ProjectDetailRow extends ProjectListRow {
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ProjectListItem {
   id: string;
   name: string;
@@ -17,6 +22,11 @@ export interface ProjectListItem {
   status: ProjectStatus;
   startDate: string;
   deliveryDate: string;
+}
+
+export interface ProjectDetail extends ProjectListItem {
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProjectListError {
@@ -27,6 +37,15 @@ export interface ProjectListError {
 export type ProjectListResult =
   | { ok: true; value: ProjectListItem[] }
   | { ok: false; error: ProjectListError };
+
+export interface ProjectDetailError {
+  code: "project_not_found" | "project_detail_failed";
+  message: string;
+}
+
+export type ProjectDetailResult =
+  | { ok: true; value: ProjectDetail }
+  | { ok: false; error: ProjectDetailError };
 
 export interface ProjectCreateInput {
   name: string;
@@ -50,9 +69,17 @@ export type ProjectCreateResult =
 
 const projectListFields =
   "id,name,customer_name,status,start_date,delivery_date";
+const projectDetailFields =
+  `${projectListFields},created_at,updated_at`;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+const isoTimestampPattern =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+export function isProjectId(value: string): boolean {
+  return uuidPattern.test(value);
+}
 
 function isIsoDate(value: unknown): value is string {
   if (typeof value !== "string" || !isoDatePattern.test(value)) return false;
@@ -64,6 +91,12 @@ function isIsoDate(value: unknown): value is string {
 
 function isTrimmedNonblank(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.trim() === value;
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    isoTimestampPattern.test(value) &&
+    Number.isFinite(Date.parse(value));
 }
 
 function isProjectListRow(value: unknown): value is ProjectListRow {
@@ -97,6 +130,22 @@ function mapProject(row: ProjectListRow): ProjectListItem {
   };
 }
 
+function isProjectDetailRow(value: unknown): value is ProjectDetailRow {
+  return isProjectListRow(value) &&
+    "created_at" in value &&
+    isIsoTimestamp(value.created_at) &&
+    "updated_at" in value &&
+    isIsoTimestamp(value.updated_at);
+}
+
+function mapProjectDetail(row: ProjectDetailRow): ProjectDetail {
+  return {
+    ...mapProject(row),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function compareProjects(
   left: ProjectListItem,
   right: ProjectListItem,
@@ -114,6 +163,26 @@ function listFailure(): ProjectListResult {
     error: {
       code: "project_list_failed",
       message: "The Project list could not be loaded.",
+    },
+  };
+}
+
+function detailFailure(): ProjectDetailResult {
+  return {
+    ok: false,
+    error: {
+      code: "project_detail_failed",
+      message: "The Project details could not be loaded.",
+    },
+  };
+}
+
+function notFoundFailure(): ProjectDetailResult {
+  return {
+    ok: false,
+    error: {
+      code: "project_not_found",
+      message: "The Project could not be found.",
     },
   };
 }
@@ -164,6 +233,28 @@ export async function listProjects(): Promise<ProjectListResult> {
     };
   } catch {
     return listFailure();
+  }
+}
+
+export async function getProject(
+  projectId: string,
+): Promise<ProjectDetailResult> {
+  if (!isProjectId(projectId)) return notFoundFailure();
+
+  try {
+    const { data, error } = await supabase
+      .from("projects")
+      .select(projectDetailFields)
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (error) return detailFailure();
+    if (data === null) return notFoundFailure();
+    if (!isProjectDetailRow(data)) return detailFailure();
+
+    return { ok: true, value: mapProjectDetail(data) };
+  } catch {
+    return detailFailure();
   }
 }
 

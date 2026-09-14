@@ -7,6 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router";
 
 const projectsPageMocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -110,7 +111,7 @@ afterEach(() => {
 
 describe("ProjectsPage", () => {
   it("renders authorized rows, all canonical status labels, and lifecycle Projects", () => {
-    const { container } = render(<ProjectsPage />);
+    const { container } = render(<ProjectsPage />, { wrapper: MemoryRouter });
 
     expect(visibleProjectNames()).toEqual(projects.map((project) => project.name));
     for (const label of [
@@ -132,7 +133,7 @@ describe("ProjectsPage", () => {
   });
 
   it("filters every canonical status and clearing returns to All", () => {
-    render(<ProjectsPage />);
+    render(<ProjectsPage />, { wrapper: MemoryRouter });
     const filter = screen.getByLabelText("Filter by status");
     const expected: ReadonlyArray<{
       filter: ProjectStatus;
@@ -160,7 +161,7 @@ describe("ProjectsPage", () => {
 
   it("distinguishes filtered no-results and clears the filter", () => {
     setQueryState({ data: { ok: true, value: [projects[0]!] } });
-    render(<ProjectsPage />);
+    render(<ProjectsPage />, { wrapper: MemoryRouter });
 
     fireEvent.change(screen.getByLabelText("Filter by status"), {
       target: { value: "cancelled" },
@@ -176,7 +177,7 @@ describe("ProjectsPage", () => {
 
   it("renders loading, safe retryable error, and true empty states", () => {
     setQueryState({ isPending: true });
-    const rendered = render(<ProjectsPage />);
+    const rendered = render(<ProjectsPage />, { wrapper: MemoryRouter });
     expect(screen.getByRole("status")).toHaveTextContent("Loading Projects...");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
 
@@ -209,14 +210,14 @@ describe("ProjectsPage", () => {
       create: projectsPageMocks.create,
     });
 
-    render(<ProjectsPage />);
+    render(<ProjectsPage />, { wrapper: MemoryRouter });
 
     expect(screen.queryByRole("button", { name: "Create Project" }))
       .not.toBeInTheDocument();
   });
 
   it("opens the authorized create form and confirms successful creation", async () => {
-    render(<ProjectsPage />);
+    render(<ProjectsPage />, { wrapper: MemoryRouter });
 
     fireEvent.click(screen.getByRole("button", { name: "Create Project" }));
     expect(screen.getByRole("dialog", { name: "Create Project" }))
@@ -243,12 +244,16 @@ describe("ProjectsPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Project created.");
   });
 
-  it("does not add detail or later Project mutation controls", () => {
-    render(<ProjectsPage />);
+  it("links Project names to detail without adding later mutation controls", () => {
+    render(<ProjectsPage />, { wrapper: MemoryRouter });
 
     expect(screen.queryByRole("button", {
       name: /edit|archive|cancel|reopen/i,
     })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Planning Project" }))
+      .toHaveAttribute(
+        "href",
+        "/projects/00000000-0000-4000-8000-000000000001",
+      );
   });
 });

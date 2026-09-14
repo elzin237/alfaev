@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import StatusBadge from "../../../shared/components/StatusBadge";
 import { getProjectStatusPresentation } from "../projectStatus";
 import type { ProjectListItem } from "../services/projectService";
@@ -45,7 +47,12 @@ function ProjectList({ projects }: ProjectListProps) {
                     scope="row"
                     className="px-5 py-4 text-left font-semibold text-zinc-900"
                   >
-                    {project.name}
+                    <Link
+                      to={`/projects/${project.id}`}
+                      className="transition hover:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:ring-offset-2"
+                    >
+                      {project.name}
+                    </Link>
                   </th>
                   <td className="px-5 py-4">{project.customerName}</td>
                   <td className="whitespace-nowrap px-5 py-4">

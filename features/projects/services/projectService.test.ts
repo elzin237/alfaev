@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const projectServiceMocks = vi.hoisted(() => ({
+  eq: vi.fn(),
   from: vi.fn(),
+  maybeSingle: vi.fn(),
   rpc: vi.fn(),
   select: vi.fn(),
 }));
@@ -13,12 +15,15 @@ vi.mock("../../../lib/supabase/client", () => ({
   },
 }));
 
-import { createProject, listProjects } from "./projectService";
+import { createProject, getProject, listProjects } from "./projectService";
 
 beforeEach(() => {
   vi.resetAllMocks();
   projectServiceMocks.from.mockReturnValue({
     select: projectServiceMocks.select,
+  });
+  projectServiceMocks.eq.mockReturnValue({
+    maybeSingle: projectServiceMocks.maybeSingle,
   });
 });
 
@@ -157,6 +162,107 @@ describe("projectService", () => {
         message: "The Project list could not be loaded.",
       },
     });
+  });
+
+  it("reads one exact Project, strictly maps its detail fields, and uses maybeSingle", async () => {
+    projectServiceMocks.select.mockReturnValue({ eq: projectServiceMocks.eq });
+    projectServiceMocks.maybeSingle.mockResolvedValue({
+      data: {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "Control Cabinet",
+        customer_name: "Alfa Customer",
+        status: "in_progress",
+        start_date: "2026-09-01",
+        delivery_date: "2026-09-30",
+        created_at: "2026-09-01T08:00:00.000Z",
+        updated_at: "2026-09-10T09:30:00+00:00",
+      },
+      error: null,
+    });
+
+    await expect(getProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "Control Cabinet",
+        customerName: "Alfa Customer",
+        status: "in_progress",
+        startDate: "2026-09-01",
+        deliveryDate: "2026-09-30",
+        createdAt: "2026-09-01T08:00:00.000Z",
+        updatedAt: "2026-09-10T09:30:00+00:00",
+      },
+    });
+    expect(projectServiceMocks.from).toHaveBeenCalledWith("projects");
+    expect(projectServiceMocks.select).toHaveBeenCalledWith(
+      "id,name,customer_name,status,start_date,delivery_date,created_at,updated_at",
+    );
+    expect(projectServiceMocks.eq).toHaveBeenCalledWith(
+      "id",
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(projectServiceMocks.maybeSingle).toHaveBeenCalledOnce();
+  });
+
+  it("distinguishes a missing Project from safe provider and malformed-row failures", async () => {
+    projectServiceMocks.select.mockReturnValue({ eq: projectServiceMocks.eq });
+    projectServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: null,
+    });
+    await expect(getProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "project_not_found",
+        message: "The Project could not be found.",
+      },
+    });
+
+    projectServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: null,
+      error: { message: "raw provider details" },
+    });
+    await expect(getProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_detail_failed" },
+    });
+
+    projectServiceMocks.maybeSingle.mockResolvedValueOnce({
+      data: {
+        id: "00000000-0000-4000-8000-000000000001",
+        name: "Project",
+        customer_name: "Customer",
+        status: "completed",
+        start_date: "2026-09-01",
+        delivery_date: "2026-09-30",
+        created_at: "not-a-timestamp",
+        updated_at: "2026-09-10T09:30:00Z",
+      },
+      error: null,
+    });
+    await expect(getProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_detail_failed" },
+    });
+  });
+
+  it("rejects a malformed Project ID without querying Supabase", async () => {
+    await expect(getProject("not-a-project-id")).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "project_not_found",
+        message: "The Project could not be found.",
+      },
+    });
+    expect(projectServiceMocks.from).not.toHaveBeenCalled();
   });
 
   it("creates through only the trusted RPC with normalized canonical inputs", async () => {
