@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { hasPermission } from "../../../app/auth/permissionService";
@@ -8,6 +8,7 @@ import {
   cancelProject,
   getProject,
   isProjectId,
+  reopenProject,
   updateProject,
   type ProjectUpdateInput,
 } from "../services/projectService";
@@ -61,6 +62,9 @@ export function useProjectDetail(projectId: string) {
     project &&
     ["planned", "in_progress", "on_hold"].includes(project.status),
   );
+  const canReopen = Boolean(
+    profile?.isActive && isAdmin && project?.status === "completed",
+  );
 
   async function invalidateProjectQueries(): Promise<void> {
     await Promise.all([
@@ -81,5 +85,20 @@ export function useProjectDetail(projectId: string) {
     return result;
   }
 
-  return { projectQuery, canEdit, canCancel, update, cancel };
+  const reopenMutation = useMutation({
+    mutationFn: () => reopenProject(projectId),
+    onSuccess: async (result) => {
+      if (result.ok) await invalidateProjectQueries();
+    },
+  });
+
+  return {
+    projectQuery,
+    canEdit,
+    canCancel,
+    canReopen,
+    update,
+    cancel,
+    reopen: reopenMutation.mutateAsync,
+  };
 }

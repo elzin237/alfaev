@@ -86,9 +86,11 @@ export interface ProjectMutationError {
     | "project_completed"
     | "project_invalid"
     | "project_not_found"
+    | "project_reopen_invalid_state"
     | "project_state_invalid"
     | "project_update_failed"
-    | "project_cancel_failed";
+    | "project_cancel_failed"
+    | "project_reopen_failed";
   message: string;
 }
 
@@ -97,6 +99,10 @@ export type ProjectUpdateResult =
   | { ok: false; error: ProjectMutationError };
 
 export type ProjectCancelResult =
+  | { ok: true; value: { projectId: string } }
+  | { ok: false; error: ProjectMutationError };
+
+export type ProjectReopenResult =
   | { ok: true; value: { projectId: string } }
   | { ok: false; error: ProjectMutationError };
 
@@ -251,9 +257,9 @@ function createFailure(code?: string): ProjectCreateResult {
 }
 
 function mutationFailure(
-  operation: "update" | "cancel",
+  operation: "update" | "cancel" | "reopen",
   code?: string,
-): ProjectUpdateResult | ProjectCancelResult {
+): ProjectUpdateResult | ProjectCancelResult | ProjectReopenResult {
   if (code === "42501") {
     return {
       ok: false,
@@ -261,7 +267,9 @@ function mutationFailure(
         code: "access_denied",
         message: operation === "update"
           ? "You do not have permission to edit this Project."
-          : "You do not have permission to cancel this Project.",
+          : operation === "cancel"
+          ? "You do not have permission to cancel this Project."
+          : "Only an active Admin can reopen this Project.",
       },
     };
   }
@@ -306,6 +314,16 @@ function mutationFailure(
     };
   }
 
+  if (code === "PRJ04") {
+    return {
+      ok: false,
+      error: {
+        code: "project_reopen_invalid_state",
+        message: "Only Completed Projects can be reopened.",
+      },
+    };
+  }
+
   if (["22007", "22008", "22023", "23514"].includes(code ?? "")) {
     return {
       ok: false,
@@ -321,10 +339,14 @@ function mutationFailure(
     error: {
       code: operation === "update"
         ? "project_update_failed"
-        : "project_cancel_failed",
+        : operation === "cancel"
+        ? "project_cancel_failed"
+        : "project_reopen_failed",
       message: operation === "update"
         ? "The Project could not be updated. Please try again."
-        : "The Project could not be cancelled. Please try again.",
+        : operation === "cancel"
+        ? "The Project could not be cancelled. Please try again."
+        : "The Project could not be reopened. Please try again.",
     },
   };
 }
@@ -433,5 +455,24 @@ export async function cancelProject(
     return { ok: true, value: { projectId: data } };
   } catch {
     return mutationFailure("cancel");
+  }
+}
+
+export async function reopenProject(
+  projectId: string,
+): Promise<ProjectReopenResult> {
+  try {
+    const { data, error } = await supabase.rpc("reopen_project", {
+      p_project_id: projectId,
+    });
+
+    if (error) return mutationFailure("reopen", error.code);
+    if (typeof data !== "string" || !uuidPattern.test(data)) {
+      return mutationFailure("reopen");
+    }
+
+    return { ok: true, value: { projectId: data } };
+  } catch {
+    return mutationFailure("reopen");
   }
 }

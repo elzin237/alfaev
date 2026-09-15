@@ -11181,7 +11181,6 @@ describe("Supabase security helpers", () => {
         [[
           "set_project_status",
           "archive_project",
-          "reopen_project",
         ]],
       );
       expect(prematureFunctions.rows).toEqual([{ count: 0 }]);
@@ -11987,5 +11986,278 @@ describe("Supabase security helpers", () => {
       expectPermissionDenied((await actor.client.rpc("cancel_project", { p_project_id: ids[0] })).error);
     }
     expectPermissionDenied((await fixture.anonymousClient.rpc("cancel_project", { p_project_id: ids[0] })).error);
+  });
+
+  it("reopens only a Completed Project for an active Admin and audits the exact transition", async () => {
+    const fixture = requireHarness();
+    const projectId = randomUUID();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           created_at, created_by_user_id, updated_at, updated_by_user_id,
+           completed_at, cancelled_at
+         ) values (
+           $1, 'Completed Reopen Project', 'Original Customer', 'completed',
+           '2026-09-01', '2026-09-30', '2026-09-01T09:00:00Z', $2,
+           '2026-09-30T10:30:00Z', $2, '2026-09-30T10:00:00Z', null
+         )`,
+        [projectId, fixture.actors.admin.profileId],
+      );
+      const baseline = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects where id = $1`,
+        [projectId],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint normal_completed_edit_still_denied");
+      await expect(database.query(
+        `select public.update_project(
+           $1, 'Changed', 'Original Customer', '2026-09-01',
+           '2026-09-30', 'in_progress'
+         )`,
+        [projectId],
+      )).rejects.toMatchObject({ code: "PRJ02" });
+      await database.query("rollback to savepoint normal_completed_edit_still_denied");
+      const reopened = await database.query<{ project_id: string }>(
+        "select public.reopen_project($1) as project_id",
+        [projectId],
+      );
+      await database.query("reset role");
+
+      expect(reopened.rows).toEqual([{ project_id: projectId }]);
+      const row = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects where id = $1`,
+        [projectId],
+      );
+      expect(row.rows[0]).toMatchObject({
+        cancelled_at: null,
+        completed_at: null,
+        customer_name: "Original Customer",
+        delivery_date: "2026-09-30",
+        name: "Completed Reopen Project",
+        start_date: "2026-09-01",
+        status: "in_progress",
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+      expect(row.rows[0]?.created_at).toEqual(baseline.rows[0]?.created_at);
+      expect(row.rows[0]?.created_by_user_id).toBe(
+        baseline.rows[0]?.created_by_user_id,
+      );
+      expect(row.rows[0]?.updated_at).not.toEqual(baseline.rows[0]?.updated_at);
+
+      const audits = await database.query<ProjectAuditRow>(
+        `select actor_user_id, action_type, entity_type, entity_id,
+                before_data, after_data
+         from public.audit_logs
+         where entity_id = $1 and action_type = 'project.reopened'`,
+        [projectId],
+      );
+      expect(audits.rows).toEqual([{
+        action_type: "project.reopened",
+        actor_user_id: fixture.actors.admin.profileId,
+        after_data: {
+          cancelled_at: null,
+          completed_at: null,
+          customer_name: "Original Customer",
+          delivery_date: "2026-09-30",
+          name: "Completed Reopen Project",
+          start_date: "2026-09-01",
+          status: "in_progress",
+        },
+        before_data: {
+          cancelled_at: null,
+          completed_at: "2026-09-30T10:00:00+00:00",
+          customer_name: "Original Customer",
+          delivery_date: "2026-09-30",
+          name: "Completed Reopen Project",
+          start_date: "2026-09-01",
+          status: "completed",
+        },
+        entity_id: projectId,
+        entity_type: "project",
+      }]);
+
+      const security = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        identity_arguments: string;
+        security_definer: boolean;
+        settings: string[];
+      }>(
+        `select
+           routine.prosecdef as security_definer,
+           routine.proconfig as settings,
+           pg_catalog.pg_get_function_identity_arguments(routine.oid)
+             as identity_arguments,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'reopen_project'`,
+      );
+      expect(security.rows).toEqual([{
+        anonymous_execute: false,
+        authenticated_execute: true,
+        identity_arguments: "p_project_id uuid",
+        security_definer: true,
+        settings: ["search_path=\"\""],
+      }]);
+    });
+  });
+
+  it("rejects every non-Completed source and every non-Admin reopen actor without side effects", async () => {
+    const fixture = requireHarness();
+    const sourceStatuses = [
+      "planned",
+      "in_progress",
+      "on_hold",
+      "cancelled",
+    ] as const;
+    const sourceIds = sourceStatuses.map(() => randomUUID());
+    const completedId = randomUUID();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select grant_row.actor_id, definition.id, $3::uuid
+         from unnest($1::uuid[], $2::text[])
+           as grant_row(actor_id, permission_key)
+         join public.permission_definitions as definition
+           on definition.key = grant_row.permission_key`,
+        [
+          [
+            fixture.actors.productCreator.profileId,
+            fixture.actors.supplierEditor.profileId,
+          ],
+          ["projects.edit", "projects.archive"],
+          fixture.actors.admin.profileId,
+        ],
+      );
+      for (const [index, status] of sourceStatuses.entries()) {
+        await database.query(
+          `insert into public.projects (
+             id, name, customer_name, status, start_date, delivery_date,
+             completed_at, cancelled_at, created_by_user_id,
+             updated_by_user_id
+           ) values (
+             $1, $2, 'Customer', $3, '2026-09-01', '2026-09-30',
+             null, $4, $5, $5
+           )`,
+          [
+            sourceIds[index],
+            `Invalid Reopen ${status}`,
+            status,
+            status === "cancelled" ? "2026-09-20T10:00:00Z" : null,
+            fixture.actors.admin.profileId,
+          ],
+        );
+      }
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           completed_at, cancelled_at, created_by_user_id, updated_by_user_id
+         ) values (
+           $1, 'Authorization Reopen Target', 'Customer', 'completed',
+           '2026-09-01', '2026-09-30', '2026-09-30T10:00:00Z', null,
+           $2, $2
+         )`,
+        [completedId, fixture.actors.admin.profileId],
+      );
+      const baseline = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects
+         where id = any($1::uuid[])
+         order by id`,
+        [[...sourceIds, completedId]],
+      );
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.actors.admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      for (const [index, sourceId] of sourceIds.entries()) {
+        await database.query(`savepoint invalid_reopen_source_${index}`);
+        await expect(
+          database.query("select public.reopen_project($1)", [sourceId]),
+        ).rejects.toMatchObject({ code: "PRJ04" });
+        await database.query(`rollback to savepoint invalid_reopen_source_${index}`);
+      }
+      await database.query("reset role");
+
+      const deniedActors = [
+        fixture.actors.permitted,
+        fixture.actors.productCreator,
+        fixture.actors.supplierEditor,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+      ];
+      for (const [index, actor] of deniedActors.entries()) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(`savepoint denied_reopen_actor_${index}`);
+        await expect(
+          database.query("select public.reopen_project($1)", [completedId]),
+        ).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint denied_reopen_actor_${index}`);
+        await database.query("reset role");
+      }
+
+      await database.query("set local role anon");
+      await database.query("savepoint denied_anonymous_reopen");
+      await expect(
+        database.query("select public.reopen_project($1)", [completedId]),
+      ).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint denied_anonymous_reopen");
+      await database.query("reset role");
+
+      const rows = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects
+         where id = any($1::uuid[])
+         order by id`,
+        [[...sourceIds, completedId]],
+      );
+      expect(rows.rows).toEqual(baseline.rows);
+      expect(rows.rows.find((row) => row.id === completedId)).toMatchObject({
+        completed_at: new Date("2026-09-30T10:00:00Z"),
+        status: "completed",
+      });
+      for (const [index, status] of sourceStatuses.entries()) {
+        expect(rows.rows.find((row) => row.id === sourceIds[index])?.status)
+          .toBe(status);
+      }
+      const audits = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = any($1::uuid[])
+           and action_type = 'project.reopened'`,
+        [[...sourceIds, completedId]],
+      );
+      expect(audits.rows).toEqual([{ count: 0 }]);
+    });
   });
 });

@@ -51,12 +51,15 @@ function formatTimestamp(value: string): string {
 
 function ProjectDetailPage() {
   const { projectId = "" } = useParams<{ projectId: string }>();
-  const { projectQuery, canEdit, canCancel, update, cancel } =
+  const { projectQuery, canEdit, canCancel, canReopen, update, cancel, reopen } =
     useProjectDetail(projectId);
   const cancellationLockRef = useRef(false);
+  const reopenLockRef = useRef(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isReopenOpen, setIsReopenOpen] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -76,6 +79,25 @@ function ProjectDetailPage() {
     } finally {
       cancellationLockRef.current = false;
       setIsCancelling(false);
+    }
+  }
+
+  async function confirmReopen() {
+    if (reopenLockRef.current) return;
+    reopenLockRef.current = true;
+    setIsReopening(true);
+    setActionError(null);
+    try {
+      const result = await reopen();
+      if (!result.ok) {
+        setActionError(result.error.message);
+        return;
+      }
+      setIsReopenOpen(false);
+      setSuccessMessage("Project reopened.");
+    } finally {
+      reopenLockRef.current = false;
+      setIsReopening(false);
     }
   }
   let content: ReactNode;
@@ -114,6 +136,7 @@ function ProjectDetailPage() {
       "in_progress",
       "on_hold",
     ].includes(project.status);
+    const showReopen = canReopen && project.status === "completed";
 
     content = (
       <>
@@ -153,6 +176,19 @@ function ProjectDetailPage() {
                     className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
                   >
                     Cancel Project
+                  </button>
+                )}
+                {showReopen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccessMessage(null);
+                      setActionError(null);
+                      setIsReopenOpen(true);
+                    }}
+                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                  >
+                    Reopen Project
                   </button>
                 )}
               </div>
@@ -258,6 +294,18 @@ function ProjectDetailPage() {
             if (!isCancelling) setIsCancelOpen(false);
           }}
           onConfirm={() => void confirmCancellation()}
+        />
+
+        <ConfirmDialog
+          open={isReopenOpen}
+          title="Reopen Project"
+          description={`Reopen ${project.name}? Its status will change from Completed back to In Progress.`}
+          confirmLabel="Reopen Project"
+          isSubmitting={isReopening}
+          onCancel={() => {
+            if (!isReopening) setIsReopenOpen(false);
+          }}
+          onConfirm={() => void confirmReopen()}
         />
       </>
     );

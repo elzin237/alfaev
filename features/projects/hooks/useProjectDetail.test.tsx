@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cancelProject: vi.fn(), getProject: vi.fn(), hasPermission: vi.fn(),
-  isProjectId: vi.fn(), updateProject: vi.fn(), useAuth: vi.fn(),
+  isProjectId: vi.fn(), reopenProject: vi.fn(), updateProject: vi.fn(),
+  useAuth: vi.fn(),
 }));
 
 vi.mock("../../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
@@ -14,6 +15,7 @@ vi.mock("../services/projectService", () => ({
   cancelProject: mocks.cancelProject,
   getProject: mocks.getProject,
   isProjectId: mocks.isProjectId,
+  reopenProject: mocks.reopenProject,
   updateProject: mocks.updateProject,
 }));
 
@@ -46,6 +48,7 @@ beforeEach(() => {
   mocks.hasPermission.mockResolvedValue({ ok: true, value: false });
   mocks.updateProject.mockResolvedValue({ ok: true, value: { projectId } });
   mocks.cancelProject.mockResolvedValue({ ok: true, value: { projectId } });
+  mocks.reopenProject.mockResolvedValue({ ok: true, value: { projectId } });
 });
 
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -60,6 +63,7 @@ describe("useProjectDetail", () => {
     await waitFor(() => expect(result.current.projectQuery.isSuccess).toBe(true));
     expect(result.current.canEdit).toBe(true);
     expect(result.current.canCancel).toBe(true);
+    expect(result.current.canReopen).toBe(false);
     expect(mocks.hasPermission).not.toHaveBeenCalled();
   });
 
@@ -95,13 +99,14 @@ describe("useProjectDetail", () => {
     expect(failed.result.current.canCancel).toBe(false);
   });
 
-  it("keeps Completed and Cancelled Projects read-only even for Admin", async () => {
+  it("lets only an active Admin reopen a Completed Project", async () => {
     mocks.useAuth.mockReturnValue({ session: { user: { id: "admin" } }, profile: { id: "admin", isActive: true }, isAdmin: true });
     mocks.getProject.mockResolvedValueOnce({ ok: true, value: { ...activeProject, status: "completed" } });
     const completed = renderDetailHook();
     await waitFor(() => expect(completed.result.current.projectQuery.isSuccess).toBe(true));
     expect(completed.result.current.canEdit).toBe(false);
     expect(completed.result.current.canCancel).toBe(false);
+    expect(completed.result.current.canReopen).toBe(true);
     completed.unmount();
 
     mocks.getProject.mockResolvedValueOnce({ ok: true, value: { ...activeProject, status: "cancelled" } });
@@ -109,6 +114,7 @@ describe("useProjectDetail", () => {
     await waitFor(() => expect(cancelled.result.current.projectQuery.isSuccess).toBe(true));
     expect(cancelled.result.current.canEdit).toBe(false);
     expect(cancelled.result.current.canCancel).toBe(false);
+    expect(cancelled.result.current.canReopen).toBe(false);
   });
 
   it("does not let projects.edit bypass the Completed lifecycle lock", async () => {
@@ -123,6 +129,7 @@ describe("useProjectDetail", () => {
     await waitFor(() => expect(result.current.projectQuery.isSuccess).toBe(true));
     expect(result.current.canEdit).toBe(false);
     expect(result.current.canCancel).toBe(false);
+    expect(result.current.canReopen).toBe(false);
   });
 
   it("invalidates exact detail and list queries only after successful mutations", async () => {
@@ -135,13 +142,19 @@ describe("useProjectDetail", () => {
     invalidateQueries.mockClear();
     await act(async () => { await result.current.cancel(); });
     expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    invalidateQueries.mockClear();
+    await act(async () => { await result.current.reopen(); });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects", "detail", "profile-1", projectId], exact: true });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects", "list", "profile-1"], exact: true });
 
     invalidateQueries.mockClear();
     mocks.updateProject.mockResolvedValueOnce({ ok: false, error: { code: "project_update_failed", message: "safe" } });
     mocks.cancelProject.mockResolvedValueOnce({ ok: false, error: { code: "project_cancel_failed", message: "safe" } });
+    mocks.reopenProject.mockResolvedValueOnce({ ok: false, error: { code: "project_reopen_failed", message: "safe" } });
     await act(async () => {
       await result.current.update({ name: "Project", customerName: "Customer", startDate: "2026-09-01", deliveryDate: "2026-09-30", status: "planned" });
       await result.current.cancel();
+      await result.current.reopen();
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
   });

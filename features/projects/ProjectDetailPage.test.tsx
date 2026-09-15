@@ -6,6 +6,7 @@ const projectDetailPageMocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   update: vi.fn(),
   cancel: vi.fn(),
+  reopen: vi.fn(),
   useProjectDetail: vi.fn(),
 }));
 
@@ -36,6 +37,7 @@ function setQueryState(options: {
   isPending?: boolean;
   canEdit?: boolean;
   canCancel?: boolean;
+  canReopen?: boolean;
 } = {}) {
   projectDetailPageMocks.useProjectDetail.mockReturnValue({
     projectQuery: {
@@ -46,8 +48,10 @@ function setQueryState(options: {
     },
     canEdit: options.canEdit ?? false,
     canCancel: options.canCancel ?? false,
+    canReopen: options.canReopen ?? false,
     update: projectDetailPageMocks.update,
     cancel: projectDetailPageMocks.cancel,
+    reopen: projectDetailPageMocks.reopen,
   });
 }
 
@@ -64,6 +68,7 @@ function renderDetail(path = `/projects/${projectId}`) {
 beforeEach(() => {
   projectDetailPageMocks.update.mockResolvedValue({ ok: true, value: { projectId } });
   projectDetailPageMocks.cancel.mockResolvedValue({ ok: true, value: { projectId } });
+  projectDetailPageMocks.reopen.mockResolvedValue({ ok: true, value: { projectId } });
   setQueryState();
 });
 
@@ -227,7 +232,7 @@ describe("ProjectDetailPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The Project could not be cancelled. Please try again.");
   });
 
-  it("renders Completed detail read-only without Edit, Cancel, or Reopen", () => {
+  it("keeps Completed detail locked for a non-Admin", () => {
     setQueryState({
       data: { ok: true, value: { ...project, status: "completed" } },
       canEdit: true,
@@ -242,8 +247,106 @@ describe("ProjectDetailPage", () => {
     expect(screen.queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
   });
 
+  it("shows only Reopen for an Admin viewing a Completed Project", () => {
+    setQueryState({
+      data: { ok: true, value: { ...project, status: "completed" } },
+      canEdit: true,
+      canCancel: true,
+      canReopen: true,
+    });
+    renderDetail();
+
+    expect(screen.getByRole("button", { name: "Reopen Project" }))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Project" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel Project" }))
+      .not.toBeInTheDocument();
+  });
+
+  it.each(["planned", "in_progress", "on_hold", "cancelled"] as const)(
+    "does not expose Reopen for a %s Project",
+    (status) => {
+      setQueryState({
+        data: { ok: true, value: { ...project, status } },
+        canReopen: true,
+      });
+      renderDetail();
+
+      expect(screen.queryByRole("button", { name: "Reopen Project" }))
+        .not.toBeInTheDocument();
+    },
+  );
+
+  it("requires reopen confirmation and shows success or safe failure", async () => {
+    setQueryState({
+      data: { ok: true, value: { ...project, status: "completed" } },
+      canReopen: true,
+    });
+    const view = renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Project" }));
+    const dialog = screen.getByRole("dialog", { name: "Reopen Project" });
+    expect(dialog).toHaveTextContent("back to In Progress");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(projectDetailPageMocks.reopen).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Project" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Reopen Project" }))
+      .getByRole("button", { name: "Reopen Project" }));
+    await waitFor(() => expect(projectDetailPageMocks.reopen).toHaveBeenCalledOnce());
+    expect(screen.getByRole("status")).toHaveTextContent("Project reopened.");
+    view.unmount();
+
+    projectDetailPageMocks.reopen.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "project_reopen_failed",
+        message: "The Project could not be reopened. Please try again.",
+      },
+    });
+    setQueryState({
+      data: { ok: true, value: { ...project, status: "completed" } },
+      canReopen: true,
+    });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Project" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Reopen Project" }))
+      .getByRole("button", { name: "Reopen Project" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The Project could not be reopened. Please try again.",
+    );
+  });
+
+  it("blocks duplicate reopen confirmation while the request is pending", async () => {
+    let resolveReopen: ((value: {
+      ok: true;
+      value: { projectId: string };
+    }) => void) | undefined;
+    projectDetailPageMocks.reopen.mockReturnValueOnce(new Promise((resolve) => {
+      resolveReopen = resolve;
+    }));
+    setQueryState({
+      data: { ok: true, value: { ...project, status: "completed" } },
+      canReopen: true,
+    });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen Project" }));
+    const confirm = within(
+      screen.getByRole("dialog", { name: "Reopen Project" }),
+    ).getByRole("button", { name: "Reopen Project" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+
+    expect(projectDetailPageMocks.reopen).toHaveBeenCalledOnce();
+    expect(confirm).toBeDisabled();
+
+    resolveReopen?.({ ok: true, value: { projectId } });
+    await waitFor(() => expect(screen.getByRole("status"))
+      .toHaveTextContent("Project reopened."));
+  });
+
   it("does not expose restore, reopen, delete, or hard-delete controls", () => {
-    setQueryState({ canEdit: true, canCancel: true });
+    setQueryState({ canEdit: true, canCancel: true, canReopen: false });
     renderDetail();
     expect(screen.queryByRole("button", { name: /restore|reopen|delete|archive/i })).not.toBeInTheDocument();
   });

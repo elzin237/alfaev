@@ -20,6 +20,7 @@ import {
   createProject,
   getProject,
   listProjects,
+  reopenProject,
   updateProject,
 } from "./projectService";
 
@@ -453,6 +454,41 @@ describe("projectService", () => {
     if (!result.ok) expect(result.error.message).not.toContain("raw");
   });
 
+  it("reopens a Project only through the trusted Admin RPC", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: "00000000-0000-4000-8000-000000000001",
+      error: null,
+    });
+
+    await expect(reopenProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toEqual({
+      ok: true,
+      value: { projectId: "00000000-0000-4000-8000-000000000001" },
+    });
+    expect(projectServiceMocks.rpc).toHaveBeenCalledWith("reopen_project", {
+      p_project_id: "00000000-0000-4000-8000-000000000001",
+    });
+    expect(projectServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["PRJ04", "project_reopen_invalid_state"],
+    ["P0002", "project_not_found"],
+    ["XX000", "project_reopen_failed"],
+  ])("maps reopen error %s safely", async (backendCode, expectedCode) => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw database detail" },
+    });
+    const result = await reopenProject(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: expectedCode } });
+    if (!result.ok) expect(result.error.message).not.toContain("raw");
+  });
+
   it("fails mutations safely for malformed results and thrown errors", async () => {
     projectServiceMocks.rpc.mockResolvedValueOnce({ data: "bad-id", error: null });
     await expect(cancelProject(
@@ -475,6 +511,14 @@ describe("projectService", () => {
     )).resolves.toMatchObject({
       ok: false,
       error: { code: "project_update_failed" },
+    });
+
+    projectServiceMocks.rpc.mockResolvedValueOnce({ data: "bad-id", error: null });
+    await expect(reopenProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_reopen_failed" },
     });
   });
 });
