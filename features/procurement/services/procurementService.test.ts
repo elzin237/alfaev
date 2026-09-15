@@ -9,6 +9,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 import {
   createProcurementRequestForNewComponent,
   createProcurementRequestForProduct,
+  createProductFromProcurementRequest,
   getProcurementSidebarBadgeCount,
   listActiveProcurementSupplierChoices,
   listProcurementSupplierOptions,
@@ -424,6 +425,116 @@ describe("procurementService", () => {
     });
 
     const result = await resolveProcurementRequest(requestRow.request_id);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(expectedCode);
+    expect(JSON.stringify(result)).not.toContain("raw provider details");
+  });
+
+  it("creates a Product from a request through only the Task 083 RPC and normalizes allowed inputs", async () => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: [{
+        product_id: requestRow.product_id,
+        serial_number: "0000456",
+      }],
+      error: null,
+    });
+
+    await expect(createProductFromProcurementRequest({
+      requestId: requestRow.request_id,
+      name: "  Final Relay Name  ",
+      category: "  Control Components  ",
+      brandId: "  00000000-0000-4000-8000-000000000005  ",
+      catalogNumber: "  CaT-AbC  ",
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        productId: requestRow.product_id,
+        serialNumber: "0000456",
+      },
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
+      "create_product_from_procurement_request",
+      {
+        p_request_id: requestRow.request_id,
+        p_name: "Final Relay Name",
+        p_category: "Control Components",
+        p_brand_id: "00000000-0000-4000-8000-000000000005",
+        p_catalog_number: "CaT-AbC",
+      },
+    );
+    const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
+    expect(payload).not.toHaveProperty("supplier_id");
+    expect(payload).not.toHaveProperty("serial_number");
+    expect(payload).not.toHaveProperty("product_kind");
+    expect(payload).not.toHaveProperty("quantity");
+    expect(payload).not.toHaveProperty("requested_name");
+    expect(payload).not.toHaveProperty("status");
+  });
+
+  it("maps blank optional Product-from-request values to NULL and rejects malformed success safely", async () => {
+    procurementServiceMocks.rpc
+      .mockResolvedValueOnce({
+        data: [{ product_id: requestRow.product_id, serial_number: "0000456" }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{ product_id: "invalid", serial_number: "456" }],
+        error: null,
+      });
+
+    await createProductFromProcurementRequest({
+      requestId: requestRow.request_id,
+      name: "Relay",
+      category: "Components",
+      brandId: null,
+      catalogNumber: "   ",
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "create_product_from_procurement_request",
+      expect.objectContaining({ p_brand_id: null, p_catalog_number: null }),
+    );
+    await expect(createProductFromProcurementRequest({
+      requestId: requestRow.request_id,
+      name: "Relay",
+      category: "Components",
+      brandId: null,
+      catalogNumber: null,
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_creation_failed",
+        message: "The Product could not be created from this request. Please try again.",
+      },
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["22023", "invalid_product"],
+    ["P0002", "request_not_found"],
+    ["PRQ02", "request_resolved"],
+    ["PRQ05", "request_already_linked"],
+    ["PRQ04", "supplier_unavailable"],
+    ["PRD04", "brand_unavailable"],
+    ["unexpected", "product_creation_failed"],
+  ] as const)("maps Product-from-request %s failures safely", async (
+    providerCode,
+    expectedCode,
+  ) => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider details" },
+    });
+
+    const result = await createProductFromProcurementRequest({
+      requestId: requestRow.request_id,
+      name: "Relay",
+      category: "Components",
+      brandId: null,
+      catalogNumber: null,
+    });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(expectedCode);

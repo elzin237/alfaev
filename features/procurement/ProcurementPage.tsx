@@ -6,6 +6,7 @@ import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import CreateExistingProductRequestDialog from "./components/CreateExistingProductRequestDialog";
+import CreateProductFromRequestDialog from "./components/CreateProductFromRequestDialog";
 import ProcurementList from "./components/ProcurementList";
 import UpdateProcurementDeliveryDialog from "./components/UpdateProcurementDeliveryDialog";
 import {
@@ -18,6 +19,7 @@ import {
 } from "./hooks/useProcurementRequests";
 import { useProcurementDeliveryUpdate } from "./hooks/useProcurementDeliveryUpdate";
 import { useProcurementResolve } from "./hooks/useProcurementResolve";
+import { useProcurementProductCreation } from "./hooks/useProcurementProductCreation";
 import {
   isProcurementStatusFilter,
   procurementStatusOptions,
@@ -41,6 +43,8 @@ function ProcurementPage() {
   const [resolveRequest, setResolveRequest] =
     useState<ProcurementRequestListItem | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  const [productCreationRequest, setProductCreationRequest] =
+    useState<ProcurementRequestListItem | null>(null);
   const resolveLockRef = useRef(false);
   const {
     canCreate,
@@ -51,6 +55,11 @@ function ProcurementPage() {
     useProcurementDeliveryUpdate();
   const { canResolve, isResolving, resolveRequest: resolveProcurement } =
     useProcurementResolve();
+  const {
+    brandsQuery,
+    canCreateProduct,
+    createProduct: createProductFromRequest,
+  } = useProcurementProductCreation(productCreationRequest !== null);
   const { productChoicesQuery, supplierChoicesQuery } =
     useProcurementCreationChoices(
       debouncedProductChoiceSearch,
@@ -142,6 +151,9 @@ function ProcurementPage() {
           setResolveError(null);
           setResolveRequest(request);
         } : undefined}
+        onCreateProduct={canCreateProduct
+          ? setProductCreationRequest
+          : undefined}
       />
     );
   }
@@ -282,6 +294,27 @@ function ProcurementPage() {
         onClose={() => setDeliveryRequest(null)}
         onSubmit={updateDelivery}
         onUpdated={() => setSuccessMessage("Delivered quantity updated.")}
+      />
+
+      <CreateProductFromRequestDialog
+        request={canCreateProduct ? productCreationRequest : null}
+        brands={brandsQuery.data?.ok ? brandsQuery.data.value : []}
+        isBrandsLoading={brandsQuery.isPending}
+        brandLoadError={
+          brandsQuery.isError || brandsQuery.data?.ok === false
+            ? brandsQuery.data?.ok === false
+              ? brandsQuery.data.error.message
+              : "The Brand list could not be loaded."
+            : null
+        }
+        onRetryBrands={() => void brandsQuery.refetch()}
+        onClose={() => setProductCreationRequest(null)}
+        onSubmit={createProductFromRequest}
+        onSucceeded={(product) => {
+          setSuccessMessage(
+            `Component created. Serial Number: ${product.serialNumber}. The Procurement request remains in its current lifecycle.`,
+          );
+        }}
       />
 
       <ConfirmDialog

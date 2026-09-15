@@ -18,6 +18,7 @@ const procurementPageMocks = vi.hoisted(() => ({
   useProcurementDeliveryUpdate: vi.fn(),
   useProcurementRequests: vi.fn(),
   useProcurementResolve: vi.fn(),
+  useProcurementProductCreation: vi.fn(),
   useProcurementSupplierOptions: vi.fn(),
 }));
 
@@ -37,6 +38,10 @@ vi.mock("./hooks/useProcurementDeliveryUpdate", () => ({
 }));
 vi.mock("./hooks/useProcurementResolve", () => ({
   useProcurementResolve: procurementPageMocks.useProcurementResolve,
+}));
+vi.mock("./hooks/useProcurementProductCreation", () => ({
+  useProcurementProductCreation:
+    procurementPageMocks.useProcurementProductCreation,
 }));
 
 import ProcurementPage from "./ProcurementPage";
@@ -140,6 +145,16 @@ beforeEach(() => {
     canResolve: false,
     isResolving: false,
     resolveRequest: vi.fn(),
+  });
+  procurementPageMocks.useProcurementProductCreation.mockReturnValue({
+    brandsQuery: {
+      data: { ok: true, value: [] },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    },
+    canCreateProduct: false,
+    createProduct: vi.fn(),
   });
 });
 
@@ -445,5 +460,111 @@ describe("ProcurementPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Brand-New Component" }))
       .toBeInTheDocument();
+  });
+
+  it("shows Create component only to Admin UX for active/partial unlinked requests", () => {
+    const activeUnlinked = {
+      ...requests[0]!,
+      requestId: "00000000-0000-4000-8000-000000000099",
+      productId: null,
+      productSerialNumber: null,
+      requestedName: "Active Unlinked Snapshot",
+    };
+    const resolvedUnlinked = {
+      ...requests[2]!,
+      requestId: "00000000-0000-4000-8000-000000000098",
+      productId: null,
+      productSerialNumber: null,
+    };
+    setSuccessfulQueries([
+      activeUnlinked,
+      requests[0]!,
+      requests[1]!,
+      resolvedUnlinked,
+    ]);
+    procurementPageMocks.useProcurementProductCreation.mockReturnValue({
+      brandsQuery: {
+        data: { ok: true, value: [] },
+        isError: false,
+        isPending: false,
+        refetch: vi.fn(),
+      },
+      canCreateProduct: true,
+      createProduct: vi.fn(),
+    });
+    render(<ProcurementPage />);
+
+    expect(screen.getAllByRole("button", {
+      name: "Create component from request",
+    })).toHaveLength(2);
+    expect(within(screen.getByText("Active Snapshot").closest("tr")!)
+      .queryByRole("button", { name: "Create component from request" }))
+      .not.toBeInTheDocument();
+    expect(within(screen.getByText("Resolved Snapshot").closest("tr")!)
+      .queryByRole("button", { name: "Create component from request" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("hides Product creation for non-Admin UX and already-linked requests", () => {
+    procurementPageMocks.useProcurementProductCreation.mockReturnValue({
+      brandsQuery: {
+        data: { ok: true, value: [] },
+        isError: false,
+        isPending: false,
+        refetch: vi.fn(),
+      },
+      canCreateProduct: false,
+      createProduct: vi.fn(),
+    });
+    render(<ProcurementPage />);
+    expect(screen.queryByRole("button", {
+      name: "Create component from request",
+    })).not.toBeInTheDocument();
+  });
+
+  it("opens the request-prefilled dialog and reports the generated Serial", async () => {
+    const createProduct = vi.fn().mockResolvedValue({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000090",
+        serialNumber: "0000789",
+      },
+    });
+    procurementPageMocks.useProcurementProductCreation.mockReturnValue({
+      brandsQuery: {
+        data: { ok: true, value: [] },
+        isError: false,
+        isPending: false,
+        refetch: vi.fn(),
+      },
+      canCreateProduct: true,
+      createProduct,
+    });
+    render(<ProcurementPage />);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Create component from request",
+    }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Create component from request",
+    });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Name")).toHaveValue(
+      "Partly Delivered Snapshot",
+    );
+    expect(within(dialog).getByLabelText("Supplier")).toHaveValue("Supplier B");
+    fireEvent.change(within(dialog).getByLabelText("Category"), {
+      target: { value: "Components" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", {
+      name: "Create Component",
+    }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Component created. Serial Number: 0000789.",
+    );
+    expect(screen.queryByRole("dialog", {
+      name: "Create component from request",
+    })).not.toBeInTheDocument();
   });
 });

@@ -65,6 +65,19 @@ export interface ResolvedProcurementRequest {
   requestId: string;
 }
 
+export interface CreateProductFromProcurementRequestInput {
+  requestId: string;
+  name: string;
+  category: string;
+  brandId: string | null;
+  catalogNumber: string | null;
+}
+
+export interface CreatedProductFromProcurementRequest {
+  productId: string;
+  serialNumber: string;
+}
+
 export interface ProcurementListInput {
   search: string;
   status: ProcurementStatus | null;
@@ -143,6 +156,23 @@ export type ProcurementResolveResult =
   | { ok: true; value: ResolvedProcurementRequest }
   | { ok: false; error: ProcurementResolveError };
 
+export interface ProcurementProductCreationError {
+  code:
+    | "access_denied"
+    | "invalid_product"
+    | "request_not_found"
+    | "request_resolved"
+    | "request_already_linked"
+    | "supplier_unavailable"
+    | "brand_unavailable"
+    | "product_creation_failed";
+  message: string;
+}
+
+export type ProcurementProductCreationResult =
+  | { ok: true; value: CreatedProductFromProcurementRequest }
+  | { ok: false; error: ProcurementProductCreationError };
+
 interface ProcurementRequestRow {
   request_id: string;
   product_id: string | null;
@@ -167,6 +197,11 @@ interface ProcurementProductChoiceRow {
   product_id: string;
   serial_number: string;
   name: string;
+}
+
+interface CreatedProductFromProcurementRequestRow {
+  product_id: string;
+  serial_number: string;
 }
 
 const uuidPattern =
@@ -517,6 +552,90 @@ function resolveFailure(code?: string): ProcurementResolveResult {
   }
 }
 
+function procurementProductCreationFailure(
+  code?: string,
+): ProcurementProductCreationResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "Only an active Admin can create a Product from this request.",
+        },
+      };
+    case "22023":
+    case "23514":
+      return {
+        ok: false,
+        error: {
+          code: "invalid_product",
+          message: "Enter a valid Product Name and Category.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "request_not_found",
+          message: "The Procurement request could not be found.",
+        },
+      };
+    case "PRQ02":
+      return {
+        ok: false,
+        error: {
+          code: "request_resolved",
+          message: "Resolved Procurement requests cannot create Products.",
+        },
+      };
+    case "PRQ05":
+      return {
+        ok: false,
+        error: {
+          code: "request_already_linked",
+          message: "This Procurement request already has a Product.",
+        },
+      };
+    case "PRQ04":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_unavailable",
+          message: "The request Supplier is no longer available for a new Product.",
+        },
+      };
+    case "PRD04":
+      return {
+        ok: false,
+        error: {
+          code: "brand_unavailable",
+          message: "The selected Brand is unavailable. Choose an active Brand or no Brand.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "product_creation_failed",
+          message: "The Product could not be created from this request. Please try again.",
+        },
+      };
+  }
+}
+
+function isCreatedProductFromProcurementRequestRow(
+  value: unknown,
+): value is CreatedProductFromProcurementRequestRow {
+  return typeof value === "object" &&
+    value !== null &&
+    "product_id" in value &&
+    isUuid(value.product_id) &&
+    "serial_number" in value &&
+    typeof value.serial_number === "string" &&
+    /^[0-9]{7}$/.test(value.serial_number);
+}
+
 export async function searchProcurementRequests(
   input: ProcurementListInput,
 ): Promise<ProcurementListResult> {
@@ -718,5 +837,41 @@ export async function resolveProcurementRequest(
     return { ok: true, value: { requestId: data } };
   } catch {
     return resolveFailure();
+  }
+}
+
+export async function createProductFromProcurementRequest(
+  input: CreateProductFromProcurementRequestInput,
+): Promise<ProcurementProductCreationResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "create_product_from_procurement_request",
+      {
+        p_request_id: input.requestId,
+        p_name: input.name.trim(),
+        p_category: input.category.trim(),
+        p_brand_id: input.brandId?.trim() || null,
+        p_catalog_number: input.catalogNumber?.trim() || null,
+      },
+    );
+
+    if (error) return procurementProductCreationFailure(error.code);
+    if (
+      !Array.isArray(data) ||
+      data.length !== 1 ||
+      !isCreatedProductFromProcurementRequestRow(data[0])
+    ) {
+      return procurementProductCreationFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        productId: data[0].product_id,
+        serialNumber: data[0].serial_number,
+      },
+    };
+  } catch {
+    return procurementProductCreationFailure();
   }
 }

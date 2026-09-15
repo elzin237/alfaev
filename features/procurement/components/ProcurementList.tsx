@@ -6,12 +6,14 @@ interface ProcurementListProps {
   requests: ProcurementRequestListItem[];
   onUpdateDelivery?: (request: ProcurementRequestListItem) => void;
   onResolve?: (request: ProcurementRequestListItem) => void;
+  onCreateProduct?: (request: ProcurementRequestListItem) => void;
 }
 
 function ProcurementList({
   requests,
   onUpdateDelivery,
   onResolve,
+  onCreateProduct,
 }: ProcurementListProps) {
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
@@ -28,7 +30,9 @@ function ProcurementList({
                 "Remaining",
                 "Status",
                 "Created By",
-                ...(onUpdateDelivery || onResolve ? ["Actions"] : []),
+                ...(onUpdateDelivery || onResolve || onCreateProduct
+                  ? ["Actions"]
+                  : []),
               ].map((heading) => (
                 <th
                   key={heading}
@@ -69,7 +73,7 @@ function ProcurementList({
                     <StatusBadge label={status.label} tone={status.tone} />
                   </td>
                   <td className="px-5 py-4">{request.createdByFullName}</td>
-                  {(onUpdateDelivery || onResolve) && (
+                  {(onUpdateDelivery || onResolve || onCreateProduct) && (
                     <td className="whitespace-nowrap px-5 py-4">
                       {request.status === "resolved" ? null : (
                         <div className="flex items-center gap-2">
@@ -89,6 +93,15 @@ function ProcurementList({
                               className="rounded-xl border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
                             >
                               Resolve
+                            </button>
+                          )}
+                          {onCreateProduct && request.productId === null && (
+                            <button
+                              type="button"
+                              onClick={() => onCreateProduct(request)}
+                              className="rounded-xl border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                            >
+                              Create component from request
                             </button>
                           )}
                         </div>
