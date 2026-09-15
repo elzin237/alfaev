@@ -12762,4 +12762,210 @@ describe("Supabase security helpers", () => {
       .limit(1);
     expectPermissionDenied(anonymousRead.error);
   });
+
+  it("counts unresolved ProcurementRequest rows only for authorized active viewers", async () => {
+    const fixture = requireHarness();
+    const supplierId = randomUUID();
+    const requestIds = Array.from({ length: 4 }, () => randomUUID());
+    const viewer = fixture.actors.productCreator;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query("delete from public.procurement_requests");
+      await database.query(
+        `insert into public.suppliers (
+           id, name, country, created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'BiH', $3, $3)`,
+        [
+          supplierId,
+          `Procurement Badge Supplier ${supplierId}`,
+          fixture.actors.admin.profileId,
+        ],
+      );
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select $1, definition.id, $2
+         from public.permission_definitions as definition
+         where definition.key = 'procurement.view'`,
+        [viewer.profileId, fixture.actors.admin.profileId],
+      );
+      const inventoryBefore = await database.query<{
+        balances: number;
+        movements: number;
+      }>(
+        `select
+           (select count(*)::integer from public.inventory_balances)
+             as balances,
+           (select count(*)::integer from public.inventory_movements)
+             as movements`,
+      );
+
+      async function readCount(authUserId: string): Promise<string> {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        const result = await database.query<{ badge_count: string }>(
+          `select public.get_procurement_sidebar_badge_count()
+             as badge_count`,
+        );
+        await database.query("reset role");
+        const count = result.rows[0]?.badge_count;
+
+        if (count === undefined) {
+          throw new Error("Procurement badge RPC returned no count");
+        }
+
+        return count;
+      }
+
+      expect(await readCount(fixture.actors.admin.authUserId)).toBe("0");
+
+      await database.query(
+        `insert into public.procurement_requests (
+           id, requested_name, supplier_id, requested_quantity,
+           created_by_user_id, updated_by_user_id
+         ) values ($1, 'One Thousand Pieces', $2, 1000, $3, $3)`,
+        [requestIds[0], supplierId, fixture.actors.admin.profileId],
+      );
+      expect(await readCount(fixture.actors.admin.authUserId)).toBe("1");
+
+      await database.query(
+        `insert into public.procurement_requests (
+           id, requested_name, supplier_id, requested_quantity,
+           delivered_quantity, status, created_by_user_id, updated_by_user_id
+         ) values (
+           $1, 'Partly Delivered Pieces', $2, 1000, 999,
+           'partly_delivered', $3, $3
+         )`,
+        [requestIds[1], supplierId, fixture.actors.admin.profileId],
+      );
+      expect(await readCount(fixture.actors.admin.authUserId)).toBe("2");
+
+      await database.query(
+        `insert into public.procurement_requests (
+           id, requested_name, supplier_id, requested_quantity,
+           delivered_quantity, status, created_by_user_id, updated_by_user_id,
+           resolved_at, resolved_by_user_id
+         ) values (
+           $1, 'Resolved Pieces', $2, 5000, 5000, 'resolved', $3, $3,
+           pg_catalog.clock_timestamp(), $3
+         )`,
+        [requestIds[2], supplierId, fixture.actors.admin.profileId],
+      );
+      expect(await readCount(fixture.actors.admin.authUserId)).toBe("2");
+
+      await database.query(
+        `insert into public.procurement_requests (
+           id, requested_name, supplier_id, requested_quantity,
+           created_by_user_id, updated_by_user_id
+         ) values ($1, 'Another Active Row', $2, 1, $3, $3)`,
+        [requestIds[3], supplierId, fixture.actors.admin.profileId],
+      );
+      expect(await readCount(fixture.actors.admin.authUserId)).toBe("3");
+      expect(await readCount(viewer.authUserId)).toBe("3");
+
+      const requestsBefore = await database.query<ProcurementRequestRow>(
+        `select * from public.procurement_requests order by id`,
+      );
+      for (const [index, actor] of [
+        fixture.actors.permitted,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+      ].entries()) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(`savepoint denied_procurement_badge_${index}`);
+        await expect(database.query(
+          "select public.get_procurement_sidebar_badge_count()",
+        )).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint denied_procurement_badge_${index}`);
+        await database.query("reset role");
+      }
+
+      await database.query("set local role anon");
+      await database.query("savepoint anonymous_procurement_badge");
+      await expect(database.query(
+        "select public.get_procurement_sidebar_badge_count()",
+      )).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_procurement_badge");
+      await database.query("reset role");
+
+      const requestsAfter = await database.query<ProcurementRequestRow>(
+        `select * from public.procurement_requests order by id`,
+      );
+      const inventoryAfter = await database.query<{
+        balances: number;
+        movements: number;
+      }>(
+        `select
+           (select count(*)::integer from public.inventory_balances)
+             as balances,
+           (select count(*)::integer from public.inventory_movements)
+             as movements`,
+      );
+      expect(requestsAfter.rows).toEqual(requestsBefore.rows);
+      expect(inventoryAfter.rows).toEqual(inventoryBefore.rows);
+
+      const security = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        definition: string;
+        identity_arguments: string;
+        security_definer: boolean;
+        settings: string[];
+        volatility: string;
+      }>(
+        `select
+           routine.prosecdef as security_definer,
+           routine.proconfig as settings,
+           routine.provolatile::text as volatility,
+           pg_catalog.pg_get_function_identity_arguments(routine.oid)
+             as identity_arguments,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'get_procurement_sidebar_badge_count'`,
+      );
+      expect(security.rows).toHaveLength(1);
+      expect(security.rows[0]).toMatchObject({
+        anonymous_execute: false,
+        authenticated_execute: true,
+        identity_arguments: "",
+        security_definer: true,
+        settings: ["search_path=\"\""],
+        volatility: "s",
+      });
+      expect(security.rows[0]?.definition).toContain("count(*)");
+      expect(security.rows[0]?.definition).toContain("'active'");
+      expect(security.rows[0]?.definition).toContain(
+        "'partly_delivered'",
+      );
+      expect(security.rows[0]?.definition).not.toContain("requested_quantity");
+      expect(security.rows[0]?.definition).not.toContain("delivered_quantity");
+    });
+
+    expectPermissionDenied((await fixture.actors.unpermitted.client.rpc(
+      "get_procurement_sidebar_badge_count",
+    )).error);
+    expectPermissionDenied((await fixture.actors.inactive.client.rpc(
+      "get_procurement_sidebar_badge_count",
+    )).error);
+    expectPermissionDenied((await fixture.anonymousClient.rpc(
+      "get_procurement_sidebar_badge_count",
+    )).error);
+  });
 });
