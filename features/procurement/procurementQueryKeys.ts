@@ -39,3 +39,25 @@ export function procurementSupplierOptionsQueryKey(
 export function procurementBadgeQueryKey(profileId: string | undefined) {
   return [...procurementQueryPrefix(profileId), "badge"] as const;
 }
+
+export function procurementProductChoicesQueryKey(
+  profileId: string | undefined,
+  search: string,
+) {
+  return [
+    ...procurementQueryPrefix(profileId),
+    "creation",
+    "product-choices",
+    normalizeProcurementSearch(search),
+  ] as const;
+}
+
+export function procurementActiveSupplierChoicesQueryKey(
+  profileId: string | undefined,
+) {
+  return [
+    ...procurementQueryPrefix(profileId),
+    "creation",
+    "supplier-choices",
+  ] as const;
+}

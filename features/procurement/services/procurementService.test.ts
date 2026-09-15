@@ -7,8 +7,11 @@ vi.mock("../../../lib/supabase/client", () => ({
 }));
 
 import {
+  createProcurementRequestForProduct,
   getProcurementSidebarBadgeCount,
+  listActiveProcurementSupplierChoices,
   listProcurementSupplierOptions,
+  searchProcurementProductChoices,
   searchProcurementRequests,
 } from "./procurementService";
 
@@ -182,5 +185,101 @@ describe("procurementService", () => {
         message: "The Procurement count could not be loaded.",
       },
     });
+  });
+
+  it("uses narrow trusted Product and active Supplier choice RPCs", async () => {
+    procurementServiceMocks.rpc
+      .mockResolvedValueOnce({
+        data: [{
+          product_id: requestRow.product_id,
+          serial_number: requestRow.product_serial_number,
+          name: "Server Product Name",
+        }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          supplier_id: requestRow.supplier_id,
+          supplier_name: "Active Supplier",
+        }],
+        error: null,
+      });
+
+    await expect(searchProcurementProductChoices("  00001  ")).resolves.toEqual({
+      ok: true,
+      value: [{
+        productId: requestRow.product_id,
+        serialNumber: requestRow.product_serial_number,
+        name: "Server Product Name",
+      }],
+    });
+    await expect(listActiveProcurementSupplierChoices()).resolves.toEqual({
+      ok: true,
+      value: [{
+        supplierId: requestRow.supplier_id,
+        supplierName: "Active Supplier",
+      }],
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenNthCalledWith(
+      1,
+      "search_procurement_product_choices",
+      { p_search: "00001" },
+    );
+    expect(procurementServiceMocks.rpc).toHaveBeenNthCalledWith(
+      2,
+      "list_active_procurement_supplier_choices",
+    );
+  });
+
+  it("creates through only the trusted existing-Product RPC without snapshot or lifecycle inputs", async () => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: requestRow.request_id,
+      error: null,
+    });
+
+    await expect(createProcurementRequestForProduct({
+      productId: requestRow.product_id,
+      supplierId: requestRow.supplier_id,
+      requestedQuantity: 12,
+    })).resolves.toEqual({
+      ok: true,
+      value: { requestId: requestRow.request_id },
+    });
+    const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
+    expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
+      "create_procurement_request_for_product",
+      {
+        p_product_id: requestRow.product_id,
+        p_supplier_id: requestRow.supplier_id,
+        p_requested_quantity: 12,
+      },
+    );
+    expect(payload).not.toHaveProperty("requested_name");
+    expect(payload).not.toHaveProperty("serial_number");
+    expect(payload).not.toHaveProperty("status");
+    expect(payload).not.toHaveProperty("delivered_quantity");
+    expect(payload).not.toHaveProperty("actor_user_id");
+  });
+
+  it.each([
+    ["42501", "access_denied", "You do not have permission to create Procurement requests."],
+    ["PRQ03", "product_unavailable", "The selected Product is unavailable. Choose an active Product."],
+    ["PRQ04", "supplier_unavailable", "The selected Supplier is unavailable. Choose an active Supplier."],
+    ["22023", "invalid_request", "Enter a valid Product, Supplier, and positive whole-number quantity."],
+    ["unexpected", "procurement_creation_failed", "The Procurement request could not be created. Please try again."],
+  ] as const)("maps %s to a safe creation error", async (providerCode, code, message) => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider details" },
+    });
+
+    const result = await createProcurementRequestForProduct({
+      productId: requestRow.product_id,
+      supplierId: requestRow.supplier_id,
+      requestedQuantity: 1,
+    });
+
+    expect(result).toEqual({ ok: false, error: { code, message } });
+    expect(JSON.stringify(result)).not.toContain("raw provider details");
   });
 });

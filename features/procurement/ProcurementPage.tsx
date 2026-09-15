@@ -4,7 +4,12 @@ import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import CreateExistingProductRequestDialog from "./components/CreateExistingProductRequestDialog";
 import ProcurementList from "./components/ProcurementList";
+import {
+  useProcurementCreation,
+  useProcurementCreationChoices,
+} from "./hooks/useProcurementCreation";
 import {
   useProcurementRequests,
   useProcurementSupplierOptions,
@@ -21,6 +26,17 @@ function ProcurementPage() {
   const [statusFilter, setStatusFilter] =
     useState<ProcurementStatusFilter>("all");
   const [supplierFilter, setSupplierFilter] = useState("all");
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [productChoiceSearch, setProductChoiceSearch] = useState("");
+  const [debouncedProductChoiceSearch, setDebouncedProductChoiceSearch] =
+    useState("");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const { canCreate, create } = useProcurementCreation();
+  const { productChoicesQuery, supplierChoicesQuery } =
+    useProcurementCreationChoices(
+      debouncedProductChoiceSearch,
+      isCreateOpen && canCreate,
+    );
   const filters = {
     search: debouncedSearch,
     status: statusFilter === "all" ? null : statusFilter,
@@ -43,6 +59,14 @@ function ProcurementPage() {
 
     return () => window.clearTimeout(timeoutId);
   }, [search]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedProductChoiceSearch(productChoiceSearch.trim());
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [productChoiceSearch]);
 
   function clearFilters() {
     setSearch("");
@@ -99,7 +123,25 @@ function ProcurementPage() {
       <PageHeader
         title="Nabavka"
         description="Track active, partly delivered, and resolved Procurement requests."
+        actions={canCreate ? (
+          <button
+            type="button"
+            onClick={() => {
+              setSuccessMessage(null);
+              setIsCreateOpen(true);
+            }}
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+          >
+            Add Request
+          </button>
+        ) : undefined}
       />
+
+      {successMessage && (
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          {successMessage}
+        </p>
+      )}
 
       <div className="grid gap-4 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm md:grid-cols-3">
         <div>
@@ -168,6 +210,43 @@ function ProcurementPage() {
       </div>
 
       {content}
+
+      <CreateExistingProductRequestDialog
+        open={isCreateOpen}
+        productSearch={productChoiceSearch}
+        onProductSearchChange={setProductChoiceSearch}
+        products={
+          productChoicesQuery.data?.ok ? productChoicesQuery.data.value : []
+        }
+        suppliers={
+          supplierChoicesQuery.data?.ok ? supplierChoicesQuery.data.value : []
+        }
+        isProductsLoading={productChoicesQuery.isPending}
+        isSuppliersLoading={supplierChoicesQuery.isPending}
+        productLoadError={
+          productChoicesQuery.isError || productChoicesQuery.data?.ok === false
+            ? productChoicesQuery.data?.ok === false
+              ? productChoicesQuery.data.error.message
+              : "The Product choices could not be loaded."
+            : null
+        }
+        supplierLoadError={
+          supplierChoicesQuery.isError || supplierChoicesQuery.data?.ok === false
+            ? supplierChoicesQuery.data?.ok === false
+              ? supplierChoicesQuery.data.error.message
+              : "The Supplier choices could not be loaded."
+            : null
+        }
+        onRetryProducts={() => void productChoicesQuery.refetch()}
+        onRetrySuppliers={() => void supplierChoicesQuery.refetch()}
+        onClose={() => {
+          setIsCreateOpen(false);
+          setProductChoiceSearch("");
+          setDebouncedProductChoiceSearch("");
+        }}
+        onSubmit={create}
+        onCreated={() => setSuccessMessage("Procurement request created.")}
+      />
     </section>
   );
 }

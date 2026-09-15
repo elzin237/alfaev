@@ -9,8 +9,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const procurementPageMocks = vi.hoisted(() => ({
+  create: vi.fn(),
   refetchRequests: vi.fn(),
   refetchSuppliers: vi.fn(),
+  useProcurementCreation: vi.fn(),
+  useProcurementCreationChoices: vi.fn(),
   useProcurementRequests: vi.fn(),
   useProcurementSupplierOptions: vi.fn(),
 }));
@@ -19,6 +22,11 @@ vi.mock("./hooks/useProcurementRequests", () => ({
   useProcurementRequests: procurementPageMocks.useProcurementRequests,
   useProcurementSupplierOptions:
     procurementPageMocks.useProcurementSupplierOptions,
+}));
+vi.mock("./hooks/useProcurementCreation", () => ({
+  useProcurementCreation: procurementPageMocks.useProcurementCreation,
+  useProcurementCreationChoices:
+    procurementPageMocks.useProcurementCreationChoices,
 }));
 
 import ProcurementPage from "./ProcurementPage";
@@ -93,7 +101,27 @@ function setSuccessfulQueries(value = requests) {
   });
 }
 
-beforeEach(() => setSuccessfulQueries());
+beforeEach(() => {
+  setSuccessfulQueries();
+  procurementPageMocks.useProcurementCreation.mockReturnValue({
+    canCreate: false,
+    create: procurementPageMocks.create,
+  });
+  procurementPageMocks.useProcurementCreationChoices.mockReturnValue({
+    productChoicesQuery: {
+      data: { ok: true, value: [] },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    },
+    supplierChoicesQuery: {
+      data: { ok: true, value: [] },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    },
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -230,5 +258,19 @@ describe("ProcurementPage", () => {
     expect(screen.queryByRole("button", {
       name: /add|create|edit|deliver|resolve/i,
     })).not.toBeInTheDocument();
+  });
+
+  it("shows the existing-Product Add Request flow only when creation is authorized", () => {
+    procurementPageMocks.useProcurementCreation.mockReturnValue({
+      canCreate: true,
+      create: procurementPageMocks.create,
+    });
+
+    render(<ProcurementPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Add Request" }));
+
+    expect(screen.getByRole("dialog", { name: "Add Procurement Request" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText(/brand-new component/i)).not.toBeInTheDocument();
   });
 });

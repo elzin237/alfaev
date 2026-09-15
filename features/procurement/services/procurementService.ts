@@ -25,6 +25,27 @@ export interface ProcurementSupplierOption {
   supplierName: string;
 }
 
+export interface ProcurementProductChoice {
+  productId: string;
+  serialNumber: string;
+  name: string;
+}
+
+export interface ProcurementActiveSupplierChoice {
+  supplierId: string;
+  supplierName: string;
+}
+
+export interface CreateProcurementRequestForProductInput {
+  productId: string;
+  supplierId: string;
+  requestedQuantity: number;
+}
+
+export interface CreatedProcurementRequest {
+  requestId: string;
+}
+
 export interface ProcurementListInput {
   search: string;
   status: ProcurementStatus | null;
@@ -35,6 +56,8 @@ export interface ProcurementReadError {
   code:
     | "procurement_list_failed"
     | "procurement_supplier_options_failed"
+    | "procurement_product_choices_failed"
+    | "procurement_active_supplier_choices_failed"
     | "procurement_badge_failed";
   message: string;
 }
@@ -50,6 +73,28 @@ export type ProcurementSupplierOptionsResult =
 export type ProcurementBadgeResult =
   | { ok: true; value: number }
   | { ok: false; error: ProcurementReadError };
+
+export type ProcurementProductChoicesResult =
+  | { ok: true; value: ProcurementProductChoice[] }
+  | { ok: false; error: ProcurementReadError };
+
+export type ProcurementActiveSupplierChoicesResult =
+  | { ok: true; value: ProcurementActiveSupplierChoice[] }
+  | { ok: false; error: ProcurementReadError };
+
+export interface ProcurementCreationError {
+  code:
+    | "access_denied"
+    | "product_unavailable"
+    | "supplier_unavailable"
+    | "invalid_request"
+    | "procurement_creation_failed";
+  message: string;
+}
+
+export type ProcurementCreationResult =
+  | { ok: true; value: CreatedProcurementRequest }
+  | { ok: false; error: ProcurementCreationError };
 
 interface ProcurementRequestRow {
   request_id: string;
@@ -69,6 +114,12 @@ interface ProcurementRequestRow {
 interface ProcurementSupplierOptionRow {
   supplier_id: string;
   supplier_name: string;
+}
+
+interface ProcurementProductChoiceRow {
+  product_id: string;
+  serial_number: string;
+  name: string;
 }
 
 const uuidPattern =
@@ -178,6 +229,20 @@ function isProcurementSupplierOptionRow(
     isTrimmedNonblank(value.supplier_name);
 }
 
+function isProcurementProductChoiceRow(
+  value: unknown,
+): value is ProcurementProductChoiceRow {
+  return typeof value === "object" &&
+    value !== null &&
+    "product_id" in value &&
+    isUuid(value.product_id) &&
+    "serial_number" in value &&
+    typeof value.serial_number === "string" &&
+    /^[0-9]{7}$/.test(value.serial_number) &&
+    "name" in value &&
+    isTrimmedNonblank(value.name);
+}
+
 function listFailure(): ProcurementListResult {
   return {
     ok: false,
@@ -206,6 +271,73 @@ function badgeFailure(): ProcurementBadgeResult {
       message: "The Procurement count could not be loaded.",
     },
   };
+}
+
+function productChoicesFailure(): ProcurementProductChoicesResult {
+  return {
+    ok: false,
+    error: {
+      code: "procurement_product_choices_failed",
+      message: "The Product choices could not be loaded.",
+    },
+  };
+}
+
+function activeSupplierChoicesFailure(): ProcurementActiveSupplierChoicesResult {
+  return {
+    ok: false,
+    error: {
+      code: "procurement_active_supplier_choices_failed",
+      message: "The Supplier choices could not be loaded.",
+    },
+  };
+}
+
+function creationFailure(code?: string): ProcurementCreationResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to create Procurement requests.",
+        },
+      };
+    case "PRQ03":
+      return {
+        ok: false,
+        error: {
+          code: "product_unavailable",
+          message: "The selected Product is unavailable. Choose an active Product.",
+        },
+      };
+    case "PRQ04":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_unavailable",
+          message: "The selected Supplier is unavailable. Choose an active Supplier.",
+        },
+      };
+    case "22003":
+    case "22023":
+    case "23514":
+      return {
+        ok: false,
+        error: {
+          code: "invalid_request",
+          message: "Enter a valid Product, Supplier, and positive whole-number quantity.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "procurement_creation_failed",
+          message: "The Procurement request could not be created. Please try again.",
+        },
+      };
+  }
 }
 
 export async function searchProcurementRequests(
@@ -273,5 +405,80 @@ export async function getProcurementSidebarBadgeCount(): Promise<
     return { ok: true, value: count };
   } catch {
     return badgeFailure();
+  }
+}
+
+export async function searchProcurementProductChoices(
+  search = "",
+): Promise<ProcurementProductChoicesResult> {
+  try {
+    const normalizedSearch = search.trim();
+    const { data, error } = await supabase.rpc(
+      "search_procurement_product_choices",
+      { p_search: normalizedSearch || null },
+    );
+
+    if (error || !Array.isArray(data) ||
+      !data.every(isProcurementProductChoiceRow)) {
+      return productChoicesFailure();
+    }
+
+    return {
+      ok: true,
+      value: data.map((row) => ({
+        productId: row.product_id,
+        serialNumber: row.serial_number,
+        name: row.name,
+      })),
+    };
+  } catch {
+    return productChoicesFailure();
+  }
+}
+
+export async function listActiveProcurementSupplierChoices(): Promise<
+  ProcurementActiveSupplierChoicesResult
+> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "list_active_procurement_supplier_choices",
+    );
+
+    if (error || !Array.isArray(data) ||
+      !data.every(isProcurementSupplierOptionRow)) {
+      return activeSupplierChoicesFailure();
+    }
+
+    return {
+      ok: true,
+      value: data.map((row) => ({
+        supplierId: row.supplier_id,
+        supplierName: row.supplier_name,
+      })),
+    };
+  } catch {
+    return activeSupplierChoicesFailure();
+  }
+}
+
+export async function createProcurementRequestForProduct(
+  input: CreateProcurementRequestForProductInput,
+): Promise<ProcurementCreationResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "create_procurement_request_for_product",
+      {
+        p_product_id: input.productId,
+        p_supplier_id: input.supplierId,
+        p_requested_quantity: input.requestedQuantity,
+      },
+    );
+
+    if (error) return creationFailure(error.code);
+    if (!isUuid(data)) return creationFailure();
+
+    return { ok: true, value: { requestId: data } };
+  } catch {
+    return creationFailure();
   }
 }
