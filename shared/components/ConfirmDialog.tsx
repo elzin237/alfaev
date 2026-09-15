@@ -12,6 +12,7 @@ export interface ConfirmDialogProps {
   onCancel: () => void;
   isSubmitting?: boolean;
   confirmVariant?: ConfirmDialogVariant;
+  errorMessage?: string | null;
 }
 
 function ConfirmDialog({
@@ -24,6 +25,7 @@ function ConfirmDialog({
   onCancel,
   isSubmitting = false,
   confirmVariant = "primary",
+  errorMessage = null,
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -91,6 +93,12 @@ function ConfirmDialog({
         <p id={descriptionId} className="mt-3 leading-7 text-zinc-600">
           {description}
         </p>
+
+        {errorMessage && (
+          <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {errorMessage}
+          </p>
+        )}
 
         <div className="mt-7 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
           <button

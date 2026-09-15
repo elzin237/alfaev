@@ -61,6 +61,10 @@ export interface UpdatedProcurementDelivery {
   requestId: string;
 }
 
+export interface ResolvedProcurementRequest {
+  requestId: string;
+}
+
 export interface ProcurementListInput {
   search: string;
   status: ProcurementStatus | null;
@@ -124,6 +128,20 @@ export interface ProcurementDeliveryUpdateError {
 export type ProcurementDeliveryUpdateResult =
   | { ok: true; value: UpdatedProcurementDelivery }
   | { ok: false; error: ProcurementDeliveryUpdateError };
+
+export interface ProcurementResolveError {
+  code:
+    | "access_denied"
+    | "invalid_request"
+    | "request_not_found"
+    | "already_resolved"
+    | "procurement_resolve_failed";
+  message: string;
+}
+
+export type ProcurementResolveResult =
+  | { ok: true; value: ResolvedProcurementRequest }
+  | { ok: false; error: ProcurementResolveError };
 
 interface ProcurementRequestRow {
   request_id: string;
@@ -454,6 +472,51 @@ function deliveryUpdateFailure(code?: string): ProcurementDeliveryUpdateResult {
   }
 }
 
+function resolveFailure(code?: string): ProcurementResolveResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to resolve Procurement requests.",
+        },
+      };
+    case "22023":
+      return {
+        ok: false,
+        error: {
+          code: "invalid_request",
+          message: "Select a valid Procurement request.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "request_not_found",
+          message: "The Procurement request could not be found.",
+        },
+      };
+    case "PRQ02":
+      return {
+        ok: false,
+        error: {
+          code: "already_resolved",
+          message: "This Procurement request is already resolved.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "procurement_resolve_failed",
+          message: "The Procurement request could not be resolved. Please try again.",
+        },
+      };
+  }
+}
+
 export async function searchProcurementRequests(
   input: ProcurementListInput,
 ): Promise<ProcurementListResult> {
@@ -637,5 +700,23 @@ export async function updateProcurementDeliveredQuantity(
     return { ok: true, value: { requestId: data } };
   } catch {
     return deliveryUpdateFailure();
+  }
+}
+
+export async function resolveProcurementRequest(
+  requestId: string,
+): Promise<ProcurementResolveResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "resolve_procurement_request",
+      { p_request_id: requestId },
+    );
+
+    if (error) return resolveFailure(error.code);
+    if (!isUuid(data)) return resolveFailure();
+
+    return { ok: true, value: { requestId: data } };
+  } catch {
+    return resolveFailure();
   }
 }

@@ -17,6 +17,7 @@ const procurementPageMocks = vi.hoisted(() => ({
   useProcurementCreationChoices: vi.fn(),
   useProcurementDeliveryUpdate: vi.fn(),
   useProcurementRequests: vi.fn(),
+  useProcurementResolve: vi.fn(),
   useProcurementSupplierOptions: vi.fn(),
 }));
 
@@ -33,6 +34,9 @@ vi.mock("./hooks/useProcurementCreation", () => ({
 vi.mock("./hooks/useProcurementDeliveryUpdate", () => ({
   useProcurementDeliveryUpdate:
     procurementPageMocks.useProcurementDeliveryUpdate,
+}));
+vi.mock("./hooks/useProcurementResolve", () => ({
+  useProcurementResolve: procurementPageMocks.useProcurementResolve,
 }));
 
 import ProcurementPage from "./ProcurementPage";
@@ -131,6 +135,11 @@ beforeEach(() => {
   procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
     canUpdateDelivery: false,
     updateDelivery: vi.fn(),
+  });
+  procurementPageMocks.useProcurementResolve.mockReturnValue({
+    canResolve: false,
+    isResolving: false,
+    resolveRequest: vi.fn(),
   });
 });
 
@@ -307,6 +316,117 @@ describe("ProcurementPage", () => {
     expect(screen.getByLabelText("Delivered So Far")).toHaveValue(0);
     expect(screen.queryByRole("button", { name: "Resolve" }))
       .not.toBeInTheDocument();
+  });
+
+  it("shows Resolve for active, partial, and fully delivered unresolved requests only", () => {
+    procurementPageMocks.useProcurementResolve.mockReturnValue({
+      canResolve: true,
+      isResolving: false,
+      resolveRequest: vi.fn(),
+    });
+    const fullyDeliveredUnresolved = {
+      ...requests[1]!,
+      deliveredQuantity: 10,
+      remainingQuantity: 0,
+    };
+    setSuccessfulQueries([requests[0]!, fullyDeliveredUnresolved, requests[2]!]);
+    render(<ProcurementPage />);
+
+    expect(screen.getAllByRole("button", { name: "Resolve" })).toHaveLength(2);
+    expect(within(screen.getByText("Active Snapshot").closest("tr")!)
+      .getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(within(screen.getByText("Partly Delivered Snapshot").closest("tr")!)
+      .getByRole("button", { name: "Resolve" })).toBeInTheDocument();
+    expect(within(screen.getByText("Resolved Snapshot").closest("tr")!)
+      .queryByRole("button", { name: "Resolve" })).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation, supports cancellation, and preserves Update Delivery separately", () => {
+    const resolveRequest = vi.fn();
+    procurementPageMocks.useProcurementResolve.mockReturnValue({
+      canResolve: true,
+      isResolving: false,
+      resolveRequest,
+    });
+    procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
+      canUpdateDelivery: true,
+      updateDelivery: vi.fn(),
+    });
+    render(<ProcurementPage />);
+
+    const activeRow = screen.getByText("Active Snapshot").closest("tr")!;
+    expect(within(activeRow).getByRole("button", { name: "Update Delivery" }))
+      .toBeInTheDocument();
+    fireEvent.click(within(activeRow).getByRole("button", { name: "Resolve" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Resolve Procurement request",
+    });
+    expect(dialog).toHaveTextContent("cannot currently be reopened");
+    expect(dialog).toHaveTextContent("Delivered Quantity and Inventory will not change");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(resolveRequest).not.toHaveBeenCalled();
+  });
+
+  it("confirms once, reports success, and sends only the request ID", async () => {
+    let finish: ((value: {
+      ok: true;
+      value: { requestId: string };
+    }) => void) | undefined;
+    const resolveRequest = vi.fn(() => new Promise<{
+      ok: true;
+      value: { requestId: string };
+    }>((resolve) => {
+      finish = resolve;
+    }));
+    procurementPageMocks.useProcurementResolve.mockReturnValue({
+      canResolve: true,
+      isResolving: false,
+      resolveRequest,
+    });
+    render(<ProcurementPage />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Resolve" })[0]!);
+    const dialog = screen.getByRole("dialog", {
+      name: "Resolve Procurement request",
+    });
+    const confirm = within(dialog).getByRole("button", { name: "Resolve" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(resolveRequest).toHaveBeenCalledTimes(1);
+    expect(resolveRequest).toHaveBeenCalledWith(requests[0]!.requestId);
+
+    finish?.({ ok: true, value: { requestId: requests[0]!.requestId } });
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Procurement request resolved.",
+    );
+    expect(screen.queryByRole("dialog", {
+      name: "Resolve Procurement request",
+    })).not.toBeInTheDocument();
+  });
+
+  it("shows a safe Resolve failure and keeps confirmation open", async () => {
+    procurementPageMocks.useProcurementResolve.mockReturnValue({
+      canResolve: true,
+      isResolving: false,
+      resolveRequest: vi.fn().mockResolvedValue({
+        ok: false,
+        error: {
+          code: "already_resolved",
+          message: "This Procurement request is already resolved.",
+        },
+      }),
+    });
+    render(<ProcurementPage />);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Resolve" })[0]!);
+    const dialog = screen.getByRole("dialog", {
+      name: "Resolve Procurement request",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resolve" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "This Procurement request is already resolved.",
+    );
+    expect(dialog).toBeInTheDocument();
   });
 
   it("shows both focused Add Request modes only when creation is authorized", () => {

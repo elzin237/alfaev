@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
@@ -16,6 +17,7 @@ import {
   useProcurementSupplierOptions,
 } from "./hooks/useProcurementRequests";
 import { useProcurementDeliveryUpdate } from "./hooks/useProcurementDeliveryUpdate";
+import { useProcurementResolve } from "./hooks/useProcurementResolve";
 import {
   isProcurementStatusFilter,
   procurementStatusOptions,
@@ -36,6 +38,10 @@ function ProcurementPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deliveryRequest, setDeliveryRequest] =
     useState<ProcurementRequestListItem | null>(null);
+  const [resolveRequest, setResolveRequest] =
+    useState<ProcurementRequestListItem | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const resolveLockRef = useRef(false);
   const {
     canCreate,
     createExistingProductRequest,
@@ -43,6 +49,8 @@ function ProcurementPage() {
   } = useProcurementCreation();
   const { canUpdateDelivery, updateDelivery } =
     useProcurementDeliveryUpdate();
+  const { canResolve, isResolving, resolveRequest: resolveProcurement } =
+    useProcurementResolve();
   const { productChoicesQuery, supplierChoicesQuery } =
     useProcurementCreationChoices(
       debouncedProductChoiceSearch,
@@ -130,6 +138,10 @@ function ProcurementPage() {
       <ProcurementList
         requests={requests}
         onUpdateDelivery={canUpdateDelivery ? setDeliveryRequest : undefined}
+        onResolve={canResolve ? (request) => {
+          setResolveError(null);
+          setResolveRequest(request);
+        } : undefined}
       />
     );
   }
@@ -270,6 +282,40 @@ function ProcurementPage() {
         onClose={() => setDeliveryRequest(null)}
         onSubmit={updateDelivery}
         onUpdated={() => setSuccessMessage("Delivered quantity updated.")}
+      />
+
+      <ConfirmDialog
+        open={resolveRequest !== null}
+        title="Resolve Procurement request"
+        description="This Procurement request will become Resolved and cannot currently be reopened. Delivered Quantity and Inventory will not change."
+        confirmLabel="Resolve"
+        confirmVariant="danger"
+        isSubmitting={isResolving}
+        errorMessage={resolveError}
+        onCancel={() => {
+          if (resolveLockRef.current || isResolving) return;
+          setResolveError(null);
+          setResolveRequest(null);
+        }}
+        onConfirm={() => {
+          if (!resolveRequest || resolveLockRef.current) return;
+
+          resolveLockRef.current = true;
+          setResolveError(null);
+          void resolveProcurement(resolveRequest.requestId)
+            .then((result) => {
+              if (!result.ok) {
+                setResolveError(result.error.message);
+                return;
+              }
+
+              setResolveRequest(null);
+              setSuccessMessage("Procurement request resolved.");
+            })
+            .finally(() => {
+              resolveLockRef.current = false;
+            });
+        }}
       />
     </section>
   );

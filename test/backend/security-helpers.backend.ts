@@ -3474,7 +3474,14 @@ describe("Supabase security helpers", () => {
              'brand.updated',
              'brand.archived'
            )
-         order by created_at`,
+         order by pg_catalog.array_position(
+           array[
+             'brand.created',
+             'brand.updated',
+             'brand.archived'
+           ]::text[],
+           action_type
+         )`,
         [brandId],
       );
 
@@ -8836,7 +8843,14 @@ describe("Supabase security helpers", () => {
              'product_supplier.updated',
              'product_supplier.archived'
            )
-         order by created_at`,
+         order by pg_catalog.array_position(
+           array[
+             'product_supplier.created',
+             'product_supplier.updated',
+             'product_supplier.archived'
+           ]::text[],
+           action_type
+         )`,
         [relationId],
       );
 
@@ -12738,7 +12752,6 @@ describe("Supabase security helpers", () => {
           "create_existing_product_procurement_request",
           "create_new_component_procurement_request",
           "create_product_from_procurement_request",
-          "resolve_procurement_request",
           "update_procurement_delivery",
         ]],
       );
@@ -14753,5 +14766,406 @@ describe("Supabase security helpers", () => {
       "update_procurement_delivered_quantity",
       { p_request_id: activeRequestId, p_delivered_quantity: 1 },
     )).error);
+  });
+
+  it("resolves Procurement requests terminally through independent resolve authority without Inventory effects", async () => {
+    const fixture = requireHarness();
+    const admin = fixture.actors.admin;
+    const resolver = fixture.actors.supplierCreator;
+    const statusChanger = fixture.actors.productEditor;
+    const editor = fixture.actors.supplierEditor;
+    const creator = fixture.actors.productCreator;
+    const viewer = fixture.actors.permitted;
+    const supplierId = randomUUID();
+    const productId = randomUUID();
+    const activeRequestId = randomUUID();
+    const partialRequestId = randomUUID();
+    const fullRequestId = randomUUID();
+    const resolvedRequestId = randomUUID();
+    const auditFailureRequestId = randomUUID();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select actor.profile_id, definition.id, $6::uuid
+         from (
+           values
+             ($1::uuid, 'procurement.resolve'::text),
+             ($2::uuid, 'procurement.change_status'::text),
+             ($3::uuid, 'procurement.edit'::text),
+             ($4::uuid, 'procurement.create'::text),
+             ($5::uuid, 'procurement.view'::text)
+         ) as actor(profile_id, permission_key)
+         join public.permission_definitions as definition
+           on definition.key = actor.permission_key`,
+        [
+          resolver.profileId,
+          statusChanger.profileId,
+          editor.profileId,
+          creator.profileId,
+          viewer.profileId,
+          admin.profileId,
+        ],
+      );
+      await database.query(
+        `insert into public.suppliers (
+           id, name, country, created_by_user_id, updated_by_user_id
+         ) values ($1, 'Resolve Supplier', 'BiH', $2, $2)`,
+        [supplierId, admin.profileId],
+      );
+      const serial = await database.query<{ serial_number: string }>(
+        "select public.allocate_product_serial_number() as serial_number",
+      );
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'Resolve Product', 'Component', 'component', $3, $3)`,
+        [productId, serial.rows[0]?.serial_number, admin.profileId],
+      );
+      await database.query(
+        `insert into public.procurement_requests (
+           id, product_id, requested_name, supplier_id, requested_quantity,
+           delivered_quantity, status, created_at, created_by_user_id,
+           updated_at, updated_by_user_id, resolved_at, resolved_by_user_id
+         ) values
+           ($1, $6, 'Active Resolve Snapshot', $7, 10, 0, 'active',
+            '2026-09-15T08:00:00Z', $8, '2000-01-01T00:00:00Z', $8,
+            null, null),
+           ($2, $6, 'Partial Resolve Snapshot', $7, 10, 4, 'partly_delivered',
+            '2026-09-15T08:01:00Z', $8, '2000-01-01T00:00:00Z', $8,
+            null, null),
+           ($3, $6, 'Full Resolve Snapshot', $7, 10, 10, 'partly_delivered',
+            '2026-09-15T08:02:00Z', $8, '2000-01-01T00:00:00Z', $8,
+            null, null),
+           ($4, $6, 'Already Resolved Snapshot', $7, 10, 5, 'resolved',
+            '2026-09-15T08:03:00Z', $8, '2026-09-15T09:00:00Z', $8,
+            '2026-09-15T09:00:00Z', $8),
+           ($5, $6, 'Audit Failure Snapshot', $7, 10, 2, 'partly_delivered',
+            '2026-09-15T08:04:00Z', $8, '2000-01-01T00:00:00Z', $8,
+            null, null)`,
+        [
+          activeRequestId,
+          partialRequestId,
+          fullRequestId,
+          resolvedRequestId,
+          auditFailureRequestId,
+          productId,
+          supplierId,
+          admin.profileId,
+        ],
+      );
+
+      const inventoryBefore = await database.query<Record<string, unknown>>(
+        `select
+           (select pg_catalog.string_agg(
+             balance.product_id::text || ':' || balance.quantity::text,
+             ',' order by balance.product_id
+           ) from public.inventory_balances as balance) as balances,
+           (select count(*)::text from public.inventory_movements) as movements`,
+      );
+
+      async function resolveAs(authUserId: string, requestId: string) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [authUserId],
+        );
+        await database.query("set local role authenticated");
+        const result = await database.query<{ request_id: string }>(
+          `select public.resolve_procurement_request($1::uuid) as request_id`,
+          [requestId],
+        );
+        await database.query("reset role");
+        return result.rows[0]?.request_id;
+      }
+
+      async function readRequest(requestId: string) {
+        const result = await database.query<ProcurementRequestRow>(
+          "select * from public.procurement_requests where id = $1::uuid",
+          [requestId],
+        );
+        const row = result.rows[0];
+        if (!row) throw new Error("Resolve request fixture is missing");
+        return row;
+      }
+
+      async function countResolveAudits(requestId: string) {
+        const result = await database.query<CountResultRow>(
+          `select count(*)::integer as count
+           from public.audit_logs
+           where entity_id = $1::uuid
+             and action_type = 'procurement.resolved'`,
+          [requestId],
+        );
+        return result.rows[0]?.count ?? -1;
+      }
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [resolver.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const independentAuthority = await database.query<{
+        can_resolve: boolean;
+        can_view: boolean;
+      }>(
+        `select
+           public.has_permission('procurement.resolve') as can_resolve,
+           public.has_permission('procurement.view') as can_view`,
+      );
+      await database.query("reset role");
+      expect(independentAuthority.rows).toEqual([{
+        can_resolve: true,
+        can_view: false,
+      }]);
+
+      for (const [requestId, actor, deliveredQuantity] of [
+        [activeRequestId, admin, "0"],
+        [partialRequestId, resolver, "4"],
+        [fullRequestId, resolver, "10"],
+      ] as const) {
+        const before = await readRequest(requestId);
+        expect(await resolveAs(actor.authUserId, requestId)).toBe(requestId);
+        const after = await readRequest(requestId);
+
+        expect(after).toMatchObject({
+          created_at: before.created_at,
+          created_by_user_id: before.created_by_user_id,
+          delivered_quantity: deliveredQuantity,
+          product_id: before.product_id,
+          requested_name: before.requested_name,
+          requested_quantity: before.requested_quantity,
+          resolved_by_user_id: actor.profileId,
+          status: "resolved",
+          supplier_id: before.supplier_id,
+          updated_by_user_id: actor.profileId,
+        });
+        expect(after.resolved_at).toBeInstanceOf(Date);
+        expect(after.updated_at).toEqual(after.resolved_at);
+        expect(await countResolveAudits(requestId)).toBe(1);
+      }
+
+      const audit = await database.query<{
+        action_type: string;
+        actor_user_id: string;
+        after_data: Record<string, unknown>;
+        before_data: Record<string, unknown>;
+      }>(
+        `select action_type, actor_user_id, before_data, after_data
+         from public.audit_logs
+         where entity_id = $1::uuid
+           and action_type = 'procurement.resolved'`,
+        [partialRequestId],
+      );
+      expect(audit.rows).toEqual([expect.objectContaining({
+        action_type: "procurement.resolved",
+        actor_user_id: resolver.profileId,
+        before_data: expect.objectContaining({
+          delivered_quantity: 4,
+          remaining_quantity: 6,
+          requested_quantity: 10,
+          status: "partly_delivered",
+        }),
+        after_data: expect.objectContaining({
+          delivered_quantity: 4,
+          remaining_quantity: 6,
+          requested_quantity: 10,
+          resolved_by_user_id: resolver.profileId,
+          status: "resolved",
+        }),
+      })]);
+
+      const deniedRequest = await readRequest(auditFailureRequestId);
+      for (const [index, actor] of [
+        statusChanger,
+        editor,
+        creator,
+        viewer,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+      ].entries()) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(`savepoint denied_procurement_resolve_${index}`);
+        await expect(database.query(
+          "select public.resolve_procurement_request($1::uuid)",
+          [auditFailureRequestId],
+        )).rejects.toMatchObject({ code: "42501" });
+        await database.query(`rollback to savepoint denied_procurement_resolve_${index}`);
+        await database.query("reset role");
+      }
+      await database.query("set local role anon");
+      await database.query("savepoint anonymous_procurement_resolve");
+      await expect(database.query(
+        "select public.resolve_procurement_request($1::uuid)",
+        [auditFailureRequestId],
+      )).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_procurement_resolve");
+      await database.query("reset role");
+      expect(await readRequest(auditFailureRequestId)).toEqual(deniedRequest);
+      expect(await countResolveAudits(auditFailureRequestId)).toBe(0);
+
+      for (const [index, requestId, code] of [
+        [0, resolvedRequestId, "PRQ02"],
+        [1, randomUUID(), "P0002"],
+      ] as const) {
+        const before = await readRequest(resolvedRequestId);
+        const auditCount = await countResolveAudits(resolvedRequestId);
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [admin.authUserId],
+        );
+        await database.query("set local role authenticated");
+        await database.query(`savepoint invalid_procurement_resolve_${index}`);
+        await expect(database.query(
+          "select public.resolve_procurement_request($1::uuid)",
+          [requestId],
+        )).rejects.toMatchObject({ code });
+        await database.query(`rollback to savepoint invalid_procurement_resolve_${index}`);
+        await database.query("reset role");
+        expect(await readRequest(resolvedRequestId)).toEqual(before);
+        expect(await countResolveAudits(resolvedRequestId)).toBe(auditCount);
+      }
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint resolved_delivery_regression");
+      await expect(database.query(
+        `select public.update_procurement_delivered_quantity($1::uuid, 1)`,
+        [activeRequestId],
+      )).rejects.toMatchObject({ code: "PRQ02" });
+      await database.query("rollback to savepoint resolved_delivery_regression");
+
+      await database.query("savepoint direct_procurement_resolve_update");
+      await expect(database.query(
+        `update public.procurement_requests
+         set status = 'resolved', resolved_at = pg_catalog.now(),
+             resolved_by_user_id = $2::uuid
+         where id = $1::uuid`,
+        [auditFailureRequestId, admin.profileId],
+      )).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint direct_procurement_resolve_update");
+      await database.query("reset role");
+
+      await database.query(
+        `create function public.test_reject_procurement_resolve_audit()
+         returns trigger
+         language plpgsql
+         set search_path = ''
+         as $test_function$
+         begin
+           if new.action_type = 'procurement.resolved' then
+             raise exception 'Test resolve audit rejection'
+               using errcode = 'TST01';
+           end if;
+
+           return new;
+         end;
+         $test_function$`,
+      );
+      await database.query(
+        `create trigger test_reject_procurement_resolve_audit
+         before insert on public.audit_logs
+         for each row
+         execute function public.test_reject_procurement_resolve_audit()`,
+      );
+      const beforeAuditFailure = await readRequest(auditFailureRequestId);
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      await database.query("savepoint failed_procurement_resolve_audit");
+      await expect(database.query(
+        "select public.resolve_procurement_request($1::uuid)",
+        [auditFailureRequestId],
+      )).rejects.toMatchObject({ code: "TST01" });
+      await database.query("rollback to savepoint failed_procurement_resolve_audit");
+      await database.query("reset role");
+      expect(await readRequest(auditFailureRequestId)).toEqual(beforeAuditFailure);
+      expect(await countResolveAudits(auditFailureRequestId)).toBe(0);
+
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [admin.authUserId],
+      );
+      await database.query("set local role authenticated");
+      const historicalRead = await database.query<{ id: string }>(
+        `select id from public.procurement_requests
+         where id = $1::uuid and status = 'resolved'`,
+        [activeRequestId],
+      );
+      await database.query("reset role");
+      expect(historicalRead.rows).toEqual([{ id: activeRequestId }]);
+
+      const inventoryAfter = await database.query<Record<string, unknown>>(
+        `select
+           (select pg_catalog.string_agg(
+             balance.product_id::text || ':' || balance.quantity::text,
+             ',' order by balance.product_id
+           ) from public.inventory_balances as balance) as balances,
+           (select count(*)::text from public.inventory_movements) as movements`,
+      );
+      expect(inventoryAfter.rows).toEqual(inventoryBefore.rows);
+
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        definition: string;
+        identity_arguments: string;
+        security_definer: boolean;
+        settings: string[];
+      }>(
+        `select
+           routine.prosecdef as security_definer,
+           routine.proconfig as settings,
+           pg_catalog.pg_get_function_identity_arguments(routine.oid)
+             as identity_arguments,
+           pg_catalog.pg_get_functiondef(routine.oid) as definition,
+           pg_catalog.has_function_privilege(
+             'anon', routine.oid, 'execute'
+           ) as anonymous_execute,
+           pg_catalog.has_function_privilege(
+             'authenticated', routine.oid, 'execute'
+           ) as authenticated_execute
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname = 'resolve_procurement_request'`,
+      );
+      expect(functionSecurity.rows).toHaveLength(1);
+      expect(functionSecurity.rows[0]).toMatchObject({
+        anonymous_execute: false,
+        authenticated_execute: true,
+        identity_arguments: "p_request_id uuid",
+        security_definer: true,
+        settings: ["search_path=\"\""],
+      });
+      const definition = functionSecurity.rows[0]?.definition ?? "";
+      expect(definition.toLowerCase()).toContain("for update");
+      expect(definition.match(/'procurement\.resolve'/g)).toHaveLength(2);
+      expect(definition).not.toContain("procurement.view");
+      expect(definition).not.toContain("apply_inventory_delta");
+      expect(definition).not.toContain("manual_adjust_inventory");
+
+      const reopenFunctions = await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and routine.proname like '%procurement%reopen%'`,
+      );
+      expect(reopenFunctions.rows).toEqual([{ count: 0 }]);
+    });
   });
 });

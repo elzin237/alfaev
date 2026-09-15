@@ -12,6 +12,7 @@ import {
   getProcurementSidebarBadgeCount,
   listActiveProcurementSupplierChoices,
   listProcurementSupplierOptions,
+  resolveProcurementRequest,
   searchProcurementProductChoices,
   searchProcurementRequests,
   updateProcurementDeliveredQuantity,
@@ -381,6 +382,48 @@ describe("procurementService", () => {
       requestId: requestRow.request_id,
       deliveredQuantity: 7,
     });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(expectedCode);
+    expect(JSON.stringify(result)).not.toContain("raw provider details");
+  });
+
+  it("resolves through only the trusted RPC without lifecycle or quantity inputs", async () => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: requestRow.request_id,
+      error: null,
+    });
+
+    await expect(resolveProcurementRequest(requestRow.request_id)).resolves.toEqual({
+      ok: true,
+      value: { requestId: requestRow.request_id },
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
+      "resolve_procurement_request",
+      { p_request_id: requestRow.request_id },
+    );
+    const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
+    expect(payload).not.toHaveProperty("status");
+    expect(payload).not.toHaveProperty("delivered_quantity");
+    expect(payload).not.toHaveProperty("resolved_by_user_id");
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["22023", "invalid_request"],
+    ["P0002", "request_not_found"],
+    ["PRQ02", "already_resolved"],
+    ["unexpected", "procurement_resolve_failed"],
+  ] as const)("maps resolve %s failures safely", async (
+    providerCode,
+    expectedCode,
+  ) => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider details" },
+    });
+
+    const result = await resolveProcurementRequest(requestRow.request_id);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(expectedCode);
