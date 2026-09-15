@@ -1572,10 +1572,41 @@ Keep UI simple.
 ## 082 — Add Resolved Workflow
 
 Goal:
-- trusted status change to Resolved
-- audit
-- historical retention
-- Sidebar badge decrements
+- add the trusted terminal Resolve mutation and its confirmed UI workflow
+
+Authorization:
+- active Admin or `procurement.resolve`
+- do not require `procurement.view` inside the trusted mutation
+- `procurement.change_status`, `procurement.edit`, `procurement.create`, and `procurement.view` alone do not authorize resolution
+- keep Task 080 delivery/lifecycle updates owned by `procurement.change_status`
+
+Allowed source states:
+- `active`
+- `partly_delivered`
+- Delivered Quantity may be any valid value from 0 through Requested Quantity
+- reject an already-Resolved request rather than treating it as a successful no-op
+
+Trusted behavior:
+- set `status = 'resolved'`
+- set `resolved_at` and `updated_at` from server time
+- set `resolved_by_user_id` and `updated_by_user_id` from the active caller
+- do not change Requested Quantity, Delivered Quantity, Product relation, requested-name snapshot, Supplier relation, or creation metadata
+- keep Remaining Quantity derived only
+
+Terminal lifecycle:
+- no normal modification or delivery update after resolution
+- no second resolution, reopen, reactivation, hard delete, or restore workflow
+- retain the request as readable history
+
+Audit and failure behavior:
+- append exactly one immutable AuditLog entry atomically with every successful resolution
+- denied or invalid attempts persist neither mutation nor audit
+
+UI and cache behavior:
+- require explicit confirmation using the existing confirmation-dialog pattern
+- clearly state that the request becomes Resolved and cannot currently be reopened
+- after success, refresh the Procurement list and exact Sidebar badge query
+- the request leaves the badge naturally because Task 076 counts only Active and Partly Delivered rows; add no special database badge mutation
 
 No Inventory mutation.
 

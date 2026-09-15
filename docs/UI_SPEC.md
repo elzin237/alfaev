@@ -567,6 +567,16 @@ No Inventory update occurs.
 
 ---
 
+## Resolve request
+
+Show the Resolve action only when the current actor is an active Admin or has `procurement.resolve`, and only for Active or Partly Delivered requests. Other Procurement permissions do not imply Resolve access.
+
+Because resolution is terminal in the current scope, require the existing confirmation-dialog pattern before invoking the trusted Resolve operation. The confirmation must clearly state that the request will become Resolved and cannot currently be reopened.
+
+After success, refresh the Procurement list and Sidebar badge. Do not change Delivered Quantity or Inventory, do not add reopen/reactivate controls, and do not show Resolve for an already-Resolved request.
+
+---
+
 ## Create component from request
 
 Admin-only.

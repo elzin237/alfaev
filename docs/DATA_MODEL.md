@@ -704,11 +704,14 @@ Rules:
 - meaningful Task 080 updates create exactly one atomic AuditLog entry; no-op updates change no metadata and create no audit noise
 - Task 080 cannot modify, resolve, reopen, delete, or reactivate a Resolved request
 - `resolved` is an explicit terminal state owned by Task 082, requires an active Admin or `procurement.resolve`, and does not require full delivery
-- `procurement.edit` and `procurement.change_status` do not imply terminal-resolution authority
+- the trusted Resolve mutation does not require `procurement.view`; `procurement.change_status`, `procurement.edit`, `procurement.create`, and `procurement.view` alone do not imply terminal-resolution authority
+- resolution may transition an `active` or `partly_delivered` request to `resolved`; an already-Resolved request is rejected
 - a Resolved request may have Delivered Quantity from 0 through Requested Quantity
+- resolution sets `resolved_at`, `resolved_by_user_id`, `updated_at`, and `updated_by_user_id` server-side without changing Requested Quantity, Delivered Quantity, Product, requested-name snapshot, Supplier, or creation metadata
 - `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null
 - `active` and `partly_delivered` require both resolution fields to be null
-- Resolved requests remain historical/readable, are excluded from the Sidebar badge, and have no hard-delete, reopen, or reactivation workflow
+- Resolved requests remain historical/readable, are excluded from the Sidebar badge, and permit no normal modification, delivery update, second resolution, hard delete, reopen, or reactivation
+- every successful resolution creates exactly one immutable AuditLog entry atomically; denied or invalid attempts create neither a mutation nor an audit event
 - Procurement delivery/status operations never mutate Inventory automatically
 
 ### Create component from request

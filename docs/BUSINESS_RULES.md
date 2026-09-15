@@ -186,11 +186,15 @@ This information is informational only.
 
 ### Resolved
 
-Resolved is an explicit terminal business state owned by Task 082 and authorized by an active Admin or `procurement.resolve`. Neither `procurement.edit` nor `procurement.change_status` implies resolution authority. Resolution does not require full delivery, so Delivered Quantity may be any value from zero through Requested Quantity.
+Resolved is an explicit terminal business state owned by Task 082 and authorized by an active Admin or `procurement.resolve`. `procurement.change_status`, `procurement.edit`, `procurement.create`, and `procurement.view` alone do not authorize resolution, and the trusted Resolve mutation does not require `procurement.view`. Resolution may start from Active or Partly Delivered and does not require full delivery, so Delivered Quantity may be any value from zero through Requested Quantity.
 
-Resolved requests remain readable historical records, are excluded from the Sidebar badge, and are never hard-deleted. No reopen or reactivation workflow exists in the current scope.
+The trusted Resolve operation sets status and resolution/update metadata from server time and the active caller. It does not change Requested Quantity, Delivered Quantity, Product, requested-name snapshot, Supplier, or creation metadata. Remaining Quantity stays derived only.
+
+Resolved requests remain readable historical records, are excluded from the Sidebar badge, and are never hard-deleted. They cannot be normally modified, receive delivery updates, be resolved a second time, reopen, or reactivate. An already-Resolved request is rejected rather than treated as a successful no-op.
 
 `resolved_at` and `resolved_by_user_id` are both populated exactly while the request is Resolved and are both `NULL` for Active and Partly Delivered requests.
+
+Every successful resolution creates exactly one immutable AuditLog entry atomically with the lifecycle change. Denied or invalid attempts create neither a mutation nor an audit event. Resolution never changes Inventory.
 
 ### Inventory relationship
 

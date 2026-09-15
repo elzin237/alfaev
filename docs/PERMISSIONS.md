@@ -97,7 +97,7 @@ ProcurementRequest reads require an active Admin or View Nabavka (`procurement.v
 
 Task 080 trusted Delivered Quantity updates and the derived Active/Partly Delivered lifecycle synchronization require an active Admin or Change Nabavka Status (`procurement.change_status`). The trusted mutation does not require `procurement.view`. Edit Nabavka Request (`procurement.edit`) alone does not authorize Delivered Quantity or lifecycle changes.
 
-Task 082 terminal resolution requires an active Admin or Resolve/Remove Nabavka Request (`procurement.resolve`). Neither `procurement.edit` nor `procurement.change_status` implies resolution authority. The existing `procurement.view`, `procurement.create`, `procurement.edit`, `procurement.change_status`, and `procurement.resolve` keys remain separate; no additional Procurement permission key is introduced.
+Task 082 terminal resolution requires an active Admin or Resolve/Remove Nabavka Request (`procurement.resolve`). The trusted mutation does not require `procurement.view`. `procurement.change_status`, `procurement.edit`, `procurement.create`, and `procurement.view` alone do not authorize resolution. Task 080 remains exclusively owned by `procurement.change_status`, while Task 082 resolution remains exclusively owned by `procurement.resolve`. The existing `procurement.view`, `procurement.create`, `procurement.edit`, `procurement.change_status`, and `procurement.resolve` keys remain separate; no additional Procurement permission key is introduced.
 
 ### Dobavljači / Suppliers
 

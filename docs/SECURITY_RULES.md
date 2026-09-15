@@ -474,7 +474,11 @@ Task 080 trusted Delivered Quantity updates require an active Admin or `procurem
 
 The trusted delivery and resolve operations must enforce whole-number quantities, `requested_quantity > 0`, and `0 <= delivered_quantity <= requested_quantity`. Task 080 does not change `requested_quantity`. `remaining_quantity` is derived as `requested_quantity - delivered_quantity` and is never persisted.
 
-Task 080 cannot modify a Resolved request or resolve, reopen, delete, or reactivate one. Task 082 remains the only explicit Resolve workflow and requires an active Admin or `procurement.resolve`; `procurement.edit` and `procurement.change_status` do not imply terminal-resolution authority.
+Task 080 cannot modify a Resolved request or resolve, reopen, delete, or reactivate one. Task 082 remains the only explicit Resolve workflow and requires an active Admin or `procurement.resolve`; `procurement.change_status`, `procurement.edit`, `procurement.create`, and `procurement.view` alone do not imply terminal-resolution authority. The trusted Resolve mutation does not require `procurement.view`.
+
+The Task 082 trusted Resolve operation accepts a request currently in `active` or `partly_delivered`, including at any valid Delivered Quantity from zero through Requested Quantity. It derives the actor from trusted authenticated context, sets `status = 'resolved'`, and sets `resolved_at`, `resolved_by_user_id`, `updated_at`, and `updated_by_user_id` server-side. It must not change Requested Quantity, Delivered Quantity, Product relation, requested-name snapshot, Supplier relation, or creation metadata. An already-Resolved request is rejected rather than accepted as a no-op.
+
+Resolution is terminal in the current scope: a Resolved request cannot receive normal modifications, delivery updates, another resolution, reopening, reactivation, or hard deletion. Every successful resolution and exactly one immutable AuditLog entry must commit atomically. Denied or invalid attempts persist neither mutation nor audit. Resolution never mutates Inventory.
 
 Every meaningful Task 080 delivery update must atomically create exactly one immutable AuditLog entry. A normalized/no-op Delivered Quantity submission changes no update metadata and creates no audit noise. Denied or failed delivery operations persist neither mutation nor audit, and no Procurement delivery/status operation automatically mutates Inventory.
 
