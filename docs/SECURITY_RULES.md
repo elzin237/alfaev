@@ -470,7 +470,13 @@ Every new ProcurementRequest requires a Supplier that exists and is active at ex
 
 While a request is unresolved, trusted delivery updates keep `active` for zero delivered pieces and `partly_delivered` for any positive delivered quantity. Reaching the full requested quantity does not authorize silent resolution and may remain `partly_delivered` until the explicit Task 082 resolve operation. Resolution may occur at any delivered quantity from zero through the requested quantity. Resolved requests are terminal in the current scope, remain readable as history, and have no reopen, hard-delete, or reactivation path.
 
-The trusted delivery and resolve operations must enforce whole-number quantities, `requested_quantity > 0`, and `0 <= delivered_quantity <= requested_quantity`. `remaining_quantity` is derived as `requested_quantity - delivered_quantity` and is never persisted.
+Task 080 trusted Delivered Quantity updates require an active Admin or `procurement.change_status`. `procurement.edit` alone does not authorize changing `delivered_quantity` or the Active/Partly Delivered lifecycle state, and the trusted mutation does not require `procurement.view`. The client submits only the request ID and desired Delivered Quantity; the backend atomically derives `active` when Delivered Quantity is zero and `partly_delivered` when it is positive.
+
+The trusted delivery and resolve operations must enforce whole-number quantities, `requested_quantity > 0`, and `0 <= delivered_quantity <= requested_quantity`. Task 080 does not change `requested_quantity`. `remaining_quantity` is derived as `requested_quantity - delivered_quantity` and is never persisted.
+
+Task 080 cannot modify a Resolved request or resolve, reopen, delete, or reactivate one. Task 082 remains the only explicit Resolve workflow and requires an active Admin or `procurement.resolve`; `procurement.edit` and `procurement.change_status` do not imply terminal-resolution authority.
+
+Every meaningful Task 080 delivery update must atomically create exactly one immutable AuditLog entry. A normalized/no-op Delivered Quantity submission changes no update metadata and creates no audit noise. Denied or failed delivery operations persist neither mutation nor audit, and no Procurement delivery/status operation automatically mutates Inventory.
 
 Resolution metadata must remain equivalent to lifecycle state: `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null. Both fields must be null for `active` and `partly_delivered` requests.
 

@@ -93,7 +93,11 @@ Project reads require an active Admin or View Projects (`projects.view`). Create
 - Change Nabavka Status
 - Resolve/Remove Nabavka Request
 
-ProcurementRequest reads require an active Admin or View Nabavka (`procurement.view`). Task 075 adds only SELECT access under that rule and keeps direct normal-client INSERT, UPDATE, and DELETE denied. Later trusted operations use the existing `procurement.create`, `procurement.edit`, `procurement.change_status`, and `procurement.resolve` capabilities according to their owning tasks; no additional Procurement permission key is introduced by the schema task.
+ProcurementRequest reads require an active Admin or View Nabavka (`procurement.view`). Task 075 adds only SELECT access under that rule and keeps direct normal-client INSERT, UPDATE, and DELETE denied.
+
+Task 080 trusted Delivered Quantity updates and the derived Active/Partly Delivered lifecycle synchronization require an active Admin or Change Nabavka Status (`procurement.change_status`). The trusted mutation does not require `procurement.view`. Edit Nabavka Request (`procurement.edit`) alone does not authorize Delivered Quantity or lifecycle changes.
+
+Task 082 terminal resolution requires an active Admin or Resolve/Remove Nabavka Request (`procurement.resolve`). Neither `procurement.edit` nor `procurement.change_status` implies resolution authority. The existing `procurement.view`, `procurement.create`, `procurement.edit`, `procurement.change_status`, and `procurement.resolve` keys remain separate; no additional Procurement permission key is introduced.
 
 ### Dobavljači / Suppliers
 

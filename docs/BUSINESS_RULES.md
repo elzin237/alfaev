@@ -176,13 +176,17 @@ While unresolved:
 - a Partly Delivered request may temporarily have Delivered Quantity equal to Requested Quantity
 - full delivery does not silently resolve the request
 
-Task 080 owns trusted delivery updates and synchronization between Active and Partly Delivered.
+Task 080 owns trusted delivery updates and synchronization between Active and Partly Delivered. The trusted operation accepts the request ID and desired Delivered Quantity, then derives the unresolved status atomically: zero is Active and any positive value, including full delivery, is Partly Delivered. The client does not independently choose either status.
+
+Task 080 requires an active Admin or `procurement.change_status`; `procurement.edit` alone does not authorize Delivered Quantity or Active/Partly Delivered lifecycle changes, and `procurement.view` is not required inside the trusted mutation. Task 080 never changes Requested Quantity.
+
+A meaningful delivery update creates exactly one immutable AuditLog entry atomically. A no-op Delivered Quantity submission changes no update metadata and creates no audit entry. Task 080 cannot modify, resolve, reopen, delete, or reactivate a Resolved request.
 
 This information is informational only.
 
 ### Resolved
 
-Resolved is an explicit terminal business state owned by Task 082. Resolution does not require full delivery, so Delivered Quantity may be any value from zero through Requested Quantity.
+Resolved is an explicit terminal business state owned by Task 082 and authorized by an active Admin or `procurement.resolve`. Neither `procurement.edit` nor `procurement.change_status` implies resolution authority. Resolution does not require full delivery, so Delivered Quantity may be any value from zero through Requested Quantity.
 
 Resolved requests remain readable historical records, are excluded from the Sidebar badge, and are never hard-deleted. No reopen or reactivation workflow exists in the current scope.
 

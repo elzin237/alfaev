@@ -1526,14 +1526,36 @@ Worker never enters Serial Number.
 ## 080 — Add Partly Delivered Backend Rules
 
 Goal:
-- validate/update:
-  - delivered quantity
-  - remaining
-  - status
+- add a trusted Delivered Quantity mutation for unresolved Procurement requests
+
+Authorization:
+- active Admin or `procurement.change_status`
+- do not require `procurement.view` inside the trusted mutation
+- `procurement.edit` alone does not authorize Delivered Quantity or Active/Partly Delivered lifecycle changes
+
+Inputs:
+- request ID
+- desired Delivered Quantity only
+- client does not choose Active or Partly Delivered status
+
+Rules:
+- Delivered Quantity is whole-number pieces between 0 and Requested Quantity inclusive
+- Requested Quantity is unchanged
+- Remaining Quantity is derived as Requested Quantity minus Delivered Quantity and is never persisted
+- backend atomically derives `active` when Delivered Quantity is 0
+- backend atomically derives `partly_delivered` when Delivered Quantity is greater than 0
+- full delivery remains valid as `partly_delivered`; do not auto-resolve
+- Resolved requests cannot be modified, resolved, reopened, deleted, or reactivated by Task 080
+- Task 082 remains the only explicit Resolve workflow and uses `procurement.resolve`
+
+Audit:
+- every meaningful update creates exactly one immutable AuditLog entry atomically
+- normalized/no-op updates change no metadata and create no audit noise
+- denied/failed operations persist neither mutation nor audit
 
 No Inventory mutation.
 
-Add domain tests.
+Add backend authorization, lifecycle, quantity, no-op, audit, rollback, and direct-bypass tests.
 
 ---
 

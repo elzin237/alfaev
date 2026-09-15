@@ -698,12 +698,18 @@ Rules:
 - while unresolved, `delivered_quantity > 0` corresponds to `partly_delivered`
 - an unresolved `partly_delivered` row may have `delivered_quantity = requested_quantity`
 - full delivery never silently resolves a request
-- Task 080 owns trusted delivery updates and Active/Partly Delivered synchronization
-- `resolved` is an explicit terminal state owned by Task 082 and does not require full delivery
+- Task 080 accepts only request ID and desired Delivered Quantity; the backend derives Active/Partly Delivered atomically rather than trusting a client-submitted status
+- Task 080 requires an active Admin or `procurement.change_status`, does not require `procurement.view`, and is not authorized by `procurement.edit` alone
+- Task 080 does not change `requested_quantity`; `remaining_quantity` remains derived and unpersisted
+- meaningful Task 080 updates create exactly one atomic AuditLog entry; no-op updates change no metadata and create no audit noise
+- Task 080 cannot modify, resolve, reopen, delete, or reactivate a Resolved request
+- `resolved` is an explicit terminal state owned by Task 082, requires an active Admin or `procurement.resolve`, and does not require full delivery
+- `procurement.edit` and `procurement.change_status` do not imply terminal-resolution authority
 - a Resolved request may have Delivered Quantity from 0 through Requested Quantity
 - `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null
 - `active` and `partly_delivered` require both resolution fields to be null
 - Resolved requests remain historical/readable, are excluded from the Sidebar badge, and have no hard-delete, reopen, or reactivation workflow
+- Procurement delivery/status operations never mutate Inventory automatically
 
 ### Create component from request
 Trusted workflow:
