@@ -51,7 +51,11 @@ export function useProjectDetail(projectId: string) {
       archivePermissionQuery.data?.ok === true && archivePermissionQuery.data.value
     )
   ));
-  const canEdit = Boolean(hasEditPermission && project?.status !== "cancelled");
+  const canEdit = Boolean(
+    hasEditPermission &&
+    project &&
+    !["completed", "cancelled"].includes(project.status),
+  );
   const canCancel = Boolean(
     hasArchivePermission &&
     project &&

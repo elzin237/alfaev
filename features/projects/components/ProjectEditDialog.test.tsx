@@ -26,11 +26,10 @@ describe("ProjectEditDialog", () => {
     expect(screen.queryByRole("option", { name: "Cancelled" })).not.toBeInTheDocument();
   });
 
-  it("keeps ordinary Completed fields editable while preventing normal reopen", () => {
+  it("renders no normal edit dialog for a Completed Project", () => {
     render(<ProjectEditDialog open currentStatus="completed" initialValues={{ ...initialValues, status: "completed" }} onClose={vi.fn()} onSubmit={vi.fn()} onSucceeded={vi.fn()} />);
-    expect(screen.getByLabelText("Project Name")).toBeEnabled();
-    expect(screen.getByLabelText("Customer")).toBeEnabled();
-    expect(Array.from((screen.getByLabelText("Status") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["completed"]);
+    expect(screen.queryByRole("dialog", { name: "Edit Project" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Project Name")).not.toBeInTheDocument();
   });
 
   it("validates required text and date ordering", async () => {

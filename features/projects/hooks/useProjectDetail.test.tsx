@@ -95,12 +95,12 @@ describe("useProjectDetail", () => {
     expect(failed.result.current.canCancel).toBe(false);
   });
 
-  it("keeps Completed field-editable but non-cancellable and Cancelled read-only", async () => {
+  it("keeps Completed and Cancelled Projects read-only even for Admin", async () => {
     mocks.useAuth.mockReturnValue({ session: { user: { id: "admin" } }, profile: { id: "admin", isActive: true }, isAdmin: true });
     mocks.getProject.mockResolvedValueOnce({ ok: true, value: { ...activeProject, status: "completed" } });
     const completed = renderDetailHook();
     await waitFor(() => expect(completed.result.current.projectQuery.isSuccess).toBe(true));
-    expect(completed.result.current.canEdit).toBe(true);
+    expect(completed.result.current.canEdit).toBe(false);
     expect(completed.result.current.canCancel).toBe(false);
     completed.unmount();
 
@@ -109,6 +109,20 @@ describe("useProjectDetail", () => {
     await waitFor(() => expect(cancelled.result.current.projectQuery.isSuccess).toBe(true));
     expect(cancelled.result.current.canEdit).toBe(false);
     expect(cancelled.result.current.canCancel).toBe(false);
+  });
+
+  it("does not let projects.edit bypass the Completed lifecycle lock", async () => {
+    mocks.hasPermission.mockImplementation((permission: string) =>
+      Promise.resolve({ ok: true, value: permission === "projects.edit" })
+    );
+    mocks.getProject.mockResolvedValue({
+      ok: true,
+      value: { ...activeProject, status: "completed" },
+    });
+    const { result } = renderDetailHook();
+    await waitFor(() => expect(result.current.projectQuery.isSuccess).toBe(true));
+    expect(result.current.canEdit).toBe(false);
+    expect(result.current.canCancel).toBe(false);
   });
 
   it("invalidates exact detail and list queries only after successful mutations", async () => {

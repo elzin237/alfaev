@@ -291,7 +291,7 @@ function mutationFailure(
       ok: false,
       error: {
         code: "project_completed",
-        message: "Completed Projects cannot be reopened through normal editing.",
+        message: "Completed Projects cannot be edited.",
       },
     };
   }

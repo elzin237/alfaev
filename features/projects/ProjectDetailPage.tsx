@@ -106,6 +106,14 @@ function ProjectDetailPage() {
   } else {
     const project = projectQuery.data.value;
     const status = getProjectStatusPresentation(project.status);
+    const showEdit = canEdit && !["completed", "cancelled"].includes(
+      project.status,
+    );
+    const showCancel = canCancel && [
+      "planned",
+      "in_progress",
+      "on_hold",
+    ].includes(project.status);
 
     content = (
       <>
@@ -121,7 +129,7 @@ function ProjectDetailPage() {
                 </h2>
               </div>
               <div className="flex flex-wrap gap-3">
-                {canEdit && (
+                {showEdit && (
                   <button
                     type="button"
                     onClick={() => {
@@ -134,7 +142,7 @@ function ProjectDetailPage() {
                     Edit Project
                   </button>
                 )}
-                {canCancel && (
+                {showCancel && (
                   <button
                     type="button"
                     onClick={() => {

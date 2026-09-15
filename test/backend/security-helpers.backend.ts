@@ -11628,7 +11628,7 @@ describe("Supabase security helpers", () => {
       await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
       await database.query("set local role authenticated");
 
-      for (const status of ["in_progress", "on_hold", "planned", "completed"]) {
+      for (const status of ["in_progress", "on_hold", "planned"]) {
         await database.query(
           `select public.update_project($1, $2, $3, $4, $5, $6)`,
           [projectId, "  Editable Project  ", "  Updated Customer  ", "2026-09-02", "2026-10-01", status],
@@ -11636,12 +11636,36 @@ describe("Supabase security helpers", () => {
       }
       await database.query("reset role");
 
+      const beforeNoOp = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date, delivery_date::text as delivery_date
+         from public.projects where id = $1`, [projectId],
+      );
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
+      await database.query("set local role authenticated");
+      await database.query(
+        `select public.update_project($1, 'Editable Project', 'Updated Customer', '2026-09-02', '2026-10-01', 'planned')`,
+        [projectId],
+      );
+      await database.query("reset role");
+      const afterNoOp = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date, delivery_date::text as delivery_date
+         from public.projects where id = $1`, [projectId],
+      );
+      expect(afterNoOp.rows).toEqual(beforeNoOp.rows);
+
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
+      await database.query("set local role authenticated");
+      await database.query(
+        `select public.update_project($1, 'Editable Project', 'Updated Customer', '2026-09-02', '2026-10-01', 'completed')`,
+        [projectId],
+      );
+      await database.query("reset role");
+
       const completed = await database.query<ProjectRow>(
         `select *, start_date::text as start_date, delivery_date::text as delivery_date
          from public.projects where id = $1`, [projectId],
       );
       const completedAt = completed.rows[0]?.completed_at;
-      const updatedAt = completed.rows[0]?.updated_at;
       expect(completed.rows[0]).toMatchObject({
         name: "Editable Project", customer_name: "Updated Customer",
         status: "completed", start_date: "2026-09-02",
@@ -11652,20 +11676,6 @@ describe("Supabase security helpers", () => {
 
       await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
       await database.query("set local role authenticated");
-      await database.query(
-        `select public.update_project($1, 'Editable Project', 'Updated Customer', '2026-09-02', '2026-10-01', 'completed')`,
-        [projectId],
-      );
-      await database.query(
-        `select public.update_project($1, '  Completed Project Revised  ', 'Customer', '2026-09-01', '2026-09-30', 'completed')`,
-        [existingCompletedId],
-      );
-      await database.query("savepoint deny_normal_reopen");
-      await expect(database.query(
-        `select public.update_project($1, 'Editable Project', 'Updated Customer', '2026-09-02', '2026-10-01', 'in_progress')`,
-        [projectId],
-      )).rejects.toMatchObject({ code: "PRJ02" });
-      await database.query("rollback to savepoint deny_normal_reopen");
       await database.query("savepoint deny_cancelled_edit");
       await expect(database.query(
         `select public.update_project($1, 'Changed', 'Customer', '2026-09-01', '2026-09-30', 'planned')`,
@@ -11679,10 +11689,9 @@ describe("Supabase security helpers", () => {
          from public.projects where id = any($1::uuid[])`,
         [[projectId, existingCompletedId, cancelledId]],
       );
-      expect(finalRows.rows.find((row) => row.id === projectId)?.updated_at).toEqual(updatedAt);
       expect(finalRows.rows.find((row) => row.id === projectId)?.completed_at).toEqual(completedAt);
       expect(finalRows.rows.find((row) => row.id === existingCompletedId)).toMatchObject({
-        name: "Completed Project Revised",
+        name: "Completed Project",
         completed_at: new Date("2026-09-30T10:00:00Z"),
       });
       expect(finalRows.rows.find((row) => row.id === cancelledId)?.name).toBe("Cancelled Project");
@@ -11691,15 +11700,141 @@ describe("Supabase security helpers", () => {
          from public.audit_logs where entity_id = any($1::uuid[]) and action_type = 'project.updated'`,
         [[projectId, existingCompletedId, cancelledId]],
       );
-      expect(audits.rows).toHaveLength(6);
+      expect(audits.rows).toHaveLength(5);
       expect(audits.rows.filter((row) => row.actor_user_id === fixture.actors.admin.profileId)).toHaveLength(1);
-      expect(audits.rows.filter((row) => row.actor_user_id === editor.profileId)).toHaveLength(5);
+      expect(audits.rows.filter((row) => row.actor_user_id === editor.profileId)).toHaveLength(4);
       expect(audits.rows.filter((row) => row.entity_id === cancelledId)).toHaveLength(0);
-      expect(audits.rows.find((row) => row.entity_id === existingCompletedId)).toMatchObject({
+      expect(audits.rows.filter((row) => row.entity_id === existingCompletedId)).toHaveLength(0);
+      expect(audits.rows.find((row) =>
+        row.entity_id === projectId && row.after_data?.status === "completed"
+      )).toMatchObject({
         action_type: "project.updated",
-        before_data: { name: "Completed Project", status: "completed" },
-        after_data: { name: "Completed Project Revised", status: "completed" },
+        before_data: { status: "planned", completed_at: null },
+        after_data: { status: "completed" },
       });
+    });
+  });
+
+  it("locks every normal edit of a Completed Project for Admin and projects.edit actors", async () => {
+    const fixture = requireHarness();
+    const projectId = randomUUID();
+    const editor = fixture.actors.productCreator;
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select $1::uuid, id, $2::uuid
+         from public.permission_definitions
+         where key = 'projects.edit'`,
+        [editor.profileId, fixture.actors.admin.profileId],
+      );
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           created_at, created_by_user_id, updated_at, updated_by_user_id,
+           completed_at, cancelled_at
+         ) values (
+           $1, 'Locked Completed Project', 'Original Customer', 'completed',
+           '2026-09-01', '2026-09-30', '2026-09-01T09:00:00Z', $2,
+           '2026-09-30T10:30:00Z', $2, '2026-09-30T10:00:00Z', null
+         )`,
+        [projectId, fixture.actors.admin.profileId],
+      );
+      const baseline = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects
+         where id = $1`,
+        [projectId],
+      );
+      const attempts: ReadonlyArray<{
+        deliveryDate: string;
+        name: string;
+        customer: string;
+        startDate: string;
+        status: string;
+      }> = [
+        {
+          name: "Changed Name",
+          customer: "Original Customer",
+          startDate: "2026-09-01",
+          deliveryDate: "2026-09-30",
+          status: "completed",
+        },
+        {
+          name: "Locked Completed Project",
+          customer: "Changed Customer",
+          startDate: "2026-09-01",
+          deliveryDate: "2026-09-30",
+          status: "completed",
+        },
+        {
+          name: "Locked Completed Project",
+          customer: "Original Customer",
+          startDate: "2026-09-02",
+          deliveryDate: "2026-10-01",
+          status: "completed",
+        },
+        {
+          name: "Locked Completed Project",
+          customer: "Original Customer",
+          startDate: "2026-09-01",
+          deliveryDate: "2026-09-30",
+          status: "completed",
+        },
+        {
+          name: "Locked Completed Project",
+          customer: "Original Customer",
+          startDate: "2026-09-01",
+          deliveryDate: "2026-09-30",
+          status: "in_progress",
+        },
+      ];
+
+      for (const actor of [fixture.actors.admin, editor]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        for (const [index, attempt] of attempts.entries()) {
+          await database.query(`savepoint completed_project_lock_${index}`);
+          await expect(database.query(
+            `select public.update_project(
+               $1::uuid, $2::text, $3::text, $4::date, $5::date, $6::text
+             )`,
+            [
+              projectId,
+              attempt.name,
+              attempt.customer,
+              attempt.startDate,
+              attempt.deliveryDate,
+              attempt.status,
+            ],
+          )).rejects.toMatchObject({ code: "PRJ02" });
+          await database.query(`rollback to savepoint completed_project_lock_${index}`);
+        }
+        await database.query("reset role");
+
+        const unchanged = await database.query<ProjectRow>(
+          `select *, start_date::text as start_date,
+                  delivery_date::text as delivery_date
+           from public.projects
+           where id = $1`,
+          [projectId],
+        );
+        expect(unchanged.rows).toEqual(baseline.rows);
+        const audits = await database.query<CountResultRow>(
+          `select count(*)::integer as count
+           from public.audit_logs
+           where entity_id = $1
+             and action_type = 'project.updated'`,
+          [projectId],
+        );
+        expect(audits.rows).toEqual([{ count: 0 }]);
+      }
     });
   });
 

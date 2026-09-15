@@ -47,9 +47,7 @@ function ProjectEditDialog({
   const formValues = useMemo<ProjectEditFormInput>(() => ({
     ...initialValues,
   }), [initialValues]);
-  const statusOptions = currentStatus === "completed"
-    ? projectEditableStatusOptions.filter((option) => option.value === "completed")
-    : projectEditableStatusOptions;
+  const statusOptions = projectEditableStatusOptions;
   const {
     register,
     handleSubmit,
@@ -121,7 +119,9 @@ function ProjectEditDialog({
     }
   });
 
-  if (!open) return null;
+  if (!open || currentStatus === "completed" || currentStatus === "cancelled") {
+    return null;
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

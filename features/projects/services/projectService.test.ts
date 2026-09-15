@@ -399,6 +399,29 @@ describe("projectService", () => {
     if (!result.ok) expect(result.error.message).not.toContain("raw");
   });
 
+  it("maps the Completed lifecycle lock to safe read-only copy", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: "PRJ02", message: "raw database detail" },
+    });
+    await expect(updateProject(
+      "00000000-0000-4000-8000-000000000001",
+      {
+        name: "Project",
+        customerName: "Customer",
+        startDate: "2026-09-01",
+        deliveryDate: "2026-09-30",
+        status: "completed",
+      },
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "project_completed",
+        message: "Completed Projects cannot be edited.",
+      },
+    });
+  });
+
   it("cancels only through the trusted cancellation RPC", async () => {
     projectServiceMocks.rpc.mockResolvedValue({ data: "00000000-0000-4000-8000-000000000001", error: null });
 

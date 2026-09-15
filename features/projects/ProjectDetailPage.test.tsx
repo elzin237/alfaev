@@ -227,17 +227,19 @@ describe("ProjectDetailPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The Project could not be cancelled. Please try again.");
   });
 
-  it("keeps Completed ordinary fields editable but offers only Completed status", () => {
+  it("renders Completed detail read-only without Edit, Cancel, or Reopen", () => {
     setQueryState({
       data: { ok: true, value: { ...project, status: "completed" } },
       canEdit: true,
-      canCancel: false,
+      canCancel: true,
     });
     renderDetail();
-    fireEvent.click(screen.getByRole("button", { name: "Edit Project" }));
-    expect(screen.getByLabelText("Project Name")).toBeEnabled();
-    expect(Array.from((screen.getByLabelText("Status") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["completed"]);
+    expect(screen.getByRole("heading", { name: "Control Cabinet" })).toBeInTheDocument();
+    expect(screen.getByText("Alfa Customer")).toBeInTheDocument();
+    expect(screen.getByText("Completed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit Project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancel Project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /reopen/i })).not.toBeInTheDocument();
   });
 
   it("does not expose restore, reopen, delete, or hard-delete controls", () => {
