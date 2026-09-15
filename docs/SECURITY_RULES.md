@@ -448,13 +448,31 @@ Client may display requested next number only if treated as non-authoritative; a
 
 Nabavka does not mutate Inventory automatically.
 
+ProcurementRequest reads require an active Admin or `procurement.view`.
+
+Direct normal-client ProcurementRequest INSERT, UPDATE, and DELETE are denied. Task 075 establishes only the table, constraints, history-preserving foreign keys, and SELECT RLS baseline. Trusted create, delivery-update, resolve, and Product-link operations are added only by their later owning tasks.
+
+Every new ProcurementRequest must be created through a trusted operation that fixes the initial state to `status = 'active'`, `delivered_quantity = 0`, `resolved_at = NULL`, and `resolved_by_user_id = NULL`. The client cannot choose a different initial lifecycle state.
+
 Existing Product request:
 - client may submit Product ID
-- backend/RLS verifies Product exists and is visible/valid
+- the trusted creation operation verifies at execution time that Product exists and is active
+- the trusted operation copies the current Product name into the required `requested_name` request-time snapshot
+- later Product renames or archival must not rewrite or clear the historical request snapshot or Product reference
 
 Brand-new Product request:
 - has no Product Serial Number
+- may start with `product_id = NULL`
+- requires a trimmed, nonblank worker-supplied `requested_name`
 - worker cannot assign one manually
+
+Every new ProcurementRequest requires a Supplier that exists and is active at execution time. Archived Suppliers cannot be selected for a new request, but later Supplier archival must not remove or rewrite historical ProcurementRequest references.
+
+While a request is unresolved, trusted delivery updates keep `active` for zero delivered pieces and `partly_delivered` for any positive delivered quantity. Reaching the full requested quantity does not authorize silent resolution and may remain `partly_delivered` until the explicit Task 082 resolve operation. Resolution may occur at any delivered quantity from zero through the requested quantity. Resolved requests are terminal in the current scope, remain readable as history, and have no reopen, hard-delete, or reactivation path.
+
+The trusted delivery and resolve operations must enforce whole-number quantities, `requested_quantity > 0`, and `0 <= delivered_quantity <= requested_quantity`. `remaining_quantity` is derived as `requested_quantity - delivered_quantity` and is never persisted.
+
+Resolution metadata must remain equivalent to lifecycle state: `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null. Both fields must be null for `active` and `partly_delivered` requests.
 
 `Create component from request`:
 - Admin-only

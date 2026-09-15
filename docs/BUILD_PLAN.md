@@ -1438,19 +1438,36 @@ Require:
 ## 075 — Create ProcurementRequest Schema + RLS
 
 Goal:
-- implement Nabavka model/security
+- implement the ProcurementRequest schema, constraints, history-preserving foreign keys, and SELECT RLS baseline only
 
-Statuses:
-- Active
-- Partly Delivered
-- Resolved
+Schema rules:
+- `requested_quantity` is required whole-number pieces greater than 0
+- `delivered_quantity` is required whole-number pieces, defaults to 0, and remains between 0 and `requested_quantity` inclusive
+- `remaining_quantity = requested_quantity - delivered_quantity` is derived and is not persisted
+- `requested_name` is a required request-time display/name snapshot; trim surrounding whitespace before persistence and reject blank values
+- `product_id` is nullable and preserves historical Product references
+- `supplier_id` is required and preserves historical Supplier references
+- statuses are exactly `active`, `partly_delivered`, and `resolved`
+- every new row starts `active`, with Delivered Quantity 0 and both resolution metadata fields `NULL`
+- while unresolved, zero delivered corresponds to `active` and positive delivered corresponds to `partly_delivered`
+- full delivery does not silently resolve a request
+- `resolved` is explicit, terminal in the current scope, historically readable, and may have any Delivered Quantity from 0 through Requested Quantity
+- `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null; non-Resolved states require both fields `NULL`
+- no hard delete, reopen, or reactivation workflow
 
-Support:
-- optional Product link
-- requested name snapshot
-- Supplier
-- requested quantity
-- delivered quantity
+Security:
+- SELECT requires an active Admin or `procurement.view`
+- direct normal-client INSERT, UPDATE, and DELETE remain denied
+- Task 075 adds no trusted create, edit, delivery, resolve, or Product-creation RPC
+
+Later workflow ownership:
+- Task 078 creates existing-Product requests, re-checks an active Product and active Supplier at execution time, and copies Product Name into the snapshot
+- Task 079 creates brand-new component requests with `product_id = NULL`, a worker-supplied snapshot, and an active Supplier
+- Task 080 owns trusted Delivered Quantity updates and Active/Partly Delivered synchronization without Inventory mutation
+- Task 082 owns explicit resolution and its audit without requiring full delivery
+- Task 083 may atomically populate `product_id` while creating a Product from an unlinked request
+
+Do not create mutation RPCs or UI in this task.
 
 ---
 

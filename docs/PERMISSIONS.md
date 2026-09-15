@@ -93,6 +93,8 @@ Project reads require an active Admin or View Projects (`projects.view`). Create
 - Change Nabavka Status
 - Resolve/Remove Nabavka Request
 
+ProcurementRequest reads require an active Admin or View Nabavka (`procurement.view`). Task 075 adds only SELECT access under that rule and keeps direct normal-client INSERT, UPDATE, and DELETE denied. Later trusted operations use the existing `procurement.create`, `procurement.edit`, `procurement.change_status`, and `procurement.resolve` capabilities according to their owning tasks; no additional Procurement permission key is introduced by the schema task.
+
 ### Dobavljači / Suppliers
 
 - View Suppliers

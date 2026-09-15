@@ -629,16 +629,26 @@ Fields:
 - `product_id`
   - nullable
   - populated when request references an existing/created Product
+  - foreign key to Product with historical references preserved
 - `requested_name`
   - required snapshot/display name
+  - surrounding whitespace is trimmed before persistence
+  - nonblank
 - `supplier_id`
+  - required foreign key to Supplier with historical references preserved
 - `requested_quantity`
+  - required whole-number pieces
+  - greater than 0
 - `delivered_quantity`
+  - required whole-number pieces
   - default 0
+  - greater than or equal to 0
+  - less than or equal to `requested_quantity`
 - `status`
   - `active`
   - `partly_delivered`
   - `resolved`
+  - default `active`
 - `created_at`
 - `created_by_user_id`
 - `updated_at`
@@ -650,20 +660,50 @@ Fields:
 
 Derived field:
 
-- `remaining_quantity = max(requested_quantity - delivered_quantity, 0)`
+- `remaining_quantity = requested_quantity - delivered_quantity`
+- derived only; never persisted
 
 Rules:
 
+### Initial state
+- every new ProcurementRequest starts with `status = 'active'`
+- `delivered_quantity = 0`
+- `resolved_at = NULL`
+- `resolved_by_user_id = NULL`
+- clients do not choose another initial lifecycle state
+
 ### Existing Product request
 - `product_id` is set
-- Serial Number and current Product name are available from Product
-- `requested_name` may retain the request-time display snapshot
+- trusted creation requires the selected Product to exist and be active at execution time
+- Serial Number remains available from Product
+- trusted creation copies the current Product name into `requested_name`
+- `requested_name` permanently retains the request-time display snapshot; later Product renames do not rewrite it
+- later Product archival preserves the historical `product_id` reference and request readability
 
 ### Brand-new Product request
 - `product_id` starts as null
-- `requested_name`, Supplier and Quantity are provided
+- a worker provides the trimmed, nonblank `requested_name`, Supplier and Quantity
 - request is clearly marked as not yet linked to a Product
 - Admin may execute `Create component from request`
+
+### Supplier relation
+- every ProcurementRequest has one Supplier
+- trusted creation requires the Supplier to exist and be active at execution time
+- archived Suppliers cannot be selected for new requests
+- later Supplier archival preserves the historical Supplier reference and request readability
+- Procurement history is never cascade-deleted
+
+### Delivery and resolution lifecycle
+- while unresolved, `delivered_quantity = 0` corresponds to `active`
+- while unresolved, `delivered_quantity > 0` corresponds to `partly_delivered`
+- an unresolved `partly_delivered` row may have `delivered_quantity = requested_quantity`
+- full delivery never silently resolves a request
+- Task 080 owns trusted delivery updates and Active/Partly Delivered synchronization
+- `resolved` is an explicit terminal state owned by Task 082 and does not require full delivery
+- a Resolved request may have Delivered Quantity from 0 through Requested Quantity
+- `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null
+- `active` and `partly_delivered` require both resolution fields to be null
+- Resolved requests remain historical/readable, are excluded from the Sidebar badge, and have no hard-delete, reopen, or reactivation workflow
 
 ### Create component from request
 Trusted workflow:
@@ -1169,7 +1209,7 @@ ProcurementRequest
 | InventoryBalance | Transactionally mutable | Never directly mutated without movement |
 | InventoryMovement | No | Immutable ledger |
 | Project | Yes subject to lifecycle | Completed is normally read-only and may be explicitly reopened only by Admin; Cancelled is the historical removal/archive state with no current restore workflow |
-| ProcurementRequest | Yes | Resolved stays historical |
+| ProcurementRequest | Yes until resolved | Resolved is terminal, stays historical, and has no hard-delete, reopen, or reactivation workflow |
 | PcbCard | Yes subject to history | Archive if production history exists |
 | Used PcbBomVersion | No | Immutable |
 | PcbBomItem on used version | No | Immutable |

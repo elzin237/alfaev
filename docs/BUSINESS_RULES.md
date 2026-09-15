@@ -122,14 +122,20 @@ Reopening must create an audit event.
 If the requested component already exists:
 
 - Nabavka references the existing Product/Component
-- Serial Number / Šifra and Name come from that Product/Component
+- the selected Product must exist and be active when the later trusted request-creation operation executes
+- Serial Number / Šifra comes from that Product/Component
+- the Product's current Name is copied, with surrounding whitespace trimmed before persistence, into `requested_name` as the request-time snapshot
 - Supplier and Quantity are selected/entered for the request
+- later Product renames or archival do not rewrite the snapshot or remove the historical Product reference
 
 If the requested component does not yet exist:
 
 - the Nabavka request may exist temporarily without an AlfaEV Serial Number / Šifra
-- worker enters Name, Supplier and Quantity
+- `product_id` may start as `NULL`
+- worker enters the required request-time Name snapshot, Supplier and Quantity; surrounding Name whitespace is trimmed before persistence and blank Names are invalid
 - the request must be distinguishable as not yet linked to a Product/Component
+
+Every new request requires an active Supplier at execution time. Archived Suppliers cannot be selected for new Procurement requests, but Supplier archival never removes or rewrites historical request references.
 
 Only Admin may create the actual Product/Component from that request.
 
@@ -149,6 +155,8 @@ Allowed statuses:
 - Partly Delivered
 - Resolved
 
+Every new request starts as Active with Delivered Quantity `0` and no resolution metadata. Clients cannot choose another initial status.
+
 ### Partly Delivered
 
 Store/display:
@@ -159,7 +167,26 @@ Store/display:
 
 Remaining Quantity = Requested Quantity - Delivered So Far.
 
+Requested Quantity and Delivered Quantity are whole-number pieces. Requested Quantity must be greater than zero. Delivered Quantity defaults to zero and must remain between zero and Requested Quantity, inclusive. Remaining Quantity is derived only and is not stored.
+
+While unresolved:
+
+- Delivered Quantity `0` corresponds to Active
+- Delivered Quantity greater than `0` corresponds to Partly Delivered
+- a Partly Delivered request may temporarily have Delivered Quantity equal to Requested Quantity
+- full delivery does not silently resolve the request
+
+Task 080 owns trusted delivery updates and synchronization between Active and Partly Delivered.
+
 This information is informational only.
+
+### Resolved
+
+Resolved is an explicit terminal business state owned by Task 082. Resolution does not require full delivery, so Delivered Quantity may be any value from zero through Requested Quantity.
+
+Resolved requests remain readable historical records, are excluded from the Sidebar badge, and are never hard-deleted. No reopen or reactivation workflow exists in the current scope.
+
+`resolved_at` and `resolved_by_user_id` are both populated exactly while the request is Resolved and are both `NULL` for Active and Partly Delivered requests.
 
 ### Inventory relationship
 
