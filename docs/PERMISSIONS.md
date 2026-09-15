@@ -150,11 +150,13 @@ A trusted minimal Product-choice lookup used to create ProductSupplier relations
 
 ### PCB Cards
 
-- View PCB Cards
-- Create PCB Card/BOM
-- Edit PCB Card/BOM
-- Produce PCB Cards
-- Delete/Archive PCB Definitions
+- View PCB Cards (`pcb.view`)
+- Create PCB Card/BOM (`pcb.create`)
+- Edit PCB Card/BOM (`pcb.edit`)
+- Produce PCB Cards (`pcb.produce`)
+- Delete/Archive PCB Definitions (`pcb.archive`)
+
+PcbCard reads require an active Admin or View PCB Cards (`pcb.view`). Task 085 grants no direct client mutation path. Later trusted PcbCard creation, editing, production, and archive operations must enforce the corresponding existing permission or Admin status at the backend; no new PCB permission key is introduced.
 
 ### Radni Nalozi / Work Orders
 

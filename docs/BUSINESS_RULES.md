@@ -405,6 +405,15 @@ Scanning the barcode must resolve the matching AlfaEV product by Serial Number /
 
 ## 8. PCB Production Rules
 
+### PCB card definitions
+
+- PcbCard Name is the required human-facing card name/code. It is trimmed before persistence, must be nonblank, and is not unique.
+- Every PcbCard has exactly one stock-tracked output Product, and one Product may be the output of at most one PcbCard.
+- The output Product must be a `pcb_finished_good`; its link to the PcbCard cannot be changed after card creation.
+- A new PcbCard starts active with no archive metadata. An active card has null archive timestamp and actor, while an archived card has both values populated.
+- Archiving the output Product later does not invalidate or rewrite the historical PcbCard relationship.
+- Task 085 creates no PcbCard archive or reactivation workflow. Where production history exists, a PcbCard must be archived rather than hard-deleted, consistent with the existing lifecycle rule.
+
 ### BOM calculation
 
 For each BOM row:

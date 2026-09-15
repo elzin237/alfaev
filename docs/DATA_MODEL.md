@@ -756,23 +756,41 @@ Fields:
 
 - `id`
 - `name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not unique
+  - human-facing PCB card name/code
 - `output_product_id`
+  - required
   - unique reference to Product
-  - Product.product_kind must be `pcb_finished_good`
+  - foreign key to Product with `ON DELETE RESTRICT`
+  - referenced `Product.product_kind` must be `pcb_finished_good`
 - `is_active`
+  - required
+  - default `true`
 - `created_at`
 - `created_by_user_id`
+  - references UserProfile with `ON DELETE RESTRICT`
 - `updated_at`
 - `updated_by_user_id`
+  - references UserProfile with `ON DELETE RESTRICT`
 - `archived_at`
   - nullable
 - `archived_by_user_id`
   - nullable
+  - references UserProfile with `ON DELETE RESTRICT`
 
 Rules:
 
 - Every PCB card has exactly one stock-tracked output Product.
+- One Product may be the output Product of at most one PcbCard.
+- The output Product link is immutable after PcbCard creation and cannot be changed to another Product.
+- Output-Product validation requires `pcb_finished_good` when the relationship is created, but does not require the Product to remain active forever; archiving the Product later preserves the historical PcbCard relationship.
 - That Product receives an AlfaEV Serial Number / Šifra and barcode like other stock items.
+- New cards start with `is_active = true`, `archived_at = NULL`, and `archived_by_user_id = NULL`.
+- Active cards require both archive metadata fields to be null. Archived cards require both `archived_at` and `archived_by_user_id` to be non-null.
+- Task 085 defines the lifecycle metadata and consistency constraints but adds no archive, hard-delete, or reactivation operation.
 - If production history exists, the PCB card is archived rather than hard-deleted.
 
 ---

@@ -1674,12 +1674,30 @@ Serial:
 ## 085 — Create PcbCard Schema + Output Product Link
 
 Goal:
-- implement PcbCard table/security
+- implement the PcbCard schema, relationship constraints, and read-security baseline only
 
-Rule:
-- every PCB card has one stock-tracked `pcb_finished_good` Product
+Schema:
+- canonical fields: `id`, `name`, `output_product_id`, `is_active`, creation/update timestamps and actors, and archive timestamp/actor
+- Name is required, trimmed, nonblank, not unique, and is the human-facing card name/code
+- `output_product_id` is required, unique across PcbCard rows, references Product with `ON DELETE RESTRICT`, and must identify a `pcb_finished_good`
+- one Product may be the output of at most one PcbCard
+- the output Product link is immutable after PcbCard creation
+- Product archival must not invalidate the historical PcbCard relationship
+- actor foreign keys preserve history with `ON DELETE RESTRICT`
 
-Do not create card UI yet.
+Lifecycle baseline:
+- new cards default active with `archived_at = NULL` and `archived_by_user_id = NULL`
+- active state requires both archive metadata fields null
+- archived state requires both archive metadata fields non-null
+- add no archive operation, hard-delete workflow, or reactivation workflow in Task 085
+- preserve the existing rule that a card with production history is archived rather than hard-deleted
+
+Security:
+- SELECT requires an active Admin or `pcb.view`
+- direct normal-client INSERT, UPDATE, and DELETE remain denied
+- add no trusted create, edit, archive, BOM, or production function in Task 085
+
+Do not create UI, BOM tables, or production tables in this task.
 
 ---
 
@@ -1689,9 +1707,14 @@ Goal:
 - create PCB card + output Product coherently
 
 Requirements:
+- create a new active PcbCard and its active output Product coherently
+- output Product kind is always `pcb_finished_good`
 - output Product gets unique 7-digit Serial Number
 - authorization
 - audit
+- establish the immutable output Product link
+
+Do not create the PCB list or Add PCB Card UI in this task.
 
 ---
 
@@ -1704,6 +1727,8 @@ Goal:
 - show card name / Serial / active state
 
 Stock appears once Inventory integration is queried.
+
+Task 087 owns the PCB list and Add PCB Card UI; it does not own BOM schema.
 
 ---
 
@@ -1718,6 +1743,8 @@ Rules:
 - quantity > 0
 - no duplicate component within version
 - no self-consumption
+
+Task 088 owns PcbBomVersion and PcbBomItem only. Task 085 must not create these tables early.
 
 ---
 

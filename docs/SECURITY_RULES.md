@@ -274,7 +274,19 @@ Reject:
 
 ---
 
-# 11. PCB Production Security
+# 11. PCB Security
+
+PcbCard reads require an active Admin or `pcb.view`.
+
+Task 085 establishes only the PcbCard table, constraints, protected output-Product relationship, and SELECT RLS baseline. Direct normal-client PcbCard INSERT, UPDATE, and DELETE are denied. Trusted create, edit, archive, BOM, and production operations belong to their later owning tasks.
+
+Every PcbCard must reference exactly one Product through a required, unique, history-preserving `output_product_id` foreign key. The referenced Product must have `product_kind = 'pcb_finished_good'`, and one Product may be the output of at most one PcbCard. The output Product relationship is immutable after card creation. Relation-level integrity must continue to accept the historical link if the output Product is archived later.
+
+New PcbCard rows start active with no archive metadata. Active state requires both `archived_at` and `archived_by_user_id` to be null; archived state requires both values to be non-null. Actor references and the output Product reference use history-preserving deletion behavior. Task 085 adds no archive, hard-delete, or reactivation operation.
+
+Task 086 owns the trusted PcbCard creation operation. It must create an active `pcb_finished_good` output Product, allocate its unique 7-digit Serial Number server-side, enforce authorization, and append the required immutable audit history.
+
+## PCB Production Security
 
 PCB production must be a trusted atomic operation.
 
