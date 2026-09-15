@@ -14,6 +14,7 @@ import {
   listProcurementSupplierOptions,
   searchProcurementProductChoices,
   searchProcurementRequests,
+  updateProcurementDeliveredQuantity,
 } from "./procurementService";
 
 const requestRow = {
@@ -332,6 +333,57 @@ describe("procurementService", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(code);
+    expect(JSON.stringify(result)).not.toContain("raw provider details");
+  });
+
+  it("updates only the absolute Delivered So Far total through the trusted RPC", async () => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: requestRow.request_id,
+      error: null,
+    });
+
+    await expect(updateProcurementDeliveredQuantity({
+      requestId: requestRow.request_id,
+      deliveredQuantity: 7,
+    })).resolves.toEqual({
+      ok: true,
+      value: { requestId: requestRow.request_id },
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
+      "update_procurement_delivered_quantity",
+      {
+        p_request_id: requestRow.request_id,
+        p_delivered_quantity: 7,
+      },
+    );
+    const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
+    expect(payload).not.toHaveProperty("status");
+    expect(payload).not.toHaveProperty("quantity_delta");
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["22023", "invalid_quantity"],
+    ["23514", "invalid_quantity"],
+    ["P0002", "request_not_found"],
+    ["PRQ02", "request_resolved"],
+    ["unexpected", "delivery_update_failed"],
+  ] as const)("maps delivery update %s failures safely", async (
+    providerCode,
+    expectedCode,
+  ) => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider details" },
+    });
+
+    const result = await updateProcurementDeliveredQuantity({
+      requestId: requestRow.request_id,
+      deliveredQuantity: 7,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(expectedCode);
     expect(JSON.stringify(result)).not.toContain("raw provider details");
   });
 });

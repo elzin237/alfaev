@@ -52,6 +52,15 @@ export interface CreatedProcurementRequest {
   requestId: string;
 }
 
+export interface UpdateProcurementDeliveredQuantityInput {
+  requestId: string;
+  deliveredQuantity: number;
+}
+
+export interface UpdatedProcurementDelivery {
+  requestId: string;
+}
+
 export interface ProcurementListInput {
   search: string;
   status: ProcurementStatus | null;
@@ -101,6 +110,20 @@ export interface ProcurementCreationError {
 export type ProcurementCreationResult =
   | { ok: true; value: CreatedProcurementRequest }
   | { ok: false; error: ProcurementCreationError };
+
+export interface ProcurementDeliveryUpdateError {
+  code:
+    | "access_denied"
+    | "invalid_quantity"
+    | "request_not_found"
+    | "request_resolved"
+    | "delivery_update_failed";
+  message: string;
+}
+
+export type ProcurementDeliveryUpdateResult =
+  | { ok: true; value: UpdatedProcurementDelivery }
+  | { ok: false; error: ProcurementDeliveryUpdateError };
 
 interface ProcurementRequestRow {
   request_id: string;
@@ -385,6 +408,52 @@ function newComponentCreationFailure(code?: string): ProcurementCreationResult {
   }
 }
 
+function deliveryUpdateFailure(code?: string): ProcurementDeliveryUpdateResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to update delivered quantity.",
+        },
+      };
+    case "22023":
+    case "23514":
+      return {
+        ok: false,
+        error: {
+          code: "invalid_quantity",
+          message: "Delivered So Far must be a whole number within the requested quantity.",
+        },
+      };
+    case "P0002":
+      return {
+        ok: false,
+        error: {
+          code: "request_not_found",
+          message: "The Procurement request could not be found.",
+        },
+      };
+    case "PRQ02":
+      return {
+        ok: false,
+        error: {
+          code: "request_resolved",
+          message: "Resolved Procurement requests cannot be changed.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "delivery_update_failed",
+          message: "Delivered quantity could not be updated. Please try again.",
+        },
+      };
+  }
+}
+
 export async function searchProcurementRequests(
   input: ProcurementListInput,
 ): Promise<ProcurementListResult> {
@@ -547,5 +616,26 @@ export async function createProcurementRequestForNewComponent(
     return { ok: true, value: { requestId: data } };
   } catch {
     return newComponentCreationFailure();
+  }
+}
+
+export async function updateProcurementDeliveredQuantity(
+  input: UpdateProcurementDeliveredQuantityInput,
+): Promise<ProcurementDeliveryUpdateResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "update_procurement_delivered_quantity",
+      {
+        p_request_id: input.requestId,
+        p_delivered_quantity: input.deliveredQuantity,
+      },
+    );
+
+    if (error) return deliveryUpdateFailure(error.code);
+    if (!isUuid(data)) return deliveryUpdateFailure();
+
+    return { ok: true, value: { requestId: data } };
+  } catch {
+    return deliveryUpdateFailure();
   }
 }

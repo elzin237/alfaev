@@ -6,6 +6,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import CreateExistingProductRequestDialog from "./components/CreateExistingProductRequestDialog";
 import ProcurementList from "./components/ProcurementList";
+import UpdateProcurementDeliveryDialog from "./components/UpdateProcurementDeliveryDialog";
 import {
   useProcurementCreation,
   useProcurementCreationChoices,
@@ -14,11 +15,13 @@ import {
   useProcurementRequests,
   useProcurementSupplierOptions,
 } from "./hooks/useProcurementRequests";
+import { useProcurementDeliveryUpdate } from "./hooks/useProcurementDeliveryUpdate";
 import {
   isProcurementStatusFilter,
   procurementStatusOptions,
   type ProcurementStatusFilter,
 } from "./procurementStatus";
+import type { ProcurementRequestListItem } from "./services/procurementService";
 
 function ProcurementPage() {
   const [search, setSearch] = useState("");
@@ -31,11 +34,15 @@ function ProcurementPage() {
   const [debouncedProductChoiceSearch, setDebouncedProductChoiceSearch] =
     useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [deliveryRequest, setDeliveryRequest] =
+    useState<ProcurementRequestListItem | null>(null);
   const {
     canCreate,
     createExistingProductRequest,
     createNewComponentRequest,
   } = useProcurementCreation();
+  const { canUpdateDelivery, updateDelivery } =
+    useProcurementDeliveryUpdate();
   const { productChoicesQuery, supplierChoicesQuery } =
     useProcurementCreationChoices(
       debouncedProductChoiceSearch,
@@ -119,7 +126,12 @@ function ProcurementPage() {
       />
     );
   } else {
-    content = <ProcurementList requests={requests} />;
+    content = (
+      <ProcurementList
+        requests={requests}
+        onUpdateDelivery={canUpdateDelivery ? setDeliveryRequest : undefined}
+      />
+    );
   }
 
   return (
@@ -251,6 +263,13 @@ function ProcurementPage() {
         onSubmitExisting={createExistingProductRequest}
         onSubmitNewComponent={createNewComponentRequest}
         onCreated={() => setSuccessMessage("Procurement request created.")}
+      />
+
+      <UpdateProcurementDeliveryDialog
+        request={deliveryRequest}
+        onClose={() => setDeliveryRequest(null)}
+        onSubmit={updateDelivery}
+        onUpdated={() => setSuccessMessage("Delivered quantity updated.")}
       />
     </section>
   );

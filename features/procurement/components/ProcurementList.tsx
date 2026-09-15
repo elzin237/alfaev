@@ -4,9 +4,10 @@ import type { ProcurementRequestListItem } from "../services/procurementService"
 
 interface ProcurementListProps {
   requests: ProcurementRequestListItem[];
+  onUpdateDelivery?: (request: ProcurementRequestListItem) => void;
 }
 
-function ProcurementList({ requests }: ProcurementListProps) {
+function ProcurementList({ requests, onUpdateDelivery }: ProcurementListProps) {
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -22,6 +23,7 @@ function ProcurementList({ requests }: ProcurementListProps) {
                 "Remaining",
                 "Status",
                 "Created By",
+                ...(onUpdateDelivery ? ["Actions"] : []),
               ].map((heading) => (
                 <th
                   key={heading}
@@ -62,6 +64,19 @@ function ProcurementList({ requests }: ProcurementListProps) {
                     <StatusBadge label={status.label} tone={status.tone} />
                   </td>
                   <td className="px-5 py-4">{request.createdByFullName}</td>
+                  {onUpdateDelivery && (
+                    <td className="whitespace-nowrap px-5 py-4">
+                      {request.status === "resolved" ? null : (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateDelivery(request)}
+                          className="rounded-xl border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                        >
+                          Update Delivery
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               );
             })}

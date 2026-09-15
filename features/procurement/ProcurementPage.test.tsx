@@ -15,6 +15,7 @@ const procurementPageMocks = vi.hoisted(() => ({
   refetchSuppliers: vi.fn(),
   useProcurementCreation: vi.fn(),
   useProcurementCreationChoices: vi.fn(),
+  useProcurementDeliveryUpdate: vi.fn(),
   useProcurementRequests: vi.fn(),
   useProcurementSupplierOptions: vi.fn(),
 }));
@@ -28,6 +29,10 @@ vi.mock("./hooks/useProcurementCreation", () => ({
   useProcurementCreation: procurementPageMocks.useProcurementCreation,
   useProcurementCreationChoices:
     procurementPageMocks.useProcurementCreationChoices,
+}));
+vi.mock("./hooks/useProcurementDeliveryUpdate", () => ({
+  useProcurementDeliveryUpdate:
+    procurementPageMocks.useProcurementDeliveryUpdate,
 }));
 
 import ProcurementPage from "./ProcurementPage";
@@ -122,6 +127,10 @@ beforeEach(() => {
       isPending: false,
       refetch: vi.fn(),
     },
+  });
+  procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
+    canUpdateDelivery: false,
+    updateDelivery: vi.fn(),
   });
 });
 
@@ -253,13 +262,51 @@ describe("ProcurementPage", () => {
     expect(procurementPageMocks.refetchSuppliers).toHaveBeenCalledOnce();
   });
 
-  it("introduces no Procurement mutation or meaningless Actions controls", () => {
+  it("hides delivery actions when delivery permission is unavailable", () => {
     render(<ProcurementPage />);
     expect(screen.queryByRole("columnheader", { name: "Actions" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", {
       name: /add|create|edit|deliver|resolve/i,
     })).not.toBeInTheDocument();
+  });
+
+  it("shows delivery actions for unresolved requests only when authorized", () => {
+    procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
+      canUpdateDelivery: true,
+      updateDelivery: vi.fn(),
+    });
+    render(<ProcurementPage />);
+
+    expect(screen.getByRole("columnheader", { name: "Actions" }))
+      .toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Update Delivery" }))
+      .toHaveLength(2);
+    const resolvedRow = screen.getByText("Resolved Snapshot").closest("tr");
+    expect(within(resolvedRow!).queryByRole("button", {
+      name: "Update Delivery",
+    })).not.toBeInTheDocument();
+  });
+
+  it("opens the selected request dialog without affecting Add Request", () => {
+    const updateDelivery = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { requestId: requests[0]!.requestId },
+    });
+    procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
+      canUpdateDelivery: true,
+      updateDelivery,
+    });
+    render(<ProcurementPage />);
+
+    fireEvent.click(screen.getAllByRole("button", {
+      name: "Update Delivery",
+    })[0]!);
+    expect(screen.getByRole("dialog", { name: "Update Delivery" }))
+      .toBeInTheDocument();
+    expect(screen.getByLabelText("Delivered So Far")).toHaveValue(0);
+    expect(screen.queryByRole("button", { name: "Resolve" }))
+      .not.toBeInTheDocument();
   });
 
   it("shows both focused Add Request modes only when creation is authorized", () => {
