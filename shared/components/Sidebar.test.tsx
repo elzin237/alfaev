@@ -12,6 +12,7 @@ import { MemoryRouter } from "react-router";
 
 const sidebarMocks = vi.hoisted(() => ({
   hasPermission: vi.fn(),
+  useProcurementSidebarBadge: vi.fn(),
   useAuth: vi.fn(),
 }));
 
@@ -20,6 +21,9 @@ vi.mock("../../app/auth/AuthProvider", () => ({
 }));
 vi.mock("../../app/auth/permissionService", () => ({
   hasPermission: sidebarMocks.hasPermission,
+}));
+vi.mock("../../features/procurement/hooks/useProcurementSidebarBadge", () => ({
+  useProcurementSidebarBadge: sidebarMocks.useProcurementSidebarBadge,
 }));
 
 import Sidebar from "./Sidebar";
@@ -99,6 +103,7 @@ function renderSidebar(
 
 beforeEach(() => {
   sidebarMocks.useAuth.mockReturnValue(createAuthState());
+  sidebarMocks.useProcurementSidebarBadge.mockReturnValue({ data: undefined });
 });
 
 afterEach(() => {
@@ -208,6 +213,77 @@ describe("Sidebar permission visibility", () => {
     });
     expect(screen.getAllByRole("link").map((link) => link.textContent))
       .toEqual(["Calendar"]);
+  });
+
+  it("fetches and displays the Procurement badge only after view access resolves", async () => {
+    sidebarMocks.hasPermission.mockImplementation(
+      async (permission: string): Promise<PermissionServiceResult> => ({
+        ok: true,
+        value: permission === "procurement.view",
+      }),
+    );
+    sidebarMocks.useProcurementSidebarBadge.mockReturnValue({
+      data: { ok: true, value: 5 },
+    });
+
+    renderSidebar();
+
+    expect(await screen.findByRole("link", { name: /Nabavka/ }))
+      .toBeInTheDocument();
+    await waitFor(() => expect(
+      sidebarMocks.useProcurementSidebarBadge,
+    ).toHaveBeenLastCalledWith(createProfile(firstUser).id, true));
+    expect(screen.getByLabelText("5 unresolved Procurement requests"))
+      .toHaveTextContent("5");
+  });
+
+  it("renders a zero badge and fails safely when the badge query fails", () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProcurementSidebarBadge.mockReturnValue({
+      data: { ok: true, value: 0 },
+    });
+    const rendered = renderSidebar();
+
+    expect(screen.getByLabelText("0 unresolved Procurement requests"))
+      .toHaveTextContent("0");
+
+    sidebarMocks.useProcurementSidebarBadge.mockReturnValue({
+      data: {
+        ok: false,
+        error: {
+          code: "procurement_badge_failed",
+          message: "The Procurement count could not be loaded.",
+        },
+      },
+    });
+    rendered.rerender(
+      <QueryClientProvider client={rendered.queryClient}>
+        <MemoryRouter>
+          <Sidebar sidebarOpen={true} setSidebarOpen={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByRole("link", { name: "Nabavka" }))
+      .toBeInTheDocument();
+    expect(screen.queryByLabelText(/unresolved Procurement requests/))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not enable the protected badge query for an unauthorized user", async () => {
+    sidebarMocks.hasPermission.mockResolvedValue({ ok: true, value: false });
+
+    renderSidebar();
+
+    await waitFor(() => expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(8));
+    expect(sidebarMocks.useProcurementSidebarBadge).toHaveBeenLastCalledWith(
+      createProfile(firstUser).id,
+      false,
+    );
   });
 
   it("does not expose module links without active authenticated profile state", () => {

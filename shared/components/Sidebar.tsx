@@ -6,6 +6,7 @@ import { useAuth } from "../../app/auth/AuthProvider";
 import { hasPermission } from "../../app/auth/permissionService";
 import { permissionQueryKey } from "../../app/auth/permissionQueryKeys";
 import { NAVIGATION } from "../../app/navigation/navigation";
+import { useProcurementSidebarBadge } from "../../features/procurement/hooks/useProcurementSidebarBadge";
 
 const permissionNavigationItems = NAVIGATION.flatMap((item) =>
   item.access.kind === "permission"
@@ -44,6 +45,19 @@ function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
       permissionQueries[index]?.data,
     ]),
   );
+  const procurementPermission = permissionResults.get("procurement.view");
+  const canReadProcurement = Boolean(
+    isAuthenticatedActive &&
+      (isAdmin || (procurementPermission?.ok && procurementPermission.value)),
+  );
+  const procurementBadgeQuery = useProcurementSidebarBadge(
+    profile?.id,
+    canReadProcurement,
+  );
+  const procurementBadgeCount =
+    canReadProcurement && procurementBadgeQuery.data?.ok
+      ? procurementBadgeQuery.data.value
+      : null;
   const visibleNavigation = NAVIGATION.filter((item) => {
     if (!isAuthenticatedActive) {
       return false;
@@ -114,6 +128,14 @@ lg:relative lg:h-screen lg:translate-x-0        `}
             >
               <Icon size={18} />
               <span>{label}</span>
+              {path === "/procurement" && procurementBadgeCount !== null && (
+                <span
+                  aria-label={`${procurementBadgeCount} unresolved Procurement requests`}
+                  className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold tabular-nums text-white"
+                >
+                  {procurementBadgeCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

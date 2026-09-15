@@ -9,7 +9,7 @@ import LoginPage from "../../pages/auth/LoginPage";
 import DashboardPage from "../../features/dashboard/DashboardPage";
 import ProjectsPage from "../../features/projects/ProjectsPage";
 import ProjectDetailPage from "../../features/projects/ProjectDetailPage";
-import ProcurementPage from "../../pages/procurement/ProcurementPage";
+import ProcurementPage from "../../features/procurement/ProcurementPage";
 import SuppliersPage from "../../features/suppliers/SuppliersPage";
 import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
 import InventoryPage from "../../features/inventory/InventoryPage";
