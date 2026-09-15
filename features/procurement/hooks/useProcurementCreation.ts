@@ -11,6 +11,7 @@ import {
   procurementSupplierOptionsQueryKey,
 } from "../procurementQueryKeys";
 import {
+  createProcurementRequestForNewComponent,
   createProcurementRequestForProduct,
   listActiveProcurementSupplierChoices,
   searchProcurementProductChoices,
@@ -29,24 +30,33 @@ export function useProcurementCreation() {
     enabled: Boolean(session && profile?.isActive && !isAdmin),
     staleTime: 60_000,
   });
-  const mutation = useMutation({
+  const invalidateProcurementReads = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: procurementListQueryPrefix(profile?.id),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: procurementBadgeQueryKey(profile?.id),
+        exact: true,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: procurementSupplierOptionsQueryKey(profile?.id),
+        exact: true,
+      }),
+    ]);
+  };
+  const existingProductMutation = useMutation({
     mutationFn: createProcurementRequestForProduct,
     onSuccess: async (result) => {
       if (!result.ok) return;
-
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: procurementListQueryPrefix(profile?.id),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: procurementBadgeQueryKey(profile?.id),
-          exact: true,
-        }),
-        queryClient.invalidateQueries({
-          queryKey: procurementSupplierOptionsQueryKey(profile?.id),
-          exact: true,
-        }),
-      ]);
+      await invalidateProcurementReads();
+    },
+  });
+  const newComponentMutation = useMutation({
+    mutationFn: createProcurementRequestForNewComponent,
+    onSuccess: async (result) => {
+      if (!result.ok) return;
+      await invalidateProcurementReads();
     },
   });
   const hasActiveIdentity = Boolean(session && profile?.isActive);
@@ -58,7 +68,8 @@ export function useProcurementCreation() {
 
   return {
     canCreate,
-    create: mutation.mutateAsync,
+    createExistingProductRequest: existingProductMutation.mutateAsync,
+    createNewComponentRequest: newComponentMutation.mutateAsync,
   };
 }
 

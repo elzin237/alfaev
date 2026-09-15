@@ -7,6 +7,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 }));
 
 import {
+  createProcurementRequestForNewComponent,
   createProcurementRequestForProduct,
   getProcurementSidebarBadgeCount,
   listActiveProcurementSupplierChoices,
@@ -280,6 +281,57 @@ describe("procurementService", () => {
     });
 
     expect(result).toEqual({ ok: false, error: { code, message } });
+    expect(JSON.stringify(result)).not.toContain("raw provider details");
+  });
+
+  it("creates a brand-new component request through only its dedicated trusted RPC", async () => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: requestRow.request_id,
+      error: null,
+    });
+
+    await expect(createProcurementRequestForNewComponent({
+      requestedName: "  New Relay  ",
+      supplierId: requestRow.supplier_id,
+      requestedQuantity: 4,
+    })).resolves.toEqual({
+      ok: true,
+      value: { requestId: requestRow.request_id },
+    });
+    expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
+      "create_procurement_request_for_new_component",
+      {
+        p_requested_name: "New Relay",
+        p_supplier_id: requestRow.supplier_id,
+        p_requested_quantity: 4,
+      },
+    );
+    const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
+    expect(payload).not.toHaveProperty("product_id");
+    expect(payload).not.toHaveProperty("serial_number");
+    expect(payload).not.toHaveProperty("status");
+    expect(payload).not.toHaveProperty("delivered_quantity");
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["PRQ04", "supplier_unavailable"],
+    ["22023", "invalid_request"],
+    ["unexpected", "procurement_creation_failed"],
+  ] as const)("maps new-component %s failures safely", async (providerCode, code) => {
+    procurementServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider details" },
+    });
+
+    const result = await createProcurementRequestForNewComponent({
+      requestedName: "New Relay",
+      supplierId: requestRow.supplier_id,
+      requestedQuantity: 1,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.code).toBe(code);
     expect(JSON.stringify(result)).not.toContain("raw provider details");
   });
 });

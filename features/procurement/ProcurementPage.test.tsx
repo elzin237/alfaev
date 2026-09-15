@@ -9,7 +9,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const procurementPageMocks = vi.hoisted(() => ({
-  create: vi.fn(),
+  createExisting: vi.fn(),
+  createNewComponent: vi.fn(),
   refetchRequests: vi.fn(),
   refetchSuppliers: vi.fn(),
   useProcurementCreation: vi.fn(),
@@ -105,7 +106,8 @@ beforeEach(() => {
   setSuccessfulQueries();
   procurementPageMocks.useProcurementCreation.mockReturnValue({
     canCreate: false,
-    create: procurementPageMocks.create,
+    createExistingProductRequest: procurementPageMocks.createExisting,
+    createNewComponentRequest: procurementPageMocks.createNewComponent,
   });
   procurementPageMocks.useProcurementCreationChoices.mockReturnValue({
     productChoicesQuery: {
@@ -260,10 +262,11 @@ describe("ProcurementPage", () => {
     })).not.toBeInTheDocument();
   });
 
-  it("shows the existing-Product Add Request flow only when creation is authorized", () => {
+  it("shows both focused Add Request modes only when creation is authorized", () => {
     procurementPageMocks.useProcurementCreation.mockReturnValue({
       canCreate: true,
-      create: procurementPageMocks.create,
+      createExistingProductRequest: procurementPageMocks.createExisting,
+      createNewComponentRequest: procurementPageMocks.createNewComponent,
     });
 
     render(<ProcurementPage />);
@@ -271,6 +274,9 @@ describe("ProcurementPage", () => {
 
     expect(screen.getByRole("dialog", { name: "Add Procurement Request" }))
       .toBeInTheDocument();
-    expect(screen.queryByText(/brand-new component/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Existing Product" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Brand-New Component" }))
+      .toBeInTheDocument();
   });
 });

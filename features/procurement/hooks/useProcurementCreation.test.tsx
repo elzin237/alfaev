@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const creationHookMocks = vi.hoisted(() => ({
+  createProcurementRequestForNewComponent: vi.fn(),
   createProcurementRequestForProduct: vi.fn(),
   hasPermission: vi.fn(),
   listActiveProcurementSupplierChoices: vi.fn(),
@@ -18,6 +19,8 @@ vi.mock("../../../app/auth/permissionService", () => ({
   hasPermission: creationHookMocks.hasPermission,
 }));
 vi.mock("../services/procurementService", () => ({
+  createProcurementRequestForNewComponent:
+    creationHookMocks.createProcurementRequestForNewComponent,
   createProcurementRequestForProduct:
     creationHookMocks.createProcurementRequestForProduct,
   listActiveProcurementSupplierChoices:
@@ -61,6 +64,10 @@ beforeEach(() => {
   creationHookMocks.createProcurementRequestForProduct.mockResolvedValue({
     ok: true,
     value: { requestId: "00000000-0000-4000-8000-000000000003" },
+  });
+  creationHookMocks.createProcurementRequestForNewComponent.mockResolvedValue({
+    ok: true,
+    value: { requestId: "00000000-0000-4000-8000-000000000004" },
   });
   creationHookMocks.searchProcurementProductChoices.mockResolvedValue({
     ok: true,
@@ -133,7 +140,7 @@ describe("useProcurementCreation", () => {
     await waitFor(() => expect(result.current.canCreate).toBe(true));
 
     await act(async () => {
-      await result.current.create(input);
+      await result.current.createExistingProductRequest(input);
     });
 
     expect(invalidateQueries).toHaveBeenCalledTimes(3);
@@ -150,8 +157,28 @@ describe("useProcurementCreation", () => {
     });
   });
 
+  it("uses the same exact invalidation boundary for brand-new requests", async () => {
+    const queryClient = createQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(useProcurementCreation, {
+      wrapper: wrapperFor(queryClient),
+    });
+
+    await act(async () => {
+      await result.current.createNewComponentRequest({
+        requestedName: "New Relay",
+        supplierId: input.supplierId,
+        requestedQuantity: 3,
+      });
+    });
+
+    expect(creationHookMocks.createProcurementRequestForNewComponent)
+      .toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+  });
+
   it("does not invalidate Procurement caches after a failed creation", async () => {
-    creationHookMocks.createProcurementRequestForProduct.mockResolvedValue({
+    creationHookMocks.createProcurementRequestForNewComponent.mockResolvedValue({
       ok: false,
       error: { code: "procurement_creation_failed", message: "safe" },
     });
@@ -162,7 +189,11 @@ describe("useProcurementCreation", () => {
     });
 
     await act(async () => {
-      await result.current.create(input);
+      await result.current.createNewComponentRequest({
+        requestedName: "New Relay",
+        supplierId: input.supplierId,
+        requestedQuantity: 3,
+      });
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
   });

@@ -3,16 +3,17 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 
 import type {
+  CreateProcurementRequestForNewComponentInput,
   CreateProcurementRequestForProductInput,
   ProcurementActiveSupplierChoice,
   ProcurementCreationResult,
   ProcurementProductChoice,
 } from "../services/procurementService";
 import {
-  existingProductRequestSchema,
-  type ExistingProductRequestFormInput,
-  type ExistingProductRequestValues,
-} from "../validation/existingProductRequestSchema";
+  procurementRequestSchema,
+  type ProcurementRequestFormInput,
+  type ProcurementRequestValues,
+} from "../validation/procurementRequestSchema";
 
 interface CreateExistingProductRequestDialogProps {
   open: boolean;
@@ -27,14 +28,19 @@ interface CreateExistingProductRequestDialogProps {
   onRetryProducts: () => void;
   onRetrySuppliers: () => void;
   onClose: () => void;
-  onSubmit: (
+  onSubmitExisting: (
     input: CreateProcurementRequestForProductInput,
+  ) => Promise<ProcurementCreationResult>;
+  onSubmitNewComponent: (
+    input: CreateProcurementRequestForNewComponentInput,
   ) => Promise<ProcurementCreationResult>;
   onCreated: () => void;
 }
 
-const emptyValues: ExistingProductRequestFormInput = {
+const emptyValues: ProcurementRequestFormInput = {
+  requestMode: "existing",
   productId: "",
+  requestedName: "",
   supplierId: "",
   requestedQuantity: "",
 };
@@ -52,7 +58,8 @@ function CreateExistingProductRequestDialog({
   onRetryProducts,
   onRetrySuppliers,
   onClose,
-  onSubmit,
+  onSubmitExisting,
+  onSubmitNewComponent,
   onCreated,
 }: CreateExistingProductRequestDialogProps) {
   const titleId = useId();
@@ -66,25 +73,29 @@ function CreateExistingProductRequestDialog({
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const {
     register,
+    clearErrors,
     handleSubmit,
     reset,
     setValue,
     watch,
     formState: { errors, isSubmitting },
   } = useForm<
-    ExistingProductRequestFormInput,
+    ProcurementRequestFormInput,
     unknown,
-    ExistingProductRequestValues
+    ProcurementRequestValues
   >({
-    resolver: zodResolver(existingProductRequestSchema),
+    resolver: zodResolver(procurementRequestSchema),
     defaultValues: emptyValues,
   });
+  const requestMode = watch("requestMode");
   const selectedProductId = watch("productId");
   const selectedProduct = products.find(
     (product) => product.productId === selectedProductId,
   ) ?? null;
-  const choicesUnavailable = isProductsLoading || isSuppliersLoading ||
-    Boolean(productLoadError) || Boolean(supplierLoadError);
+  const choicesUnavailable = isSuppliersLoading || Boolean(supplierLoadError) ||
+    (requestMode === "existing" && (
+      isProductsLoading || Boolean(productLoadError)
+    ));
 
   const resetDialog = useCallback(() => {
     setSubmissionError(null);
@@ -147,7 +158,17 @@ function CreateExistingProductRequestDialog({
     setSubmissionError(null);
 
     try {
-      const result = await onSubmit(input);
+      const result = input.requestMode === "existing"
+        ? await onSubmitExisting({
+          productId: input.productId,
+          supplierId: input.supplierId,
+          requestedQuantity: input.requestedQuantity,
+        })
+        : await onSubmitNewComponent({
+          requestedName: input.requestedName,
+          supplierId: input.supplierId,
+          requestedQuantity: input.requestedQuantity,
+        });
       if (!result.ok) {
         setSubmissionError(result.error.message);
         return;
@@ -177,7 +198,7 @@ function CreateExistingProductRequestDialog({
           Add Procurement Request
         </h2>
         <p id={descriptionId} className="mt-2 text-sm leading-6 text-zinc-500">
-          Request an existing active Product from an active Supplier.
+          Request an existing Product or a brand-new component from an active Supplier.
         </p>
 
         <form
@@ -185,6 +206,54 @@ function CreateExistingProductRequestDialog({
           noValidate
           onSubmit={(event) => void submit(event)}
         >
+          <fieldset>
+            <legend className="block text-sm font-semibold text-zinc-800">
+              Request Type
+            </legend>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                aria-pressed={requestMode === "existing"}
+                disabled={isSubmitting}
+                onClick={() => {
+                  setValue("requestMode", "existing");
+                  setValue("productId", "");
+                  setValue("requestedName", "");
+                  clearErrors();
+                  setSubmissionError(null);
+                }}
+                className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                  requestMode === "existing"
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                }`}
+              >
+                Existing Product
+              </button>
+              <button
+                type="button"
+                aria-pressed={requestMode === "new"}
+                disabled={isSubmitting}
+                onClick={() => {
+                  setValue("requestMode", "new");
+                  setValue("productId", "");
+                  setValue("requestedName", "");
+                  clearErrors();
+                  onProductSearchChange("");
+                  setSubmissionError(null);
+                }}
+                className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                  requestMode === "new"
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+                }`}
+              >
+                Brand-New Component
+              </button>
+            </div>
+          </fieldset>
+
+          {requestMode === "existing" ? <>
           <div>
             <label
               htmlFor="procurement-product-search"
@@ -274,6 +343,43 @@ function CreateExistingProductRequestDialog({
               </div>
             </dl>
           )}
+          </> : <>
+            <div>
+              <label
+                htmlFor="procurement-new-component-name"
+                className="block text-sm font-semibold text-zinc-800"
+              >
+                Component Name
+              </label>
+              <input
+                {...register("requestedName")}
+                id="procurement-new-component-name"
+                type="text"
+                disabled={isSubmitting}
+                aria-invalid={Boolean(errors.requestedName)}
+                className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+              />
+              {errors.requestedName && (
+                <p className="mt-2 text-sm text-red-600">
+                  {errors.requestedName.message}
+                </p>
+              )}
+            </div>
+
+            <dl className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Serial Number / Šifra
+                </dt>
+                <dd className="mt-1 font-semibold text-zinc-900">
+                  Not assigned
+                </dd>
+                <p className="mt-1 text-sm text-zinc-500">
+                  AlfaEV assigns the Serial Number when an Admin creates the Product.
+                </p>
+              </div>
+            </dl>
+          </>}
 
           <div>
             <label

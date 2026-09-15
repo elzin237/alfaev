@@ -42,6 +42,12 @@ export interface CreateProcurementRequestForProductInput {
   requestedQuantity: number;
 }
 
+export interface CreateProcurementRequestForNewComponentInput {
+  requestedName: string;
+  supplierId: string;
+  requestedQuantity: number;
+}
+
 export interface CreatedProcurementRequest {
   requestId: string;
 }
@@ -340,6 +346,45 @@ function creationFailure(code?: string): ProcurementCreationResult {
   }
 }
 
+function newComponentCreationFailure(code?: string): ProcurementCreationResult {
+  switch (code) {
+    case "42501":
+      return {
+        ok: false,
+        error: {
+          code: "access_denied",
+          message: "You do not have permission to create Procurement requests.",
+        },
+      };
+    case "PRQ04":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_unavailable",
+          message: "The selected Supplier is unavailable. Choose an active Supplier.",
+        },
+      };
+    case "22003":
+    case "22023":
+    case "23514":
+      return {
+        ok: false,
+        error: {
+          code: "invalid_request",
+          message: "Enter a valid Component Name, Supplier, and positive whole-number quantity.",
+        },
+      };
+    default:
+      return {
+        ok: false,
+        error: {
+          code: "procurement_creation_failed",
+          message: "The Procurement request could not be created. Please try again.",
+        },
+      };
+  }
+}
+
 export async function searchProcurementRequests(
   input: ProcurementListInput,
 ): Promise<ProcurementListResult> {
@@ -480,5 +525,27 @@ export async function createProcurementRequestForProduct(
     return { ok: true, value: { requestId: data } };
   } catch {
     return creationFailure();
+  }
+}
+
+export async function createProcurementRequestForNewComponent(
+  input: CreateProcurementRequestForNewComponentInput,
+): Promise<ProcurementCreationResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "create_procurement_request_for_new_component",
+      {
+        p_requested_name: input.requestedName.trim(),
+        p_supplier_id: input.supplierId,
+        p_requested_quantity: input.requestedQuantity,
+      },
+    );
+
+    if (error) return newComponentCreationFailure(error.code);
+    if (!isUuid(data)) return newComponentCreationFailure();
+
+    return { ok: true, value: { requestId: data } };
+  } catch {
+    return newComponentCreationFailure();
   }
 }

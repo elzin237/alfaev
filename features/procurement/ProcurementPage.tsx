@@ -31,7 +31,11 @@ function ProcurementPage() {
   const [debouncedProductChoiceSearch, setDebouncedProductChoiceSearch] =
     useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const { canCreate, create } = useProcurementCreation();
+  const {
+    canCreate,
+    createExistingProductRequest,
+    createNewComponentRequest,
+  } = useProcurementCreation();
   const { productChoicesQuery, supplierChoicesQuery } =
     useProcurementCreationChoices(
       debouncedProductChoiceSearch,
@@ -244,7 +248,8 @@ function ProcurementPage() {
           setProductChoiceSearch("");
           setDebouncedProductChoiceSearch("");
         }}
-        onSubmit={create}
+        onSubmitExisting={createExistingProductRequest}
+        onSubmitNewComponent={createNewComponentRequest}
         onCreated={() => setSuccessMessage("Procurement request created.")}
       />
     </section>
