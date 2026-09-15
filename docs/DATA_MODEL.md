@@ -717,14 +717,20 @@ Rules:
 ### Create component from request
 Trusted workflow:
 
-1. verify request has no linked Product
-2. create Product
-3. allocate next 7-digit Serial Number
-4. collect any missing Product fields required by Inventory, such as Category/Brand if applicable
-5. create ProductSupplier relation for the selected Supplier when appropriate
-6. link ProcurementRequest.product_id to the new Product
-7. create AuditLog entries
-8. commit atomically
+1. require an active Admin; use no delegable permission and do not require `procurement.view` inside the mutation
+2. lock the ProcurementRequest and verify it remains `active` or `partly_delivered` with `product_id = NULL`; reject resolved or already-linked requests
+3. validate required trimmed, nonblank Product Name and free-text Category; Name may be prefilled from but may differ from immutable `requested_name`
+4. validate an optional supplied Brand exists and is active
+5. derive Supplier only from `ProcurementRequest.supplier_id` and require it still exists and is active
+6. allocate the next permanent 7-digit Serial Number server-side and create exactly one active Product with `product_kind = 'component'`
+7. create exactly one required active ProductSupplier relation to the request Supplier; normalize optional Catalog Number by trimming, storing blank as `NULL`, and preserving nonblank casing
+8. set only `ProcurementRequest.product_id`; preserve requested name, Supplier, requested/delivered quantities, status, resolution metadata, and creation metadata
+9. create immutable audit history for Product creation, ProductSupplier creation, and Procurement linking
+10. commit all domain mutations and required audits atomically
+
+The Product's request-time name snapshot remains unchanged even when the final Product Name differs. An archived request Supplier or supplied Brand cannot be used for this new Product/relationship. Competing Admin attempts on one request cannot create duplicate linked Products. Failed attempts persist no domain mutation or audit; consumed Serial sequence values are never reused.
+
+Existing Product initialization creates one zero InventoryBalance automatically. This workflow creates no InventoryMovement and does not convert Delivered Quantity into stock; physical receipt remains a separate Admin Inventory operation.
 
 ### Status/badge behavior
 Sidebar badge count is:

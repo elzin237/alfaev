@@ -485,14 +485,19 @@ Every meaningful Task 080 delivery update must atomically create exactly one imm
 Resolution metadata must remain equivalent to lifecycle state: `status = 'resolved'` if and only if both `resolved_at` and `resolved_by_user_id` are non-null. Both fields must be null for `active` and `partly_delivered` requests.
 
 `Create component from request`:
-- Admin-only
-- trusted transaction
-- re-check request is still unlinked
-- allocate Product Serial Number
-- create Product
-- create Supplier relationship as appropriate
-- link request
-- audit action
+- is permanently Admin-only, uses no delegable permission, and does not require `procurement.view` inside the trusted mutation
+- accepts only an `active` or `partly_delivered` ProcurementRequest whose `product_id` is still `NULL`; reject resolved or already-linked requests
+- locks the ProcurementRequest and re-checks eligibility so competing Admin attempts cannot create two Products for one request
+- derives the request Supplier from `ProcurementRequest.supplier_id`; the client cannot substitute a different Supplier
+- requires that Supplier to still exist and be active, and requires any supplied Brand to exist and be active
+- validates a required trimmed, nonblank Product Name and Category; Product Name may differ from the historical `requested_name` snapshot
+- creates exactly one active `component` Product and allocates its permanent 7-digit Serial Number server-side; the client cannot choose it
+- creates exactly one required active ProductSupplier relation to the request Supplier, with optional Catalog Number normalized by trimming blank to `NULL` while preserving nonblank casing
+- links `ProcurementRequest.product_id` without modifying its requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
+- creates the required immutable Product, ProductSupplier, and Procurement-link AuditLog history
+- commits Product creation, ProductSupplier creation, Procurement linking, and all required audits atomically
+
+Failed or denied attempts persist no Product, ProductSupplier, Procurement link, or audit. A consumed Serial sequence value need not be reused after rollback. Normal Product creation still initializes one zero InventoryBalance through the existing schema mechanism, but this workflow creates no InventoryMovement and never adds delivered Procurement quantity to stock. Physical stock remains a separate Admin Inventory workflow.
 
 ---
 

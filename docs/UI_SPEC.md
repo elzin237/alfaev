@@ -581,24 +581,30 @@ After success, refresh the Procurement list and Sidebar badge. Do not change Del
 
 Admin-only.
 
-Open a focused form prefilled from Nabavka.
+Show this action only for an Active or Partly Delivered request that is not yet linked to a Product. Do not show it for Resolved or already-linked requests.
 
-Fields may include:
+Open a focused form prefilled from Nabavka. Product Name starts from the immutable requested-name snapshot, but Admin may edit the final Product Name before creation. The snapshot itself is never changed.
 
-- Name
-- Category
-- Brand
-- Supplier
-- Catalog Number
+Fields:
+
+- Name: required, trimmed, nonblank
+- Category: required, trimmed, nonblank free text
+- Brand: optional; active choices only
+- Supplier: read-only/prefilled from the request and not replaceable in this workflow
+- Catalog Number: optional; blank becomes no Catalog Number and nonblank casing is preserved
 
 Serial Number:
 
 - displayed as `Generated automatically`
+- never entered or selected by Admin
 
 On success:
 - Product is created
+- the required ProductSupplier relation to the request Supplier is created
 - request links to Product
 - Serial Number appears on Nabavka row
+- request status, quantities, Supplier, and requested-name snapshot remain unchanged
+- Inventory remains at the Product's initialized zero balance until the separate Admin Inventory workflow records physical stock
 
 ---
 

@@ -1615,19 +1615,40 @@ No Inventory mutation.
 ## 083 — Add Admin Create-Product-from-Request RPC
 
 Goal:
-- Admin-only trusted transaction
+- add the permanently Admin-only trusted transaction that creates and links a Component from an unlinked Procurement request
 
-Must:
-- re-check request unlinked
-- allocate Product Serial
-- create Product
-- create ProductSupplier relation
-- link request
-- audit
+Authorization and eligibility:
+- active Admin only; no delegable permission substitute
+- do not require `procurement.view` inside the trusted mutation
+- lock and re-check the request is `active` or `partly_delivered` and still has `product_id = NULL`
+- reject Resolved and already-linked requests
 
-Collect missing Product fields as function input.
+Inputs and validation:
+- required Product Name: trim and reject blank; it may differ from immutable `requested_name`
+- required free-text Category: trim and reject blank
+- optional Brand: `NULL` allowed; otherwise require an existing active Brand
+- optional Catalog Number: trim, store blank as `NULL`, and preserve nonblank casing
+- do not accept Supplier or Serial Number as client choices
 
-Add security tests.
+Atomic workflow:
+- derive the fixed Supplier from the request and require it still exists and is active
+- allocate the next permanent 7-digit Serial Number server-side
+- create exactly one active Product with `product_kind = 'component'`
+- create exactly one required active ProductSupplier relation to the request Supplier
+- set only `ProcurementRequest.product_id`; preserve requested name, Supplier, quantities, Active/Partly Delivered status, resolution metadata, and creation metadata
+- create immutable audit history for Product creation, ProductSupplier creation, and Procurement linking using established domain conventions
+- commit all mutations and audits atomically; required audit failure rolls everything back
+
+Concurrency and Inventory:
+- competing Admin attempts on one request must never create two linked Products
+- consumed Serial values after rollback may remain gaps and are never reused
+- rely on existing Product initialization for one zero InventoryBalance
+- create no InventoryMovement and do not add Delivered Quantity to Inventory
+- physical stock remains the separate Admin Inventory workflow
+
+Add authorization, eligibility, validation, concurrency, atomic rollback, audit, Serial, ProductSupplier, request-preservation, and Inventory-separation backend tests.
+
+Do not implement Task 084 UI in this task.
 
 ---
 
@@ -1637,11 +1658,11 @@ Goal:
 - Admin form prefilled from Nabavka
 
 Fields:
-- Name
-- Category
-- Brand
-- Supplier
-- Catalog Number
+- editable required Name prefilled from `requested_name`
+- required free-text Category
+- optional active Brand
+- read-only/prefilled request Supplier
+- optional Catalog Number
 
 Serial:
 - generated automatically

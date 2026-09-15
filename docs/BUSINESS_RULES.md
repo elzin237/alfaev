@@ -141,11 +141,19 @@ Only Admin may create the actual Product/Component from that request.
 
 When Admin uses `Create component from request`:
 
-- create the Product/Component
+- the request must still be Active or Partly Delivered and unlinked; Resolved or already-linked requests are rejected
+- Product Name is prefilled from the request-time `requested_name` snapshot, but Admin may edit it before creation; the final Name and required free-text Category are trimmed and nonblank
+- optional Brand must still exist and be active
+- the request's existing Supplier is fixed for this workflow and must still exist and be active; an archived Supplier leaves history readable but blocks Product creation from that request
+- create exactly one active Product/Component with `product_kind = 'component'`
 - generate the next unique 7-digit Serial Number / Šifra through trusted backend/database logic
-- link the Product/Component back to the original Nabavka request
+- create one required active ProductSupplier relationship to the request Supplier, with an optional supplier-specific Catalog Number normalized by trimming blank to `NULL` and preserving nonblank casing
+- link the Product/Component back to the original Nabavka request without changing its historical requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
+- preserve immutable audit history for Product creation, ProductSupplier creation, and the Procurement-to-Product link
 
 Workers never manually assign Serial Number / Šifra values.
+
+The workflow is one concurrency-safe transaction. Competing Admin attempts cannot create two Products for the same request, and any required audit failure rolls back all domain mutations. Sequence gaps after a failed attempt are acceptable and never reused. Product initialization creates its normal zero InventoryBalance, but creates no InventoryMovement and does not add delivered Procurement quantity to stock; physical stock is entered separately through the Admin Inventory workflow.
 
 ### Statuses
 
