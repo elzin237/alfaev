@@ -1,5 +1,9 @@
 import { supabase } from "../../../lib/supabase/client";
-import { isProjectStatus, type ProjectStatus } from "../projectStatus";
+import {
+  isProjectStatus,
+  type ProjectEditableStatus,
+  type ProjectStatus,
+} from "../projectStatus";
 
 interface ProjectListRow {
   id: string;
@@ -66,6 +70,35 @@ export interface ProjectCreateError {
 export type ProjectCreateResult =
   | { ok: true; value: CreatedProject }
   | { ok: false; error: ProjectCreateError };
+
+export interface ProjectUpdateInput {
+  name: string;
+  customerName: string;
+  startDate: string;
+  deliveryDate: string;
+  status: ProjectEditableStatus;
+}
+
+export interface ProjectMutationError {
+  code:
+    | "access_denied"
+    | "project_cancelled"
+    | "project_completed"
+    | "project_invalid"
+    | "project_not_found"
+    | "project_state_invalid"
+    | "project_update_failed"
+    | "project_cancel_failed";
+  message: string;
+}
+
+export type ProjectUpdateResult =
+  | { ok: true; value: { projectId: string } }
+  | { ok: false; error: ProjectMutationError };
+
+export type ProjectCancelResult =
+  | { ok: true; value: { projectId: string } }
+  | { ok: false; error: ProjectMutationError };
 
 const projectListFields =
   "id,name,customer_name,status,start_date,delivery_date";
@@ -217,6 +250,85 @@ function createFailure(code?: string): ProjectCreateResult {
   };
 }
 
+function mutationFailure(
+  operation: "update" | "cancel",
+  code?: string,
+): ProjectUpdateResult | ProjectCancelResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: operation === "update"
+          ? "You do not have permission to edit this Project."
+          : "You do not have permission to cancel this Project.",
+      },
+    };
+  }
+
+  if (code === "P0002") {
+    return {
+      ok: false,
+      error: {
+        code: "project_not_found",
+        message: "The Project could not be found.",
+      },
+    };
+  }
+
+  if (code === "PRJ01") {
+    return {
+      ok: false,
+      error: {
+        code: "project_cancelled",
+        message: "Cancelled Projects cannot be edited.",
+      },
+    };
+  }
+
+  if (code === "PRJ02") {
+    return {
+      ok: false,
+      error: {
+        code: "project_completed",
+        message: "Completed Projects cannot be reopened through normal editing.",
+      },
+    };
+  }
+
+  if (code === "PRJ03") {
+    return {
+      ok: false,
+      error: {
+        code: "project_state_invalid",
+        message: "This Project cannot be cancelled from its current status.",
+      },
+    };
+  }
+
+  if (["22007", "22008", "22023", "23514"].includes(code ?? "")) {
+    return {
+      ok: false,
+      error: {
+        code: "project_invalid",
+        message: "Enter valid Project details and dates.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: operation === "update"
+        ? "project_update_failed"
+        : "project_cancel_failed",
+      message: operation === "update"
+        ? "The Project could not be updated. Please try again."
+        : "The Project could not be cancelled. Please try again.",
+    },
+  };
+}
+
 export async function listProjects(): Promise<ProjectListResult> {
   try {
     const { data, error } = await supabase
@@ -277,5 +389,49 @@ export async function createProject(
     return { ok: true, value: { projectId: data } };
   } catch {
     return createFailure();
+  }
+}
+
+export async function updateProject(
+  projectId: string,
+  input: ProjectUpdateInput,
+): Promise<ProjectUpdateResult> {
+  try {
+    const { data, error } = await supabase.rpc("update_project", {
+      p_project_id: projectId,
+      p_name: input.name.trim(),
+      p_customer_name: input.customerName.trim(),
+      p_start_date: input.startDate,
+      p_delivery_date: input.deliveryDate,
+      p_status: input.status,
+    });
+
+    if (error) return mutationFailure("update", error.code);
+    if (typeof data !== "string" || !uuidPattern.test(data)) {
+      return mutationFailure("update");
+    }
+
+    return { ok: true, value: { projectId: data } };
+  } catch {
+    return mutationFailure("update");
+  }
+}
+
+export async function cancelProject(
+  projectId: string,
+): Promise<ProjectCancelResult> {
+  try {
+    const { data, error } = await supabase.rpc("cancel_project", {
+      p_project_id: projectId,
+    });
+
+    if (error) return mutationFailure("cancel", error.code);
+    if (typeof data !== "string" || !uuidPattern.test(data)) {
+      return mutationFailure("cancel");
+    }
+
+    return { ok: true, value: { projectId: data } };
+  } catch {
+    return mutationFailure("cancel");
   }
 }

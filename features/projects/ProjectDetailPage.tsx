@@ -1,11 +1,13 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
 import EmptyState from "../../shared/components/EmptyState";
+import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
+import ProjectEditDialog from "./components/ProjectEditDialog";
 import { useProjectDetail } from "./hooks/useProjectDetail";
 import { getProjectStatusPresentation } from "./projectStatus";
 import { isProjectId } from "./services/projectService";
@@ -49,7 +51,33 @@ function formatTimestamp(value: string): string {
 
 function ProjectDetailPage() {
   const { projectId = "" } = useParams<{ projectId: string }>();
-  const projectQuery = useProjectDetail(projectId);
+  const { projectQuery, canEdit, canCancel, update, cancel } =
+    useProjectDetail(projectId);
+  const cancellationLockRef = useRef(false);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [isCancelOpen, setIsCancelOpen] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function confirmCancellation() {
+    if (cancellationLockRef.current) return;
+    cancellationLockRef.current = true;
+    setIsCancelling(true);
+    setActionError(null);
+    try {
+      const result = await cancel();
+      if (!result.ok) {
+        setActionError(result.error.message);
+        return;
+      }
+      setIsCancelOpen(false);
+      setSuccessMessage("Project cancelled.");
+    } finally {
+      cancellationLockRef.current = false;
+      setIsCancelling(false);
+    }
+  }
   let content: ReactNode;
 
   if (!isProjectId(projectId)) {
@@ -83,12 +111,44 @@ function ProjectDetailPage() {
       <>
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
           <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Project
-            </p>
-            <h2 className="mt-2 text-2xl font-bold text-zinc-900">
-              {project.name}
-            </h2>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Project
+                </p>
+                <h2 className="mt-2 text-2xl font-bold text-zinc-900">
+                  {project.name}
+                </h2>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccessMessage(null);
+                      setActionError(null);
+                      setIsEditOpen(true);
+                    }}
+                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                  >
+                    Edit Project
+                  </button>
+                )}
+                {canCancel && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSuccessMessage(null);
+                      setActionError(null);
+                      setIsCancelOpen(true);
+                    }}
+                    className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                  >
+                    Cancel Project
+                  </button>
+                )}
+              </div>
+            </div>
 
             <dl className="mt-8 grid gap-6 sm:grid-cols-2">
               <div>
@@ -163,6 +223,34 @@ function ProjectDetailPage() {
             </section>
           ))}
         </div>
+
+        <ProjectEditDialog
+          open={isEditOpen}
+          currentStatus={project.status}
+          initialValues={{
+            name: project.name,
+            customerName: project.customerName,
+            startDate: project.startDate,
+            deliveryDate: project.deliveryDate,
+            status: project.status === "cancelled" ? "planned" : project.status,
+          }}
+          onClose={() => setIsEditOpen(false)}
+          onSubmit={update}
+          onSucceeded={() => setSuccessMessage("Project updated.")}
+        />
+
+        <ConfirmDialog
+          open={isCancelOpen}
+          title="Cancel Project"
+          description={`Cancel ${project.name}? The Project will remain in historical records and cannot be restored in the current workflow.`}
+          confirmLabel="Cancel Project"
+          confirmVariant="danger"
+          isSubmitting={isCancelling}
+          onCancel={() => {
+            if (!isCancelling) setIsCancelOpen(false);
+          }}
+          onConfirm={() => void confirmCancellation()}
+        />
       </>
     );
   }
@@ -181,6 +269,17 @@ function ProjectDetailPage() {
           </Link>
         }
       />
+
+      {successMessage && (
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          {successMessage}
+        </p>
+      )}
+      {actionError && (
+        <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700">
+          {actionError}
+        </p>
+      )}
 
       {content}
     </section>

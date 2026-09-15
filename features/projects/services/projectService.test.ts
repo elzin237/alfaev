@@ -15,7 +15,13 @@ vi.mock("../../../lib/supabase/client", () => ({
   },
 }));
 
-import { createProject, getProject, listProjects } from "./projectService";
+import {
+  cancelProject,
+  createProject,
+  getProject,
+  listProjects,
+  updateProject,
+} from "./projectService";
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -340,6 +346,112 @@ describe("projectService", () => {
     })).resolves.toMatchObject({
       ok: false,
       error: { code: "project_create_failed" },
+    });
+  });
+
+  it("updates only through the trusted RPC with normalized Project fields", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({ data: "00000000-0000-4000-8000-000000000001", error: null });
+
+    await expect(updateProject("00000000-0000-4000-8000-000000000001", {
+      name: "  Updated Project  ",
+      customerName: "  Updated Customer  ",
+      startDate: "2026-09-02",
+      deliveryDate: "2026-09-30",
+      status: "in_progress",
+    })).resolves.toEqual({
+      ok: true,
+      value: { projectId: "00000000-0000-4000-8000-000000000001" },
+    });
+    expect(projectServiceMocks.rpc).toHaveBeenCalledWith("update_project", {
+      p_project_id: "00000000-0000-4000-8000-000000000001",
+      p_name: "Updated Project",
+      p_customer_name: "Updated Customer",
+      p_start_date: "2026-09-02",
+      p_delivery_date: "2026-09-30",
+      p_status: "in_progress",
+    });
+    expect(projectServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["PRJ01", "project_cancelled"],
+    ["PRJ02", "project_completed"],
+    ["22023", "project_invalid"],
+    ["P0002", "project_not_found"],
+    ["XX000", "project_update_failed"],
+  ])("maps update error %s safely", async (backendCode, expectedCode) => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw database detail" },
+    });
+    const result = await updateProject(
+      "00000000-0000-4000-8000-000000000001",
+      {
+        name: "Project",
+        customerName: "Customer",
+        startDate: "2026-09-01",
+        deliveryDate: "2026-09-30",
+        status: "planned",
+      },
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: expectedCode } });
+    if (!result.ok) expect(result.error.message).not.toContain("raw");
+  });
+
+  it("cancels only through the trusted cancellation RPC", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({ data: "00000000-0000-4000-8000-000000000001", error: null });
+
+    await expect(cancelProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toEqual({
+      ok: true,
+      value: { projectId: "00000000-0000-4000-8000-000000000001" },
+    });
+    expect(projectServiceMocks.rpc).toHaveBeenCalledWith("cancel_project", {
+      p_project_id: "00000000-0000-4000-8000-000000000001",
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["PRJ03", "project_state_invalid"],
+    ["P0002", "project_not_found"],
+    ["XX000", "project_cancel_failed"],
+  ])("maps cancellation error %s safely", async (backendCode, expectedCode) => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backendCode, message: "raw database detail" },
+    });
+    const result = await cancelProject(
+      "00000000-0000-4000-8000-000000000001",
+    );
+    expect(result).toMatchObject({ ok: false, error: { code: expectedCode } });
+    if (!result.ok) expect(result.error.message).not.toContain("raw");
+  });
+
+  it("fails mutations safely for malformed results and thrown errors", async () => {
+    projectServiceMocks.rpc.mockResolvedValueOnce({ data: "bad-id", error: null });
+    await expect(cancelProject(
+      "00000000-0000-4000-8000-000000000001",
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_cancel_failed" },
+    });
+
+    projectServiceMocks.rpc.mockRejectedValueOnce(new Error("raw network detail"));
+    await expect(updateProject(
+      "00000000-0000-4000-8000-000000000001",
+      {
+        name: "Project",
+        customerName: "Customer",
+        startDate: "2026-09-01",
+        deliveryDate: "2026-09-30",
+        status: "planned",
+      },
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "project_update_failed" },
     });
   });
 });

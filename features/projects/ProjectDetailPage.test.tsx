@@ -1,9 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 const projectDetailPageMocks = vi.hoisted(() => ({
   refetch: vi.fn(),
+  update: vi.fn(),
+  cancel: vi.fn(),
   useProjectDetail: vi.fn(),
 }));
 
@@ -32,12 +34,20 @@ function setQueryState(options: {
     | { ok: false; error: { code: string; message: string } };
   isError?: boolean;
   isPending?: boolean;
+  canEdit?: boolean;
+  canCancel?: boolean;
 } = {}) {
   projectDetailPageMocks.useProjectDetail.mockReturnValue({
-    data: options.data ?? { ok: true, value: project },
-    isError: options.isError ?? false,
-    isPending: options.isPending ?? false,
-    refetch: projectDetailPageMocks.refetch,
+    projectQuery: {
+      data: options.data ?? { ok: true, value: project },
+      isError: options.isError ?? false,
+      isPending: options.isPending ?? false,
+      refetch: projectDetailPageMocks.refetch,
+    },
+    canEdit: options.canEdit ?? false,
+    canCancel: options.canCancel ?? false,
+    update: projectDetailPageMocks.update,
+    cancel: projectDetailPageMocks.cancel,
   });
 }
 
@@ -51,7 +61,11 @@ function renderDetail(path = `/projects/${projectId}`) {
   );
 }
 
-beforeEach(() => setQueryState());
+beforeEach(() => {
+  projectDetailPageMocks.update.mockResolvedValue({ ok: true, value: { projectId } });
+  projectDetailPageMocks.cancel.mockResolvedValue({ ok: true, value: { projectId } });
+  setQueryState();
+});
 
 afterEach(() => {
   cleanup();
@@ -172,5 +186,63 @@ describe("ProjectDetailPage", () => {
     expect(screen.queryByRole("button", {
       name: /create|edit|status|archive|cancel|reopen|delete/i,
     })).not.toBeInTheDocument();
+  });
+
+  it("shows independently authorized edit and cancellation actions", () => {
+    setQueryState({ canEdit: true, canCancel: false });
+    const editOnly = renderDetail();
+    expect(screen.getByRole("button", { name: "Edit Project" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel Project" })).not.toBeInTheDocument();
+    editOnly.unmount();
+
+    setQueryState({ canEdit: false, canCancel: true });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: "Edit Project" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel Project" })).toBeInTheDocument();
+  });
+
+  it("requires cancellation confirmation and allows cancel to be dismissed", () => {
+    setQueryState({ canCancel: true });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Project" }));
+    expect(screen.getByRole("dialog", { name: "Cancel Project" })).toHaveTextContent("cannot be restored");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(projectDetailPageMocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it("cancels through the hook and shows safe success or failure feedback", async () => {
+    setQueryState({ canCancel: true });
+    const view = renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Project" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Cancel Project" })).getByRole("button", { name: "Cancel Project" }));
+    await waitFor(() => expect(projectDetailPageMocks.cancel).toHaveBeenCalledOnce());
+    expect(screen.getByRole("status")).toHaveTextContent("Project cancelled.");
+    view.unmount();
+
+    projectDetailPageMocks.cancel.mockResolvedValueOnce({ ok: false, error: { code: "project_cancel_failed", message: "The Project could not be cancelled. Please try again." } });
+    setQueryState({ canCancel: true });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Project" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Cancel Project" })).getByRole("button", { name: "Cancel Project" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The Project could not be cancelled. Please try again.");
+  });
+
+  it("keeps Completed ordinary fields editable but offers only Completed status", () => {
+    setQueryState({
+      data: { ok: true, value: { ...project, status: "completed" } },
+      canEdit: true,
+      canCancel: false,
+    });
+    renderDetail();
+    fireEvent.click(screen.getByRole("button", { name: "Edit Project" }));
+    expect(screen.getByLabelText("Project Name")).toBeEnabled();
+    expect(Array.from((screen.getByLabelText("Status") as HTMLSelectElement).options).map((option) => option.value)).toEqual(["completed"]);
+    expect(screen.queryByRole("button", { name: "Cancel Project" })).not.toBeInTheDocument();
+  });
+
+  it("does not expose restore, reopen, delete, or hard-delete controls", () => {
+    setQueryState({ canEdit: true, canCancel: true });
+    renderDetail();
+    expect(screen.queryByRole("button", { name: /restore|reopen|delete|archive/i })).not.toBeInTheDocument();
   });
 });

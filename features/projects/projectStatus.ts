@@ -11,6 +11,15 @@ export const projectStatuses = [
 export type ProjectStatus = (typeof projectStatuses)[number];
 export type ProjectStatusFilter = "all" | ProjectStatus;
 
+export const projectEditableStatuses = [
+  "planned",
+  "in_progress",
+  "on_hold",
+  "completed",
+] as const;
+
+export type ProjectEditableStatus = (typeof projectEditableStatuses)[number];
+
 export const projectStatusOptions: ReadonlyArray<{
   label: string;
   value: ProjectStatusFilter;
@@ -22,6 +31,14 @@ export const projectStatusOptions: ReadonlyArray<{
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
 ];
+
+export const projectEditableStatusOptions: ReadonlyArray<{
+  label: string;
+  value: ProjectEditableStatus;
+}> = projectStatusOptions.filter(
+  (option): option is { label: string; value: ProjectEditableStatus } =>
+    option.value !== "all" && option.value !== "cancelled",
+);
 
 const statusPresentation: Record<
   ProjectStatus,
