@@ -13574,6 +13574,96 @@ describe("Supabase security helpers", () => {
     });
   });
 
+  it("reads only narrow historical Product identity through the Project planning boundary", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { projectIds, groupIds, productIds } = await createPlanningRows(
+        database, fixture.actors.admin.profileId,
+      );
+      const requirementIds = [randomUUID(), randomUUID(), randomUUID()];
+      for (const [index, requirementId] of requirementIds.entries()) {
+        await database.query(
+          "insert into public.project_product_components (id, project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id) values ($1, $2, $3, $4, $5, $5)",
+          [
+            requirementId,
+            groupIds[index + 2],
+            productIds[index],
+            index + 1,
+            fixture.actors.admin.profileId,
+          ],
+        );
+      }
+      for (const actor of [fixture.actors.admin, fixture.actors.permitted]) {
+        const open = await callPlanningAs<{
+          project_product_id: string; project_product_name: string;
+          component_id: string | null; product_id: string | null;
+          serial_number: string | null; product_name: string | null;
+          product_kind: string | null; required_quantity: string | null;
+        }>(
+          database, actor, "select * from public.get_project_planning($1)",
+          [projectIds[0]],
+        );
+        expect(open).toEqual([{
+          project_product_id: groupIds[0],
+          project_product_name: "Group 0",
+          component_id: null,
+          product_id: null,
+          serial_number: null,
+          product_name: null,
+          product_kind: null,
+          required_quantity: null,
+        }]);
+        for (const index of [3, 4]) {
+          const historical = await callPlanningAs<{
+            product_id: string; required_quantity: string;
+          }>(
+            database, actor, "select * from public.get_project_planning($1)",
+            [projectIds[index]],
+          );
+          expect(historical).toHaveLength(1);
+          expect(historical[0]).toMatchObject({
+            product_id: productIds[index - 2],
+            required_quantity: String(index - 1),
+          });
+          expect(Object.keys(historical[0] ?? {}).sort()).toEqual([
+            "component_id", "product_id", "product_kind", "product_name",
+            "project_product_id", "project_product_name", "required_quantity",
+            "serial_number",
+          ]);
+        }
+      }
+      const directProduct = await callPlanningAs<{ id: string }>(
+        database, fixture.actors.permitted,
+        "select id from public.products where id = $1", [productIds[2]],
+      );
+      expect(directProduct).toEqual([]);
+      for (const actor of [
+        fixture.actors.unpermitted, fixture.actors.inactive, null,
+      ]) {
+        await expect(callPlanningAs(
+          database, actor, "select * from public.get_project_planning($1)",
+          [projectIds[4]],
+        )).rejects.toMatchObject({ code: "42501" });
+      }
+      const security = await database.query<{
+        anon_execute: boolean; authenticated_execute: boolean;
+        is_definer: boolean; settings: string[];
+      }>(
+        "select routine.prosecdef as is_definer, routine.proconfig as settings, pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anon_execute, pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute from pg_catalog.pg_proc as routine join pg_catalog.pg_namespace as ns on ns.oid = routine.pronamespace where ns.nspname = 'public' and routine.proname = 'get_project_planning'",
+      );
+      expect(security.rows).toEqual([{
+        anon_execute: false,
+        authenticated_execute: true,
+        is_definer: true,
+        settings: ["search_path=\"\""],
+      }]);
+      const productRls = await database.query<{ policy: string }>(
+        "select pg_catalog.pg_get_expr(pol.polqual, pol.polrelid) as policy from pg_catalog.pg_policy as pol where pol.polrelid = 'public.products'::regclass order by pol.polname",
+      );
+      expect(productRls.rows.every((row) => !row.policy.includes("projects.view"))).toBe(true);
+    });
+  });
+
   it("rolls back Project planning creation when its immutable audit append fails", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {

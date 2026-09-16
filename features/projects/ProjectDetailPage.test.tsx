@@ -13,6 +13,9 @@ const projectDetailPageMocks = vi.hoisted(() => ({
 vi.mock("./hooks/useProjectDetail", () => ({
   useProjectDetail: projectDetailPageMocks.useProjectDetail,
 }));
+vi.mock("./components/ProjectPlanningSection", () => ({
+  ProjectPlanningSection: () => null,
+}));
 
 import ProjectDetailPage from "./ProjectDetailPage";
 import type { ProjectDetail } from "./services/projectService";

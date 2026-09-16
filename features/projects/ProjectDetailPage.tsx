@@ -8,6 +8,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import ProjectEditDialog from "./components/ProjectEditDialog";
+import { ProjectPlanningSection } from "./components/ProjectPlanningSection";
 import { useProjectDetail } from "./hooks/useProjectDetail";
 import {
   getProjectStatusPresentation,
@@ -259,6 +260,8 @@ function ProjectDetailPage() {
             </dl>
           </aside>
         </div>
+
+        <ProjectPlanningSection projectId={project.id} status={project.status} />
 
         <div className="grid gap-6 xl:grid-cols-2">
           {relatedPlaceholders.map((placeholder) => (
