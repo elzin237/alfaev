@@ -6,6 +6,7 @@ import {
   Warehouse,
   Cpu,
   ClipboardList,
+  FileText,
   CalendarDays,
   Archive,
   Users,
@@ -64,6 +65,12 @@ export const NAVIGATION = [
     path: "/work-orders",
     icon: ClipboardList,
     access: { kind: "permission", permission: "work_orders.view" },
+  },
+  {
+    label: "Dokumentacija",
+    path: "/documents",
+    icon: FileText,
+    access: { kind: "admin" },
   },
   {
     label: "Calendar",

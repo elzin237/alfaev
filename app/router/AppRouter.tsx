@@ -18,6 +18,7 @@ import PcbPage from "../../pages/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";
+import DocumentationPage from "../../features/documentation/DocumentationPage";
 
 function AppRouter() {
   return (
@@ -56,6 +57,7 @@ function AppRouter() {
           <Route path="/work-orders" element={<WorkOrdersPage />} />
         </Route>
         <Route element={<AdminRoute />}>
+          <Route path="/documents" element={<DocumentationPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/users/:userId" element={<UserDetailPage />} />
         </Route>

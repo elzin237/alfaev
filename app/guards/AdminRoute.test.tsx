@@ -152,4 +152,13 @@ describe("AdminRoute", () => {
     expect(screen.queryByText("Users Page")).not.toBeInTheDocument();
     expect(routeMocks.hasPermission).not.toHaveBeenCalled();
   });
+
+  it("wraps Dokumentacija without consulting delegable permissions", () => {
+    routeMocks.useAuth.mockReturnValue(createAuthState({
+      profile: { ...profile, isAdmin: false }, isAdmin: false,
+    }));
+    render(<MemoryRouter initialEntries={["/documents"]}><AppRouter /></MemoryRouter>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
+    expect(routeMocks.hasPermission).not.toHaveBeenCalled();
+  });
 });
