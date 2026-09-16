@@ -227,6 +227,27 @@ interface ProjectAuditRow {
   entity_type: string;
 }
 
+interface ProjectProductRow {
+  created_at: Date;
+  created_by_user_id: string;
+  id: string;
+  name: string;
+  project_id: string;
+  updated_at: Date;
+  updated_by_user_id: string;
+}
+
+interface ProjectProductComponentRow {
+  created_at: Date;
+  created_by_user_id: string;
+  id: string;
+  product_id: string;
+  project_product_id: string;
+  required_quantity: string;
+  updated_at: Date;
+  updated_by_user_id: string;
+}
+
 interface ProcurementRequestRow {
   created_at: Date;
   created_by_user_id: string;
@@ -12393,6 +12414,610 @@ describe("Supabase security helpers", () => {
       );
       expect(audits.rows).toEqual([{ count: 0 }]);
     });
+  });
+
+  it("enforces the Project planning schema, references, quantities, and non-mutating baseline", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const projectId = randomUUID();
+      const projectProductIds = [randomUUID(), randomUUID()];
+      const productIds = [randomUUID(), randomUUID()];
+      const componentIds = [randomUUID(), randomUUID(), randomUUID()];
+      const serials = await database.query<{ serial_number: string }>(
+        `select public.allocate_product_serial_number() as serial_number
+         from pg_catalog.generate_series(1, 2)`,
+      );
+
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, start_date, delivery_date,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1, 'Planning Schema Project', 'Planning Customer',
+           '2026-09-01', '2026-09-30', $2, $2
+         )`,
+        [projectId, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values
+           ($1, $3, 'Planning Component', 'Component', 'component', $5, $5),
+           ($2, $4, 'Planning PCB', 'PCB', 'pcb_finished_good', $5, $5)`,
+        [
+          productIds[0],
+          productIds[1],
+          serials.rows[0]?.serial_number,
+          serials.rows[1]?.serial_number,
+          actorId,
+        ],
+      );
+
+      const projectsBefore = await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects
+         where id = $1`,
+        [projectId],
+      );
+      const productsBefore = await database.query<ProductRow>(
+        `select * from public.products
+         where id = any($1::uuid[])
+         order by id`,
+        [productIds],
+      );
+      const inventoryBefore = await database.query<{
+        balances: number;
+        movements: number;
+        total_quantity: string;
+      }>(
+        `select
+           (select count(*)::integer
+            from public.inventory_balances
+            where product_id = any($1::uuid[])) as balances,
+           (select count(*)::integer
+            from public.inventory_movements
+            where product_id = any($1::uuid[])) as movements,
+           (select coalesce(sum(quantity), 0::numeric)::text
+            from public.inventory_balances
+            where product_id = any($1::uuid[])) as total_quantity`,
+        [productIds],
+      );
+
+      await database.query(
+        `insert into public.project_products (
+           id, project_id, name, created_by_user_id, updated_by_user_id
+         ) values
+           ($1, $3, 'B24', $4, $4),
+           ($2, $3, 'B24', $4, $4)`,
+        [projectProductIds[0], projectProductIds[1], projectId, actorId],
+      );
+      await database.query(
+        `insert into public.project_product_components (
+           id, project_product_id, product_id, required_quantity,
+           created_by_user_id, updated_by_user_id
+         ) values
+           ($1, $4, $6, 12, $8, $8),
+           ($2, $4, $7, 3, $8, $8),
+           ($3, $5, $6, 4, $8, $8)`,
+        [
+          componentIds[0],
+          componentIds[1],
+          componentIds[2],
+          projectProductIds[0],
+          projectProductIds[1],
+          productIds[0],
+          productIds[1],
+          actorId,
+        ],
+      );
+
+      const projectProducts = await database.query<ProjectProductRow>(
+        `select * from public.project_products
+         where id = any($1::uuid[])
+         order by id`,
+        [projectProductIds],
+      );
+      const components = await database.query<ProjectProductComponentRow>(
+        `select * from public.project_product_components
+         where id = any($1::uuid[])
+         order by id`,
+        [componentIds],
+      );
+      expect(projectProducts.rows).toHaveLength(2);
+      expect(projectProducts.rows.every((row) => row.name === "B24")).toBe(true);
+      expect(components.rows.map((row) => row.required_quantity).sort())
+        .toEqual(["12", "3", "4"]);
+      expect(components.rows.some((row) => row.product_id === productIds[0]))
+        .toBe(true);
+      expect(components.rows.some((row) => row.product_id === productIds[1]))
+        .toBe(true);
+
+      expect(await database.query<ProjectRow>(
+        `select *, start_date::text as start_date,
+                delivery_date::text as delivery_date
+         from public.projects
+         where id = $1`,
+        [projectId],
+      )).toEqual(projectsBefore);
+      expect(await database.query<ProductRow>(
+        `select * from public.products
+         where id = any($1::uuid[])
+         order by id`,
+        [productIds],
+      )).toEqual(productsBefore);
+      expect(await database.query<{
+        balances: number;
+        movements: number;
+        total_quantity: string;
+      }>(
+        `select
+           (select count(*)::integer
+            from public.inventory_balances
+            where product_id = any($1::uuid[])) as balances,
+           (select count(*)::integer
+            from public.inventory_movements
+            where product_id = any($1::uuid[])) as movements,
+           (select coalesce(sum(quantity), 0::numeric)::text
+            from public.inventory_balances
+            where product_id = any($1::uuid[])) as total_quantity`,
+        [productIds],
+      )).toEqual(inventoryBefore);
+
+      const invalidProjectProducts = [
+        { label: "empty_name", projectId, name: "", actorId },
+        { label: "whitespace_name", projectId, name: "   ", actorId },
+        { label: "untrimmed_name", projectId, name: " B25 ", actorId },
+        {
+          label: "missing_project",
+          projectId: randomUUID(),
+          name: "Missing Project",
+          actorId,
+        },
+        {
+          label: "invalid_created_actor",
+          projectId,
+          name: "Invalid Created Actor",
+          actorId: randomUUID(),
+        },
+      ];
+      for (const invalid of invalidProjectProducts) {
+        await database.query(`savepoint project_product_${invalid.label}`);
+        await expect(database.query(
+          `insert into public.project_products (
+             project_id, name, created_by_user_id, updated_by_user_id
+           ) values ($1, $2, $3, $4)`,
+          [invalid.projectId, invalid.name, invalid.actorId, actorId],
+        )).rejects.toMatchObject({
+          code: invalid.label.includes("name") ? "23514" : "23503",
+        });
+        await database.query(`rollback to savepoint project_product_${invalid.label}`);
+      }
+      await database.query("savepoint project_product_invalid_updated_actor");
+      await expect(database.query(
+        `insert into public.project_products (
+           project_id, name, created_by_user_id, updated_by_user_id
+         ) values ($1, 'Invalid Updated Actor', $2, $3)`,
+        [projectId, actorId, randomUUID()],
+      )).rejects.toMatchObject({ code: "23503" });
+      await database.query("rollback to savepoint project_product_invalid_updated_actor");
+
+      for (const [label, quantity] of [["zero", 0], ["negative", -1]] as const) {
+        await database.query(`savepoint component_quantity_${label}`);
+        await expect(database.query(
+          `insert into public.project_product_components (
+             project_product_id, product_id, required_quantity,
+             created_by_user_id, updated_by_user_id
+           ) values ($1, $2, $3, $4, $4)`,
+          [projectProductIds[1], productIds[1], quantity, actorId],
+        )).rejects.toMatchObject({ code: "23514" });
+        await database.query(`rollback to savepoint component_quantity_${label}`);
+      }
+
+      const invalidComponents = [
+        {
+          label: "duplicate_pair",
+          projectProductId: projectProductIds[0],
+          productId: productIds[0],
+          actorId,
+          code: "23505",
+        },
+        {
+          label: "missing_project_product",
+          projectProductId: randomUUID(),
+          productId: productIds[0],
+          actorId,
+          code: "23503",
+        },
+        {
+          label: "missing_product",
+          projectProductId: projectProductIds[1],
+          productId: randomUUID(),
+          actorId,
+          code: "23503",
+        },
+        {
+          label: "invalid_created_actor",
+          projectProductId: projectProductIds[1],
+          productId: productIds[1],
+          actorId: randomUUID(),
+          code: "23503",
+        },
+      ];
+      for (const invalid of invalidComponents) {
+        await database.query(`savepoint project_component_${invalid.label}`);
+        await expect(database.query(
+          `insert into public.project_product_components (
+             project_product_id, product_id, required_quantity,
+             created_by_user_id, updated_by_user_id
+           ) values ($1, $2, 1, $3, $4)`,
+          [
+            invalid.projectProductId,
+            invalid.productId,
+            invalid.actorId,
+            actorId,
+          ],
+        )).rejects.toMatchObject({ code: invalid.code });
+        await database.query(`rollback to savepoint project_component_${invalid.label}`);
+      }
+      await database.query("savepoint component_invalid_updated_actor");
+      await expect(database.query(
+        `insert into public.project_product_components (
+           project_product_id, product_id, required_quantity,
+           created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 1, $3, $4)`,
+        [projectProductIds[1], productIds[1], actorId, randomUUID()],
+      )).rejects.toMatchObject({ code: "23503" });
+      await database.query("rollback to savepoint component_invalid_updated_actor");
+
+      await database.query(
+        `update public.products
+         set is_active = false,
+             updated_at = now(),
+             updated_by_user_id = $2,
+             archived_at = now(),
+             archived_by_user_id = $2
+         where id = $1`,
+        [productIds[1], actorId],
+      );
+      const archivedReference = await database.query<{
+        is_active: boolean;
+        product_id: string;
+      }>(
+        `select product.id as product_id, product.is_active
+         from public.project_product_components as component
+         join public.products as product on product.id = component.product_id
+         where component.id = $1`,
+        [componentIds[1]],
+      );
+      expect(archivedReference.rows).toEqual([{
+        is_active: false,
+        product_id: productIds[1],
+      }]);
+
+      const foreignKeys = await database.query<{
+        constraint_name: string;
+        delete_rule: string;
+      }>(
+        `select constraint_name, delete_rule
+         from information_schema.referential_constraints
+         where constraint_schema = 'public'
+           and constraint_name = any($1::text[])
+         order by constraint_name`,
+        [[
+          "project_products_project_id_fkey",
+          "project_products_created_by_user_id_fkey",
+          "project_products_updated_by_user_id_fkey",
+          "project_product_components_project_product_id_fkey",
+          "project_product_components_product_id_fkey",
+          "project_product_components_created_by_user_id_fkey",
+          "project_product_components_updated_by_user_id_fkey",
+        ]],
+      );
+      expect(foreignKeys.rows).toHaveLength(7);
+      expect(foreignKeys.rows.every((foreignKey) =>
+        foreignKey.delete_rule === "RESTRICT"
+      )).toBe(true);
+
+      const columns = await database.query<{
+        column_name: string;
+        data_type: string;
+        is_nullable: string;
+        table_name: string;
+      }>(
+        `select table_name, column_name, data_type, is_nullable
+         from information_schema.columns
+         where table_schema = 'public'
+           and table_name = any($1::text[])
+         order by table_name, ordinal_position`,
+        [["project_products", "project_product_components"]],
+      );
+      expect(columns.rows.filter((column) => column.table_name === "project_products")
+        .map((column) => column.column_name)).toEqual([
+          "id",
+          "project_id",
+          "name",
+          "created_at",
+          "created_by_user_id",
+          "updated_at",
+          "updated_by_user_id",
+        ]);
+      expect(columns.rows.find((column) =>
+        column.table_name === "project_product_components"
+        && column.column_name === "required_quantity"
+      )).toMatchObject({ data_type: "bigint", is_nullable: "NO" });
+
+      const indexes = await database.query<{
+        indexdef: string;
+        indexname: string;
+      }>(
+        `select indexname, indexdef
+         from pg_catalog.pg_indexes
+         where schemaname = 'public'
+           and tablename = any($1::text[])
+         order by indexname`,
+        [["project_products", "project_product_components"]],
+      );
+      expect(indexes.rows.find((index) =>
+        index.indexname === "project_products_project_id_idx"
+      )?.indexdef).toContain("(project_id)");
+      expect(indexes.rows.find((index) =>
+        index.indexname === "project_product_components_product_id_idx"
+      )?.indexdef).toContain("(product_id)");
+      expect(indexes.rows.find((index) =>
+        index.indexname ===
+          "project_product_components_project_product_product_key"
+      )?.indexdef).toContain(
+        "UNIQUE INDEX project_product_components_project_product_product_key",
+      );
+      expect(indexes.rows.find((index) =>
+        index.indexname ===
+          "project_product_components_project_product_product_key"
+      )?.indexdef).toContain("(project_product_id, product_id)");
+
+      const prematureObjects = await database.query<{
+        object_kind: string;
+        object_name: string;
+      }>(
+        `select 'function'::text as object_kind, routine.proname as object_name
+         from pg_catalog.pg_proc as routine
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = routine.pronamespace
+         where namespace.nspname = 'public'
+           and (
+             routine.proname like '%project_product%'
+             or routine.proname like '%project_commitment%'
+           )
+         union all
+         select 'relation'::text, relation.relname
+         from pg_catalog.pg_class as relation
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = relation.relnamespace
+         where namespace.nspname = 'public'
+           and relation.relname like '%project_commitment%'`,
+      );
+      expect(prematureObjects.rows).toEqual([]);
+    });
+  });
+
+  it("limits Project planning reads to active Project viewers and denies every direct client write", async () => {
+    const fixture = requireHarness();
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const projectIds = [randomUUID(), randomUUID(), randomUUID()];
+      const projectProductIds = [randomUUID(), randomUUID(), randomUUID()];
+      const componentIds = [randomUUID(), randomUUID(), randomUUID()];
+      const productId = randomUUID();
+      const serial = await database.query<{ serial_number: string }>(
+        "select public.allocate_product_serial_number() as serial_number",
+      );
+
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           completed_at, cancelled_at, created_by_user_id, updated_by_user_id
+         ) values
+           ($1, 'Planning Read Planned', 'Customer', 'planned',
+            '2026-09-01', '2026-09-30', null, null, $4, $4),
+           ($2, 'Planning Read Completed', 'Customer', 'completed',
+            '2026-09-01', '2026-09-30', '2026-09-30T10:00:00Z', null, $4, $4),
+           ($3, 'Planning Read Cancelled', 'Customer', 'cancelled',
+            '2026-09-01', '2026-09-30', null, '2026-09-20T10:00:00Z', $4, $4)`,
+        [...projectIds, actorId],
+      );
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'Planning Read Product', 'Component', 'component', $3, $3)`,
+        [productId, serial.rows[0]?.serial_number, actorId],
+      );
+      await database.query(
+        `insert into public.project_products (
+           id, project_id, name, created_by_user_id, updated_by_user_id
+         ) values
+           ($1, $4, 'Planned Group', $7, $7),
+           ($2, $5, 'Completed Group', $7, $7),
+           ($3, $6, 'Cancelled Group', $7, $7)`,
+        [...projectProductIds, ...projectIds, actorId],
+      );
+      await database.query(
+        `insert into public.project_product_components (
+           id, project_product_id, product_id, required_quantity,
+           created_by_user_id, updated_by_user_id
+         ) values
+           ($1, $4, $7, 1, $8, $8),
+           ($2, $5, $7, 2, $8, $8),
+           ($3, $6, $7, 3, $8, $8)`,
+        [...componentIds, ...projectProductIds, productId, actorId],
+      );
+
+      for (const actor of [fixture.actors.admin, fixture.actors.permitted]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const visibleProjectProducts = await database.query<{ id: string }>(
+          `select id from public.project_products
+           where id = any($1::uuid[])
+           order by id`,
+          [projectProductIds],
+        );
+        const visibleComponents = await database.query<{ id: string }>(
+          `select id from public.project_product_components
+           where id = any($1::uuid[])
+           order by id`,
+          [componentIds],
+        );
+        await database.query("reset role");
+        expect(visibleProjectProducts.rows.map((row) => row.id))
+          .toEqual([...projectProductIds].sort());
+        expect(visibleComponents.rows.map((row) => row.id))
+          .toEqual([...componentIds].sort());
+      }
+
+      for (const actor of [fixture.actors.unpermitted, fixture.actors.inactive]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        const hiddenProjectProducts = await database.query<{ id: string }>(
+          `select id from public.project_products
+           where id = any($1::uuid[])`,
+          [projectProductIds],
+        );
+        const hiddenComponents = await database.query<{ id: string }>(
+          `select id from public.project_product_components
+           where id = any($1::uuid[])`,
+          [componentIds],
+        );
+        await database.query("reset role");
+        expect(hiddenProjectProducts.rows).toEqual([]);
+        expect(hiddenComponents.rows).toEqual([]);
+      }
+
+      const security = await database.query<{
+        authenticated_delete: boolean;
+        authenticated_insert: boolean;
+        authenticated_select: boolean;
+        authenticated_update: boolean;
+        policy_expression: string;
+        row_security: boolean;
+        table_name: string;
+      }>(
+        `select
+           relation.relname as table_name,
+           relation.relrowsecurity as row_security,
+           pg_catalog.has_table_privilege(
+             'authenticated', relation.oid, 'select'
+           ) as authenticated_select,
+           pg_catalog.has_table_privilege(
+             'authenticated', relation.oid, 'insert'
+           ) as authenticated_insert,
+           pg_catalog.has_table_privilege(
+             'authenticated', relation.oid, 'update'
+           ) as authenticated_update,
+           pg_catalog.has_table_privilege(
+             'authenticated', relation.oid, 'delete'
+           ) as authenticated_delete,
+           pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+             as policy_expression
+         from pg_catalog.pg_class as relation
+         join pg_catalog.pg_namespace as namespace
+           on namespace.oid = relation.relnamespace
+         join pg_catalog.pg_policy as policy
+           on policy.polrelid = relation.oid
+         where namespace.nspname = 'public'
+           and relation.relname = any($1::text[])
+         order by relation.relname`,
+        [["project_products", "project_product_components"]],
+      );
+      expect(security.rows).toHaveLength(2);
+      for (const tableSecurity of security.rows) {
+        expect(tableSecurity).toMatchObject({
+          authenticated_delete: false,
+          authenticated_insert: false,
+          authenticated_select: true,
+          authenticated_update: false,
+          row_security: true,
+        });
+        expect(tableSecurity.policy_expression).toContain(
+          "current_user_is_admin()",
+        );
+        expect(tableSecurity.policy_expression).toContain(
+          "has_permission('projects.view'::text)",
+        );
+      }
+
+      await database.query("set local role anon");
+      await database.query("savepoint anonymous_project_planning_reads");
+      await expect(database.query("select id from public.project_products limit 1"))
+        .rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_project_planning_reads");
+      await database.query("savepoint anonymous_project_component_reads");
+      await expect(database.query(
+        "select id from public.project_product_components limit 1",
+      )).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_project_component_reads");
+      await database.query("reset role");
+    });
+
+    const adminClient = fixture.actors.admin.client;
+    const projectProductInsert = await adminClient.from("project_products").insert({
+      project_id: randomUUID(),
+      name: "Forbidden Direct Planning Group",
+      created_by_user_id: fixture.actors.admin.profileId,
+      updated_by_user_id: fixture.actors.admin.profileId,
+    });
+    const projectProductUpdate = await adminClient
+      .from("project_products")
+      .update({ name: "Forbidden Direct Update" })
+      .eq("id", randomUUID());
+    const projectProductDelete = await adminClient
+      .from("project_products")
+      .delete()
+      .eq("id", randomUUID());
+    const componentInsert = await adminClient
+      .from("project_product_components")
+      .insert({
+        project_product_id: randomUUID(),
+        product_id: randomUUID(),
+        required_quantity: 1,
+        created_by_user_id: fixture.actors.admin.profileId,
+        updated_by_user_id: fixture.actors.admin.profileId,
+      });
+    const componentUpdate = await adminClient
+      .from("project_product_components")
+      .update({ required_quantity: 2 })
+      .eq("id", randomUUID());
+    const componentDelete = await adminClient
+      .from("project_product_components")
+      .delete()
+      .eq("id", randomUUID());
+    for (const error of [
+      projectProductInsert.error,
+      projectProductUpdate.error,
+      projectProductDelete.error,
+      componentInsert.error,
+      componentUpdate.error,
+      componentDelete.error,
+    ]) {
+      expectPermissionDenied(error);
+    }
+
+    for (const table of ["project_products", "project_product_components"] as const) {
+      const anonymousRead = await fixture.anonymousClient
+        .from(table)
+        .select("id")
+        .limit(1);
+      expectPermissionDenied(anonymousRead.error);
+    }
   });
 
   it("enforces the canonical ProcurementRequest schema, lifecycle, snapshot, and historical foreign keys", async () => {
