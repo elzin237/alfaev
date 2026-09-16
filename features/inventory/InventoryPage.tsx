@@ -12,6 +12,7 @@ import ProductList from "./components/ProductList";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useProductCreation } from "./hooks/useProductCreation";
 import { useProducts } from "./hooks/useProducts";
+import { useInventoryCommitments } from "./hooks/useInventoryCommitments";
 import type { Brand } from "./services/brandService";
 
 function InventoryPage() {
@@ -21,6 +22,7 @@ function InventoryPage() {
   const [productSearch, setProductSearch] = useState("");
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
   const productsQuery = useProducts(debouncedProductSearch);
+  const commitmentsQuery = useInventoryCommitments();
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
@@ -118,7 +120,24 @@ function InventoryPage() {
       />
     );
   } else {
-    productContent = <ProductList products={productsQuery.data.value} />;
+    const commitments = commitmentsQuery.data?.ok
+      ? new Map(commitmentsQuery.data.value.map((item) => [item.productId, item]))
+      : undefined;
+    productContent = (
+      <div className="space-y-4">
+        {commitmentsQuery.isPending ? (
+          <LoadingState message="Loading Project commitments..." />
+        ) : commitmentsQuery.isError || !commitmentsQuery.data?.ok ||
+          productsQuery.data.value.some((product) => !commitments?.has(product.id)) ? (
+          <ErrorState
+            title="Unable to load Project commitments"
+            message="Project commitment figures are unavailable. Physical quantities remain visible."
+            onRetry={() => void commitmentsQuery.refetch()}
+          />
+        ) : null}
+        <ProductList products={productsQuery.data.value} commitments={commitments} />
+      </div>
+    );
   }
 
   let brandContent: ReactNode;

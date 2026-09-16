@@ -6,6 +6,7 @@ const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
   useProductCreation: vi.fn(),
   useProducts: vi.fn(),
+  useInventoryCommitments: vi.fn(),
   refetch: vi.fn(),
   productRefetch: vi.fn(),
   create: vi.fn(),
@@ -22,6 +23,9 @@ vi.mock("./hooks/useProductCreation", () => ({
 }));
 vi.mock("./hooks/useProducts", () => ({
   useProducts: inventoryMocks.useProducts,
+}));
+vi.mock("./hooks/useInventoryCommitments", () => ({
+  useInventoryCommitments: inventoryMocks.useInventoryCommitments,
 }));
 
 import InventoryPage from "./InventoryPage";
@@ -78,6 +82,15 @@ function setHookState(options: {
   productsError?: boolean;
   productsData?: ProductListResult;
 } = {}) {
+  inventoryMocks.useInventoryCommitments.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: { ok: true, value: [
+      { productId: "product-active", physicalQuantity: 0n, committedToProjects: 0n, availableAfterCommitments: 0n },
+      { productId: "product-archived", physicalQuantity: 27n, committedToProjects: 0n, availableAfterCommitments: 27n },
+    ] },
+    refetch: vi.fn(),
+  });
   inventoryMocks.useBrandManagement.mockReturnValue({
     canManage: options.canManage ?? true,
     brandsQuery: {
@@ -137,6 +150,23 @@ afterEach(() => {
 });
 
 describe("InventoryPage", () => {
+  it("keeps physical stock visible and never fakes commitment zero after a read failure", () => {
+    setHookState({ productsData: { ok: true, value: [activeProduct] } });
+    const retry = vi.fn();
+    inventoryMocks.useInventoryCommitments.mockReturnValue({
+      isPending: false, isError: false,
+      data: { ok: false, error: { code: "load_failed", message: "Safe error" } },
+      refetch: retry,
+    });
+    renderInventory();
+    expect(screen.getByRole("alert")).toHaveTextContent("Project commitment figures are unavailable");
+    const row = screen.getByRole("row", { name: /0000001 Resistor Passive/ });
+    expect(within(row).getAllByText("Unavailable")).toHaveLength(2);
+    expect(within(row).getByText("0")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
   it("renders loading, safe error with retry, and empty states", () => {
     setHookState({ isPending: true });
     const rendered = renderInventory();
@@ -211,17 +241,19 @@ describe("InventoryPage", () => {
     ).toBeTruthy();
 
     const activeRow = screen.getByRole("row", {
-      name: /0000001 Resistor Passive — 0 Active/,
+      name: /0000001 Resistor Passive — 0 0 0 Active/,
     });
     const archivedRow = screen.getByRole("row", {
-      name: /0000002 Legacy Controller Control Bosch 27 Archived/,
+      name: /0000002 Legacy Controller Control Bosch 27 0 27 Archived/,
     });
     expect(within(activeRow).getByText("—")).toBeInTheDocument();
-    expect(within(activeRow).getByText("0")).toBeInTheDocument();
+    expect(within(activeRow).getAllByText("0").length).toBeGreaterThan(0);
     expect(within(archivedRow).getByText("Bosch")).toBeInTheDocument();
-    expect(within(archivedRow).getByText("27")).toBeInTheDocument();
+    expect(within(archivedRow).getAllByText("27").length).toBeGreaterThan(0);
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByText("Quantity")).toBeInTheDocument();
+    expect(screen.getByText("Physical Quantity")).toBeInTheDocument();
+    expect(screen.getByText("Committed to Projects")).toBeInTheDocument();
+    expect(screen.getByText("Available after Commitments")).toBeInTheDocument();
   });
 
   it("debounces server-backed Product search and distinguishes no matches from an empty Inventory", () => {

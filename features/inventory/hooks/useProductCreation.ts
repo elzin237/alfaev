@@ -4,6 +4,7 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { productListQueryPrefix } from "../productQueryKeys";
+import { inventoryCommitmentsQueryKey } from "../inventoryCommitmentQueryKeys";
 import { createProduct } from "../services/productService";
 
 export function useProductCreation() {
@@ -28,9 +29,13 @@ export function useProductCreation() {
     const result = await createProduct(input);
 
     if (result.ok) {
-      await queryClient.invalidateQueries({
-        queryKey: listQueryPrefix,
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: listQueryPrefix }),
+        queryClient.invalidateQueries({
+          queryKey: inventoryCommitmentsQueryKey(profile?.id),
+          exact: true,
+        }),
+      ]);
     }
 
     return result;

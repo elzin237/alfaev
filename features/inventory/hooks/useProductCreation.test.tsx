@@ -122,6 +122,9 @@ describe("useProductCreation", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+    });
   });
 
   it("does not invalidate the Product list after failed creation", async () => {

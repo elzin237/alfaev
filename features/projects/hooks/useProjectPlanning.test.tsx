@@ -124,7 +124,7 @@ describe("useProjectPlanning", () => {
     expect(missing.result.current.canManage).toBe(false);
   });
 
-  it("allows projects.edit without inventory.view and invalidates only exact planning after success", async () => {
+  it("allows projects.edit without inventory.view and invalidates planning plus Inventory commitments after success", async () => {
     mocks.hasPermission.mockImplementation((key: string) =>
       Promise.resolve({ ok: true, value: key === "projects.edit" })
     );
@@ -137,7 +137,10 @@ describe("useProjectPlanning", () => {
       queryKey: projectPlanningQueryKey("profile-1", projectId),
       exact: true,
     });
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledTimes(2);
     expect(mocks.hasPermission).toHaveBeenCalledWith("projects.edit");
     invalidate.mockClear();
     mocks.removeProjectProduct.mockResolvedValueOnce({

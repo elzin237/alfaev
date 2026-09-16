@@ -91,7 +91,7 @@ describe("useInventoryBalance", () => {
       quantity: 5,
       reason: "Delivery",
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: [
         "inventory",
@@ -104,6 +104,9 @@ describe("useInventoryBalance", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["inventory", "commitments", "profile-1"], exact: true,
     });
   });
 

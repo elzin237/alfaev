@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
+import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
 import type { ProjectStatus } from "../projectStatus";
 import {
   projectPlanningChoicesQueryKey,
@@ -64,10 +65,13 @@ export function useProjectPlanning(
   ): Promise<PlanningResult<{ id: string }>> {
     const result = await operation();
     if (result.ok) {
-      await queryClient.invalidateQueries({
-        queryKey: planningKey,
-        exact: true,
-      });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: planningKey, exact: true }),
+        queryClient.invalidateQueries({
+          queryKey: inventoryCommitmentsQueryKey(profile?.id),
+          exact: true,
+        }),
+      ]);
     }
     return result;
   }
