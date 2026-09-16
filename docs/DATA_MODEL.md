@@ -945,8 +945,9 @@ Constraints:
 
 Rules:
 
-- component_product_id must reference a stock-tracked Product.
-- A PCB card must not directly consume itself.
+- `component_product_id` may reference a stock-tracked Product of kind `component` or `pcb_finished_good`.
+- When adding or changing a BOM item, the referenced Product must exist and be active; the PcbCard's own `output_product_id` is not eligible.
+- Later Product archival does not invalidate, delete, or rewrite an existing BOM item. Historical BOM versions continue to display their referenced Product.
 - BOM items for historical used versions are immutable.
 
 ---

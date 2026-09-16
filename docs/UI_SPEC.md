@@ -946,9 +946,13 @@ Each row:
 
 Validation:
 
-- no duplicate component in same BOM
+- no duplicate Product in same BOM
 - quantity > 0
+- new or changed BOM inputs must reference an existing active stock-tracked Product of kind `component` or `pcb_finished_good`
 - cannot select the PCB output Product itself
+
+Here, Component names the BOM input row; it does not limit `product_kind` to `component`.
+Archiving a referenced Product later does not remove it from historical BOM versions; its reference remains visible.
 
 If current BOM has production history:
 

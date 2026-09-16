@@ -321,6 +321,8 @@ Client-side "stock available" display is not authorization or final validation.
 
 # 12. PCB BOM History
 
+When adding or changing a BOM item, trusted backend validation must require an existing active stock-tracked Product of kind `component` or `pcb_finished_good` and reject the PcbCard's own `output_product_id`. Later Product archival must not invalidate, delete, or rewrite the existing BOM reference; historical versions remain readable with their referenced Product.
+
 Once a BOM version has production history:
 
 - BOM version is immutable

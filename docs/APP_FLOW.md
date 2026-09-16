@@ -310,10 +310,12 @@ Non-admin users cannot perform this operation regardless of UI manipulation.
 After card creation, the later BOM workflow may:
 
 6. Define BOM:
-   - select existing component Product
+   - select an eligible existing active stock-tracked Product of kind `component` or `pcb_finished_good`, excluding this card's own output Product
    - enter quantity required per one PCB card.
 7. Save active BOM version.
 8. Audit creation.
+
+Archiving a selected Product later does not remove or rewrite its existing BOM item; historical BOM versions continue to display that Product.
 
 ---
 

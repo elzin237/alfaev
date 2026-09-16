@@ -1943,8 +1943,10 @@ Goal:
 
 Rules:
 - quantity > 0
-- no duplicate component within version
-- no self-consumption
+- no duplicate input Product within version
+- BOM input Product must exist and be active when the item is added or changed; both `component` and `pcb_finished_good` are eligible stock-tracked kinds
+- reject direct self-consumption of the PcbCard's own output Product
+- later Product archival preserves existing BOM references and historical display
 
 Task 088 owns PcbBomVersion and PcbBomItem only. Task 085 must not create these tables early.
 

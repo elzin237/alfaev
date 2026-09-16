@@ -468,6 +468,8 @@ Scanning the barcode must resolve the matching AlfaEV product by Serial Number /
 
 ### BOM calculation
 
+PCB BOM inputs may be existing stock-tracked Products of kind `component` or `pcb_finished_good`. When adding or changing a BOM item, the Product must exist and be active; a PcbCard cannot directly consume its own output Product. Archiving an input Product later does not invalidate, delete, or rewrite the existing BOM item or its historical version.
+
 For each BOM row:
 
 Required Quantity = Quantity Per Card × Production Quantity
