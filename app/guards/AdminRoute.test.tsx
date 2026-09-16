@@ -161,4 +161,13 @@ describe("AdminRoute", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
     expect(routeMocks.hasPermission).not.toHaveBeenCalled();
   });
+
+  it("denies non-Admins at the Fixed Assets route without a permission RPC", () => {
+    routeMocks.useAuth.mockReturnValue(createAuthState({
+      profile: { ...profile, isAdmin: false }, isAdmin: false,
+    }));
+    render(<MemoryRouter initialEntries={["/fixed-assets"]}><AppRouter /></MemoryRouter>);
+    expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
+    expect(routeMocks.hasPermission).not.toHaveBeenCalled();
+  });
 });

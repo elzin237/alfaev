@@ -19,6 +19,7 @@ import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";
 import DocumentationPage from "../../features/documentation/DocumentationPage";
+import FixedAssetsPage from "../../features/fixed-assets/FixedAssetsPage";
 
 function AppRouter() {
   return (
@@ -58,6 +59,7 @@ function AppRouter() {
         </Route>
         <Route element={<AdminRoute />}>
           <Route path="/documents" element={<DocumentationPage />} />
+          <Route path="/fixed-assets" element={<FixedAssetsPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/users/:userId" element={<UserDetailPage />} />
         </Route>

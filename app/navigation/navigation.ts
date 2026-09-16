@@ -7,6 +7,7 @@ import {
   Cpu,
   ClipboardList,
   FileText,
+  PackageCheck,
   CalendarDays,
   Archive,
   Users,
@@ -70,6 +71,12 @@ export const NAVIGATION = [
     label: "Dokumentacija",
     path: "/documents",
     icon: FileText,
+    access: { kind: "admin" },
+  },
+  {
+    label: "Osnovna sredstva",
+    path: "/fixed-assets",
+    icon: PackageCheck,
     access: { kind: "admin" },
   },
   {

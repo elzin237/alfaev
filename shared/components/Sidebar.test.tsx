@@ -112,7 +112,7 @@ afterEach(() => {
 });
 
 describe("Sidebar permission visibility", () => {
-  it("shows Dokumentacija in canonical order to an active Admin immediately", () => {
+  it("shows the 12 canonical items to an active Admin in order", () => {
     sidebarMocks.useAuth.mockReturnValue(
       createAuthState({
         profile: { ...createProfile(firstUser), isAdmin: true },
@@ -132,6 +132,7 @@ describe("Sidebar permission visibility", () => {
         "PCB Cards",
         "Radni Nalozi",
         "Dokumentacija",
+        "Osnovna sredstva",
         "Calendar",
         "Archive",
         "Users",
@@ -154,6 +155,8 @@ describe("Sidebar permission visibility", () => {
     expect(screen.queryByRole("link", { name: "Users" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dokumentacija" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Osnovna sredstva" }))
       .not.toBeInTheDocument();
   });
 
