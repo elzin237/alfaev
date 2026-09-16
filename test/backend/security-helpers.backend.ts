@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { PERMISSION_KEYS } from "../../app/auth/permissions";
 import { loadBackendTestEnvironment } from "./env";
 import {
   createSecurityFixtureHarness,
+  type SecurityActor,
   type SecurityFixtureHarness,
 } from "./security-fixtures";
 
@@ -246,6 +247,78 @@ interface ProjectProductComponentRow {
   required_quantity: string;
   updated_at: Date;
   updated_by_user_id: string;
+}
+
+async function callPlanningAs<Row extends QueryResultRow>(
+  database: PoolClient,
+  actor: SecurityActor | null,
+  statement: string,
+  values: unknown[] = [],
+): Promise<Row[]> {
+  await database.query("savepoint planning_actor_call");
+  try {
+    await database.query(
+      "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+      [actor?.authUserId ?? ""],
+    );
+    await database.query(actor ? "set local role authenticated" : "set local role anon");
+    const result = await database.query<Row>(statement, values);
+    await database.query("reset role");
+    await database.query("release savepoint planning_actor_call");
+    return result.rows;
+  } catch (error) {
+    await database.query("rollback to savepoint planning_actor_call");
+    await database.query("release savepoint planning_actor_call");
+    throw error;
+  }
+}
+
+async function createPlanningRows(database: PoolClient, actorId: string): Promise<{
+  projectIds: string[];
+  groupIds: string[];
+  productIds: string[];
+}> {
+  const projectIds = Array.from({ length: 5 }, () => randomUUID());
+  const groupIds = projectIds.map(() => randomUUID());
+  const productIds = Array.from({ length: 3 }, () => randomUUID());
+  const serials = await database.query<{ serial_number: string }>(
+    "select public.allocate_product_serial_number() as serial_number from pg_catalog.generate_series(1, 3)",
+  );
+  for (const [index, status] of [
+    "planned", "in_progress", "on_hold", "completed", "cancelled",
+  ].entries()) {
+    await database.query(
+      "insert into public.projects (id, name, customer_name, status, start_date, delivery_date, completed_at, cancelled_at, created_by_user_id, updated_by_user_id) values ($1, $2, 'Planning Customer', $3, '2026-09-01', '2026-09-30', $4, $5, $6, $6)",
+      [
+        projectIds[index],
+        "Planning " + status + " " + randomUUID(),
+        status,
+        status === "completed" ? "2026-09-30T10:00:00Z" : null,
+        status === "cancelled" ? "2026-09-29T10:00:00Z" : null,
+        actorId,
+      ],
+    );
+    await database.query(
+      "insert into public.project_products (id, project_id, name, created_by_user_id, updated_by_user_id) values ($1, $2, $3, $4, $4)",
+      [groupIds[index], projectIds[index], "Group " + index, actorId],
+    );
+  }
+  for (const [index, productId] of productIds.entries()) {
+    await database.query(
+        "insert into public.products (id, serial_number, name, category, product_kind, is_active, archived_at, archived_by_user_id, created_by_user_id, updated_by_user_id) values ($1, $2, $3, 'Planning', $4, $5, $6, $7, $8, $8)",
+      [
+        productId,
+        serials.rows[index]?.serial_number,
+        index === 0 ? "Literal 100%_\\ Part" : "Planning Choice " + index,
+        index === 1 ? "pcb_finished_good" : "component",
+        index !== 2,
+        index === 2 ? new Date() : null,
+        index === 2 ? actorId : null,
+        actorId,
+      ],
+    );
+  }
+  return { projectIds, groupIds, productIds };
 }
 
 interface ProcurementRequestRow {
@@ -12788,8 +12861,7 @@ describe("Supabase security helpers", () => {
            on namespace.oid = routine.pronamespace
          where namespace.nspname = 'public'
            and (
-             routine.proname like '%project_product%'
-             or routine.proname like '%project_commitment%'
+             routine.proname like '%project_commitment%'
            )
          union all
          select 'relation'::text, relation.relname
@@ -13018,6 +13090,634 @@ describe("Supabase security helpers", () => {
         .limit(1);
       expectPermissionDenied(anonymousRead.error);
     }
+  });
+
+  it("mutates open Project plans atomically with trusted actors, audit, and no physical stock changes", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { projectIds, groupIds, productIds } = await createPlanningRows(
+        database, fixture.actors.admin.profileId,
+      );
+      const delegated = fixture.actors.productCreator;
+      await database.query(
+        "insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id) select $1, id, $2 from public.permission_definitions where key = 'projects.edit'",
+        [delegated.profileId, fixture.actors.admin.profileId],
+      );
+      expect(await callPlanningAs<{ can_edit: boolean; can_view: boolean }>(
+        database, delegated,
+        "select public.has_permission('projects.edit') as can_edit, public.has_permission('projects.view') as can_view",
+      )).toEqual([{ can_edit: true, can_view: false }]);
+
+      const inventoryBefore = await database.query<{
+        product_id: string; quantity: string;
+      }>(
+        "select product_id, quantity from public.inventory_balances where product_id = any($1::uuid[]) order by product_id",
+        [productIds],
+      );
+      const productsBefore = await database.query<ProductRow>(
+        "select * from public.products where id = any($1::uuid[]) order by id",
+        [productIds],
+      );
+      const projectsBefore = await database.query<ProjectRow>(
+        "select *, start_date::text as start_date, delivery_date::text as delivery_date from public.projects where id = any($1::uuid[]) order by id",
+        [projectIds],
+      );
+
+      const created = await callPlanningAs<{ id: string }>(
+        database, delegated,
+        "select public.create_project_product($1, $2) as id",
+        [projectIds[0], "  B24  "],
+      );
+      const duplicateName = await callPlanningAs<{ id: string }>(
+        database, fixture.actors.admin,
+        "select public.create_project_product($1, $2) as id",
+        [projectIds[0], "B24"],
+      );
+      expect(created[0]?.id).toEqual(expect.any(String));
+      expect(duplicateName[0]?.id).not.toBe(created[0]?.id);
+      const createdId = created[0]?.id;
+      const createdRow = await database.query<ProjectProductRow>(
+        "select * from public.project_products where id = $1", [createdId],
+      );
+      expect(createdRow.rows[0]).toMatchObject({
+        name: "B24",
+        project_id: projectIds[0],
+        created_by_user_id: delegated.profileId,
+        updated_by_user_id: delegated.profileId,
+      });
+
+      const updated = await callPlanningAs<{ id: string }>(
+        database, delegated, "select public.update_project_product($1, $2) as id",
+        [createdId, "  B25  "],
+      );
+      expect(updated).toEqual([{ id: createdId }]);
+      const editedRow = await database.query<ProjectProductRow>(
+        "select * from public.project_products where id = $1", [createdId],
+      );
+      expect(editedRow.rows[0]?.name).toBe("B25");
+      await callPlanningAs(
+        database, delegated, "select public.update_project_product($1, $2)",
+        [createdId, " B25 "],
+      );
+      const afterNoop = await database.query<ProjectProductRow>(
+        "select * from public.project_products where id = $1", [createdId],
+      );
+      expect(afterNoop.rows).toEqual(editedRow.rows);
+
+      const component = await callPlanningAs<{ id: string }>(
+        database, delegated,
+        "select public.create_project_product_component($1, $2, $3) as id",
+        [createdId, productIds[0], 12],
+      );
+      const pcb = await callPlanningAs<{ id: string }>(
+        database, fixture.actors.admin,
+        "select public.create_project_product_component($1, $2, $3) as id",
+        [createdId, productIds[1], 3],
+      );
+      const anotherGroup = await callPlanningAs<{ id: string }>(
+        database, delegated,
+        "select public.create_project_product_component($1, $2, $3) as id",
+        [groupIds[0], productIds[0], 5],
+      );
+      expect([component[0]?.id, pcb[0]?.id, anotherGroup[0]?.id]
+        .every(Boolean)).toBe(true);
+
+      await expect(callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.remove_project_product($1)", [createdId],
+      )).rejects.toMatchObject({ code: "PPL03" });
+      await callPlanningAs(
+        database, delegated,
+        "select public.update_project_product_component($1, $2, $3)",
+        [component[0]?.id, productIds[0], 15],
+      );
+      const editedComponent = await database.query<ProjectProductComponentRow>(
+        "select * from public.project_product_components where id = $1",
+        [component[0]?.id],
+      );
+      expect(editedComponent.rows[0]).toMatchObject({
+        product_id: productIds[0],
+        required_quantity: "15",
+        updated_by_user_id: delegated.profileId,
+      });
+      await callPlanningAs(
+        database, delegated,
+        "select public.update_project_product_component($1, $2, $3)",
+        [component[0]?.id, productIds[0], 15],
+      );
+      const afterComponentNoop = await database.query<ProjectProductComponentRow>(
+        "select * from public.project_product_components where id = $1",
+        [component[0]?.id],
+      );
+      expect(afterComponentNoop.rows).toEqual(editedComponent.rows);
+      await callPlanningAs(
+        database, delegated,
+        "select public.update_project_product_component($1, $2, $3)",
+        [component[0]?.id, productIds[1], 15],
+      ).then(
+        () => { throw new Error("Duplicate Product reference should have failed"); },
+        (error: unknown) => { expect(error).toMatchObject({ code: "PPL02" }); },
+      );
+
+      await callPlanningAs(
+        database, delegated,
+        "select public.remove_project_product_component($1)", [pcb[0]?.id],
+      );
+      await callPlanningAs(
+        database, delegated,
+        "select public.update_project_product_component($1, $2, $3)",
+        [component[0]?.id, productIds[1], 17],
+      );
+      expect((await database.query<ProjectProductComponentRow>(
+        "select * from public.project_product_components where id = $1",
+        [component[0]?.id],
+      )).rows[0]).toMatchObject({
+        project_product_id: createdId,
+        product_id: productIds[1],
+        required_quantity: "17",
+      });
+      await callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.remove_project_product_component($1)", [component[0]?.id],
+      );
+      await callPlanningAs(
+        database, delegated,
+        "select public.remove_project_product($1)", [createdId],
+      );
+      expect((await database.query(
+        "select id from public.project_products where id = $1", [createdId],
+      )).rows).toEqual([]);
+
+      const audit = await database.query<{
+        action_type: string; actor_user_id: string; before_data: Record<string, unknown> | null;
+        after_data: Record<string, unknown> | null; entity_id: string;
+      }>(
+        "select action_type, actor_user_id, entity_id, before_data, after_data from public.audit_logs where entity_id = any($1::uuid[]) order by created_at, id",
+        [[createdId, duplicateName[0]?.id, component[0]?.id, pcb[0]?.id, anotherGroup[0]?.id]],
+      );
+      const eventCounts = new Map<string, number>();
+      for (const entry of audit.rows) {
+        eventCounts.set(entry.action_type, (eventCounts.get(entry.action_type) ?? 0) + 1);
+        expect(entry.actor_user_id).toBe(
+          entry.entity_id === pcb[0]?.id
+            && entry.action_type === "project_product_component.created"
+          || entry.entity_id === component[0]?.id
+            && entry.action_type === "project_product_component.removed"
+          || entry.entity_id === duplicateName[0]?.id
+            ? fixture.actors.admin.profileId : delegated.profileId,
+        );
+      }
+      expect(Object.fromEntries(eventCounts)).toEqual({
+        "project_product.created": 2,
+        "project_product.updated": 1,
+        "project_product_component.created": 3,
+        "project_product_component.updated": 2,
+        "project_product_component.removed": 2,
+        "project_product.removed": 1,
+      });
+      expect(audit.rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          entity_id: component[0]?.id,
+          action_type: "project_product_component.updated",
+          before_data: expect.objectContaining({ required_quantity: 12 }),
+          after_data: expect.objectContaining({ required_quantity: 15 }),
+        }),
+      ]));
+      // Exercise the same six authorized operations as Admin, independently
+      // of the delegated projects.edit actor used above.
+      const adminGroup = await callPlanningAs<{ id: string }>(
+        database, fixture.actors.admin,
+        "select public.create_project_product($1, 'Admin Group') as id",
+        [projectIds[1]],
+      );
+      await callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.update_project_product($1, 'Admin Edited Group')",
+        [adminGroup[0]?.id],
+      );
+      const adminComponent = await callPlanningAs<{ id: string }>(
+        database, fixture.actors.admin,
+        "select public.create_project_product_component($1, $2, 2) as id",
+        [adminGroup[0]?.id, productIds[0]],
+      );
+      await callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.update_project_product_component($1, $2, 4)",
+        [adminComponent[0]?.id, productIds[0]],
+      );
+      await callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.remove_project_product_component($1)",
+        [adminComponent[0]?.id],
+      );
+      await callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.remove_project_product($1)",
+        [adminGroup[0]?.id],
+      );
+      expect(await database.query<ProductRow>(
+        "select * from public.products where id = any($1::uuid[]) order by id",
+        [productIds],
+      )).toEqual(productsBefore);
+      expect(await database.query<ProjectRow>(
+        "select *, start_date::text as start_date, delivery_date::text as delivery_date from public.projects where id = any($1::uuid[]) order by id",
+        [projectIds],
+      )).toEqual(projectsBefore);
+      expect(await database.query(
+        "select product_id, quantity from public.inventory_balances where product_id = any($1::uuid[]) order by product_id",
+        [productIds],
+      )).toEqual(inventoryBefore);
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.inventory_movements where product_id = any($1::uuid[])",
+        [productIds],
+      )).rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("denies unauthorized, closed, invalid, or duplicate Project planning mutations without audit", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { projectIds, groupIds, productIds } = await createPlanningRows(
+        database, fixture.actors.admin.profileId,
+      );
+      const componentId = randomUUID();
+      await database.query(
+        "insert into public.project_product_components (id, project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id) values ($1, $2, $3, 8, $4, $4)",
+        [componentId, groupIds[0], productIds[0], fixture.actors.admin.profileId],
+      );
+      const archiveOnly = fixture.actors.productCreator;
+      const createOnly = fixture.actors.productEditor;
+      const editor = fixture.actors.supplierEditor;
+      await database.query(
+        "insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id) select grants.actor_id, definition.id, $3 from unnest($1::uuid[], $2::text[]) as grants(actor_id, permission_key) join public.permission_definitions as definition on definition.key = grants.permission_key",
+        [
+          [archiveOnly.profileId, createOnly.profileId, editor.profileId],
+          ["projects.archive", "projects.create", "projects.edit"],
+          fixture.actors.admin.profileId,
+        ],
+      );
+      const cases: Array<{ sql: string; args: unknown[] }> = [
+        { sql: "select public.create_project_product($1, 'Denied')", args: [projectIds[0]] },
+        { sql: "select public.update_project_product($1, 'Denied')", args: [groupIds[0]] },
+        { sql: "select public.remove_project_product($1)", args: [groupIds[1]] },
+        { sql: "select public.create_project_product_component($1, $2, 1)", args: [groupIds[0], productIds[1]] },
+        { sql: "select public.update_project_product_component($1, $2, 2)", args: [componentId, productIds[0]] },
+        { sql: "select public.remove_project_product_component($1)", args: [componentId] },
+      ];
+      for (const actor of [
+        fixture.actors.permitted,
+        archiveOnly,
+        createOnly,
+        fixture.actors.brandManager,
+        fixture.actors.unpermitted,
+        fixture.actors.inactive,
+        null,
+      ]) {
+        for (const testCase of cases) {
+          await expect(callPlanningAs(
+            database, actor, testCase.sql, testCase.args,
+          )).rejects.toMatchObject({ code: "42501" });
+        }
+      }
+      for (const index of [3, 4]) {
+        const closedComponentId = randomUUID();
+        await database.query(
+          "insert into public.project_product_components (id, project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id) values ($1, $2, $3, 1, $4, $4)",
+          [closedComponentId, groupIds[index], productIds[0], fixture.actors.admin.profileId],
+        );
+        for (const actor of [fixture.actors.admin, editor]) {
+          const closedCases: Array<{ sql: string; args: unknown[] }> = [
+            { sql: "select public.create_project_product($1, 'Closed')", args: [projectIds[index]] },
+            { sql: "select public.update_project_product($1, 'Closed')", args: [groupIds[index]] },
+            { sql: "select public.remove_project_product($1)", args: [groupIds[index]] },
+            { sql: "select public.create_project_product_component($1, $2, 1)", args: [groupIds[index], productIds[0]] },
+          ];
+          closedCases.push(
+            { sql: "select public.update_project_product_component($1, $2, 2)", args: [closedComponentId, productIds[0]] },
+            { sql: "select public.remove_project_product_component($1)", args: [closedComponentId] },
+          );
+          for (const testCase of closedCases) {
+            await expect(callPlanningAs(
+              database, actor, testCase.sql, testCase.args,
+            )).rejects.toMatchObject({ code: "PPL01" });
+          }
+        }
+      }
+
+      const admin = fixture.actors.admin;
+      for (const index of [0, 1, 2]) {
+        const result = await callPlanningAs<{ id: string }>(
+          database, index === 0 ? editor : admin,
+          "select public.create_project_product($1, 'Open') as id",
+          [projectIds[index]],
+        );
+        expect(result[0]?.id).toEqual(expect.any(String));
+      }
+      const invalid: Array<{ sql: string; args: unknown[]; code: string }> = [
+        { sql: "select public.create_project_product($1, '   ')", args: [projectIds[0]], code: "22023" },
+        { sql: "select public.update_project_product($1, '')", args: [groupIds[0]], code: "22023" },
+        { sql: "select public.create_project_product(null::uuid, 'X')", args: [], code: "22023" },
+        { sql: "select public.create_project_product($1, 'X')", args: [randomUUID()], code: "P0002" },
+        { sql: "select public.create_project_product_component($1, $2, 0)", args: [groupIds[0], productIds[1]], code: "22023" },
+        { sql: "select public.create_project_product_component($1, $2, -1)", args: [groupIds[0], productIds[1]], code: "22023" },
+        { sql: "select public.create_project_product_component($1, $2, 1)", args: [groupIds[0], productIds[2]], code: "PPL04" },
+        { sql: "select public.create_project_product_component($1, $2, 1)", args: [groupIds[0], randomUUID()], code: "PPL04" },
+        { sql: "select public.create_project_product_component($1, $2, 1)", args: [groupIds[0], productIds[0]], code: "PPL02" },
+        { sql: "select public.update_project_product_component($1, $2, 0)", args: [componentId, productIds[0]], code: "22023" },
+        { sql: "select public.update_project_product_component($1, $2, -1)", args: [componentId, productIds[0]], code: "22023" },
+        { sql: "select public.update_project_product_component($1, $2, 2)", args: [componentId, productIds[2]], code: "PPL04" },
+      ];
+      for (const testCase of invalid) {
+        await expect(callPlanningAs(
+          database, admin, testCase.sql, testCase.args,
+        )).rejects.toMatchObject({ code: testCase.code });
+      }
+      // Archiving after the original requirement does not invalidate unchanged
+      // historical Product references during a meaningful quantity edit.
+      await database.query(
+        "update public.products set is_active = false, archived_at = now(), archived_by_user_id = $2, updated_at = now(), updated_by_user_id = $2 where id = $1",
+        [productIds[0], admin.profileId],
+      );
+      await callPlanningAs(
+        database, editor,
+        "select public.update_project_product_component($1, $2, 9)",
+        [componentId, productIds[0]],
+      );
+      await expect(callPlanningAs(
+        database, admin,
+        "select public.create_project_product_component($1, $2, 1)",
+        [groupIds[1], productIds[0]],
+      )).rejects.toMatchObject({ code: "PPL04" });
+
+      expect((await database.query<ProjectProductComponentRow>(
+        "select * from public.project_product_components where id = $1", [componentId],
+      )).rows[0]).toMatchObject({
+        product_id: productIds[0], required_quantity: "9",
+        updated_by_user_id: editor.profileId,
+      });
+      const events = await database.query<{ action_type: string; count: number }>(
+        "select action_type, count(*)::integer as count from public.audit_logs where entity_type in ('project_product', 'project_product_component') group by action_type order by action_type",
+      );
+      expect(events.rows).toEqual([
+        { action_type: "project_product_component.updated", count: 1 },
+        { action_type: "project_product.created", count: 3 },
+      ]);
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.inventory_movements where product_id = any($1::uuid[])",
+        [productIds],
+      )).rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("offers only active narrow Product choices to Project editors without Inventory read access", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { productIds } = await createPlanningRows(
+        database, fixture.actors.admin.profileId,
+      );
+      const editor = fixture.actors.productCreator;
+      await database.query(
+        "insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id) select $1, id, $2 from public.permission_definitions where key = 'projects.edit'",
+        [editor.profileId, fixture.actors.admin.profileId],
+      );
+      expect(await callPlanningAs<{ can_view: boolean; can_inventory: boolean }>(
+        database, editor,
+        "select public.has_permission('projects.view') as can_view, public.has_permission('inventory.view') as can_inventory",
+      )).toEqual([{ can_view: false, can_inventory: false }]);
+      const rows = await callPlanningAs<{
+        product_id: string; serial_number: string;
+        name: string; product_kind: string;
+      }>(
+        database, editor, "select * from public.search_project_component_product_choices()",
+      );
+      expect(rows.filter((row) => productIds.includes(row.product_id))).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            product_id: productIds[0], product_kind: "component",
+          }),
+          expect.objectContaining({
+            product_id: productIds[1], product_kind: "pcb_finished_good",
+          }),
+        ]),
+      );
+      expect(rows.some((row) => row.product_id === productIds[2])).toBe(false);
+      expect(rows.every((row) => Object.keys(row).sort().join(",") ===
+        "name,product_id,product_kind,serial_number")).toBe(true);
+      const serial = rows.find((row) => row.product_id === productIds[1])?.serial_number;
+      expect((await callPlanningAs<{ product_id: string }>(
+        database, editor,
+        "select * from public.search_project_component_product_choices($1)",
+        [serial?.slice(0, 5)],
+      )).some((row) => row.product_id === productIds[1])).toBe(true);
+      for (const literal of ["%", "_", "\\"]) {
+        const matched = await callPlanningAs<{ product_id: string }>(
+          database, editor,
+          "select * from public.search_project_component_product_choices($1)",
+          [literal],
+        );
+        expect(matched.filter((row) => productIds.includes(row.product_id))
+          .map((row) => row.product_id)).toEqual([productIds[0]]);
+      }
+      expect((await callPlanningAs<{ product_id: string }>(
+        database, fixture.actors.admin,
+        "select * from public.search_project_component_product_choices('choice 1')",
+      )).some((row) => row.product_id === productIds[1])).toBe(true);
+      for (const actor of [
+        fixture.actors.permitted, fixture.actors.inactive, null,
+      ]) {
+        await expect(callPlanningAs(
+          database, actor,
+          "select * from public.search_project_component_product_choices()",
+        )).rejects.toMatchObject({ code: "42501" });
+      }
+
+      const security = await database.query<{
+        anonymous_execute: boolean; authenticated_execute: boolean;
+        is_definer: boolean; settings: string[]; name: string;
+      }>(
+        "select routine.proname as name, routine.prosecdef as is_definer, routine.proconfig as settings, pg_catalog.has_function_privilege('anon', routine.oid, 'execute') as anonymous_execute, pg_catalog.has_function_privilege('authenticated', routine.oid, 'execute') as authenticated_execute from pg_catalog.pg_proc as routine join pg_catalog.pg_namespace as ns on ns.oid = routine.pronamespace where ns.nspname = 'public' and routine.proname = any($1::text[]) order by routine.proname",
+        [[
+          "current_project_planning_mutation_actor_id",
+          "lock_open_project_for_planning",
+          "create_project_product",
+          "update_project_product",
+          "remove_project_product",
+          "create_project_product_component",
+          "update_project_product_component",
+          "remove_project_product_component",
+          "search_project_component_product_choices",
+        ]],
+      );
+      expect(security.rows).toHaveLength(9);
+      for (const row of security.rows) {
+        expect(row).toMatchObject({
+          anonymous_execute: false,
+          is_definer: true,
+          settings: ["search_path=\"\""],
+        });
+        expect(row.authenticated_execute).toBe(
+          !["current_project_planning_mutation_actor_id",
+            "lock_open_project_for_planning"].includes(row.name),
+        );
+      }
+      for (const table of ["project_products", "project_product_components"]) {
+        const direct = await database.query<{
+          can_insert: boolean; can_update: boolean; can_delete: boolean;
+        }>(
+          "select pg_catalog.has_table_privilege('authenticated', $1::text, 'insert') as can_insert, pg_catalog.has_table_privilege('authenticated', $1::text, 'update') as can_update, pg_catalog.has_table_privilege('authenticated', $1::text, 'delete') as can_delete",
+          ["public." + table],
+        );
+        expect(direct.rows).toEqual([{
+          can_insert: false, can_update: false, can_delete: false,
+        }]);
+      }
+    });
+  });
+
+  it("rolls back Project planning creation when its immutable audit append fails", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { projectIds, groupIds, productIds } = await createPlanningRows(
+        database, fixture.actors.admin.profileId,
+      );
+      await database.query(
+        "create function public.test_reject_project_planning_audit() returns trigger language plpgsql set search_path = '' as $test_function$ begin if new.action_type in ('project_product.created', 'project_product_component.created') then raise exception 'Test audit rejection' using errcode = 'TST01'; end if; return new; end; $test_function$",
+      );
+      await database.query(
+        "create trigger test_reject_project_planning_audit before insert on public.audit_logs for each row execute function public.test_reject_project_planning_audit()",
+      );
+      await expect(callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.create_project_product($1, 'Audit Rejected')",
+        [projectIds[0]],
+      )).rejects.toMatchObject({ code: "TST01" });
+      await expect(callPlanningAs(
+        database, fixture.actors.admin,
+        "select public.create_project_product_component($1, $2, 8)",
+        [groupIds[0], productIds[0]],
+      )).rejects.toMatchObject({ code: "TST01" });
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.project_products where project_id = $1 and name = 'Audit Rejected'",
+        [projectIds[0]],
+      )).rows).toEqual([{ count: 0 }]);
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.project_product_components where project_product_id = $1",
+        [groupIds[0]],
+      )).rows).toEqual([{ count: 0 }]);
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.audit_logs where action_type like 'project_product%'",
+      )).rows).toEqual([{ count: 0 }]);
+      expect((await database.query<{ count: number }>(
+        "select count(*)::integer as count from public.inventory_movements where product_id = any($1::uuid[])",
+        [productIds],
+      )).rows).toEqual([{ count: 0 }]);
+    });
+  });
+
+  it("serializes competing duplicate requirements and leaves one audited row", async () => {
+    const fixture = requireHarness();
+    const projectId = randomUUID();
+    const groupId = randomUUID();
+    const productId = randomUUID();
+    const applicationName = "alfaev-planning-wait-" + randomUUID();
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const first = clients[0];
+      const second = clients[1];
+      const observer = clients[2];
+      if (!first || !second || !observer) {
+        throw new Error("Project planning concurrency clients unavailable");
+      }
+      await observer.query("begin");
+      await observer.query(
+        "insert into public.projects (id, name, customer_name, start_date, delivery_date, created_by_user_id, updated_by_user_id) values ($1, 'Concurrency Project', 'Customer', '2026-09-01', '2026-09-30', $2, $2)",
+        [projectId, fixture.actors.admin.profileId],
+      );
+      await observer.query(
+        "insert into public.project_products (id, project_id, name, created_by_user_id, updated_by_user_id) values ($1, $2, 'Concurrent Group', $3, $3)",
+        [groupId, projectId, fixture.actors.admin.profileId],
+      );
+      await observer.query(
+        "insert into public.products (id, serial_number, name, category, product_kind, created_by_user_id, updated_by_user_id) values ($1, $2, 'Concurrent Component', 'Planning', 'component', $3, $3)",
+        [productId, createTestSerialNumber(), fixture.actors.admin.profileId],
+      );
+      await observer.query("commit");
+      try {
+        await first.query("begin");
+        await first.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await first.query("set local role authenticated");
+        const firstResult = await first.query<{ id: string }>(
+          "select public.create_project_product_component($1, $2, 2) as id",
+          [groupId, productId],
+        );
+        expect(firstResult.rows[0]?.id).toEqual(expect.any(String));
+
+        await second.query("begin");
+        await second.query(
+          "select pg_catalog.set_config('application_name', $1::text, true)",
+          [applicationName],
+        );
+        await second.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.actors.admin.authUserId],
+        );
+        await second.query("set local role authenticated");
+        const competing = second.query(
+          "select public.create_project_product_component($1, $2, 3)",
+          [groupId, productId],
+        ).then(
+          () => null,
+          (error: unknown) => error,
+        );
+
+        let lockObserved = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const activity = await observer.query<ActivityWaitRow>(
+            "select wait_event_type, wait_event from pg_catalog.pg_stat_activity where application_name = $1",
+            [applicationName],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            lockObserved = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(lockObserved).toBe(true);
+        await first.query("commit");
+        expect(await competing).toMatchObject({ code: "PPL02" });
+        await second.query("rollback");
+        const result = await observer.query<{
+          audit_count: number; movement_count: number;
+          quantity: string; relation_count: number;
+        }>(
+          "select (select count(*)::integer from public.project_product_components where project_product_id = $1 and product_id = $2) as relation_count, (select count(*)::integer from public.audit_logs where action_type = 'project_product_component.created' and entity_id in (select id from public.project_product_components where project_product_id = $1 and product_id = $2)) as audit_count, (select count(*)::integer from public.inventory_movements where product_id = $2) as movement_count, (select quantity::text from public.inventory_balances where product_id = $2) as quantity",
+          [groupId, productId],
+        );
+        expect(result.rows).toEqual([{
+          audit_count: 1, movement_count: 0, quantity: "0", relation_count: 1,
+        }]);
+      } finally {
+        await first.query("rollback");
+        await second.query("rollback");
+        await observer.query("begin");
+        await observer.query("set local session_replication_role = replica");
+        await observer.query(
+          "delete from public.audit_logs where action_type = 'project_product_component.created' and entity_id in (select id from public.project_product_components where project_product_id = $1)",
+          [groupId],
+        );
+        await observer.query(
+          "delete from public.project_product_components where project_product_id = $1",
+          [groupId],
+        );
+        await observer.query("delete from public.project_products where id = $1", [groupId]);
+        await observer.query("delete from public.inventory_balances where product_id = $1", [productId]);
+        await observer.query("delete from public.products where id = $1", [productId]);
+        await observer.query("delete from public.projects where id = $1", [projectId]);
+        await observer.query("commit");
+      }
+    });
   });
 
   it("enforces the canonical ProcurementRequest schema, lifecycle, snapshot, and historical foreign keys", async () => {
