@@ -60,6 +60,7 @@ Special rules:
 
 - Calendar is visible to every authenticated user.
 - Users is never visible to non-admin users.
+- Dokumentacija and Osnovna sredstva are never visible to non-admin users.
 - Dashboard may be visible when `dashboard.view` is granted.
 - Dashboard widgets themselves still inherit source-module permissions.
 
@@ -107,20 +108,40 @@ Expected eventual widgets may include:
 
 ## Project lifecycle
 
-Allowed statuses:
-
-`Planned → In Progress → On Hold / Completed / Cancelled`
+Allowed stored statuses are Planned, In Progress, On Hold, Completed, and Cancelled.
+Normal Project editing can select only Planned, In Progress, or On Hold. Completed is
+entered only by the trusted final-Work-Order Finish flow, while Cancelled is entered
+only by the separate trusted cancellation flow.
 
 Transitions are not required to be a rigid state machine unless later specified, but only allowed status values may be stored.
 
 ### Completed Project
 
-1. Admin/authorized user changes status to Completed.
-2. Normal Project business fields become read-only.
-3. Historical material usage remains visible.
-4. If legitimate work must continue:
+1. A trusted Finish operation completes the final unfinished Work Order for the Project.
+2. The same transaction automatically changes the Project to Completed and sets server-owned completion metadata.
+3. Normal Project business fields and planned requirements become read-only.
+4. Historical planned and actual material usage remains visible.
+5. If legitimate work must continue:
    - Admin explicitly reopens Project to In Progress.
-5. Reopening is audited.
+6. Reopening is audited and makes still-outstanding requirements count as commitments again.
+
+Normal Project editing may select Planned, In Progress, or On Hold. It cannot set
+Completed directly. Existing Completed Projects remain preserved.
+
+## Project Products and commitments
+
+1. An authorized Project editor adds one or more Project Products, such as B24 or Main Cabinet.
+2. For each Project Product, the editor selects active stock-tracked Products and enters the planned total required quantity.
+3. AlfaEV prevents duplicate use of one Product within the same Project Product.
+4. Planning updates do not change InventoryBalance or create InventoryMovement.
+5. Inventory and Project views derive outstanding commitment separately for each Project and Product, then sum those values by Product.
+6. Only qualifying physical consumption for that same Project and Product reduces its commitment; one Project's consumption never offsets another's.
+7. Completed or Cancelled Projects contribute no commitment; unused material is released without a stock movement.
+
+Qualifying consumption includes finished Work Order deductions and, where applicable,
+Project-linked PCB production input deductions. Additions/output movements, unrelated
+manual adjustments, and another Project's consumption are excluded, and the existing
+PCB anti-double-counting rule remains authoritative.
 
 ## Project material usage
 
@@ -433,13 +454,17 @@ If insufficient:
 
 If valid, trusted Finish operation:
 
-1. deduct every consumed Product
-2. create InventoryMovement records
-3. mark Work Order Finished
-4. record finisher/time
-5. generate/finalize permanent PDF
-6. create AuditLog
-7. commit/finalize safely
+1. re-check Project planning and prevent double-allocation across its Draft Work Orders
+2. deduct every consumed Product exactly once
+3. create Project-linked InventoryMovement records
+4. mark Work Order Finished
+5. record finisher/time
+6. reduce only that Project's per-Product outstanding commitment through qualifying Project-linked physical consumption
+7. check for other unfinished Work Orders on the same Project
+8. if none remain, automatically complete the Project and release unused commitment
+9. generate/finalize permanent PDF
+10. create required Work Order, Inventory, and Project-completion AuditLog history
+11. commit/finalize safely as one coherent operation
 
 After Finish:
 
@@ -450,9 +475,43 @@ After Finish:
 - no edit
 - no delete.
 
+One Project may have one or many Work Orders. Finishing one keeps the Project open
+while another unfinished Work Order exists. ProjectProductComponent quantities are
+never deducted separately from the Work Order consumption.
+
 ---
 
-# 13. Finished Work Order Correction Flow
+# 13. Documentation Flow
+
+Admin only:
+
+1. Open Dokumentacija.
+2. Create or edit Name, fixed Category, Document Date, and exact non-negative Amount.
+3. Optionally upload one validated PDF to private Supabase Storage.
+4. Use authorized private/signed access to view or download it.
+5. Replace or remove the PDF only through a trusted Admin business operation.
+6. Archive rather than hard-delete historical records.
+7. Audit meaningful record, archive, and PDF changes.
+
+Non-admin users see no navigation item and cannot access the route, data, or PDF.
+
+---
+
+# 14. Fixed Assets Flow
+
+Admin only:
+
+1. Open Osnovna sredstva.
+2. Create or edit Name, fixed Category, Purchase Date, and positive whole-number Quantity.
+3. Archive rather than hard-delete historical assets.
+4. Audit meaningful create/edit/archive changes.
+
+Fixed Asset quantity does not update Product, Procurement, InventoryBalance, or
+InventoryMovement.
+
+---
+
+# 15. Finished Work Order Correction Flow
 
 Finished Work Orders are never edited.
 
@@ -469,7 +528,7 @@ The exact correction UI can be finalized before implementation of that workflow,
 
 ---
 
-# 14. Calendar Flow
+# 16. Calendar Flow
 
 ## View
 
@@ -498,7 +557,7 @@ No approval workflow exists for Vacation or Business Trip.
 
 ---
 
-# 15. Archive Flow
+# 17. Archive Flow
 
 ## Admin
 
@@ -521,7 +580,7 @@ No user can:
 
 ---
 
-# 16. Users / Permission Management Flow
+# 18. Users / Permission Management Flow
 
 Admin-only.
 
@@ -603,7 +662,7 @@ Non-admin users never gain permission-management capability.
 
 ---
 
-# 17. Permission Change Runtime Behavior
+# 19. Permission Change Runtime Behavior
 
 After permission changes:
 
@@ -616,13 +675,15 @@ Frontend cached permission state must not allow stale access to protected backen
 
 ---
 
-# 18. Archive/Audit Creation Principle
+# 20. Archive/Audit Creation Principle
 
 Meaningful business operations should create Audit records from trusted domain/backend operations.
 
 Examples:
 
 - Project created/edited/status changed
+- Project Product/component requirement changed
+- Project automatically completed by final Work Order Finish
 - Nabavka created/status changed/resolved
 - Supplier changed
 - Product created/archived
@@ -631,6 +692,8 @@ Examples:
 - PCB BOM version changed
 - PCB production completed
 - Work Order created/deleted/finished
+- Documentation record/PDF changed
+- Fixed Asset changed
 - Calendar changed
 - User activated/deactivated
 - permission granted/revoked.
@@ -641,10 +704,11 @@ Do not create audit records for:
 - typing into unsaved fields
 - filtering/searching
 - cosmetic UI interactions.
+- pure derived commitment/availability calculations.
 
 ---
 
-# 19. Cross-Module Traceability Flow
+# 21. Cross-Module Traceability Flow
 
 AlfaEV must make important business history navigable across modules.
 
@@ -670,7 +734,7 @@ Archive entry should make it possible to identify/open the affected business rec
 
 ---
 
-# 20. Project Material Reporting Anti-Double-Count Rule
+# 22. Project Material Reporting Anti-Double-Count Rule
 
 Project material reporting must preserve physical truth.
 
@@ -691,7 +755,7 @@ This avoids double-counting while keeping a traceable physical flow.
 
 ---
 
-# 21. Logout Flow
+# 23. Logout Flow
 
 1. User triggers Logout.
 2. Authentication session is ended.
@@ -701,7 +765,7 @@ This avoids double-counting while keeping a traceable physical flow.
 
 ---
 
-# 22. Application Flow Definition of Done
+# 24. Application Flow Definition of Done
 
 The application flow is correctly implemented when:
 
@@ -718,6 +782,11 @@ The application flow is correctly implemented when:
 - Finished Work Orders are immutable
 - Work Order PDFs remain tied to finished records
 - Project material usage is derived without double counting
+- Project Products model planned requirements without changing physical Inventory
+- one Project may have multiple Work Orders without double-allocation
+- final Work Order Finish automatically completes the Project atomically
+- Documentation PDFs remain private and Admin-only
+- Fixed Assets remain Admin-only and separate from Inventory
 - Calendar is globally readable but Admin-managed
 - Archive is immutable
 - Users is completely Admin-only

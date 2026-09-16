@@ -16,6 +16,8 @@ AlfaEV is an internal Alfa Proteh operational system for managing:
 - products/components and inventory / Skladište
 - PCB card definitions and PCB production
 - work orders / Radni Nalozi
+- Documentation / Dokumentacija
+- fixed assets / Osnovna sredstva
 - company calendar
 - users and per-user permissions
 - permanent audit/archive history
@@ -35,9 +37,11 @@ Final main navigation:
 5. Skladište
 6. PCB Cards
 7. Radni Nalozi
-8. Calendar
-9. Archive
-10. Users
+8. Dokumentacija
+9. Osnovna sredstva
+10. Calendar
+11. Archive
+12. Users
 
 Unused placeholder pages from the current prototype must be removed.
 
@@ -85,9 +89,48 @@ Each Project contains at minimum:
 - status
 - start date
 - delivery/due date
-- automatically derived components/materials consumed
+- planned Project Products and their required stock-tracked components
+- automatically derived components/materials actually consumed
 
-Project material usage must not be manually maintained as a separate free-text list.
+Project Products are Project-specific deliverable/grouping records such as B24,
+Control Unit, or Main Cabinet. They are not Inventory Products and do not receive
+AlfaEV Serial Numbers merely because they exist on a Project.
+
+Each Project Product may contain multiple component requirements. A requirement
+references an eligible stock-tracked AlfaEV Product and records the planned total
+whole-number quantity required for that Project Product. The same Product cannot
+appear twice within one Project Product. Creating or changing a requirement may
+select only an active Product; later Product archival preserves history.
+
+Planning and physical usage are separate:
+
+- planned Project requirements create outstanding commitments, not Inventory movements
+- physical Inventory remains `InventoryBalance.quantity`
+- actual consumption remains derived from completed Project-linked Inventory movements
+- Draft Work Orders never deduct stock
+- Project planning must never directly decrement Inventory
+
+Commitment is calculated separately for each Project and Product before it is summed
+for Inventory display. For an open Project P and Product X:
+
+- planned requirement is the sum of Product X requirements within Project P
+- actual consumption is qualifying physical consumption of Product X attributable to Project P
+- outstanding commitment is `max(planned requirement - actual consumption, 0)`
+
+`committed_to_projects` for Product X is then the sum of those per-Project outstanding
+values across Projects in `planned`, `in_progress`, or `on_hold`. Consumption from one
+Project must never reduce another Project's commitment. Completed and Cancelled
+Projects contribute zero. Reopening a Completed Project to `in_progress` makes that
+Project's own still-outstanding requirement contribute again after subtracting only
+that Project's own prior consumption.
+
+Qualifying actual consumption includes finished Work Order deductions linked to the
+same Project and Product and, where applicable, Project-linked PCB production input
+deductions. Inventory additions/outputs, unrelated manual adjustments, and another
+Project's consumption do not reduce the commitment. Preserve the material-usage rule
+that prevents double-counting raw PCB inputs and later finished-PCB consumption.
+
+Project material usage must not be maintained as an unrelated free-text list.
 
 Material usage is derived from completed operations linked to the Project:
 
@@ -96,6 +139,11 @@ Material usage is derived from completed operations linked to the Project:
 - PCB production contributes when that production run is linked to the Project
 
 Project totals must remain traceable back to the original completed operation.
+
+Normal Project editing may use Planned, In Progress, and On Hold, but may no longer
+set Completed manually. Completing the final unfinished Work Order for the Project
+automatically completes the Project in the same trusted transaction. The existing
+Admin-only Completed to In Progress reopen remains supported.
 
 Locked Project statuses:
 
@@ -300,6 +348,16 @@ The system records actor, time, quantities and source context through Inventory 
 
 Inventory may never go below zero.
 
+Inventory must eventually display three distinct quantities per Product:
+
+- Physical Quantity: the real `InventoryBalance.quantity`
+- Committed to Projects: outstanding planned requirement for open Projects after actual Project-linked consumption
+- Available after Commitments: Physical minus Committed
+
+Available after Commitments is not clamped to zero. A negative value is a useful
+shortage signal and must be shown clearly. Planning commitments do not create
+InventoryMovement rows and do not reserve or deduct physical stock.
+
 ---
 
 ## 8. PCB Cards
@@ -405,6 +463,11 @@ Each Work Order contains at minimum:
 - consumed materials/components table
 - short description
 
+One Project may have one or many Work Orders. Do not impose a restriction of one
+Work Order per Project. Draft Work Order materials must integrate with the Project's
+planned component requirements, and allocation across multiple Draft Work Orders
+must not double-allocate one planned requirement.
+
 ### Work Order number
 
 AlfaEV generates the human-readable Work Order number automatically.
@@ -468,8 +531,14 @@ Finishing a Work Order:
 - records actor and timestamp
 - creates audit history
 - generates a printable PDF
+- reduces the Project's outstanding commitment through the resulting Project-linked physical consumption
+- automatically completes the Project when no other unfinished Work Order remains
 
 Inventory is deducted only on Finish.
+
+The final Work Order transaction must atomically finish the Work Order, deduct stock,
+record movements and audits, and complete the Project when appropriate. Project
+requirements are not deducted separately, so the same material is never deducted twice.
 
 ### Finished Work Order behavior
 
@@ -496,7 +565,54 @@ Exact PDF visual layout will be designed later.
 
 ---
 
-## 10. Calendar
+## 10. Dokumentacija
+
+Dokumentacija is a permanently Admin-only module for company Documentation records.
+
+Each record contains:
+
+- Naziv / Name
+- Kategorija / Category: Uvoz, Izvoz, Nabavka, or Troškovi
+- Datum / Document Date
+- Iznos / Amount
+- optional private PDF attachment
+- creation/update and historical archive metadata
+
+Name is required, trimmed, and nonblank. Category is restricted to `uvoz`, `izvoz`,
+`nabavka`, or `troskovi`. Document Date is required. Amount is an exact non-negative
+decimal monetary value; floating-point storage is forbidden and no currency field is
+currently included.
+
+The optional PDF is stored in private Supabase Storage, never as PostgreSQL bytes or
+through a public URL. Only Admin may upload, read, download, replace, or remove it.
+Meaningful create/edit/archive/PDF changes are audited. Records are archived rather
+than hard-deleted and have no current reactivation workflow.
+
+---
+
+## 11. Osnovna sredstva
+
+Osnovna sredstva is a permanently Admin-only company-assets module.
+
+Each Fixed Asset contains:
+
+- Naziv / Name
+- Kategorija / Category: Oprema, Uređaji, or Alati
+- Datum nabavke / Purchase Date
+- Količina / Quantity
+- creation/update and historical archive metadata
+
+Name is required, trimmed, and nonblank. Category is restricted to `oprema`,
+`uredjaji`, or `alati`. Purchase Date is required. Quantity is a whole number greater
+than zero.
+
+Fixed Assets are independent of Products, Procurement, InventoryBalance, and
+InventoryMovement. Admin may create, read, edit, and archive them. There is no normal
+hard delete or current reactivation workflow, and meaningful changes are audited.
+
+---
+
+## 12. Calendar
 
 Calendar contains an actual calendar view.
 
@@ -528,7 +644,7 @@ Only Admin may create/edit/modify Calendar data.
 
 ---
 
-## 11. Archive / Audit Log
+## 13. Archive / Audit Log
 
 Archive is a permanent history of meaningful business/data changes.
 
@@ -553,6 +669,9 @@ Audit coverage includes meaningful changes to:
 - PCB cards/BOMs
 - PCB production
 - Radni Nalozi
+- Documentation records and PDF changes
+- Fixed Assets
+- Project Products and component requirements
 - Calendar
 - users
 - permissions
@@ -565,7 +684,7 @@ Archive should support practical searching/filtering because the dataset will gr
 
 ---
 
-## 12. Users / Accounts
+## 14. Users / Accounts
 
 Each AlfaEV user has an individual account.
 
@@ -600,7 +719,7 @@ The current localStorage-based fake login is temporary and must eventually be re
 
 ---
 
-## 13. Permission Model
+## 15. Permission Model
 
 AlfaEV does not use a rigid Admin/Worker role matrix.
 
@@ -631,9 +750,12 @@ All permission changes must be recorded in Archive.
 
 `Manage user permissions` is Admin-only and can never be delegated.
 
+Dokumentacija and Osnovna sredstva are also permanently Admin-only modules. They do
+not receive delegable permission keys.
+
 ---
 
-## 14. Removed Placeholder Modules
+## 16. Removed Placeholder Modules
 
 Unused placeholder pages from the current React prototype must be removed from product scope and navigation.
 

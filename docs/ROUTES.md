@@ -110,8 +110,9 @@ Shows:
 - status
 - start date
 - delivery date
-- derived material usage
-- linked Finished Work Orders
+- planned Project Products and component requirements
+- derived physical material usage and outstanding commitment
+- linked Draft and Finished Work Orders
 - linked PCB production where applicable
 - relevant history/activity
 
@@ -121,7 +122,10 @@ Access:
 Rules:
 - Completed Project is read-only
 - Admin may explicitly reopen it to In Progress
-- material usage is derived; it is not manually edited
+- normal Project editing cannot manually set Completed
+- finishing the final unfinished Work Order automatically completes the Project
+- planning requirements are editable only while the Project is open and never directly deduct Inventory
+- actual material usage and outstanding commitment are derived; physical usage is not manually edited
 
 ---
 
@@ -223,7 +227,7 @@ Purpose:
 - search by Name
 - search by Serial Number / Šifra
 - optional Catalog Number filtering/search
-- current quantities
+- Physical Quantity, Committed to Projects, and Available after Commitments
 - Add Component action when authorized
 - Brand management entry point when authorized
 
@@ -240,6 +244,13 @@ Actions depend on:
 Manual quantity adjustment:
 - Admin-only
 - not delegable
+
+Project commitment values are derived planning data. Outstanding commitment is first
+calculated independently for each open Project and Product using only qualifying
+physical consumption from that same Project/Product pair, then summed per Product.
+One Project's consumption never offsets another's commitment. Commitments do not create
+Inventory movements or modify physical quantity. Negative Available after Commitments
+remains visible as a shortage warning.
 
 ---
 
@@ -380,6 +391,8 @@ Purpose:
 Draft behavior:
 - select Project
 - Customer auto-fills from Project
+- integrate material lines with that Project's planned requirements
+- support multiple Work Orders per Project without double-allocating the same requirement
 - scan Product barcode
 - Product resolves by Serial Number / Šifra
 - add Product to materials table
@@ -395,6 +408,11 @@ Finished behavior:
 - show linked Inventory movements
 - show generated PDF
 - no edit/reopen/delete controls
+
+Finishing performs the physical stock deduction. If no other unfinished Work Order
+remains for the Project, the same trusted transaction automatically completes the
+Project and releases unused outstanding commitment. Project requirements are not
+deducted separately.
 
 ---
 
@@ -413,7 +431,61 @@ Rules:
 
 ---
 
-# 11. Calendar
+# 11. Dokumentacija
+
+## `/documents`
+
+Purpose:
+- Admin-only Documentation list and management
+- create/read/edit/archive Documentation records
+- upload/read/download/replace/remove one optional private PDF attachment
+
+Fields:
+- Naziv
+- Kategorija: Uvoz, Izvoz, Nabavka, or Troškovi
+- Datum
+- Iznos
+- optional PDF
+
+Access:
+- Admin only through `AdminRoute` or the equivalent existing Admin boundary
+- no delegable permission
+
+Non-admin behavior:
+- navigation item hidden
+- direct URL forbidden
+- backend data and private PDF access denied
+
+---
+
+# 12. Osnovna sredstva
+
+## `/fixed-assets`
+
+Purpose:
+- Admin-only Fixed Asset list and management
+- create/read/edit/archive Fixed Assets
+
+Fields:
+- Naziv
+- Kategorija: Oprema, Uređaji, or Alati
+- Datum nabavke
+- Količina
+
+Access:
+- Admin only through `AdminRoute` or the equivalent existing Admin boundary
+- no delegable permission
+
+Non-admin behavior:
+- navigation item hidden
+- direct URL forbidden
+- backend data access denied
+
+This route does not modify or expose warehouse Inventory as Fixed Asset quantity.
+
+---
+
+# 13. Calendar
 
 ## `/calendar`
 
@@ -441,7 +513,7 @@ No separate approval routes are required.
 
 ---
 
-# 12. Archive / Audit
+# 14. Archive / Audit
 
 ## `/archive`
 
@@ -467,7 +539,7 @@ Rules:
 
 ---
 
-# 13. Users
+# 15. Users
 
 ## `/users`
 
@@ -517,7 +589,7 @@ Every permission/account-security change must be audited.
 
 ---
 
-# 14. Forbidden / Removed Routes
+# 16. Forbidden / Removed Routes
 
 The current prototype contains routes for placeholder modules that are not part of the locked AlfaEV scope.
 
@@ -525,7 +597,6 @@ These must be removed rather than implemented.
 
 Remove routes such as:
 
-- `/documents`
 - `/production`
 - `/quality`
 - `/reports`
@@ -536,7 +607,7 @@ Do not keep dead navigation items pointing to removed modules.
 
 ---
 
-# 15. Not Found / Unauthorized Behavior
+# 17. Not Found / Unauthorized Behavior
 
 ## Unknown route
 
@@ -559,7 +630,7 @@ Exact UX can be finalized in UI_SPEC.md.
 
 ---
 
-# 16. Route Guard Strategy
+# 18. Route Guard Strategy
 
 Conceptually:
 
@@ -577,14 +648,14 @@ PermissionRoute
   └─ renders protected feature route
 
 AdminRoute
-  └─ Users + permanently Admin-only areas/actions
+  └─ Users, Dokumentacija, Osnovna sredstva, and other permanently Admin-only areas/actions
 ```
 
 Avoid creating separate hard-coded guards for every page when a reusable typed permission guard can express the rule safely.
 
 ---
 
-# 17. Route Definition of Done
+# 19. Route Definition of Done
 
 The route map is correct when:
 
@@ -592,6 +663,7 @@ The route map is correct when:
 - every protected route requires authentication
 - inactive users are blocked
 - Users is Admin-only
+- Dokumentacija and Osnovna sredstva are Admin-only
 - Calendar is readable by all authenticated users
 - Archive honors `archive.view`
 - Dashboard is permission-aware

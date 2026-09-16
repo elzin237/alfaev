@@ -64,8 +64,8 @@ Do not impose a rigid general Project status-transition graph beyond the explici
 
 - Normal Project editing requires an active Admin or `projects.edit`.
 - Normal editable fields are Name, Customer, Start Date, Delivery Date, and normal status where allowed.
-- The normal edit operation handles only `planned`, `in_progress`, `on_hold`, and `completed`; it cannot set `cancelled`.
-- Entering `completed` sets `completed_at` server-side and keeps `cancelled_at` `NULL`.
+- The normal edit operation handles only `planned`, `in_progress`, and `on_hold`; it cannot set `completed` or `cancelled`.
+- Project completion is produced only by the trusted final-Work-Order Finish flow, which sets `completed_at` server-side and keeps `cancelled_at` `NULL`.
 - Normal edit/status mutation cannot move a Project out of `completed`. The only reopen is the explicit Admin-only `completed` to `in_progress` operation, which clears the current `completed_at` and is audited.
 - These explicit lifecycle rules do not establish a broader rigid status-transition graph.
 
@@ -89,7 +89,19 @@ Do not impose a rigid general Project status-transition graph beyond the explici
 - A normalized no-op normal edit/status submission creates no update and no audit entry.
 - Denied or failed mutations leave both Project state and AuditLog unchanged.
 
-### Material usage
+### Project Products and planned material
+
+- A Project may contain multiple Project Products, each representing a Project-specific grouping or deliverable rather than an Inventory Product.
+- Project Product Name is required, trimmed, nonblank, not globally unique, and receives no Product Serial Number.
+- A Project Product may contain multiple component requirements referencing stock-tracked AlfaEV Products.
+- Required Quantity is the planned total whole-number requirement for that Project Product and must be greater than zero.
+- The same Product cannot be duplicated within one Project Product.
+- A newly selected or changed requirement Product must exist and be active. Later Product archival preserves historical references.
+- Eligible requirement Products may include components and finished PCB goods; do not restrict the planning model to `component` only.
+- Completed and Cancelled Projects cannot receive normal Project Product or component-requirement changes.
+- Reads require an active Admin or `projects.view`; mutations require an active Admin or `projects.edit` and trusted backend enforcement.
+
+### Material usage and outstanding commitment
 
 Project material usage is derived automatically from completed linked operations.
 
@@ -101,7 +113,39 @@ Draft Work Orders do not count.
 
 Material totals must remain traceable to the originating operations.
 
+Planned requirements do not change physical Inventory. Commitment must be calculated
+per Project and Product before aggregation. For every open Project P and Product X:
+
+`planned_requirement(P, X) = sum of ProjectProductComponent.required_quantity for X within P`
+
+`actual_project_consumption(P, X) = qualifying physical consumption of X attributable to P`
+
+`outstanding_commitment(P, X) = max(planned_requirement(P, X) - actual_project_consumption(P, X), 0)`
+
+Then:
+
+`committed_to_projects(X) = sum of outstanding_commitment(P, X) across Projects currently in planned/in_progress/on_hold`
+
+`available_after_commitments(X) = InventoryBalance.quantity - committed_to_projects(X)`
+
+Consumption from one Project must never reduce another Project's commitment. Completed
+and Cancelled Projects contribute zero. Reopening a Completed Project to `in_progress`
+makes its own still-outstanding requirement contribute again, with only its own prior
+physical consumption subtracted.
+
+Qualifying consumption includes finished Work Order Inventory deductions linked to
+the same Project and Product and Project-linked PCB production input deductions where
+applicable. Inventory additions/output movements, unrelated manual adjustments, and
+consumption belonging to another Project do not qualify. Raw PCB inputs and later
+finished-PCB consumption must not be double-counted.
+
+Availability is not clamped to zero; negative values indicate a shortage. Neither
+commitments nor their release create InventoryMovement rows or directly change stock.
+
 ### Completed Projects
+
+When the final unfinished Work Order is successfully Finished, the trusted Finish
+operation automatically changes the Project to Completed in the same transaction.
 
 When status becomes Completed:
 
@@ -334,6 +378,10 @@ Draft Work Orders never affect Inventory.
 
 Incomplete/failed PCB production never affects Inventory.
 
+Project planning commitments never affect InventoryBalance or create InventoryMovement.
+Only trusted physical-consumption workflows change stock. Actual Project-linked
+consumption reduces derived outstanding commitment without a second stock deduction.
+
 ### Manual adjustment
 
 Only Admin may manually adjust Inventory.
@@ -513,6 +561,11 @@ User manually selects Project.
 
 Customer is auto-filled from the selected Project.
 
+One Project may have one or many Work Orders. No uniqueness rule may limit a Project
+to one Work Order. Draft Work Order materials integrate with the Project's planned
+component requirements, and allocation across multiple Draft Work Orders must avoid
+double-allocation of the same planned requirement.
+
 ### Barcode scanning
 
 When a product barcode is scanned while editing a Work Order:
@@ -542,8 +595,18 @@ Finishing:
 - creates audit history
 - generates PDF
 - changes Work Order to Finished
+- records qualifying Project/Product consumption so the derived read model reduces only that matching Project/Product commitment
+- checks for other unfinished Work Orders for the same Project
+- automatically completes the Project when none remain
 
 Inventory changes happen only on Finish.
+
+The final Work Order transaction must atomically validate and finish the Work Order,
+deduct Inventory, create InventoryMovement rows, update actual Project consumption,
+complete the Project when this is the last unfinished Work Order, and create required
+AuditLog entries. ProjectProductComponent requirements are never deducted separately.
+Completing or cancelling a Project releases remaining unused commitment without
+changing physical stock.
 
 ### Finished Work Order
 
@@ -560,7 +623,34 @@ If a mistake must be corrected later:
 
 ---
 
-## 10. Calendar Rules
+## 10. Documentation Rules
+
+- Documentation is permanently Admin-only for navigation, routes, reads, and mutations.
+- DocumentationRecord Name is required, trimmed, and nonblank.
+- Category is exactly `uvoz`, `izvoz`, `nabavka`, or `troskovi`.
+- Document Date is a required SQL date.
+- Amount is a required exact non-negative decimal monetary value; floating point is forbidden and no currency field exists in current scope.
+- One optional PDF may be attached. PDF bytes are stored only in private Supabase Storage, not PostgreSQL.
+- Only Admin may upload, read/download, replace, or remove the PDF through trusted operations.
+- Normal workflows archive rather than hard-delete Documentation records; archived records remain readable to Admin and have no current reactivation workflow.
+- Meaningful create/edit/archive/PDF changes are audited.
+
+---
+
+## 11. Fixed Asset Rules
+
+- Osnovna sredstva is permanently Admin-only for navigation, routes, reads, and mutations.
+- Fixed Asset Name is required, trimmed, and nonblank.
+- Category is exactly `oprema`, `uredjaji`, or `alati`.
+- Purchase Date is a required SQL date.
+- Quantity is a required whole number greater than zero.
+- Fixed Assets are independent of Product, Procurement, InventoryBalance, and InventoryMovement; asset quantity never changes warehouse stock automatically.
+- Normal workflows archive rather than hard-delete Fixed Assets; archived records remain readable to Admin and have no current reactivation workflow.
+- Meaningful create/edit/archive changes are audited.
+
+---
+
+## 12. Calendar Rules
 
 Categories:
 
@@ -581,7 +671,7 @@ Only Admin may modify Calendar entries.
 
 ---
 
-## 11. User and Permission Rules
+## 13. User and Permission Rules
 
 Admin has full access.
 
@@ -628,7 +718,7 @@ Historical audit records continue to display the original actor after deactivati
 
 ---
 
-## 12. Audit Rules
+## 14. Audit Rules
 
 Audit records are immutable.
 
@@ -651,17 +741,23 @@ Examples:
 - Work Order finished
 - PCB production completed
 - Project status changed
+- Project Product/component requirement changed
+- Project automatically completed by final Work Order Finish
 - Nabavka status changed
 - Supplier edited
 - Calendar edited
 - user activated/deactivated
 - permission changed
+- Documentation/PDF changed
+- Fixed Asset changed
 
 Do not generate audit noise for pure UI interactions.
 
+Pure derived commitment/availability calculations create no AuditLog noise.
+
 ---
 
-## 13. Deletion / Archive Rules
+## 15. Deletion / Archive Rules
 
 General rule:
 
@@ -686,6 +782,14 @@ AlfaEV does not hard-delete Suppliers through normal application workflows, rega
 ### Projects
 If linked history exists:
 - archive/cancel rather than hard-delete
+
+### Documentation
+- archive rather than hard-delete
+- no current reactivation workflow
+
+### Fixed Assets
+- archive rather than hard-delete
+- no current reactivation workflow
 
 ### PCB definitions
 If production history exists:

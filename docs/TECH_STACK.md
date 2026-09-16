@@ -324,16 +324,25 @@ This prevents a Work Order from appearing Finished without a valid final documen
 
 Use Supabase Storage only for files that genuinely require persistence.
 
-Initial required persistent file:
+Required persistent files include:
 
 - generated Finished Work Order PDF
+- optional DocumentationRecord PDF
 
 Do not store:
 
 - generated barcode images that can be recreated deterministically
-- arbitrary user uploads unless a future feature explicitly requires them
+- arbitrary user uploads outside explicitly approved features
 
 Storage buckets containing business documents must remain private.
+
+DocumentationRecord PDFs:
+
+- use private Supabase Storage
+- never use a public bucket or public object URL
+- require Admin-only authorized upload/read/download/replace/remove access
+- store only the private object path/reference in PostgreSQL, never PDF bytes
+- support only one optional PDF per DocumentationRecord in the current scope
 
 ---
 
@@ -568,6 +577,7 @@ Transactional stock operations
 
 Documents
 Server-generated Work Order PDFs
+Optional validated DocumentationRecord PDFs
 Private Storage
 
 Testing
@@ -594,7 +604,8 @@ The production stack is correctly implemented when:
 - all tables are protected appropriately
 - critical workflows use trusted atomic backend operations
 - no service-role secret reaches the browser
-- PDFs are private and server-generated
+- Finished Work Order PDFs are private and server-generated
+- DocumentationRecord PDFs are private, validated, optional Admin-managed uploads
 - database changes are migration-driven
 - dev and production environments are separated
 - critical security/business flows have automated tests before production

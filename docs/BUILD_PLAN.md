@@ -136,6 +136,10 @@ Remove active routes such as:
 
 Keep Dashboard.
 
+Historical note after Task 085: this task removed the old unapproved Documents
+placeholder. CEO change Task 085H later introduces a new, real, Admin-only
+Dokumentacija module at `/documents`; do not restore the obsolete placeholder.
+
 Do not redesign routing architecture beyond what is needed.
 
 Validate:
@@ -161,6 +165,10 @@ Final order:
 8. Calendar
 9. Archive
 10. Users
+
+Historical note after Task 085: Tasks 085H and 085J extend this implemented order
+with Dokumentacija and Osnovna sredstva between Radni Nalozi and Calendar, producing
+the new 12-item canonical order without restoring placeholder navigation.
 
 At this task, permission-aware hiding is not required yet.
 
@@ -1379,11 +1387,15 @@ Normal edit status values:
 - `planned`
 - `in_progress`
 - `on_hold`
-- `completed`
+
+CEO correction after Task 085:
+- this task was implemented under the former rule that allowed normal edit to enter `completed`
+- the new canonical rule removes `completed` from normal editable status targets
+- Task 085A adds the corrective migration/UI change without rewriting this applied task's history
 
 Normal edit rules:
-- never set `cancelled`
-- entering `completed` sets `completed_at` server-side and leaves `cancelled_at` `NULL`
+- after Task 085A, never set `completed` or `cancelled`
+- only the trusted final-Work-Order Finish flow sets `completed_at` while entering `completed`
 - clients never provide lifecycle timestamps
 - do not allow a normal edit/status operation to move a Project out of `completed`
 - normalized no-op edit/status submissions create no update or audit noise
@@ -1701,6 +1713,192 @@ Do not create UI, BOM tables, or production tables in this task.
 
 ---
 
+# CEO CHANGE CORRECTION BLOCK — AFTER COMPLETED TASK 085
+
+The following lettered tasks are inserted before existing Task 086. They do not
+renumber or replace Tasks 086 onward.
+
+## 085A — Correct Normal Project Completion Authority
+
+Goal:
+- correct the already-built Project backend and UI so normal Project editing can no longer set `completed`
+
+Requirements:
+- add a corrective migration; do not rewrite applied Project migrations
+- normal editable status values become only `planned`, `in_progress`, and `on_hold`
+- preserve all existing Completed historical Projects
+- preserve the existing Admin-only `completed` to `in_progress` reopen from Task 074
+- preserve cancellation authority and behavior
+- remove Completed from the normal edit UI
+- add backend/UI regression coverage proving direct and UI attempts cannot manually complete a Project
+- do not rewrite Project history
+
+Future Work Order Finish is the only normal authority that may enter `completed`.
+
+---
+
+## 085B — Create ProjectProduct + ProjectProductComponent Schema/Security
+
+Goal:
+- add Project planning entities and direct-write-denial/read-security baseline
+
+Include:
+- ProjectProduct with required trimmed nonblank Project-specific Name
+- no Product FK or Serial Number on ProjectProduct
+- ProjectProductComponent with Product and positive whole-number required total quantity
+- unique Product per ProjectProduct
+- history-preserving Project/Product/actor references
+- active Product validation boundary for later create/change operations
+- SELECT for active Admin or `projects.view`
+- deny direct normal-client mutations
+- Completed/Cancelled Project planning-lock foundation
+
+Do not mutate Inventory or create InventoryMovement.
+
+---
+
+## 085C — Add Trusted Project Product/Component Mutations
+
+Goal:
+- trusted create/edit/remove operations for Project Products and their component requirements
+
+Authorization:
+- active Admin or `projects.edit`
+
+Requirements:
+- reject Completed or Cancelled Projects
+- require active Product when adding/changing a component requirement
+- support `component` and `pcb_finished_good` Products
+- enforce positive whole-number planned total quantities and duplicate prevention
+- create immutable audit history for meaningful Project Product and requirement changes
+- make mutations atomic and keep normalized no-ops audit-free
+- never alter InventoryBalance or create InventoryMovement
+
+---
+
+## 085D — Build Project Products Planning UI
+
+Goal:
+- replace the Project detail planning placeholder with real Project Products/component management
+
+Show/manage:
+- Project Product Name
+- required Product identity and Serial Number
+- planned total Required Quantity
+- safe loading/error/empty states
+
+Use existing Project read/edit authorization. Completed and Cancelled Projects are
+read-only. Do not present ProjectProduct as an Inventory Product or assign it a Serial.
+
+---
+
+## 085E — Add Project Commitment / Availability Read Model
+
+Goal:
+- expose trusted outstanding Project commitments without changing physical stock
+
+Derive in this mandatory order:
+- for each open Project P and Product X, sum planned ProjectProductComponent requirements as `planned_requirement(P, X)`
+- for the same pair, derive only qualifying physical consumption as `actual_project_consumption(P, X)`
+- calculate `outstanding_commitment(P, X) = max(planned_requirement(P, X) - actual_project_consumption(P, X), 0)`
+- calculate `committed_to_projects(X)` by summing those per-Project outstanding values
+- calculate Available after Commitments as InventoryBalance Physical Quantity minus `committed_to_projects(X)`, without clamping
+
+Qualifying consumption includes finished Work Order deductions and, where applicable,
+Project-linked PCB production input deductions for the same Project and Product. Exclude
+Inventory additions/output movements, unrelated manual adjustments, and consumption
+from another Project. Preserve PCB material-usage anti-double-counting. Completed and
+Cancelled Projects contribute zero. A reopened `in_progress` Project contributes its
+own still-outstanding requirement after subtracting its own prior consumption. Add
+authorization, cross-Project isolation, anti-double-count, archived-history,
+negative-shortage, and query/index tests. Do not create reservation movement rows.
+
+---
+
+## 085F — Show Physical / Committed / Available Inventory
+
+Goal:
+- integrate the trusted commitment read model into Skladište
+
+Show per Product:
+- Physical Quantity
+- Committed to Projects
+- Available after Commitments
+- clear shortage warning when Available is negative
+- relevant Project attribution where useful
+
+Preserve physical-stock mutation boundaries. Planning UI must not adjust stock.
+
+---
+
+## 085G — Create Documentation Schema + Private PDF Security
+
+Goal:
+- add the permanently Admin-only Documentation backend and private Storage boundary
+
+Include:
+- DocumentationRecord fields and exact `uvoz`, `izvoz`, `nabavka`, `troskovi` category constraint
+- required SQL date and exact non-negative numeric amount; no currency field
+- normal historical archive metadata with no hard delete/current reactivation
+- optional single private PDF Storage path/reference; no PostgreSQL PDF bytes
+- private bucket/policies, PDF validation, no public URL, and authorized signed/private reads
+- trusted Admin-only create/edit/archive/PDF upload/replace/remove operations
+- immutable audit for meaningful record and PDF changes
+- security tests proving non-admin/direct access denial and no browser secret exposure
+
+Do not add a delegable permission key.
+
+---
+
+## 085H — Build Dokumentacija Admin UI + Route
+
+Goal:
+- add `/documents` and the permanent `Dokumentacija` Sidebar item
+
+Requirements:
+- AdminRoute protection and Admin-only data operations
+- list/create/edit/archive Documentation records
+- optional PDF upload/open/download/replace/remove using private authorized access
+- fixed localized categories and exact decimal amount handling
+- no hard delete, restore, currency selector, or multiple attachments
+- place the Sidebar item after Radni Nalozi
+
+---
+
+## 085I — Create FixedAsset Schema + Security
+
+Goal:
+- add the permanently Admin-only Fixed Asset backend
+
+Include:
+- required trimmed nonblank Name
+- exact `oprema`, `uredjaji`, `alati` category constraint
+- required SQL Purchase Date
+- positive whole-number Quantity
+- normal historical archive metadata with no hard delete/current reactivation
+- trusted Admin-only create/read/edit/archive operations
+- immutable audit and direct-bypass security tests
+- no Product, Procurement, InventoryBalance, or InventoryMovement synchronization
+
+Do not add a delegable permission key.
+
+---
+
+## 085J — Build Osnovna Sredstva Admin UI + Route
+
+Goal:
+- add `/fixed-assets` and the permanent `Osnovna sredstva` Sidebar item
+
+Requirements:
+- AdminRoute protection and Admin-only data operations
+- list/create/edit/archive Fixed Assets
+- fixed localized categories and positive whole-number Quantity validation
+- no Inventory controls, hard delete, or restore
+- place the Sidebar item after Dokumentacija and before Calendar
+- verify final 12-item canonical Sidebar order and direct-route denial for both new Admin modules
+
+---
+
 ## 086 — Add Trusted PCB Card Creation
 
 Goal:
@@ -1926,6 +2124,8 @@ Goal:
 - customer snapshot
 - description
 - metadata
+- one Project may own one or many Work Orders; do not add unique `project_id`
+- preserve the relationship needed for Project-requirement synchronization
 
 Do not create numbering in this task.
 
@@ -1953,6 +2153,7 @@ Goal:
 - allocate number
 - authorize actor
 - audit creation
+- select an open Project without assuming it has no other Work Order
 
 No Inventory mutation.
 
@@ -1989,6 +2190,9 @@ Goal:
 Recommended duplicate prevention:
 - one row per Product per Work Order
 
+Design the relationship/allocation boundary needed to reconcile WorkOrderItem rows
+with ProjectProductComponent requirements. Do not assume one Work Order per Project.
+
 ---
 
 ## 107 — Build Draft Work Order Detail Shell
@@ -2013,6 +2217,8 @@ Goal:
 Protect:
 - Finished cannot be updated
 - Customer snapshot derives from selected Project
+- Project material intent stays synchronized with planned requirements
+- concurrent Draft Work Orders cannot double-allocate the same planned requirement
 
 Audit only meaningful saved changes according to audit policy.
 
@@ -2096,6 +2302,8 @@ Rules:
 - quantity > 0
 - Finished parent rejected
 - no Inventory mutation
+- validate allocation against Project requirements across all Draft Work Orders
+- prevent double-allocation under concurrency
 
 ---
 
@@ -2122,6 +2330,8 @@ Cover:
 - Finished update rejection foundation
 - barcode Product validation
 - Draft operations never alter Inventory
+- multiple Work Orders may belong to one Project
+- planned requirements cannot be double-allocated across Draft Work Orders
 
 ---
 
@@ -2140,6 +2350,12 @@ Validate:
 - Product validity
 - Inventory sufficiency
 - expected Draft version/timestamp
+- Project planned-requirement synchronization
+- Drafts have caused no physical Inventory deduction; physical consumption occurs only during successful Finish finalization
+- other unfinished Work Orders for the same Project
+- qualifying Project/Product physical-consumption attribution
+- per-Project/Product outstanding-commitment effects and cross-Project isolation
+- final unfinished Work Order detection and automatic Project-completion preconditions
 
 No mutation yet.
 
@@ -2222,11 +2438,20 @@ Atomically:
 - deduct every item
 - create InventoryMovement rows
 - mark Finished
+- preserve Project linkage on physical consumption
+- create qualifying Project-linked physical-consumption records so the derived read model reduces only the same Project/Product outstanding commitment
+- check for other unfinished Work Orders on the same Project
+- when none remain, set Project to `completed`, set server-owned lifecycle/update metadata, and audit automatic completion
+- release all remaining unused commitment when Project completes without deducting it
 - link PDF reference
 - set finisher/time
-- audit
+- create all required Work Order, Inventory, and Project AuditLog entries
 
 No partial DB state.
+
+Physical Inventory deduction occurs only in this successful Finish transaction.
+Do not separately deduct ProjectProductComponent requirements; Work Order consumption
+is the single physical deduction.
 
 ---
 
@@ -2243,6 +2468,9 @@ Goal:
 
 Prevent Finished-without-PDF and stale-PDF finalization.
 
+Do not report success unless Inventory, Work Order, automatic final-Work-Order Project
+completion, commitment release, PDF linkage, and required audits are coherent.
+
 ---
 
 ## 123 — Build Finish Confirmation UI
@@ -2257,6 +2485,7 @@ Show:
 - consequence:
   - Inventory deducted
   - Work Order locked
+  - Project completed when this is its final unfinished Work Order
 
 Do not call finalization until confirmed.
 
@@ -2339,6 +2568,14 @@ Cover:
 - unauthorized PDF denied
 - audit
 - failure leaves no partial finalized state
+- multiple Work Orders per Project
+- exactly the final unfinished Work Order completes the Project
+- simultaneous finishes cannot complete the Project early or twice
+- actual consumption reduces outstanding commitment without double deduction
+- consumption from one Project cannot reduce another Project's commitment
+- additions/output movements and unrelated manual adjustments do not reduce commitment
+- Project-linked PCB input consumption follows the existing raw-input/finished-PCB anti-double-count rule
+- unused commitment releases on completion without an Inventory movement
 
 ---
 
@@ -2354,8 +2591,13 @@ Show traceability:
 - Quantity
 - source Work Order
 - date
+- planned ProjectProductComponent requirement
+- outstanding commitment after qualifying consumption for that same Project/Product pair
 
 Drafts excluded.
+
+Support one or many Work Orders per Project without double-counting or
+double-allocation.
 
 ---
 
@@ -2668,12 +2910,17 @@ Goal:
 
 Goal:
 - create Project
+- add Project Products and planned component requirements
+- create multiple Draft Work Orders without double-allocation
 - create Draft
 - scan/add materials
 - Save
 - Finish
 - verify stock
-- Project usage
+- verify Work Order-linked actual consumption reduces only the same Project/Product commitment
+- verify consumption from one Project cannot reduce another Project's commitment
+- verify the final unfinished Work Order automatically completes the Project
+- verify unused commitment releases without another stock deduction
 - PDF
 - immutability
 - audit
@@ -2824,6 +3071,7 @@ Goal:
 - verify production recovery plan for:
   - PostgreSQL business data
   - Work Order PDFs
+  - DocumentationRecord PDFs
 
 Document:
 - backup capability
@@ -2864,8 +3112,13 @@ Manually verify real production-like flow:
 
 ### Projects
 - create/edit
-- Complete
-- reopen
+- normal editing cannot manually Complete
+- Project Products/component planning
+- per-Project/Product commitment aggregation and cross-Project isolation
+- Physical / Committed / Available values and negative shortage display
+- Work Order-linked actual consumption reduces only its own Project/Product commitment
+- final Work Order automatic completion
+- Admin-only Completed to In Progress reopen
 
 ### Nabavka
 - existing request
@@ -2900,6 +3153,21 @@ Manually verify real production-like flow:
 - Inventory
 - PDF
 - immutable state
+- multiple Work Orders per Project
+- no planned-requirement double-allocation
+- physical deduction occurs only on Finish
+- Project-linked consumption reduces only the matching Project/Product commitment
+- final Work Order completes Project atomically
+
+### Dokumentacija
+- Admin-only navigation/route/data
+- create/edit/archive
+- private optional PDF upload/open/download/replace/remove
+
+### Osnovna sredstva
+- Admin-only navigation/route/data
+- create/edit/archive
+- no Inventory synchronization
 
 ### Calendar
 - filters

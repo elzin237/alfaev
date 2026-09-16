@@ -51,6 +51,8 @@ These capabilities are not delegable:
 - Activate/deactivate user accounts
 - Manually adjust Inventory quantity
 - Create/edit/modify Calendar entries
+- Manage Dokumentacija records and private PDF attachments
+- Manage Osnovna sredstva
 
 A non-admin user must never be able to:
 
@@ -83,7 +85,9 @@ The Admin user-management UI should expose a clear checkbox/toggle matrix for no
 - Edit Projects
 - Delete/Archive Projects
 
-Project reads require an active Admin or View Projects (`projects.view`). Create uses `projects.create`. Normal field edits and normal status changes use `projects.edit` and handle only `planned`, `in_progress`, `on_hold`, and `completed`; `projects.edit` does not authorize cancellation or a Completed Project reopen. Delete/Archive Projects (`projects.archive`) authorizes the separate trusted cancellation transition from `planned`, `in_progress`, or `on_hold` to `cancelled`; it does not authorize hard deletion, Completed Project cancellation, or restoration/reactivation. The only Completed Project reopen is the explicit Admin-only `completed` to `in_progress` operation. No separate cancel/status permission and no additional Project permission key are added.
+Project reads require an active Admin or View Projects (`projects.view`). Create uses `projects.create`. Normal field edits and normal status changes use `projects.edit` and handle only `planned`, `in_progress`, and `on_hold`; normal edit can no longer set `completed` or `cancelled`. Project completion is performed atomically by the trusted final-Work-Order Finish flow. Delete/Archive Projects (`projects.archive`) authorizes the separate trusted cancellation transition from `planned`, `in_progress`, or `on_hold` to `cancelled`; it does not authorize hard deletion, Completed Project cancellation, or restoration/reactivation. The only Completed Project reopen is the explicit Admin-only `completed` to `in_progress` operation. No separate cancel/status permission and no additional Project permission key are added.
+
+Project Product and Project component-requirement reads use the same active Admin or `projects.view` authority. Their trusted mutations require an active Admin or `projects.edit`. Completed and Cancelled Projects reject normal planning mutations.
 
 ### Nabavka / Procurement
 
@@ -175,6 +179,17 @@ All authenticated users may view Calendar.
 Calendar modification is Admin-only.
 
 Therefore Calendar does not require delegable view/manage checkboxes in the initial permission matrix.
+
+### Dokumentacija
+
+Dokumentacija is permanently Admin-only, including record create/read/edit/archive
+and private PDF upload/read/download/replace/remove operations. It has no delegable
+permission key and must not appear in the permission matrix.
+
+### Osnovna sredstva
+
+Osnovna sredstva is permanently Admin-only for create/read/edit/archive. It has no
+delegable permission key and must not appear in the permission matrix.
 
 ### Archive
 

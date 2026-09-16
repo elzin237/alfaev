@@ -98,6 +98,8 @@ src/
     inventory/
     pcb/
     work-orders/
+    documents/
+    fixed-assets/
     calendar/
     archive/
     users/
@@ -163,12 +165,16 @@ Canonical shared/domain types should exist for concepts such as:
 - Supplier
 - ProductSupplier
 - Project
+- ProjectProduct
+- ProjectProductComponent
 - ProcurementRequest
 - PcbCard
 - PcbBomVersion
 - PcbProductionRun
 - WorkOrder
 - WorkOrderItem
+- DocumentationRecord
+- FixedAsset
 - InventoryMovement
 - CalendarEntry
 - AuditLog
@@ -264,6 +270,9 @@ At minimum:
 - create Product from Nabavka request
 - PCB production
 - Work Order Finish
+- Project Product/component planning mutations
+- Documentation record and private PDF mutations
+- Fixed Asset mutations
 - Work Order number allocation
 - permission changes
 - Admin status changes
@@ -296,7 +305,11 @@ Either all occur:
 or none occur.
 
 ### Work Order Finish
-Either all required state transitions succeed coherently, or the Work Order must not appear successfully Finished.
+Either all required state transitions succeed coherently, or the Work Order must not
+appear successfully Finished. This boundary includes physical Inventory deductions,
+InventoryMovement rows, Work Order finalization, actual Project-consumption linkage,
+automatic Project completion when this is the final unfinished Work Order, release of
+unused commitment, and required audit history.
 
 ### Manual Inventory adjustment
 Balance change, movement record, and audit record belong to one trusted transaction.
@@ -316,6 +329,7 @@ Rules:
 - frontend hiding/disabled controls are UX only
 - direct unauthorized backend/database attempts must fail
 - Users module is Admin-only
+- Dokumentacija and Osnovna sredstva are Admin-only
 - permission management is Admin-only
 - Calendar modification is Admin-only
 - manual Inventory adjustment is Admin-only
@@ -336,6 +350,9 @@ Audit records are immutable.
 
 Audit must capture meaningful business changes without logging useless UI interaction noise.
 
+This includes Documentation/PDF changes, Fixed Asset changes, Project planning
+changes, Work Order Finish, and automatic final-Work-Order Project completion.
+
 ---
 
 ## 14. Inventory Architecture
@@ -352,6 +369,14 @@ All stock changes must pass through trusted Inventory logic.
 No feature should directly set Inventory quantity.
 
 Projects, PCB, Work Orders, and future features must interact with Inventory through defined operations.
+
+ProjectProductComponent requirements are planning commitments, not physical stock
+reservations. They never directly change InventoryBalance or create InventoryMovement.
+The read model computes outstanding commitment independently for each Project/Product
+pair, subtracting only qualifying physical consumption attributed to that same pair,
+then sums the per-Project results by Product. Consumption from one Project never offsets
+another Project's commitment. Derived availability compares physical stock with that
+summed outstanding commitment and may be negative to expose shortages.
 
 ---
 
@@ -381,6 +406,7 @@ Do not persist duplicate data unless required for history/performance.
 Prefer derived queries/read models for:
 
 - Project material totals
+- outstanding Project commitments and available-after-commitments
 - Nabavka sidebar badge count
 - Calendar birthday entries
 - Dashboard aggregates
@@ -397,6 +423,8 @@ Use domain language consistently.
 Preferred code terms:
 
 - `Project`
+- `ProjectProduct`
+- `ProjectProductComponent`
 - `ProcurementRequest`
 - `Supplier`
 - `Product`
@@ -405,6 +433,8 @@ Preferred code terms:
 - `PcbBomVersion`
 - `PcbProductionRun`
 - `WorkOrder`
+- `DocumentationRecord`
+- `FixedAsset`
 - `CalendarEntry`
 - `AuditLog`
 
@@ -414,6 +444,8 @@ UI may use localized labels such as:
 - Dobavljači
 - Skladište
 - Radni Nalozi
+- Dokumentacija
+- Osnovna sredstva
 
 Avoid multiple code names for the same domain concept.
 

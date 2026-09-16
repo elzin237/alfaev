@@ -37,6 +37,8 @@ Primary entities:
 - InventoryBalance
 - InventoryMovement
 - Project
+- ProjectProduct
+- ProjectProductComponent
 - ProcurementRequest
 - PcbCard
 - PcbBomVersion
@@ -45,6 +47,8 @@ Primary entities:
 - WorkOrder
 - WorkOrderItem
 - WorkOrderPdf
+- DocumentationRecord
+- FixedAsset
 - CalendarEntry
 - AuditLog
 
@@ -56,6 +60,7 @@ Supporting sequence/counter concepts:
 Derived/read-model concepts:
 
 - Project Material Usage
+- Project Inventory Commitment / Availability
 - Nabavka Sidebar Badge Count
 - Calendar Birthday Entries
 - Dashboard widgets
@@ -186,6 +191,8 @@ Not delegable:
 - changing Admin status
 - manual Inventory quantity adjustment
 - Calendar modification
+- Documentation administration and private PDF access
+- Fixed Asset administration
 
 These remain Admin-only and should not be grantable through UserPermission.
 
@@ -577,8 +584,8 @@ Rules:
 - All other statuses require both `completed_at` and `cancelled_at` to be `NULL`.
 - Trusted operations assign lifecycle timestamps server-side; clients do not provide them.
 - Normal Project editing requires an active Admin or `projects.edit` and may change only `name`, `customer_name`, `start_date`, `delivery_date`, and a normal status where allowed.
-- The normal edit operation accepts only `planned`, `in_progress`, `on_hold`, or `completed`; it never sets `cancelled`.
-- Entering `completed` sets `completed_at` and leaves `cancelled_at` `NULL`.
+- The normal edit operation accepts only `planned`, `in_progress`, or `on_hold`; it never sets `completed` or `cancelled`.
+- Only the trusted final-Work-Order Finish transaction enters `completed`, sets `completed_at`, and leaves `cancelled_at` `NULL`.
 - A normal edit/status operation cannot move a Project out of `completed`.
 - Completed Projects are read-only for normal business fields.
 - Admin may reopen a Completed Project by explicitly changing it to `in_progress`.
@@ -593,7 +600,105 @@ Rules:
 
 ---
 
-## 8.2 Project Material Usage — derived
+## 8.2 ProjectProduct
+
+Represents one Project-specific grouping or deliverable, such as B24, Control Unit,
+or Main Cabinet. It is not automatically an Inventory Product.
+
+Fields:
+
+- `id`
+- `project_id`
+  - required reference to Project with historical preservation
+- `name`
+  - required
+  - trimmed before persistence
+  - nonblank
+  - not globally unique
+- `created_at`
+- `created_by_user_id`
+- `updated_at`
+- `updated_by_user_id`
+
+Rules:
+
+- One Project may contain multiple Project Products.
+- ProjectProduct receives no Product Serial Number and has no Product foreign key merely because it exists.
+- Reads require an active Admin or `projects.view`; trusted mutations require an active Admin or `projects.edit`.
+- Completed or Cancelled Projects reject normal ProjectProduct changes.
+- Meaningful create/edit/removal changes are audited.
+
+---
+
+## 8.3 ProjectProductComponent
+
+Represents one planned total stock requirement within a ProjectProduct.
+
+Fields:
+
+- `id`
+- `project_product_id`
+  - required reference to ProjectProduct with historical preservation
+- `product_id`
+  - required reference to stock-tracked Product with historical preservation
+- `required_quantity`
+  - required whole number greater than zero
+- `created_at`
+- `created_by_user_id`
+- `updated_at`
+- `updated_by_user_id`
+
+Rules:
+
+- Unique `(project_product_id, product_id)` prevents duplicate Product requirements within one ProjectProduct.
+- A Product selected for a new or changed requirement must exist and be active at execution time.
+- Later Product archival does not invalidate or rewrite historical requirements.
+- Eligible stock-tracked kinds include `component` and `pcb_finished_good`; do not restrict requirements unnecessarily to components.
+- Required Quantity is the planned total for that ProjectProduct. No separate per-unit BOM/build-quantity model exists in current scope.
+- Reads require an active Admin or `projects.view`; trusted mutations require an active Admin or `projects.edit`.
+- Completed or Cancelled Projects reject normal requirement changes.
+- Meaningful add/edit/removal changes are audited.
+
+---
+
+## 8.4 Project Inventory Commitment / Availability — derived
+
+Project planning is not a physical Inventory mutation.
+
+Commitment is calculated per Project and Product before aggregation. For every open
+Project P and Product X:
+
+- `planned_requirement(P, X)` is the sum of `ProjectProductComponent.required_quantity` for Product X within Project P
+- `actual_project_consumption(P, X)` is qualifying physical consumption of Product X attributable to Project P
+- `outstanding_commitment(P, X) = max(planned_requirement(P, X) - actual_project_consumption(P, X), 0)`
+
+Then:
+
+- `committed_to_projects(X) = sum of outstanding_commitment(P, X)` across Projects currently in `planned`, `in_progress`, or `on_hold`
+- `available_after_commitments(X) = InventoryBalance.quantity - committed_to_projects(X)`
+
+Consumption from one Project never reduces another Project's commitment. Completed and
+Cancelled Projects contribute zero. An Admin-reopened Project in `in_progress`
+contributes its own still-outstanding requirements again after subtracting only its
+own prior qualifying physical consumption.
+
+Qualifying consumption for the same Project and Product includes finished Work Order
+Inventory deductions and, where applicable, Project-linked PCB production input
+deductions. Do not count Inventory additions/output movements, unrelated manual
+Inventory adjustments, or another Project's consumption. Preserve the Project
+material-usage rule that prevents double-counting raw PCB inputs and later consumption
+of the resulting finished PCB Product.
+
+Do not clamp `available_after_commitments` to zero; a negative value is a shortage
+signal. Do not persist commitments as InventoryMovement rows or decrement
+InventoryBalance when planning changes. Physical stock is already reduced by actual
+movement records, so only the unconsumed remainder remains committed.
+
+Pure derived commitment and availability calculations create no AuditLog entries.
+
+---
+
+## 8.5 Project Material Usage — derived
 
 Do not create a manually editable Project material table.
 
@@ -916,7 +1021,10 @@ Rules:
 
 - Work Order Number is allocated at creation, including Draft.
 - Number never changes or gets reused.
+- One Project may have one or many Work Orders; `project_id` is not unique.
 - Selecting Project automatically sets/refreshes the customer snapshot while Draft.
+- Draft materials integrate with the selected Project's planned component requirements.
+- Allocation across multiple Draft Work Orders must not double-allocate the same planned requirement.
 - Draft is editable according to permission.
 - Draft does not affect Inventory.
 - Finished is immutable.
@@ -973,11 +1081,19 @@ Trusted Finish workflow:
 7. update InventoryBalance rows
 8. mark WorkOrder Finished
 9. set finished actor/time
-10. create permanent PDF
-11. create AuditLog
-12. commit atomically
+10. record qualifying Project/Product physical consumption so the derived read model reduces only that matching Project/Product commitment
+11. check for other unfinished Work Orders belonging to the same Project
+12. if none remain, set the Project to `completed`, set `completed_at`, and update actor/time metadata
+13. create permanent PDF
+14. create required Work Order, Inventory, and automatic Project-completion AuditLog history
+15. commit atomically
 
 No Inventory mutation occurs before Finish.
+
+ProjectProductComponent requirements are not deducted separately. Inventory changes
+only through the Work Order's physical movements. If the final unfinished Work Order
+completes the Project, any unused planned commitment stops counting without changing
+physical stock.
 
 ---
 
@@ -1025,9 +1141,94 @@ The exact correction UI/workflow can be specified before that feature is impleme
 
 ---
 
-# 12. Calendar
+# 12. Documentation
 
-## 12.1 CalendarEntry
+## 12.1 DocumentationRecord
+
+Admin-only company Documentation record.
+
+Fields:
+
+- `id`
+- `name`
+  - required, trimmed, nonblank
+- `category`
+  - exactly `uvoz`, `izvoz`, `nabavka`, or `troskovi`
+- `document_date`
+  - required SQL `date`
+- `amount`
+  - required exact decimal/numeric monetary value
+  - non-negative
+- `pdf_storage_path`
+  - nullable private Supabase Storage object path/reference
+- `created_at`
+- `created_by_user_id`
+  - references UserProfile with historical preservation
+- `updated_at`
+- `updated_by_user_id`
+  - references UserProfile with historical preservation
+- `is_active`
+  - required, default `true`
+- `archived_at`
+  - nullable
+- `archived_by_user_id`
+  - nullable reference to UserProfile with historical preservation
+
+Rules:
+
+- No currency field exists in current scope.
+- PDF bytes are never stored in PostgreSQL.
+- At most one optional PDF attachment belongs to a Documentation record.
+- Admin-only trusted operations own create/read/edit/archive and PDF upload/read/download/replace/remove.
+- Archived records remain readable to Admin, are not hard-deleted, and have no current reactivation workflow.
+- Active records require null archive metadata; archived records require both archive timestamp and actor.
+- Meaningful record and PDF changes are audited.
+
+---
+
+# 13. Fixed Assets
+
+## 13.1 FixedAsset
+
+Admin-only company asset record, independent from warehouse Inventory.
+
+Fields:
+
+- `id`
+- `name`
+  - required, trimmed, nonblank
+- `category`
+  - exactly `oprema`, `uredjaji`, or `alati`
+- `purchase_date`
+  - required SQL `date`
+- `quantity`
+  - required whole number greater than zero
+- `created_at`
+- `created_by_user_id`
+  - references UserProfile with historical preservation
+- `updated_at`
+- `updated_by_user_id`
+  - references UserProfile with historical preservation
+- `is_active`
+  - required, default `true`
+- `archived_at`
+  - nullable
+- `archived_by_user_id`
+  - nullable reference to UserProfile with historical preservation
+
+Rules:
+
+- FixedAsset does not reference or synchronize Product, ProcurementRequest, InventoryBalance, or InventoryMovement.
+- Admin-only trusted operations own create/read/edit/archive.
+- Archived records remain readable to Admin, are not hard-deleted, and have no current reactivation workflow.
+- Active records require null archive metadata; archived records require both archive timestamp and actor.
+- Meaningful create/edit/archive changes are audited.
+
+---
+
+# 14. Calendar
+
+## 14.1 CalendarEntry
 
 Stores Admin-managed calendar information except Birthdays.
 
@@ -1061,7 +1262,7 @@ Rules:
 
 ---
 
-## 12.2 Birthday calendar entries — derived
+## 14.2 Birthday calendar entries — derived
 
 Do not duplicate birthdays into CalendarEntry.
 
@@ -1078,9 +1279,9 @@ Calendar filtering combines:
 
 ---
 
-# 13. Audit / Archive
+# 15. Audit / Archive
 
-## 13.1 AuditLog
+## 15.1 AuditLog
 
 Immutable system-wide business audit record.
 
@@ -1116,6 +1317,7 @@ Rules:
 - non-admin read access requires `archive.view`
 - do not log meaningless UI interactions
 - record meaningful create/edit/archive/status/permission/stock/production/work-order actions
+- record meaningful Documentation/PDF, Fixed Asset, Project Product, component-requirement, and automatic Project-completion actions
 
 AuditLog does not replace InventoryMovement.
 
@@ -1125,11 +1327,11 @@ Example:
 
 ---
 
-# 14. Derived Read Models
+# 16. Derived Read Models
 
 These should normally be implemented as queries/views/selectors rather than writable tables.
 
-## 14.1 Nabavka Sidebar Badge
+## 16.1 Nabavka Sidebar Badge
 
 Count ProcurementRequest rows with:
 
@@ -1142,7 +1344,7 @@ Exclude:
 
 ---
 
-## 14.2 Project Material Usage
+## 16.2 Project Material Usage
 
 Derived from physical completed consumption:
 
@@ -1155,7 +1357,20 @@ Do not expand a finished PCB item consumed by a Work Order back into BOM raw com
 
 ---
 
-## 14.3 Calendar feed
+## 16.3 Project Inventory Commitment / Availability
+
+For each Product X, expose Physical Quantity, Committed to Projects, and Available
+after Commitments. First calculate `outstanding_commitment(P, X)` independently for
+each open Project P by subtracting only qualifying consumption attributed to that same
+Project/Product pair and clamping that individual result at zero. Then sum those
+per-Project values into `committed_to_projects(X)`. Consumption from one Project never
+reduces another Project's commitment. Available is not clamped and may be negative to
+expose a shortage. This is a read model, not a reservation ledger or Inventory
+mutation.
+
+---
+
+## 16.4 Calendar feed
 
 Union of:
 
@@ -1166,7 +1381,7 @@ Filtered by selected category set.
 
 ---
 
-## 14.4 Dashboard
+## 16.5 Dashboard
 
 Dashboard is a permission-aware read model.
 
@@ -1179,7 +1394,7 @@ Rules:
 
 ---
 
-# 15. Relationship Summary
+# 17. Relationship Summary
 
 ```text
 UserProfile
@@ -1203,6 +1418,8 @@ Product
   └─0..1 PcbCard as output_product
 
 Project
+  ├─< ProjectProduct
+  │    └─< ProjectProductComponent >─ Product
   ├─< WorkOrder
   └─< PcbProductionRun
 
@@ -1226,11 +1443,17 @@ WorkOrder
 ProcurementRequest
   ├─0..1 Product
   └─1 Supplier
+
+DocumentationRecord
+  └─0..1 private PDF Storage object reference
+
+FixedAsset
+  └─ no Inventory/Product/Procurement relationship
 ```
 
 ---
 
-# 16. Immutability Matrix
+# 18. Immutability Matrix
 
 | Entity / Record | Mutable? | Locked behavior |
 |---|---|---|
@@ -1242,6 +1465,8 @@ ProcurementRequest
 | InventoryBalance | Transactionally mutable | Never directly mutated without movement |
 | InventoryMovement | No | Immutable ledger |
 | Project | Yes subject to lifecycle | Completed is normally read-only and may be explicitly reopened only by Admin; Cancelled is the historical removal/archive state with no current restore workflow |
+| ProjectProduct | Yes while Project is open | No normal changes after Project Completed/Cancelled |
+| ProjectProductComponent | Yes while Project is open | Planned requirement; never a physical Inventory movement |
 | ProcurementRequest | Yes until resolved | Resolved is terminal, stays historical, and has no hard-delete, reopen, or reactivation workflow |
 | PcbCard | Yes subject to history | Archive if production history exists |
 | Used PcbBomVersion | No | Immutable |
@@ -1250,12 +1475,14 @@ ProcurementRequest
 | Draft WorkOrder | Yes | May be deleted |
 | Finished WorkOrder | No | Never reopen/edit/delete |
 | WorkOrderPdf | No | Permanent document |
+| DocumentationRecord | Yes until archived, Admin-only | Private optional PDF; no hard delete/current reactivation |
+| FixedAsset | Yes until archived, Admin-only | Separate from Inventory; no hard delete/current reactivation |
 | CalendarEntry | Yes, Admin-only | Audit meaningful edits |
 | AuditLog | No | Never edit/delete |
 
 ---
 
-# 17. Critical Transaction Boundaries
+# 19. Critical Transaction Boundaries
 
 The physical implementation must provide trusted atomic operations for at least:
 
@@ -1281,12 +1508,17 @@ The physical implementation must provide trusted atomic operations for at least:
 ## Work Order Finish
 - permission check
 - Draft-state validation
+- Project relationship and planned-requirement synchronization validation
 - all-stock sufficiency validation
 - InventoryBalance deductions
 - InventoryMovement inserts
 - WorkOrder Finished transition
+- reduction of outstanding commitment from actual Project-linked consumption
+- check for other unfinished Work Orders on the same Project
+- atomic automatic Project completion when this is the final unfinished Work Order
+- release of unused remaining commitment when Project completes
 - PDF generation/finalization strategy
-- AuditLog insert
+- required Work Order, Inventory, and Project-completion AuditLog inserts
 
 The final backend design must ensure a failure cannot leave partially updated Inventory.
 
@@ -1307,7 +1539,7 @@ If PDF byte generation cannot participate in the same database transaction, the 
 
 ---
 
-# 18. Data Not Added to Current Scope
+# 20. Data Not Added to Current Scope
 
 Do not add entities solely because they are common in ERP software.
 
@@ -1318,8 +1550,8 @@ The locked scope currently does not require dedicated entities for:
 - Purchase Orders
 - Invoices
 - Quality Control
-- Production planning outside PCB production/Work Orders
-- Documents other than generated Work Order PDFs
+- broader production planning beyond the locked ProjectProduct commitment model, PCB production, and Work Orders
+- multiple Documentation PDF attachments or a currency model
 - Reports as a standalone module
 - employee vacation approvals
 - global state workflows
@@ -1328,7 +1560,7 @@ If future Alfa Proteh requirements introduce these concepts, extend the model de
 
 ---
 
-# 19. Definition of Done for the Data Model
+# 21. Definition of Done for the Data Model
 
 The logical model is ready for physical implementation when:
 
@@ -1342,7 +1574,13 @@ The logical model is ready for physical implementation when:
 - PCB production creates finished-goods stock atomically
 - Work Order drafts do not affect Inventory
 - Work Order Finish is atomic and immutable afterward
+- one Project may own multiple Work Orders without double-allocating planned requirements
+- Project planning commitments never directly mutate physical Inventory
+- Inventory availability exposes Physical, Committed, and unclamped Available values
+- final Work Order Finish automatically completes its Project and releases unused commitment atomically
 - Project material usage is derived without raw-material double counting
+- Documentation and its optional PDF remain Admin-only and private
+- Fixed Assets remain Admin-only and independent from Inventory
 - Calendar birthdays are derived from UserProfile
 - non-admin permissions are data-driven
 - Users module remains Admin-only

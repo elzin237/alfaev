@@ -72,13 +72,15 @@ Final navigation order:
 5. Skladište
 6. PCB Cards
 7. Radni Nalozi
-8. Calendar
-9. Archive
-10. Users
+8. Dokumentacija
+9. Osnovna sredstva
+10. Calendar
+11. Archive
+12. Users
 
 Rules:
 
-- Users item is visible only to Admin.
+- Users, Dokumentacija, and Osnovna sredstva are visible only to Admin.
 - Other items respect module visibility permissions.
 - Calendar is visible to all authenticated users.
 - Dashboard visibility follows the locked Dashboard permission model.
@@ -456,6 +458,21 @@ Sections:
 ### Overview
 Core Project fields.
 
+### Products
+Project-specific Products/groupings and their planned component requirements.
+
+Show enough information to understand:
+
+- Project Product Name
+- required stock-tracked Product
+- Serial Number / Šifra
+- planned total quantity
+- actual Project-linked consumption where available
+- outstanding commitment
+
+Authorized Project editors may manage planning only while the Project is open.
+Completed and Cancelled Projects are read-only.
+
 ### Material Usage
 Derived read-only list/table.
 
@@ -488,6 +505,10 @@ Completed Project:
 - normal edit controls hidden/disabled
 - Admin-only `Reopen Project` action
 - confirmation required
+
+Normal Project editing must not offer Completed as a target status. Completion is
+shown as the result of finishing the final unfinished Work Order. Existing Completed
+Projects and the Admin-only Reopen Project action remain supported.
 
 ---
 
@@ -665,7 +686,9 @@ Columns:
 - Name
 - Category
 - Brand
-- Quantity
+- Physical Quantity
+- Committed to Projects
+- Available after Commitments
 - primary Supplier or supplier count
 - status
 - actions
@@ -680,6 +703,14 @@ Primary actions:
 
 - Add Component
 - Manage Brands, if authorized
+
+Committed quantity is the sum of outstanding values calculated independently for each
+open Project and Product. Only qualifying physical consumption attributed to that same
+Project/Product pair reduces its outstanding value; consumption from one Project never
+offsets another's. Available is Physical minus Committed and may be negative. Display a
+clear shortage warning for negative values. Do not present commitments as stock
+movements or editable physical quantity. Where relevant, provide a way to understand
+which Projects account for the commitment without inventing reservation movements.
 
 ---
 
@@ -1015,6 +1046,11 @@ Fields:
   - read-only
 - Short Description
 
+One Project may have multiple Work Orders. The Draft UI must make its relationship to
+the selected Project's planned component requirements understandable and must not
+allow the same planned requirement to be silently double-allocated across Draft Work
+Orders.
+
 Materials section:
 
 - dedicated barcode scan field
@@ -1056,6 +1092,7 @@ When user clicks Finish:
    - status becomes Finished
    - editor becomes read-only
    - PDF action appears
+   - Project completes automatically when no other unfinished Work Order remains
 
 Confirmation should summarize:
 
@@ -1064,6 +1101,10 @@ Confirmation should summarize:
 - number of material lines
 - consequence:
   `Inventory will be deducted and this Work Order can no longer be edited.`
+
+Also explain when applicable that finishing the final unfinished Work Order will
+complete the Project. The UI must not suggest that planned requirements themselves are
+deducted from Inventory.
 
 If Inventory became insufficient since page load:
 
@@ -1131,6 +1172,41 @@ The PDF itself should include enough document identity to be useful when printed
 - signature area
 
 Exact formatting remains a later document-design task.
+
+---
+
+# 29A. Dokumentacija UI
+
+Admin-only route `/documents`.
+
+Provide a clear list and focused create/edit/archive flow for:
+
+- Naziv
+- Kategorija: Uvoz, Izvoz, Nabavka, Troškovi
+- Datum
+- Iznos
+- optional PDF
+
+Use exact decimal amount display/input semantics. PDF actions are Upload, Open/View,
+Download, Replace, and Remove as authorized Admin business operations. Explain archive
+consequences; provide no hard-delete or restore action. Private/signed PDF access must
+not be represented as a public permanent URL.
+
+---
+
+# 29B. Osnovna sredstva UI
+
+Admin-only route `/fixed-assets`.
+
+Provide a clear list and focused create/edit/archive flow for:
+
+- Naziv
+- Kategorija: Oprema, Uređaji, Alati
+- Datum nabavke
+- Količina
+
+Quantity is a positive whole number. Provide no Inventory controls, hard delete, or
+restore action.
 
 ---
 

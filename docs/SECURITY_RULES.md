@@ -110,6 +110,8 @@ Permanently Admin-only:
 - account activation/deactivation
 - manual Inventory quantity adjustment
 - Calendar modification
+- Dokumentacija records and private PDF attachments
+- Osnovna sredstva
 
 Brand authorization:
 
@@ -519,7 +521,7 @@ Project reads require an active Admin or `projects.view`.
 
 Direct normal-client Project INSERT, UPDATE, and DELETE are denied. Project writes require a trusted operation that re-checks the active actor's corresponding `projects.create`, `projects.edit`, or `projects.archive` permission, or Admin status.
 
-Normal Project field and status edits require an active Admin or `projects.edit`. The normal edit operation may change only `name`, `customer_name`, `start_date`, `delivery_date`, and a normal status of `planned`, `in_progress`, `on_hold`, or `completed`; it must never set `cancelled`. When the operation enters `completed`, it sets `completed_at` server-side and keeps `cancelled_at` `NULL`. Clients never provide lifecycle timestamps. A normal edit/status operation must not move a Project out of `completed`, even before the full Completed Project edit lock is added.
+Normal Project field and status edits require an active Admin or `projects.edit`. The normal edit operation may change only `name`, `customer_name`, `start_date`, `delivery_date`, and a normal status of `planned`, `in_progress`, or `on_hold`; it must never set `completed` or `cancelled`. Only the trusted final-Work-Order Finish transaction may enter `completed`, set `completed_at` server-side, and keep `cancelled_at` `NULL`. Clients never provide lifecycle timestamps. A normal edit/status operation must not move a Project out of `completed`.
 
 The `cancelled` status is the Project archive/removal state. Cancellation is a separate trusted operation requiring an active Admin or `projects.archive`; `projects.edit` alone never authorizes cancellation. Only a Project currently in `planned`, `in_progress`, or `on_hold` may be cancelled. Cancellation sets `status = 'cancelled'` and `cancelled_at` server-side while leaving `completed_at` `NULL`. A Completed Project cannot be cancelled directly. Cancellation never hard-deletes the Project. Cancelled Projects remain historically readable, are immutable, cannot change status, and have no restore/reactivation path in the current scope. Do not add separate Project `is_active`, `archived_at`, or archived-by fields.
 
@@ -537,6 +539,71 @@ Project status/timestamp consistency must be enforced at the database boundary: 
 Every meaningful Project edit, normal status change, or cancellation appends exactly one AuditLog entry atomically with the mutation. A normalized no-op normal edit/status submission creates no update and no audit noise. Denied or failed operations persist neither mutation nor audit.
 
 Project material usage is derived from trusted completed movement sources.
+
+ProjectProduct and ProjectProductComponent reads require an active Admin or
+`projects.view`. Their trusted mutations require an active Admin or `projects.edit`.
+Direct table writes are not authoritative. Completed and Cancelled Projects reject
+normal planning mutations. New or changed component requirements may reference only
+Products that are active at execution time, while historical references survive later
+Product archival.
+
+Project commitments are derived planning data and must never directly decrement
+InventoryBalance or create InventoryMovement. The trusted read model must first compute
+`max(planned_requirement(P, X) - actual_project_consumption(P, X), 0)` independently
+for each open Project P and Product X, then sum those isolated values into Product X's
+`committed_to_projects`. Consumption from one Project must never reduce another
+Project's commitment.
+
+Only physical consumption for the same Project and Product qualifies: finished Work
+Order deductions and, where applicable, Project-linked PCB production input
+deductions. Inventory additions/output movements, unrelated manual adjustments, and
+another Project's consumption do not qualify. Raw PCB inputs and later finished-PCB
+consumption must not be double-counted. Available after Commitments is physical
+InventoryBalance quantity minus the summed commitment; it may be negative and must not
+be clamped or used as a substitute for authoritative physical-stock checks.
+
+One Project may own multiple Work Orders. Trusted Draft synchronization must prevent
+double-allocation of the same planned requirement across concurrent Work Orders. Work
+Order Finish remains the only physical consumption event and must not also deduct
+ProjectProductComponent quantities.
+
+When a Work Order finishes, the trusted transaction must check for other unfinished
+Work Orders on the same Project. If none remain, it atomically completes the Project,
+sets server-owned lifecycle/update metadata, releases unused commitment, and appends
+the required immutable audit history together with Work Order and Inventory changes.
+No partial Finished/Inventory/Project state is permitted. The existing Admin-only
+`completed` to `in_progress` reopen remains valid.
+
+---
+
+# 20A. Documentation Security
+
+Dokumentacija is permanently Admin-only at navigation, route, read, mutation, and
+Storage layers. No delegable permission key is allowed. Non-admin and anonymous callers
+must not receive Documentation data or PDF access through direct API attempts.
+
+Documentation create/edit/archive and PDF upload/read/download/replace/remove require
+a trusted active-Admin operation. Record mutations and meaningful PDF changes are
+audited. Normal workflows do not hard-delete historical records and do not reactivate
+archived records.
+
+The optional PDF is stored in private Supabase Storage. Never store PDF bytes in
+PostgreSQL, expose a public bucket/public URL, or send service-role credentials to the
+browser. Validate PDF type, store only the private object path/reference on the
+business record, and issue access only through authorized private/signed mechanisms.
+
+---
+
+# 20B. Fixed Asset Security
+
+Osnovna sredstva is permanently Admin-only at navigation, route, read, and mutation
+layers. No delegable permission key is allowed. Non-admin and anonymous callers must
+not receive Fixed Asset data through direct API attempts.
+
+Trusted active-Admin operations own create/edit/archive and immutable audit creation.
+Normal workflows do not hard-delete or reactivate archived assets. Fixed Asset quantity
+must never update or authorize changes to Product, ProcurementRequest,
+InventoryBalance, or InventoryMovement.
 
 ---
 
@@ -754,6 +821,11 @@ Use signed/authorized access.
 
 Generated PDF objects should use stable internal identifiers rather than user-supplied filenames as security boundaries.
 
+Documentation PDFs follow the same private-storage baseline and are Admin-only. Each
+Documentation record may reference at most one optional validated PDF object. Upload,
+read/download, replacement, and removal require trusted active-Admin authorization;
+the browser never receives service-role credentials.
+
 ---
 
 # 32. Environment Separation
@@ -815,6 +887,8 @@ Protect:
 - Inventory deductions
 - PCB production
 - Work Order Finish
+- Project requirement synchronization across multiple Work Orders
+- final-Work-Order automatic Project completion
 - one-time Product creation from Nabavka
 - permission updates where stale state matters
 
@@ -874,17 +948,21 @@ Before production launch, verify at minimum:
 - inactive accounts blocked server-side
 - RLS enabled on all exposed business tables
 - Admin-only Users enforced server-side
+- Admin-only Dokumentacija and Osnovna sredstva enforced server-side
 - non-admin permission escalation impossible
 - service-role secret absent from frontend
 - Inventory cannot go negative
 - manual adjustment Admin-only
 - PCB production atomic
 - Work Order Finish atomic/safely finalized
+- final unfinished Work Order completes its Project atomically
+- Project commitments cannot mutate physical Inventory directly
 - Finished Work Orders immutable
 - used BOM versions immutable
 - InventoryMovement immutable
 - AuditLog immutable
 - private PDF Storage
+- private Admin-only Documentation PDF access
 - signed/authorized PDF access
 - dev/prod separation
 - migrations reproducible
