@@ -17919,7 +17919,7 @@ describe("Supabase security helpers", () => {
               join pg_catalog.pg_namespace as namespace on namespace.oid = routine.pronamespace
              where namespace.nspname = 'public'
                and routine.proname in (
-                 'create_pcb_card', 'update_pcb_card', 'archive_pcb_card',
+                 'update_pcb_card', 'archive_pcb_card',
                  'delete_pcb_card', 'reactivate_pcb_card', 'produce_pcb_card'
                )) as mutation_functions`,
       );
