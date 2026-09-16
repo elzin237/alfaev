@@ -303,9 +303,12 @@ Non-admin users cannot perform this operation regardless of UI manipulation.
 
 1. Authorized user/Admin opens PCB Cards.
 2. Click Create PCB Card.
-3. Enter card name/code.
-4. AlfaEV creates/links a finished-goods Product for the PCB card.
-5. That Product receives its own 7-digit Serial Number / barcode identity.
+3. Enter only the required card name/code; AlfaEV trims it and rejects blank input. The user does not choose Serial Number, Product Category, Brand, kind, Supplier, or initial stock.
+4. The trusted operation, authorized for an active Admin or `pcb.create`, creates one active `pcb_finished_good` Product with the normalized card Name, Category `PCB`, and no Brand, then links the new active PcbCard to it atomically.
+5. That Product receives its own server-allocated 7-digit Serial Number / barcode identity and a zero InventoryBalance. Card creation adds no InventoryMovement, finished-goods stock, Supplier link, or Catalog Number. Exactly one Product creation audit and one `pcb_card.created` audit are recorded atomically; failed creation leaves no business or audit rows, though the consumed Serial is never reused.
+
+After card creation, the later BOM workflow may:
+
 6. Define BOM:
    - select existing component Product
    - enter quantity required per one PCB card.

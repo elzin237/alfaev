@@ -897,6 +897,9 @@ Rules:
 - Active cards require both archive metadata fields to be null. Archived cards require both `archived_at` and `archived_by_user_id` to be non-null.
 - Task 085 defines the lifecycle metadata and consistency constraints but adds no archive, hard-delete, or reactivation operation.
 - If production history exists, the PCB card is archived rather than hard-deleted.
+- Trusted creation accepts only the normalized PcbCard Name/Code. It creates a new active output Product whose Name is that same normalized value, Category is exactly the free-text value `PCB`, Brand is `NULL`, and kind is `pcb_finished_good`. The existing trusted allocator supplies its 7-digit Serial Number; the client supplies no Product fields or initial stock.
+- The new Product receives exactly one zero InventoryBalance through normal Product initialization. No InventoryMovement, Supplier, ProductSupplier, or Catalog Number is created by card definition. Finished-goods stock increases only during later PCB production.
+- Product, zero balance, PcbCard, and exactly one `product.created` plus one `pcb_card.created` AuditLog entry commit atomically. The card audit identifies the card ID, normalized Name, output Product ID, and generated Serial Number. Failed creation leaves no Product, balance, card, or audit; allocated Serial Numbers are not reused after rollback.
 
 ---
 

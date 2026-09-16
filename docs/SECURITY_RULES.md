@@ -286,7 +286,7 @@ Every PcbCard must reference exactly one Product through a required, unique, his
 
 New PcbCard rows start active with no archive metadata. Active state requires both `archived_at` and `archived_by_user_id` to be null; archived state requires both values to be non-null. Actor references and the output Product reference use history-preserving deletion behavior. Task 085 adds no archive, hard-delete, or reactivation operation.
 
-Task 086 owns the trusted PcbCard creation operation. It must create an active `pcb_finished_good` output Product, allocate its unique 7-digit Serial Number server-side, enforce authorization, and append the required immutable audit history.
+Task 086 owns trusted backend-only PcbCard creation. The sole client input is the card Name/Code; the client cannot supply Product fields, Serial Number, actor identity, or initial stock. Creation requires an active Admin or `pcb.create`; neither `pcb.view` nor Inventory Product permissions are required. The trusted operation derives the active `pcb_finished_good` Product and its unique 7-digit Serial Number server-side, links exactly that Product to the new active card, and relies on normal zero InventoryBalance initialization. It creates no InventoryMovement or Supplier relationship. Product, zero balance, PcbCard, and exactly one `product.created` plus one `pcb_card.created` immutable audit event must commit atomically or all roll back. A consumed Serial Number is never reused even if that transaction rolls back.
 
 ## PCB Production Security
 

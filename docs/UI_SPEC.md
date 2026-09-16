@@ -889,6 +889,8 @@ Primary actions:
 - Create PCB Card
 - Produce
 
+The later Add PCB Card UI (Task 087) asks only for the required card Name/Code. It does not ask for Serial Number, Product Category, Brand, kind, Supplier, or initial stock. Task 086 creates the trusted backend operation only and adds no UI.
+
 ---
 
 ## PCB detail

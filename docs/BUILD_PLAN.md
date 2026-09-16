@@ -1902,17 +1902,21 @@ Requirements:
 ## 086 — Add Trusted PCB Card Creation
 
 Goal:
-- create PCB card + output Product coherently
+- create the PCB card and its newly derived output Product through one trusted backend operation
 
 Requirements:
-- create a new active PcbCard and its active output Product coherently
-- output Product kind is always `pcb_finished_good`
-- output Product gets unique 7-digit Serial Number
-- authorization
-- audit
-- establish the immutable output Product link
+- accept only the required, trimmed, nonblank human-facing PcbCard Name/Code; names are not unique
+- do not accept client-selected Serial Number, Product Category, Brand, kind, Supplier, actor, or initial stock
+- require an active Admin or `pcb.create`, without requiring `pcb.view` or Inventory Product permissions
+- allocate the next unique 7-digit Serial Number through the existing trusted allocator; sequence gaps after rollback are acceptable and allocated values are never reused
+- create exactly one new active Product with Name equal to the normalized PcbCard Name, Category exactly `PCB`, Brand `NULL`, and kind `pcb_finished_good`
+- rely on normal Product initialization for exactly one zero InventoryBalance; do not create InventoryMovement, add finished-goods stock, or treat card creation as production
+- create one new active PcbCard pointing to that Product, preserving the required unique and immutable output-Product relationship from Task 085
+- append exactly one established `product.created` audit and one `pcb_card.created` audit, without duplicating the Product event; the card audit identifies card ID, Name, output Product ID, and generated Serial Number
+- commit Product, zero balance, card, and both audits atomically; failure leaves none of those rows or audits
+- create no Supplier, ProductSupplier relationship, or Catalog Number
 
-Do not create the PCB list or Add PCB Card UI in this task.
+Backend only. Do not create the PCB list or Add PCB Card UI in this task; Task 087 owns both.
 
 ---
 

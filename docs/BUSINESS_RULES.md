@@ -461,6 +461,10 @@ Scanning the barcode must resolve the matching AlfaEV product by Serial Number /
 - A new PcbCard starts active with no archive metadata. An active card has null archive timestamp and actor, while an archived card has both values populated.
 - Archiving the output Product later does not invalidate or rewrite the historical PcbCard relationship.
 - Task 085 creates no PcbCard archive or reactivation workflow. Where production history exists, a PcbCard must be archived rather than hard-deleted, consistent with the existing lifecycle rule.
+- Creating a PcbCard takes only its required, trimmed, nonblank human-facing Name/Code; card names are not unique. The trusted operation creates exactly one new active output Product with the same normalized Name, Category `PCB`, no Brand, and kind `pcb_finished_good`. Its unique 7-digit Serial Number comes from the trusted allocator, never from the user.
+- Normal Product setup initializes the output Product's InventoryBalance at zero. Card creation is not production: it adds no finished-goods stock and creates no InventoryMovement. Only later PCB production may increase finished-goods stock.
+- A PcbCard definition does not inherently require a Supplier. Creation adds no Supplier, ProductSupplier relationship, or Catalog Number.
+- Task 086 creation is authorized by an active Admin or `pcb.create`, without requiring `pcb.view` or Inventory Product permissions. It atomically creates the Product, zero balance, card, and exactly one Product creation audit plus one `pcb_card.created` audit. Failure leaves none of those rows or audits; a rolled-back Serial allocation may leave a permanent sequence gap.
 
 ### BOM calculation
 
