@@ -14,7 +14,7 @@ import SuppliersPage from "../../features/suppliers/SuppliersPage";
 import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
 import InventoryPage from "../../features/inventory/InventoryPage";
 import ProductDetailPage from "../../features/inventory/ProductDetailPage";
-import PcbPage from "../../pages/pcb/PcbPage";
+import PcbPage from "../../features/pcb/PcbPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";

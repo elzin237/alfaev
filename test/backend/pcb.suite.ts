@@ -38,6 +38,118 @@ interface PcbCardRow {
 }
 
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("lists PCB Cards through a narrow authorized Product and stock projection", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const productId = randomUUID();
+      const cardId = randomUUID();
+      const serial = createTestSerialNumber();
+      const archivedProductId = randomUUID();
+      const archivedCardId = randomUUID();
+      let archivedSerial = createTestSerialNumber();
+      while (archivedSerial === serial) archivedSerial = createTestSerialNumber();
+      await database.query(
+        `insert into public.products (id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id)
+         values ($1, $2, 'Private Product Name', 'PCB', 'pcb_finished_good', $3, $3)`,
+        [productId, serial, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_cards (id, name, output_product_id,
+           created_by_user_id, updated_by_user_id)
+         values ($1, 'List Test Card', $2, $3, $3)`,
+        [cardId, productId, actorId],
+      );
+      await database.query(
+        `insert into public.products (id, serial_number, name, category, product_kind,
+           is_active, archived_at, archived_by_user_id, created_by_user_id, updated_by_user_id)
+         values ($1, $2, 'Private Archived Product', 'PCB', 'pcb_finished_good',
+           false, pg_catalog.now(), $3, $3, $3)`,
+        [archivedProductId, archivedSerial, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_cards (id, name, output_product_id, is_active,
+           archived_at, archived_by_user_id, created_by_user_id, updated_by_user_id)
+         values ($1, 'Archived List Card', $2, false, pg_catalog.now(), $3, $3, $3)`,
+        [archivedCardId, archivedProductId, actorId],
+      );
+      await database.query(
+        "update public.inventory_balances set quantity = 4 where product_id = $1",
+        [productId],
+      );
+      await database.query(
+        `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+         select $1, id, $2 from public.permission_definitions where key = 'pcb.view'`,
+        [fixture.actors.permitted.profileId, actorId],
+      );
+
+      const functionSecurity = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        security_definer: boolean;
+        search_path: string[];
+      }>(
+        `select p.prosecdef as security_definer,
+                pg_catalog.has_function_privilege('anon', p.oid, 'execute') as anonymous_execute,
+                pg_catalog.has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+                p.proconfig as search_path
+         from pg_catalog.pg_proc p
+         where p.oid = 'public.list_pcb_cards()'::pg_catalog.regprocedure`,
+      );
+      expect(functionSecurity.rows).toEqual([{
+        anonymous_execute: false,
+        authenticated_execute: true,
+        security_definer: true,
+        search_path: ['search_path=""'],
+      }]);
+
+      for (const actor of [fixture.actors.admin, fixture.actors.permitted]) {
+        await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)", [actor.authUserId]);
+        await database.query("set local role authenticated");
+        const response = await database.query<Record<string, unknown>>("select * from public.list_pcb_cards()");
+        await database.query("reset role");
+        const listed = response.rows.find((row) => row.pcb_card_id === cardId);
+        expect(listed).toEqual({
+          pcb_card_id: cardId,
+          card_name: "List Test Card",
+          is_active: true,
+          output_product_id: productId,
+          serial_number: serial,
+          current_stock: "4",
+        });
+        expect(response.rows.find((row) => row.pcb_card_id === archivedCardId)).toEqual({
+          pcb_card_id: archivedCardId,
+          card_name: "Archived List Card",
+          is_active: false,
+          output_product_id: archivedProductId,
+          serial_number: archivedSerial,
+          current_stock: "0",
+        });
+        expect(response.rows.findIndex((row) => row.pcb_card_id === cardId))
+          .toBeLessThan(response.rows.findIndex((row) => row.pcb_card_id === archivedCardId));
+      }
+
+      for (const actor of [fixture.actors.unpermitted, fixture.actors.inactive]) {
+        await database.query("savepoint denied_pcb_list");
+        await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)", [actor.authUserId]);
+        await database.query("set local role authenticated");
+        await expect(database.query("select * from public.list_pcb_cards()"))
+          .rejects.toMatchObject({ code: "42501" });
+        await database.query("rollback to savepoint denied_pcb_list");
+      }
+      await database.query("savepoint anon_pcb_list");
+      await database.query("set local role anon");
+      await expect(database.query("select * from public.list_pcb_cards()"))
+        .rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anon_pcb_list");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
+        [[productId, archivedProductId]],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
   it("enforces the canonical PcbCard schema and protected output Product relationship", async () => {
     const fixture = requireHarness();
 
