@@ -412,7 +412,7 @@ describe("projectService", () => {
         customerName: "Customer",
         startDate: "2026-09-01",
         deliveryDate: "2026-09-30",
-        status: "completed",
+        status: "in_progress",
       },
     )).resolves.toEqual({
       ok: false,

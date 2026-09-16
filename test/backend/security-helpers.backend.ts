@@ -11704,26 +11704,17 @@ describe("Supabase security helpers", () => {
       );
       expect(afterNoOp.rows).toEqual(beforeNoOp.rows);
 
-      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
-      await database.query("set local role authenticated");
-      await database.query(
-        `select public.update_project($1, 'Editable Project', 'Updated Customer', '2026-09-02', '2026-10-01', 'completed')`,
-        [projectId],
-      );
-      await database.query("reset role");
-
-      const completed = await database.query<ProjectRow>(
+      const openProject = await database.query<ProjectRow>(
         `select *, start_date::text as start_date, delivery_date::text as delivery_date
          from public.projects where id = $1`, [projectId],
       );
-      const completedAt = completed.rows[0]?.completed_at;
-      expect(completed.rows[0]).toMatchObject({
+      expect(openProject.rows[0]).toMatchObject({
         name: "Editable Project", customer_name: "Updated Customer",
-        status: "completed", start_date: "2026-09-02",
+        status: "planned", start_date: "2026-09-02",
         delivery_date: "2026-10-01", updated_by_user_id: editor.profileId,
+        completed_at: null,
         cancelled_at: null,
       });
-      expect(completedAt).toBeInstanceOf(Date);
 
       await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)", [editor.authUserId]);
       await database.query("set local role authenticated");
@@ -11740,7 +11731,11 @@ describe("Supabase security helpers", () => {
          from public.projects where id = any($1::uuid[])`,
         [[projectId, existingCompletedId, cancelledId]],
       );
-      expect(finalRows.rows.find((row) => row.id === projectId)?.completed_at).toEqual(completedAt);
+      expect(finalRows.rows.find((row) => row.id === projectId)).toMatchObject({
+        status: "planned",
+        completed_at: null,
+        cancelled_at: null,
+      });
       expect(finalRows.rows.find((row) => row.id === existingCompletedId)).toMatchObject({
         name: "Completed Project",
         completed_at: new Date("2026-09-30T10:00:00Z"),
@@ -11751,18 +11746,104 @@ describe("Supabase security helpers", () => {
          from public.audit_logs where entity_id = any($1::uuid[]) and action_type = 'project.updated'`,
         [[projectId, existingCompletedId, cancelledId]],
       );
-      expect(audits.rows).toHaveLength(5);
+      expect(audits.rows).toHaveLength(4);
       expect(audits.rows.filter((row) => row.actor_user_id === fixture.actors.admin.profileId)).toHaveLength(1);
-      expect(audits.rows.filter((row) => row.actor_user_id === editor.profileId)).toHaveLength(4);
+      expect(audits.rows.filter((row) => row.actor_user_id === editor.profileId)).toHaveLength(3);
       expect(audits.rows.filter((row) => row.entity_id === cancelledId)).toHaveLength(0);
       expect(audits.rows.filter((row) => row.entity_id === existingCompletedId)).toHaveLength(0);
-      expect(audits.rows.find((row) =>
-        row.entity_id === projectId && row.after_data?.status === "completed"
-      )).toMatchObject({
-        action_type: "project.updated",
-        before_data: { status: "planned", completed_at: null },
-        after_data: { status: "completed" },
-      });
+      expect(audits.rows.some((row) => row.after_data?.status === "completed"))
+        .toBe(false);
+    });
+  });
+
+  it("rejects manual completion from every open status for Admin and projects.edit without mutation or audit", async () => {
+    const fixture = requireHarness();
+    const editor = fixture.actors.productCreator;
+    const projectIds = [randomUUID(), randomUUID(), randomUUID()];
+
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select $1::uuid, id, $2::uuid
+         from public.permission_definitions
+         where key = 'projects.edit'`,
+        [editor.profileId, fixture.actors.admin.profileId],
+      );
+      await database.query(
+        `insert into public.projects (
+           id, name, customer_name, status, start_date, delivery_date,
+           created_at, created_by_user_id, updated_at, updated_by_user_id,
+           completed_at, cancelled_at
+         ) values
+           ($1, 'Planned Manual Completion', 'Customer', 'planned',
+            '2026-09-01', '2026-09-30', '2026-09-01T08:00:00Z', $4,
+            '2026-09-02T08:00:00Z', $4, null, null),
+           ($2, 'Progress Manual Completion', 'Customer', 'in_progress',
+            '2026-09-01', '2026-09-30', '2026-09-01T08:00:00Z', $4,
+            '2026-09-02T08:00:00Z', $4, null, null),
+           ($3, 'Hold Manual Completion', 'Customer', 'on_hold',
+            '2026-09-01', '2026-09-30', '2026-09-01T08:00:00Z', $4,
+            '2026-09-02T08:00:00Z', $4, null, null)`,
+        [...projectIds, fixture.actors.admin.profileId],
+      );
+      const baseline = await database.query<{
+        completed_at: Date | null;
+        id: string;
+        status: string;
+        updated_at: Date;
+        updated_by_user_id: string;
+      }>(
+        `select id, status, completed_at, updated_at, updated_by_user_id
+         from public.projects
+         where id = any($1::uuid[])
+         order by id`,
+        [projectIds],
+      );
+
+      for (const actor of [fixture.actors.admin, editor]) {
+        await database.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [actor.authUserId],
+        );
+        await database.query("set local role authenticated");
+        for (const [index, projectId] of projectIds.entries()) {
+          await database.query(`savepoint manual_completion_${index}`);
+          await expect(database.query(
+            `select public.update_project(
+               $1, 'Manual Completion Attempt', 'Customer',
+               '2026-09-01', '2026-09-30', 'completed'
+             )`,
+            [projectId],
+          )).rejects.toMatchObject({ code: "22023" });
+          await database.query(`rollback to savepoint manual_completion_${index}`);
+        }
+        await database.query("reset role");
+      }
+
+      const unchanged = await database.query<{
+        completed_at: Date | null;
+        id: string;
+        status: string;
+        updated_at: Date;
+        updated_by_user_id: string;
+      }>(
+        `select id, status, completed_at, updated_at, updated_by_user_id
+         from public.projects
+         where id = any($1::uuid[])
+         order by id`,
+        [projectIds],
+      );
+      expect(unchanged.rows).toEqual(baseline.rows);
+      expect(unchanged.rows.every((row) => row.completed_at === null)).toBe(true);
+      expect((await database.query<CountResultRow>(
+        `select count(*)::integer as count
+         from public.audit_logs
+         where entity_id = any($1::uuid[])
+           and action_type = 'project.updated'`,
+        [projectIds],
+      )).rows).toEqual([{ count: 0 }]);
     });
   });
 
@@ -11913,6 +11994,7 @@ describe("Supabase security helpers", () => {
         ["Project", "   ", "2026-09-01", "2026-09-30", "planned"],
         ["Project", "Customer", null, "2026-09-30", "planned"],
         ["Project", "Customer", "2026-10-01", "2026-09-30", "planned"],
+        ["Project", "Customer", "2026-09-01", "2026-09-30", "completed"],
         ["Project", "Customer", "2026-09-01", "2026-09-30", "cancelled"],
         ["Project", "Customer", "2026-09-01", "2026-09-30", "unknown"],
       ];

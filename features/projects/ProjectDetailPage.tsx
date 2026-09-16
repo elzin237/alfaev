@@ -9,7 +9,10 @@ import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import ProjectEditDialog from "./components/ProjectEditDialog";
 import { useProjectDetail } from "./hooks/useProjectDetail";
-import { getProjectStatusPresentation } from "./projectStatus";
+import {
+  getProjectStatusPresentation,
+  isProjectEditableStatus,
+} from "./projectStatus";
 import { isProjectId } from "./services/projectService";
 
 const projectDateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -276,7 +279,9 @@ function ProjectDetailPage() {
             customerName: project.customerName,
             startDate: project.startDate,
             deliveryDate: project.deliveryDate,
-            status: project.status === "cancelled" ? "planned" : project.status,
+            status: isProjectEditableStatus(project.status)
+              ? project.status
+              : "planned",
           }}
           onClose={() => setIsEditOpen(false)}
           onSubmit={update}

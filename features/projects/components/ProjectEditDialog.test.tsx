@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { projectEditSchema } from "../validation/projectEditSchema";
 import ProjectEditDialog from "./ProjectEditDialog";
 
 const initialValues = {
@@ -14,20 +15,29 @@ const initialValues = {
 afterEach(cleanup);
 
 describe("ProjectEditDialog", () => {
-  it("prefills fields and offers exactly the four normal statuses", () => {
+  it("prefills fields and offers exactly the three open editable statuses", () => {
     render(<ProjectEditDialog open currentStatus="planned" initialValues={initialValues} onClose={vi.fn()} onSubmit={vi.fn()} onSucceeded={vi.fn()} />);
     expect(screen.getByLabelText("Project Name")).toHaveValue("Control Cabinet");
     expect(screen.getByLabelText("Customer")).toHaveValue("Alfa Customer");
     const status = screen.getByLabelText("Status");
     expect(status).toHaveValue("planned");
     expect(Array.from((status as HTMLSelectElement).options).map((option) => option.value)).toEqual([
-      "planned", "in_progress", "on_hold", "completed",
+      "planned", "in_progress", "on_hold",
     ]);
+    expect(screen.queryByRole("option", { name: "Completed" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Cancelled" })).not.toBeInTheDocument();
   });
 
+  it.each(["completed", "cancelled"])(
+    "rejects %s as a normal edit target",
+    (status) => {
+      expect(projectEditSchema.safeParse({ ...initialValues, status }).success)
+        .toBe(false);
+    },
+  );
+
   it("renders no normal edit dialog for a Completed Project", () => {
-    render(<ProjectEditDialog open currentStatus="completed" initialValues={{ ...initialValues, status: "completed" }} onClose={vi.fn()} onSubmit={vi.fn()} onSucceeded={vi.fn()} />);
+    render(<ProjectEditDialog open currentStatus="completed" initialValues={initialValues} onClose={vi.fn()} onSubmit={vi.fn()} onSucceeded={vi.fn()} />);
     expect(screen.queryByRole("dialog", { name: "Edit Project" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Project Name")).not.toBeInTheDocument();
   });

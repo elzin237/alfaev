@@ -15,7 +15,6 @@ export const projectEditableStatuses = [
   "planned",
   "in_progress",
   "on_hold",
-  "completed",
 ] as const;
 
 export type ProjectEditableStatus = (typeof projectEditableStatuses)[number];
@@ -37,7 +36,7 @@ export const projectEditableStatusOptions: ReadonlyArray<{
   value: ProjectEditableStatus;
 }> = projectStatusOptions.filter(
   (option): option is { label: string; value: ProjectEditableStatus } =>
-    option.value !== "all" && option.value !== "cancelled",
+    isProjectEditableStatus(option.value),
 );
 
 const statusPresentation: Record<
@@ -58,6 +57,13 @@ export function getProjectStatusPresentation(status: ProjectStatus) {
 export function isProjectStatus(value: unknown): value is ProjectStatus {
   return typeof value === "string" &&
     projectStatuses.some((status) => status === value);
+}
+
+export function isProjectEditableStatus(
+  value: unknown,
+): value is ProjectEditableStatus {
+  return typeof value === "string" &&
+    projectEditableStatuses.some((status) => status === value);
 }
 
 export function isProjectStatusFilter(
