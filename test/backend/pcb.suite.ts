@@ -110,26 +110,54 @@ async function commitBomCallInTestTransaction(
   cardId: string,
   items: unknown,
 ) {
-  await database.query(
-    "select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
-    [actor.authUserId],
-  );
-  await database.query("set local role authenticated");
+  await database.query("savepoint successful_bom_call");
   try {
-    return (await database.query<{ bom_version_id: string; version_number: string }>(
+    await database.query(
+      "select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+      [actor.authUserId],
+    );
+    await database.query("set local role authenticated");
+    const rows = (await database.query<{ bom_version_id: string; version_number: string }>(
       "select * from public.save_initial_pcb_bom($1::uuid, $2::jsonb)",
       [cardId, JSON.stringify(items)],
     )).rows;
-  } finally {
     await database.query("reset role");
+    await database.query("release savepoint successful_bom_call");
+    return rows;
+  } catch (error) {
+    await database.query("rollback to savepoint successful_bom_call");
+    throw error;
   }
 }
 
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("rejects an archived PCB Card BOM save with PCB07 before any BOM write", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { cardId, componentId } =
+        await createBomSaveFixture(database, fixture.actors.admin.profileId);
+      await database.query(
+        `update public.pcb_cards set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`,
+        [cardId, fixture.actors.admin.profileId],
+      );
+      await expect(saveBomAs(database, fixture.actors.admin, cardId, [
+        { product_id: componentId, quantity_per_card: 1 },
+      ])).rejects.toMatchObject({ code: "PCB07" });
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_bom_versions where pcb_card_id = $1", [cardId],
+      )).rows).toEqual([{ count: "0" }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [cardId],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
   it("saves and updates only the initial PCB BOM with one audit per meaningful change", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
-      const { cardId, componentId, finishedId, anotherId } =
+      const { cardId, outputId, componentId, finishedId, anotherId, archivedId } =
         await createBomSaveFixture(database, fixture.actors.admin.profileId);
       const actor = fixture.actors.admin;
       const first = await commitBomCallInTestTransaction(database, actor, cardId, [
@@ -197,9 +225,16 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       expect(audits.rows.every((row) => row.actor_user_id === actor.profileId)).toBe(true);
       expect(audits.rows.find((row) => row.action_type === "pcb_bom.updated"))
         .toMatchObject({ before_data: { items: expect.any(Array) }, after_data: { items: expect.any(Array) } });
+      const allProductIds = [outputId, componentId, finishedId, anotherId, archivedId];
+      const balances = await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = any($1::uuid[])",
+        [allProductIds],
+      );
+      expect(balances.rows).toHaveLength(allProductIds.length);
+      expect(balances.rows.every((row) => row.quantity === "0")).toBe(true);
       expect((await database.query<{ count: string }>(
         "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
-        [[componentId, finishedId, anotherId]],
+        [allProductIds],
       )).rows).toEqual([{ count: "0" }]);
     });
   });
@@ -207,7 +242,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
   it("rejects unauthorized and invalid initial BOM saves without partial writes", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
-      const { cardId, outputId, componentId, archivedId } =
+      const { cardId, outputId, componentId, finishedId, anotherId, archivedId } =
         await createBomSaveFixture(database, fixture.actors.admin.profileId);
       for (const [actor, key] of [
         [fixture.actors.permitted, "pcb.view"],
@@ -238,6 +273,17 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       const editorSave = await commitBomCallInTestTransaction(database, editor, cardId, valid);
       expect(editorSave[0]?.version_number).toBe("1");
       const versionId = editorSave[0]?.bom_version_id;
+      const productIds = [outputId, componentId, finishedId, anotherId, archivedId];
+      const balances = await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = any($1::uuid[])",
+        [productIds],
+      );
+      expect(balances.rows).toHaveLength(productIds.length);
+      expect(balances.rows.every((row) => row.quantity === "0")).toBe(true);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
+        [productIds],
+      )).rows).toEqual([{ count: "0" }]);
       const invalid: Array<[unknown, string]> = [
         [[{ product_id: outputId, quantity_per_card: 1 }], "22023"],
         [[{ product_id: archivedId, quantity_per_card: 1 }], "PCB04"],
@@ -289,7 +335,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
          where id = $1`, [cardId, fixture.actors.admin.profileId],
       );
       await expect(saveBomAs(database, editor, cardId, valid))
-        .rejects.toMatchObject({ code: "PCB01" });
+        .rejects.toMatchObject({ code: "PCB07" });
 
       const security = await database.query<{
         anonymous_execute: boolean;
