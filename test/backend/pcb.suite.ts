@@ -38,6 +38,300 @@ interface PcbCardRow {
 }
 
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("enforces PCB BOM version, item, eligibility and historical reference integrity", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const [outputA, outputB, component, finishedGood, archivedInput] =
+        Array.from({ length: 5 }, () => randomUUID());
+      const serials: string[] = [];
+      while (serials.length < 5) {
+        const serial = createTestSerialNumber();
+        if (!serials.includes(serial)) serials.push(serial);
+      }
+      for (const [index, productId] of [outputA, outputB, component, finishedGood, archivedInput].entries()) {
+        await database.query(
+          `insert into public.products (id, serial_number, name, category, product_kind,
+             created_by_user_id, updated_by_user_id)
+           values ($1, $2, $3, 'PCB', $4, $5, $5)`,
+          [productId, serials[index], `BOM Product ${index}`,
+            index < 2 || index === 3 ? "pcb_finished_good" : "component", actorId],
+        );
+      }
+      const cardA = randomUUID();
+      const cardB = randomUUID();
+      for (const [cardId, productId] of [[cardA, outputA], [cardB, outputB]]) {
+        await database.query(
+          `insert into public.pcb_cards (id, name, output_product_id,
+             created_by_user_id, updated_by_user_id)
+           values ($1, 'BOM Test Card', $2, $3, $3)`,
+          [cardId, productId, actorId],
+        );
+      }
+      const noVersions = await database.query<{ count: string }>(
+        "select count(*) from public.pcb_bom_versions where pcb_card_id = $1", [cardB],
+      );
+      expect(noVersions.rows).toEqual([{ count: "0" }]);
+
+      const version1 = randomUUID();
+      const version2 = randomUUID();
+      const otherCardVersion = randomUUID();
+      await database.query(
+        `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, created_by_user_id)
+         values ($1, $2, 1, $3)`, [version1, cardA, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, is_active, created_by_user_id)
+         values ($1, $2, 2, false, $3)`, [version2, cardA, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, created_by_user_id)
+         values ($1, $2, 1, $3)`, [otherCardVersion, cardB, actorId],
+      );
+
+      async function rejects(sql: string, values: unknown[], code: string) {
+        await database.query("savepoint invalid_bom_row");
+        await expect(database.query(sql, values)).rejects.toMatchObject({ code });
+        await database.query("rollback to savepoint invalid_bom_row");
+      }
+
+      const versionInsert = `insert into public.pcb_bom_versions
+        (pcb_card_id, version_number, is_active, created_by_user_id)
+        values ($1, $2, $3, $4)`;
+      await rejects(versionInsert, [randomUUID(), 1, true, actorId], "23503");
+      await rejects(versionInsert, [cardA, null, false, actorId], "23502");
+      await rejects(versionInsert, [cardA, 0, false, actorId], "23514");
+      await rejects(versionInsert, [cardA, -1, false, actorId], "23514");
+      await rejects(versionInsert, [cardA, 1, false, actorId], "23505");
+      await rejects(versionInsert, [cardA, 3, true, actorId], "23505");
+      await rejects(versionInsert, [cardA, 3, false, randomUUID()], "23503");
+      await rejects("update public.pcb_bom_versions set pcb_card_id = $2 where id = $1",
+        [version2, cardB], "PCB03");
+
+      const componentItem = randomUUID();
+      const finishedItem = randomUUID();
+      await database.query(
+        `insert into public.pcb_bom_items
+           (id, bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, $3, 2), ($4, $2, $5, 3)`,
+        [componentItem, version1, component, finishedItem, finishedGood],
+      );
+      await database.query(
+        `insert into public.pcb_bom_items
+           (bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, 1)`, [version2, component],
+      );
+      const itemInsert = `insert into public.pcb_bom_items
+        (bom_version_id, component_product_id, quantity_per_card)
+        values ($1, $2, $3)`;
+      await rejects(itemInsert, [version1, component, 1], "23505");
+      await rejects(itemInsert, [version1, archivedInput, 0], "23514");
+      await rejects(itemInsert, [version1, archivedInput, -1], "23514");
+      await rejects(itemInsert, [randomUUID(), component, 1], "23503");
+      await rejects(itemInsert, [version1, randomUUID(), 1], "23503");
+      await rejects(itemInsert, [version1, outputA, 1], "PCB05");
+      await rejects("update public.pcb_bom_items set component_product_id = $2 where id = $1",
+        [componentItem, outputA], "PCB05");
+
+      const foreignKeys = await database.query<{ conname: string; confdeltype: string }>(
+        `select conname, confdeltype
+         from pg_catalog.pg_constraint
+         where conrelid in (
+           'public.pcb_bom_versions'::pg_catalog.regclass,
+           'public.pcb_bom_items'::pg_catalog.regclass
+         ) and contype = 'f'
+         order by conname`,
+      );
+      expect(foreignKeys.rows).toHaveLength(4);
+      expect(foreignKeys.rows.every((row) => row.confdeltype === "r")).toBe(true);
+
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [archivedInput, actorId],
+      );
+      await rejects(itemInsert, [version1, archivedInput, 1], "PCB04");
+      await rejects("update public.pcb_bom_items set component_product_id = $2 where id = $1",
+        [componentItem, archivedInput], "PCB04");
+
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [finishedGood, actorId],
+      );
+      expect((await database.query<{ component_product_id: string }>(
+        "select component_product_id from public.pcb_bom_items where id = $1", [finishedItem],
+      )).rows).toEqual([{ component_product_id: finishedGood }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = any($1::uuid[])",
+        [[version1, version2, componentItem, finishedItem]],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
+  it("allows only active PCB readers to see BOM rows and denies every direct client write", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const outputId = randomUUID();
+      const inputId = randomUUID();
+      const cardId = randomUUID();
+      const versionId = randomUUID();
+      const itemId = randomUUID();
+      let inputSerial = createTestSerialNumber();
+      const outputSerial = createTestSerialNumber();
+      while (inputSerial === outputSerial) inputSerial = createTestSerialNumber();
+      await database.query(
+        `insert into public.products (id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id)
+         values ($1, $3, 'BOM Output', 'PCB', 'pcb_finished_good', $5, $5),
+                ($2, $4, 'BOM Input', 'Parts', 'component', $5, $5)`,
+        [outputId, inputId, outputSerial, inputSerial, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_cards (id, name, output_product_id, created_by_user_id, updated_by_user_id)
+         values ($1, 'BOM Security Card', $2, $3, $3)`, [cardId, outputId, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, created_by_user_id)
+         values ($1, $2, 1, $3)`, [versionId, cardId, actorId],
+      );
+      await database.query(
+        `insert into public.pcb_bom_items (id, bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, $3, 2)`, [itemId, versionId, inputId],
+      );
+      await database.query(
+        `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+         select $1, id, $3 from public.permission_definitions where key = $2`,
+        [fixture.actors.permitted.profileId, "pcb.view", actorId],
+      );
+      await database.query(
+        `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+         select $1, id, $3 from public.permission_definitions where key = $2`,
+        [fixture.actors.unpermitted.profileId, "pcb.edit", actorId],
+      );
+      await database.query("update public.user_profiles set is_admin = true where id = $1",
+        [fixture.actors.inactive.profileId]);
+
+      for (const actor of [fixture.actors.admin, fixture.actors.permitted]) {
+        await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)", [actor.authUserId]);
+        await database.query("set local role authenticated");
+        expect((await database.query<{ id: string }>(
+          "select id from public.pcb_bom_versions where id = $1", [versionId],
+        )).rows).toEqual([{ id: versionId }]);
+        expect((await database.query<{ id: string }>(
+          "select id from public.pcb_bom_items where id = $1", [itemId],
+        )).rows).toEqual([{ id: itemId }]);
+        await database.query("reset role");
+      }
+
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [inputId, actorId],
+      );
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+        [fixture.actors.permitted.authUserId]);
+      await database.query("set local role authenticated");
+      expect((await database.query<{ id: string }>(
+        "select id from public.pcb_bom_items where id = $1", [itemId],
+      )).rows).toEqual([{ id: itemId }]);
+      await database.query("reset role");
+
+      for (const actor of [fixture.actors.unpermitted, fixture.actors.inactive]) {
+        await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)", [actor.authUserId]);
+        await database.query("set local role authenticated");
+        expect((await database.query("select id from public.pcb_bom_versions where id = $1", [versionId])).rows)
+          .toEqual([]);
+        expect((await database.query("select id from public.pcb_bom_items where id = $1", [itemId])).rows)
+          .toEqual([]);
+        await database.query("reset role");
+      }
+
+      await database.query("savepoint anonymous_bom_read");
+      await database.query("set local role anon");
+      await expect(database.query("select id from public.pcb_bom_versions limit 1"))
+        .rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_bom_read");
+      await database.query("savepoint anonymous_bom_item_read");
+      await database.query("set local role anon");
+      await expect(database.query("select id from public.pcb_bom_items limit 1"))
+        .rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint anonymous_bom_item_read");
+
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+        [fixture.actors.unpermitted.authUserId]);
+      await database.query("set local role authenticated");
+      await database.query("savepoint pcb_edit_direct_write");
+      await expect(database.query(
+        `insert into public.pcb_bom_items (bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, 1)`, [versionId, inputId],
+      )).rejects.toMatchObject({ code: "42501" });
+      await database.query("rollback to savepoint pcb_edit_direct_write");
+      await database.query("reset role");
+
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+        [fixture.actors.admin.authUserId]);
+      await database.query("set local role authenticated");
+      for (const [sql, values] of [
+        ["insert into public.pcb_bom_versions (pcb_card_id, version_number, created_by_user_id) values ($1, 2, $2)", [cardId, actorId]],
+        ["update public.pcb_bom_versions set is_active = false where id = $1", [versionId]],
+        ["delete from public.pcb_bom_versions where id = $1", [versionId]],
+        ["insert into public.pcb_bom_items (bom_version_id, component_product_id, quantity_per_card) values ($1, $2, 1)", [versionId, inputId]],
+        ["update public.pcb_bom_items set quantity_per_card = 3 where id = $1", [itemId]],
+        ["delete from public.pcb_bom_items where id = $1", [itemId]],
+      ] as const) {
+        await database.query("savepoint denied_bom_write");
+        await expect(database.query(sql, [...values])).rejects.toMatchObject({ code: "42501" });
+        await database.query("rollback to savepoint denied_bom_write");
+      }
+      await database.query("reset role");
+
+      const security = await database.query<{
+        relname: string;
+        relrowsecurity: boolean;
+        select_allowed: boolean;
+        insert_allowed: boolean;
+        update_allowed: boolean;
+        delete_allowed: boolean;
+      }>(
+        `select c.relname, c.relrowsecurity,
+          pg_catalog.has_table_privilege('authenticated', c.oid, 'select') as select_allowed,
+          pg_catalog.has_table_privilege('authenticated', c.oid, 'insert') as insert_allowed,
+          pg_catalog.has_table_privilege('authenticated', c.oid, 'update') as update_allowed,
+          pg_catalog.has_table_privilege('authenticated', c.oid, 'delete') as delete_allowed
+         from pg_catalog.pg_class c
+         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+         where n.nspname = 'public' and c.relname in ('pcb_bom_versions', 'pcb_bom_items')
+         order by c.relname`,
+      );
+      expect(security.rows).toEqual([
+        { relname: "pcb_bom_items", relrowsecurity: true, select_allowed: true,
+          insert_allowed: false, update_allowed: false, delete_allowed: false },
+        { relname: "pcb_bom_versions", relrowsecurity: true, select_allowed: true,
+          insert_allowed: false, update_allowed: false, delete_allowed: false },
+      ]);
+      const helperGrants = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        settings: string[];
+      }>(
+        `select pg_catalog.has_function_privilege('anon', p.oid, 'execute') as anonymous_execute,
+                pg_catalog.has_function_privilege('authenticated', p.oid, 'execute') as authenticated_execute,
+                p.proconfig as settings
+         from pg_catalog.pg_proc p
+         where p.oid in (
+           'public.enforce_pcb_bom_item_product()'::pg_catalog.regprocedure,
+           'public.enforce_pcb_bom_version_card_identity()'::pg_catalog.regprocedure
+         )`,
+      );
+      expect(helperGrants.rows).toHaveLength(2);
+      expect(helperGrants.rows.every((row) =>
+        !row.anonymous_execute && !row.authenticated_execute &&
+        row.settings.includes('search_path=""'))).toBe(true);
+    });
+  });
+
   it("lists PCB Cards through a narrow authorized Product and stock projection", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -571,7 +865,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
                  'delete_pcb_card', 'reactivate_pcb_card', 'produce_pcb_card'
                )) as mutation_functions`,
       );
-      expect(unsupportedObjects.rows).toEqual([{ bom_tables: 0, mutation_functions: 0 }]);
+      expect(unsupportedObjects.rows).toEqual([{ bom_tables: 2, mutation_functions: 0 }]);
     });
   });
 
