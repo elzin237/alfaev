@@ -16,7 +16,7 @@ const detail: PcbBomDetail = {
   cardId, name: "Controller", isActive: true,
   outputProductId: "55555555-5555-4555-8555-555555555555",
   outputSerialNumber: "0000001", outputCurrentStock: "0",
-  versionId: "66666666-6666-4666-8666-666666666666", versionNumber: 1,
+  versionId: "66666666-6666-4666-8666-666666666666", versionNumber: "1",
   items: [
     { itemId: "77777777-7777-4777-8777-777777777777", productId: archivedId,
       name: "Historical PCB", serialNumber: "0000002", productKind: "pcb_finished_good",
@@ -41,7 +41,7 @@ describe("PCB BOM editor", () => {
   beforeEach(() => {
     mocks.useQuery.mockReturnValue({ isPending: false, isError: false,
       data: { ok: true, value: choices }, refetch: vi.fn() });
-    onSave.mockResolvedValue({ ok: true, value: { versionId: detail.versionId, versionNumber: 1 } });
+    onSave.mockResolvedValue({ ok: true, value: { versionId: detail.versionId, versionNumber: "1" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -80,6 +80,23 @@ describe("PCB BOM editor", () => {
       { productId: activeId, quantityPerCard: "4" },
     ]));
     expect(screen.getByRole("status")).toHaveTextContent("version 1 saved");
+  });
+
+  it.each(["2", "3"])("shows saved version %s and renders refetched active items", async (versionNumber) => {
+    const nextId = "99999999-9999-4999-8999-999999999999";
+    onSave.mockResolvedValue({ ok: true, value: { versionId: nextId, versionNumber } });
+    const view = render(<PcbBomEditor detail={detail} canEdit profileId="profile" onSave={onSave} />);
+    fireEvent.change(screen.getByLabelText("Qty per Card for Active Component"), { target: { value: "4" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save BOM" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(
+      `version ${versionNumber} saved`,
+    ));
+    view.rerender(<PcbBomEditor detail={{ ...detail, versionId: nextId, versionNumber,
+      items: [{ ...detail.items[1]!, quantityPerCard: "4" }] }}
+      canEdit profileId="profile" onSave={onSave} />);
+    expect(screen.getByText(`Version ${versionNumber}`)).toBeInTheDocument();
+    expect(screen.getByLabelText("Qty per Card for Active Component")).toHaveValue("4");
+    expect(screen.queryByText("Historical PCB")).not.toBeInTheDocument();
   });
 
   it("allows removing an archived input and an empty initial save", async () => {

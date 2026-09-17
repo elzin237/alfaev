@@ -15,7 +15,7 @@ interface Props {
   detail: PcbBomDetail;
   canEdit: boolean;
   profileId: string | undefined;
-  onSave: (items: PcbBomSaveItem[]) => Promise<PcbBomResult<{ versionId: string; versionNumber: 1 }>>;
+  onSave: (items: PcbBomSaveItem[]) => Promise<PcbBomResult<{ versionId: string; versionNumber: string }>>;
 }
 
 interface DraftRow {

@@ -34,7 +34,7 @@ beforeEach(() => {
   mocks.isPcbCardId.mockReturnValue(true);
   mocks.getPcbBomEditor.mockResolvedValue({ ok: true, value: card });
   mocks.hasPermission.mockResolvedValue({ ok: true, value: false });
-  mocks.saveInitialPcbBom.mockResolvedValue({ ok: true, value: { versionId: "version-1", versionNumber: 1 } });
+  mocks.saveInitialPcbBom.mockResolvedValue({ ok: true, value: { versionId: "version-1", versionNumber: "1" } });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
@@ -89,6 +89,21 @@ describe("PCB BOM detail query and edit authority", () => {
     mocks.saveInitialPcbBom.mockResolvedValue({ ok: false, error: { code: "save_failed", message: "Safe" } });
     await act(async () => { await result.current.save([]); });
     expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it.each(["2", "3"])("refetches active version %s after a successful save", async (versionNumber) => {
+    mocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const next = { ...card, versionId: `version-${versionNumber}`, versionNumber };
+    mocks.getPcbBomEditor.mockResolvedValueOnce({ ok: true, value: card })
+      .mockResolvedValue({ ok: true, value: next });
+    mocks.saveInitialPcbBom.mockResolvedValue({ ok: true, value: {
+      versionId: next.versionId, versionNumber,
+    } });
+    const { result } = setup();
+    await waitFor(() => expect(result.current.canEdit).toBe(true));
+    await act(async () => { await result.current.save([]); });
+    await waitFor(() => expect(result.current.detailQuery.data).toEqual({ ok: true, value: next }));
+    expect(mocks.getPcbBomEditor).toHaveBeenCalledTimes(2);
   });
 
   it("does not call the save service without edit authority", async () => {

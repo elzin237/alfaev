@@ -21,7 +21,7 @@ export interface PcbBomDetail {
   outputSerialNumber: string;
   outputCurrentStock: string;
   versionId: string | null;
-  versionNumber: number | null;
+  versionNumber: string | null;
   items: PcbBomItem[];
 }
 
@@ -83,6 +83,14 @@ function isBigintText(value: unknown, positive: boolean): value is string {
   return integer <= bigintMax && (!positive || integer > 0n);
 }
 
+function parseVersionNumber(value: unknown, allowSafeNumber = false): string | null {
+  if (typeof value === "number") {
+    return allowSafeNumber && Number.isSafeInteger(value) && value > 0 ? String(value) : null;
+  }
+  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return null;
+  return BigInt(value) <= bigintMax ? value : null;
+}
+
 export function parseEditableQuantity(value: string): string | null {
   if (!/^[0-9]+$/.test(value)) return null;
   const normalized = value.replace(/^0+/, "");
@@ -105,12 +113,13 @@ export async function getPcbBomEditor(cardId: string): Promise<PcbBomResult<PcbB
   let detail: PcbBomDetail | null = null;
   const seenProducts = new Set<string>();
   for (const value of data) {
+    const versionNumber = isRecord(value) ? parseVersionNumber(value.active_bom_version_number) : null;
     if (!isRecord(value) || !isUuid(value.card_id) || value.card_id !== cardId ||
       !isName(value.card_name) ||
       typeof value.card_is_active !== "boolean" || !isUuid(value.output_product_id) ||
       !isSerial(value.output_serial_number) || !isBigintText(value.output_current_stock, false) ||
       !((value.active_bom_version_id === null && value.active_bom_version_number === null) ||
-        (isUuid(value.active_bom_version_id) && value.active_bom_version_number === "1"))) {
+        (isUuid(value.active_bom_version_id) && versionNumber !== null))) {
       return { ok: false, error: readError };
     }
     if (!detail) {
@@ -119,14 +128,14 @@ export async function getPcbBomEditor(cardId: string): Promise<PcbBomResult<PcbB
         outputProductId: value.output_product_id, outputSerialNumber: value.output_serial_number,
         outputCurrentStock: value.output_current_stock,
         versionId: value.active_bom_version_id,
-        versionNumber: value.active_bom_version_id === null ? null : 1,
+        versionNumber,
         items: [],
       };
     } else if (detail.cardId !== value.card_id || detail.name !== value.card_name ||
       detail.isActive !== value.card_is_active || detail.outputProductId !== value.output_product_id ||
       detail.outputSerialNumber !== value.output_serial_number ||
       detail.outputCurrentStock !== value.output_current_stock ||
-      detail.versionId !== value.active_bom_version_id) {
+      detail.versionId !== value.active_bom_version_id || detail.versionNumber !== versionNumber) {
       return { ok: false, error: readError };
     }
     if (value.bom_item_id === null) {
@@ -187,7 +196,7 @@ export async function searchPcbBomProductChoices(
 export async function saveInitialPcbBom(
   cardId: string,
   items: PcbBomSaveItem[],
-): Promise<PcbBomResult<{ versionId: string; versionNumber: 1 }>> {
+): Promise<PcbBomResult<{ versionId: string; versionNumber: string }>> {
   if (!isPcbCardId(cardId) || new Set(items.map((item) => item.productId)).size !== items.length) {
     return { ok: false, error: { code: "invalid_items", message: "Enter valid, unique BOM Products and quantities." } };
   }
@@ -217,9 +226,9 @@ export async function saveInitialPcbBom(
     return { ok: false, error: mapped[error.code] ?? { code: "save_failed", message: "PCB BOM could not be saved." } };
   }
   const row: unknown = Array.isArray(data) && data.length === 1 ? data[0] : null;
-  if (!isRecord(row) || !isUuid(row.bom_version_id) ||
-    !(row.version_number === 1 || row.version_number === "1")) {
+  const versionNumber = isRecord(row) ? parseVersionNumber(row.version_number, true) : null;
+  if (!isRecord(row) || !isUuid(row.bom_version_id) || versionNumber === null) {
     return { ok: false, error: { code: "save_failed", message: "PCB BOM could not be saved." } };
   }
-  return { ok: true, value: { versionId: row.bom_version_id, versionNumber: 1 } };
+  return { ok: true, value: { versionId: row.bom_version_id, versionNumber } };
 }

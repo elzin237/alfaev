@@ -45,11 +45,31 @@ describe("PCB BOM service", () => {
       quantity_per_card: "9007199254740993",
     }], error: null });
     const result = await getPcbBomEditor(cardId);
-    expect(result).toMatchObject({ ok: true, value: { versionId, versionNumber: 1, items: [{
+    expect(result).toMatchObject({ ok: true, value: { versionId, versionNumber: "1", items: [{
       productId: inputId, isActive: false, currentStock: "9007199254740993",
       quantityPerCard: "9007199254740993",
     }] } });
   });
+
+  it.each(["1", "2", "3", "9223372036854775807"])(
+    "preserves active BOM version %s exactly on read", async (versionNumber) => {
+      rpc.mockResolvedValue({ data: [{ ...noBom,
+        active_bom_version_id: versionId, active_bom_version_number: versionNumber,
+      }], error: null });
+      expect(await getPcbBomEditor(cardId)).toMatchObject({ ok: true, value: {
+        versionId, versionNumber, items: [],
+      } });
+    },
+  );
+
+  it.each(["0", "-1", "1.5", "1e2", "01", "not-a-version", "9223372036854775808", 2])(
+    "rejects malformed active BOM version %s on read", async (versionNumber) => {
+      rpc.mockResolvedValue({ data: [{ ...noBom,
+        active_bom_version_id: versionId, active_bom_version_number: versionNumber,
+      }], error: null });
+      expect(await getPcbBomEditor(cardId)).toMatchObject({ ok: false, error: { code: "read_failed" } });
+    },
+  );
 
   it("fails safely for missing, provider, and malformed detail data", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { code: "P0002", message: "private" } })
@@ -84,13 +104,30 @@ describe("PCB BOM service", () => {
   it("saves a complete ID/quantity-only payload, including an empty initial BOM", async () => {
     rpc.mockResolvedValue({ data: [{ bom_version_id: versionId, version_number: "1" }], error: null });
     expect(await saveInitialPcbBom(cardId, [{ productId: inputId, quantityPerCard: "002" }]))
-      .toEqual({ ok: true, value: { versionId, versionNumber: 1 } });
+      .toEqual({ ok: true, value: { versionId, versionNumber: "1" } });
     expect(rpc).toHaveBeenCalledWith("save_initial_pcb_bom", {
       p_pcb_card_id: cardId, p_items: [{ product_id: inputId, quantity_per_card: "2" }],
     });
     expect(await saveInitialPcbBom(cardId, [])).toMatchObject({ ok: true });
     expect(rpc).toHaveBeenLastCalledWith("save_initial_pcb_bom", { p_pcb_card_id: cardId, p_items: [] });
   });
+
+  it.each(["1", "2", "3", "9223372036854775807", 1, 2, 3])(
+    "preserves valid save version %s", async (versionNumber) => {
+      rpc.mockResolvedValue({ data: [{ bom_version_id: versionId, version_number: versionNumber }], error: null });
+      expect(await saveInitialPcbBom(cardId, [])).toEqual({ ok: true, value: {
+        versionId, versionNumber: String(versionNumber),
+      } });
+    },
+  );
+
+  it.each(["0", "-1", "1.5", "1e2", "01", "invalid", "9223372036854775808", 0, -1,
+    1.5, Number.MAX_SAFE_INTEGER + 1, null])(
+    "rejects invalid save version %s", async (versionNumber) => {
+      rpc.mockResolvedValue({ data: [{ bom_version_id: versionId, version_number: versionNumber }], error: null });
+      expect(await saveInitialPcbBom(cardId, [])).toMatchObject({ ok: false, error: { code: "save_failed" } });
+    },
+  );
 
   it("preserves exact bigint quantities in the RPC JSON payload", async () => {
     rpc.mockResolvedValue({ data: [{ bom_version_id: versionId, version_number: "1" }], error: null });
@@ -128,7 +165,7 @@ describe("PCB BOM service", () => {
       expect(result).toMatchObject({ ok: false, error: { code: expected } });
       if (!result.ok) expect(result.error.message).not.toContain("private");
     }
-    rpc.mockResolvedValueOnce({ data: [{ bom_version_id: versionId, version_number: "2" }], error: null });
+    rpc.mockResolvedValueOnce({ data: [{ bom_version_id: "bad-id", version_number: "2" }], error: null });
     expect(await saveInitialPcbBom(cardId, [])).toMatchObject({ ok: false, error: { code: "save_failed" } });
   });
 });
