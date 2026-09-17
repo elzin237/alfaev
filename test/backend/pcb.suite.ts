@@ -239,6 +239,122 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
     });
   });
 
+  it("preserves unchanged archived BOM inputs while validating only new or changed inputs", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { cardId, outputId, componentId, finishedId, anotherId, archivedId } =
+        await createBomSaveFixture(database, fixture.actors.admin.profileId);
+      const actor = fixture.actors.admin;
+      const allProductIds = [outputId, componentId, finishedId, anotherId, archivedId];
+      const balanceRows = () => database.query<{
+        product_id: string; quantity: string; updated_at: Date;
+      }>(
+        `select product_id, quantity, updated_at from public.inventory_balances
+         where product_id = any($1::uuid[]) order by product_id`,
+        [allProductIds],
+      );
+      const balancesBefore = (await balanceRows()).rows;
+      const archivedInput = { product_id: componentId, quantity_per_card: 2 };
+      const finishedInput = { product_id: finishedId, quantity_per_card: 3 };
+      const anotherInput = { product_id: anotherId, quantity_per_card: 4 };
+
+      // Every input is new on initial creation, so an archived Product is denied.
+      await expect(saveBomAs(database, actor, cardId, [
+        { product_id: archivedId, quantity_per_card: 1 },
+      ])).rejects.toMatchObject({ code: "PCB04" });
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_bom_versions where pcb_card_id = $1", [cardId],
+      )).rows).toEqual([{ count: "0" }]);
+
+      const initial = await commitBomCallInTestTransaction(database, actor, cardId,
+        [archivedInput, finishedInput]);
+      const versionId = initial[0]?.bom_version_id;
+      expect(versionId).toBeDefined();
+      const itemRows = () => database.query<{
+        id: string; component_product_id: string; quantity_per_card: string;
+      }>(
+        `select id, component_product_id, quantity_per_card
+         from public.pcb_bom_items where bom_version_id = $1 order by component_product_id`,
+        [versionId],
+      );
+      const auditCount = async () => (await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [versionId],
+      )).rows[0]?.count;
+      const initialRows = (await itemRows()).rows;
+      const archivedItemId = initialRows.find((row) => row.component_product_id === componentId)?.id;
+      expect(archivedItemId).toBeDefined();
+      expect(await auditCount()).toBe("1");
+
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [componentId, actor.profileId],
+      );
+      expect((await database.query<{ component_product_id: string; is_active: boolean }>(
+        `select item.component_product_id, product.is_active
+         from public.pcb_bom_items as item
+         join public.products as product on product.id = item.component_product_id
+         where item.id = $1`, [archivedItemId],
+      )).rows).toEqual([{ component_product_id: componentId, is_active: false }]);
+
+      // An exact no-op neither rewrites archived items nor creates audit noise.
+      expect(await commitBomCallInTestTransaction(database, actor, cardId,
+        [finishedInput, archivedInput])).toEqual(initial);
+      expect((await itemRows()).rows).toEqual(initialRows);
+      expect(await auditCount()).toBe("1");
+
+      // Changing the archived input, even alongside an unrelated valid change,
+      // fails atomically and leaves the complete prior set/audit unchanged.
+      await expect(saveBomAs(database, actor, cardId, [
+        { product_id: componentId, quantity_per_card: 5 }, finishedInput,
+      ])).rejects.toMatchObject({ code: "PCB04" });
+      await expect(saveBomAs(database, actor, cardId, [
+        { product_id: componentId, quantity_per_card: 5 }, anotherInput,
+      ])).rejects.toMatchObject({ code: "PCB04" });
+      await expect(saveBomAs(database, actor, cardId, [
+        archivedInput, { product_id: archivedId, quantity_per_card: 1 },
+      ])).rejects.toMatchObject({ code: "PCB04" });
+      expect((await itemRows()).rows).toEqual(initialRows);
+      expect(await auditCount()).toBe("1");
+
+      // Replacing a different row, then adding another active input, must not
+      // touch the unchanged archived row or create an extra BOM version.
+      expect(await commitBomCallInTestTransaction(database, actor, cardId,
+        [archivedInput, anotherInput])).toEqual(initial);
+      expect((await itemRows()).rows.find((row) => row.component_product_id === componentId)?.id)
+        .toBe(archivedItemId);
+      expect(await auditCount()).toBe("2");
+      expect(await commitBomCallInTestTransaction(database, actor, cardId,
+        [archivedInput, anotherInput, finishedInput])).toEqual(initial);
+      expect((await itemRows()).rows.find((row) => row.component_product_id === componentId)?.id)
+        .toBe(archivedItemId);
+      expect(await auditCount()).toBe("3");
+
+      // Removing the archived reference is allowed and is one meaningful update.
+      expect(await commitBomCallInTestTransaction(database, actor, cardId,
+        [anotherInput, finishedInput])).toEqual(initial);
+      expect((await itemRows()).rows.map((row) => row.component_product_id).sort())
+        .toEqual([anotherId, finishedId].sort());
+      expect(await auditCount()).toBe("4");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_bom_versions where pcb_card_id = $1", [cardId],
+      )).rows).toEqual([{ count: "1" }]);
+      expect((await database.query<{ action_type: string }>(
+        "select action_type from public.audit_logs where entity_id = $1 order by created_at, id",
+        [versionId],
+      )).rows.map((row) => row.action_type).sort()).toEqual([
+        "pcb_bom.created", "pcb_bom.updated", "pcb_bom.updated", "pcb_bom.updated",
+      ]);
+      expect(balancesBefore).toHaveLength(allProductIds.length);
+      expect(balancesBefore.every((row) => row.quantity === "0")).toBe(true);
+      expect((await balanceRows()).rows).toEqual(balancesBefore);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
+        [allProductIds],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
   it("rejects unauthorized and invalid initial BOM saves without partial writes", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
