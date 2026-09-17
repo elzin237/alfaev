@@ -154,7 +154,189 @@ async function readPcbRpcAs<Row extends QueryResultRow>(
   }
 }
 
+async function expectPcbRunSqlFailure(
+  database: PoolClient,
+  sql: string,
+  parameters: unknown[],
+  code: string,
+): Promise<void> {
+  await database.query("savepoint rejected_pcb_run_sql");
+  try {
+    await expect(database.query(sql, parameters)).rejects.toMatchObject({ code });
+  } finally {
+    await database.query("rollback to savepoint rejected_pcb_run_sql");
+  }
+}
+
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("enforces PCB production-run schema, card/BOM identity and permanent history", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const cardA = await createBomSaveFixture(database, actorId);
+      const cardBId = (await database.query<{ id: string }>(
+        `insert into public.pcb_cards
+          (name, output_product_id, created_by_user_id, updated_by_user_id)
+         values ('Second production-history card', $1, $2, $2) returning id`,
+        [cardA.finishedId, actorId],
+      )).rows[0]!.id;
+      const createVersion = async (cardId: string) => (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions (pcb_card_id, version_number, created_by_user_id)
+         values ($1, 1, $2) returning id`, [cardId, actorId],
+      )).rows[0]!.id;
+      const versionA = await createVersion(cardA.cardId);
+      const versionB = await createVersion(cardBId);
+      const projectId = (await database.query<{ id: string }>(
+        `insert into public.projects
+           (name, customer_name, start_date, delivery_date, created_by_user_id, updated_by_user_id)
+         values ('PCB production history', 'Test customer', '2026-09-01', '2026-09-02', $1, $1)
+         returning id`, [actorId],
+      )).rows[0]!.id;
+      const insertSql = `insert into public.pcb_production_runs
+        (pcb_card_id, bom_version_id, project_id, quantity_produced, status, produced_by_user_id)
+        values ($1, $2, $3, $4, $5, $6)
+        returning id, pcb_card_id, bom_version_id, project_id, quantity_produced, status,
+          produced_by_user_id, completed_at`;
+      const first = (await database.query<{
+        id: string; pcb_card_id: string; bom_version_id: string; project_id: string | null;
+        quantity_produced: string; status: string; produced_by_user_id: string; completed_at: Date;
+      }>(
+        `insert into public.pcb_production_runs
+          (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3)
+         returning id, pcb_card_id, bom_version_id, project_id, quantity_produced,
+           status, produced_by_user_id, completed_at`,
+        [cardA.cardId, versionA, actorId],
+      )).rows[0]!;
+      expect(first).toMatchObject({ pcb_card_id: cardA.cardId, bom_version_id: versionA,
+        project_id: null, quantity_produced: "1", status: "completed", produced_by_user_id: actorId });
+      expect(first.completed_at).toBeInstanceOf(Date);
+      const second = (await database.query<{ id: string }>(insertSql,
+        [cardA.cardId, versionA, projectId, 2, "completed", actorId])).rows[0]!;
+      expect(second.id).not.toBe(first.id);
+      expect((await database.query<{ project_id: string }>(
+        "select project_id from public.pcb_production_runs where id = $1", [second.id],
+      )).rows).toEqual([{ project_id: projectId }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_production_runs where bom_version_id = $1", [versionA],
+      )).rows).toEqual([{ count: "2" }]);
+      await database.query(insertSql, [cardBId, versionB, null, 3, "completed", actorId]);
+
+      for (const [parameters, code] of [
+        [[cardA.cardId, versionA, null, 0, "completed", actorId], "23514"],
+        [[cardA.cardId, versionA, null, -1, "completed", actorId], "23514"],
+        [[cardA.cardId, versionA, null, 1, "pending", actorId], "23514"],
+        [[cardA.cardId, versionA, null, 1, null, actorId], "23502"],
+        [[randomUUID(), versionA, null, 1, "completed", actorId], "23503"],
+        [[cardA.cardId, randomUUID(), null, 1, "completed", actorId], "23503"],
+        [[cardA.cardId, versionB, null, 1, "completed", actorId], "23503"],
+        [[cardA.cardId, versionA, randomUUID(), 1, "completed", actorId], "23503"],
+        [[cardA.cardId, versionA, null, 1, "completed", randomUUID()], "23503"],
+      ] as Array<[unknown[], string]>) {
+        await expectPcbRunSqlFailure(database, insertSql, parameters, code);
+      }
+      await expectPcbRunSqlFailure(database,
+        `insert into public.pcb_production_runs
+          (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id, completed_at)
+         values ($1, $2, 1, $3, null)`, [cardA.cardId, versionA, actorId], "23502");
+
+      await expectPcbRunSqlFailure(database,
+        "update public.pcb_production_runs set quantity_produced = 9 where id = $1",
+        [first.id], "PCB08");
+      await expectPcbRunSqlFailure(database,
+        "delete from public.pcb_production_runs where id = $1", [first.id], "PCB08");
+      expect((await database.query<{ quantity_produced: string }>(
+        "select quantity_produced from public.pcb_production_runs where id = $1", [first.id],
+      )).rows).toEqual([{ quantity_produced: "1" }]);
+
+      await database.query(
+        `update public.pcb_cards set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardA.cardId, actorId],
+      );
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardA.outputId, actorId],
+      );
+      await database.query(
+        `update public.projects set status = 'cancelled', cancelled_at = pg_catalog.now(),
+           updated_at = pg_catalog.now(), updated_by_user_id = $2 where id = $1`,
+        [projectId, actorId],
+      );
+      await database.query(
+        "update public.pcb_bom_versions set is_active = false where id = $1", [versionA],
+      );
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_production_runs where bom_version_id = $1", [versionA],
+      )).rows).toEqual([{ count: "2" }]);
+      expect(await readPcbRpcAs(database, fixture.actors.admin,
+        "select id from public.pcb_production_runs where id = $1", [first.id]))
+        .toEqual([{ id: first.id }]);
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [cardA.outputId],
+      )).rows).toEqual([{ quantity: "0" }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = $1", [cardA.outputId],
+      )).rows).toEqual([{ count: "0" }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = any($1::uuid[])",
+        [[first.id, second.id]],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
+  it("limits PCB production-run reads and denies every normal-client write", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const { cardId } = await createBomSaveFixture(database, actor.profileId);
+      const versionId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions (pcb_card_id, version_number, created_by_user_id)
+         values ($1, 1, $2) returning id`, [cardId, actor.profileId],
+      )).rows[0]!.id;
+      const runId = (await database.query<{ id: string }>(
+        `insert into public.pcb_production_runs
+          (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3) returning id`, [cardId, versionId, actor.profileId],
+      )).rows[0]!.id;
+      for (const [profileId, key] of [
+        [fixture.actors.permitted.profileId, "pcb.view"],
+        [fixture.actors.unpermitted.profileId, "pcb.produce"],
+        [fixture.actors.productCreator.profileId, "pcb.edit"],
+      ]) {
+        await database.query(
+          `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+           select $1, id, $2 from public.permission_definitions where key = $3`,
+          [profileId, actor.profileId, key],
+        );
+      }
+      const selectSql = "select id from public.pcb_production_runs where id = $1";
+      for (const allowed of [actor, fixture.actors.permitted]) {
+        expect(await readPcbRpcAs(database, allowed, selectSql, [runId])).toEqual([{ id: runId }]);
+      }
+      for (const denied of [fixture.actors.unpermitted, fixture.actors.productCreator,
+        fixture.actors.supplierViewer, fixture.actors.inactive]) {
+        expect(await readPcbRpcAs(database, denied, selectSql, [runId])).toEqual([]);
+      }
+      await expect(readPcbRpcAs(database, null, selectSql, [runId]))
+        .rejects.toMatchObject({ code: "42501" });
+      for (const directActor of [actor, fixture.actors.unpermitted, fixture.actors.productCreator]) {
+        await expect(readPcbRpcAs(database, directActor,
+          `insert into public.pcb_production_runs
+            (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+           values ($1, $2, 1, $3) returning id`, [cardId, versionId, directActor.profileId]))
+          .rejects.toMatchObject({ code: "42501" });
+        await expect(readPcbRpcAs(database, directActor,
+          "update public.pcb_production_runs set quantity_produced = 2 where id = $1", [runId]))
+          .rejects.toMatchObject({ code: "42501" });
+        await expect(readPcbRpcAs(database, directActor,
+          "delete from public.pcb_production_runs where id = $1", [runId]))
+          .rejects.toMatchObject({ code: "42501" });
+      }
+    });
+  });
+
   it("limits PCB BOM editor and Product-choice reads to narrow authorized projections", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
