@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router";
 import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
@@ -35,7 +36,8 @@ export default function PcbPage() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {cardsQuery.data.value.map((card) => <tr key={card.id}>
-                  <td className="px-5 py-4 font-semibold text-zinc-900">{card.name}</td>
+                  <td className="px-5 py-4 font-semibold text-zinc-900"><Link to={`/pcb/${card.id}`}
+                    className="hover:text-red-700 hover:underline">{card.name}</Link></td>
                   <td className="px-5 py-4 font-mono text-zinc-700">{card.serialNumber}</td>
                   <td className="px-5 py-4 text-zinc-700">{card.currentStock}</td>
                   <td className="px-5 py-4"><StatusBadge label={card.isActive ? "Active" : "Archived"}

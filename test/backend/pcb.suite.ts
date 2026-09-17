@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { PoolClient, QueryResultRow } from "pg";
 import { expect, it } from "vitest";
 import { expectPermissionDenied } from "./helpers/assertions";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
@@ -130,7 +130,163 @@ async function commitBomCallInTestTransaction(
   }
 }
 
+async function readPcbRpcAs<Row extends QueryResultRow>(
+  database: PoolClient,
+  actor: SecurityActor | null,
+  sql: string,
+  parameters: unknown[],
+): Promise<Row[]> {
+  await database.query("savepoint pcb_read_attempt");
+  try {
+    if (actor) {
+      await database.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+        [actor.authUserId]);
+      await database.query("set local role authenticated");
+    } else {
+      await database.query("set local role anon");
+    }
+    const rows = (await database.query<Row>(sql, parameters)).rows;
+    await database.query("rollback to savepoint pcb_read_attempt");
+    return rows;
+  } catch (error) {
+    await database.query("rollback to savepoint pcb_read_attempt");
+    throw error;
+  }
+}
+
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("limits PCB BOM editor and Product-choice reads to narrow authorized projections", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const viewer = fixture.actors.permitted;
+      const editor = fixture.actors.unpermitted;
+      const { cardId, outputId, componentId, finishedId, anotherId, archivedId } =
+        await createBomSaveFixture(database, actor.profileId);
+      await database.query(
+        `update public.inventory_balances set quantity = 7, updated_at = pg_catalog.now()
+         where product_id = $1`, [finishedId],
+      );
+      for (const [profileId, key] of [
+        [viewer.profileId, "pcb.view"], [editor.profileId, "pcb.edit"],
+      ]) {
+        await database.query(
+          `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+           select $1, id, $2 from public.permission_definitions where key = $3`,
+          [profileId, actor.profileId, key],
+        );
+      }
+      const detailSql = "select * from public.get_pcb_bom_editor($1::uuid)";
+      const choicesSql = "select * from public.search_pcb_bom_product_choices($1::uuid, $2::text)";
+      const empty = await readPcbRpcAs<Record<string, unknown>>(database, viewer, detailSql, [cardId]);
+      expect(await readPcbRpcAs<{ allowed: boolean }>(database, viewer,
+        "select public.has_permission('inventory.view') as allowed", [])).toEqual([{ allowed: false }]);
+      expect(await readPcbRpcAs(database, viewer,
+        "select id from public.products where id = $1", [componentId])).toEqual([]);
+      expect(await readPcbRpcAs(database, viewer,
+        "select product_id from public.inventory_balances where product_id = $1", [componentId])).toEqual([]);
+      await expect(readPcbRpcAs(database, viewer, choicesSql, [cardId, ""]))
+        .rejects.toMatchObject({ code: "42501" });
+      expect(empty).toHaveLength(1);
+      expect(empty[0]).toMatchObject({ card_id: cardId, output_product_id: outputId,
+        active_bom_version_id: null, bom_item_id: null, output_current_stock: "0" });
+      expect(Object.keys(empty[0] ?? {}).sort()).toEqual([
+        "card_id", "card_name", "card_is_active", "output_product_id",
+        "output_serial_number", "output_current_stock", "active_bom_version_id",
+        "active_bom_version_number", "bom_item_id", "input_product_id",
+        "input_product_name", "input_serial_number", "input_product_kind",
+        "input_product_is_active", "input_current_stock", "quantity_per_card",
+      ].sort());
+      const initialChoices = await readPcbRpcAs<Record<string, unknown>>(
+        database, editor, choicesSql, [cardId, ""],
+      );
+      expect(initialChoices.map((row) => row.product_id)).toContain(componentId);
+      expect(initialChoices.map((row) => row.product_id)).toContain(finishedId);
+      expect(initialChoices.find((row) => row.product_id === finishedId)?.current_stock).toBe("7");
+      expect(initialChoices.map((row) => row.product_id)).not.toContain(outputId);
+      expect(initialChoices.map((row) => row.product_id)).not.toContain(archivedId);
+      expect(Object.keys(initialChoices[0] ?? {}).sort()).toEqual([
+        "product_id", "product_name", "serial_number", "product_kind", "current_stock",
+      ].sort());
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, editor, choicesSql,
+        [cardId, "save Product 3"])).map((row) => row.product_id)).toEqual([anotherId]);
+      const serial = initialChoices.find((row) => row.product_id === finishedId)?.serial_number;
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, editor, choicesSql,
+        [cardId, serial])).map((row) => row.product_id)).toEqual([finishedId]);
+
+      const saved = await commitBomCallInTestTransaction(database, actor, cardId, [
+        { product_id: componentId, quantity_per_card: 2 },
+        { product_id: finishedId, quantity_per_card: 3 },
+      ]);
+      const versionId = saved[0]?.bom_version_id;
+      await database.query(
+        `update public.products set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [componentId, actor.profileId],
+      );
+      const beforeAudit = (await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [versionId],
+      )).rows;
+      const balanceBefore = (await database.query(
+        `select product_id, quantity, updated_at from public.inventory_balances
+         where product_id = any($1::uuid[]) order by product_id`,
+        [[outputId, componentId, finishedId, anotherId, archivedId]],
+      )).rows;
+      const detail = await readPcbRpcAs<Record<string, unknown>>(database, viewer, detailSql, [cardId]);
+      expect(detail).toHaveLength(2);
+      expect(detail.every((row) => row.active_bom_version_id === versionId &&
+        row.active_bom_version_number === "1")).toBe(true);
+      expect(detail.find((row) => row.input_product_id === componentId)).toMatchObject({
+        input_product_is_active: false, input_serial_number: expect.stringMatching(/^[0-9]{7}$/),
+        input_current_stock: "0", quantity_per_card: "2",
+      });
+      expect(detail.find((row) => row.input_product_id === finishedId)).toMatchObject({
+        input_product_kind: "pcb_finished_good", input_current_stock: "7", quantity_per_card: "3",
+      });
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, editor, choicesSql,
+        [cardId, ""])).map((row) => row.product_id)).not.toContain(componentId);
+      await expect(readPcbRpcAs(database, editor, detailSql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.productCreator, detailSql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.productCreator, choicesSql, [cardId, ""]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.inactive, detailSql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.inactive, choicesSql, [cardId, ""]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, null, detailSql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, null, choicesSql, [cardId, ""]))
+        .rejects.toMatchObject({ code: "42501" });
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, actor, detailSql,
+        [cardId])).length).toBe(2);
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, actor, choicesSql,
+        [cardId, ""])).length).toBeGreaterThan(0);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [versionId],
+      )).rows).toEqual(beforeAudit);
+      expect((await database.query(
+        `select product_id, quantity, updated_at from public.inventory_balances
+         where product_id = any($1::uuid[]) order by product_id`,
+        [[outputId, componentId, finishedId, anotherId, archivedId]],
+      )).rows).toEqual(balanceBefore);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
+        [[outputId, componentId, finishedId, anotherId, archivedId]],
+      )).rows).toEqual([{ count: "0" }]);
+      await database.query(
+        `update public.pcb_cards set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardId, actor.profileId],
+      );
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, viewer, detailSql,
+        [cardId]))[0]?.card_is_active).toBe(false);
+      await expect(readPcbRpcAs(database, editor, choicesSql, [cardId, ""]))
+        .rejects.toMatchObject({ code: "PCB07" });
+    });
+  });
+
   it("rejects an archived PCB Card BOM save with PCB07 before any BOM write", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -151,6 +307,50 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       expect((await database.query<{ count: string }>(
         "select count(*) from public.audit_logs where entity_id = $1", [cardId],
       )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
+  it("accepts legacy numeric and exact decimal-string PCB BOM quantities", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const { cardId, componentId } = await createBomSaveFixture(
+        database, fixture.actors.admin.profileId,
+      );
+      const actor = fixture.actors.admin;
+      const save = (quantity: unknown) => commitBomCallInTestTransaction(database, actor, cardId,
+        [{ product_id: componentId, quantity_per_card: quantity }]);
+      const persistedQuantity = async () => (await database.query<{ quantity_per_card: string }>(
+        `select item.quantity_per_card from public.pcb_bom_items as item
+         join public.pcb_bom_versions as version on version.id = item.bom_version_id
+         where version.pcb_card_id = $1`, [cardId],
+      )).rows[0]?.quantity_per_card;
+      const auditCount = async () => (await database.query<{ count: string }>(
+        `select count(*) from public.audit_logs as audit
+         join public.pcb_bom_versions as version on version.id = audit.entity_id
+         where version.pcb_card_id = $1`, [cardId],
+      )).rows[0]?.count;
+
+      const initial = await save(2);
+      expect(initial).toEqual([{ bom_version_id: expect.any(String), version_number: "1" }]);
+      expect(await persistedQuantity()).toBe("2");
+      for (const quantity of ["1", "9007199254740993", "9223372036854775807"]) {
+        expect(await save(quantity)).toEqual(initial);
+        expect(await persistedQuantity()).toBe(quantity);
+      }
+      expect(await auditCount()).toBe("4");
+      expect(await save("0009223372036854775807")).toEqual(initial);
+      expect(await persistedQuantity()).toBe("9223372036854775807");
+      expect(await save("9223372036854775807")).toEqual(initial);
+      expect(await auditCount()).toBe("4");
+
+      for (const quantity of ["0", "-1", "1.5", "1e3", "9223372036854775808",
+        "not-a-number", true, null, {}, []]) {
+        await expect(saveBomAs(database, actor, cardId,
+          [{ product_id: componentId, quantity_per_card: quantity }]))
+          .rejects.toMatchObject({ code: "22023" });
+        expect(await persistedQuantity()).toBe("9223372036854775807");
+        expect(await auditCount()).toBe("4");
+      }
     });
   });
 
@@ -407,7 +607,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
         [[{ product_id: componentId, quantity_per_card: 0 }], "22023"],
         [[{ product_id: componentId, quantity_per_card: -1 }], "22023"],
         [[{ product_id: componentId, quantity_per_card: 1.5 }], "22023"],
-        [[{ product_id: componentId, quantity_per_card: "2" }], "22023"],
+        [[{ product_id: componentId, quantity_per_card: "2.0" }], "22023"],
         [[{ product_id: "bad-uuid", quantity_per_card: 1 }], "22023"],
         [[{ product_id: componentId }], "22023"],
         [[{ product_id: componentId, quantity_per_card: 1 },

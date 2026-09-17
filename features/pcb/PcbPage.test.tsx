@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ usePcbCards: vi.fn(), usePcbCreation: vi.fn(), refetch: vi.fn(), create: vi.fn() }));
@@ -6,6 +7,10 @@ vi.mock("./hooks/usePcbCards", () => ({ usePcbCards: mocks.usePcbCards }));
 vi.mock("./hooks/usePcbCreation", () => ({ usePcbCreation: mocks.usePcbCreation }));
 
 import PcbPage from "./PcbPage";
+
+function renderPage() {
+  return render(<MemoryRouter><PcbPage /></MemoryRouter>);
+}
 
 describe("PCB list and creation", () => {
   beforeEach(() => {
@@ -19,7 +24,7 @@ describe("PCB list and creation", () => {
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
   it("renders active and archived Cards, stock, serials and creator action", () => {
-    render(<PcbPage />);
+    renderPage();
     expect(screen.getByText("Active Card")).toBeInTheDocument();
     expect(screen.getByText("Legacy Card")).toBeInTheDocument();
     expect(screen.getByText("0000001")).toBeInTheDocument();
@@ -30,27 +35,27 @@ describe("PCB list and creation", () => {
 
   it("fails closed for a view-only creator", () => {
     mocks.usePcbCreation.mockReturnValue({ canCreate: false, create: mocks.create });
-    render(<PcbPage />);
+    renderPage();
     expect(screen.queryByRole("button", { name: "Create PCB Card" })).not.toBeInTheDocument();
   });
 
   it("shows loading, error with retry, and empty states", () => {
     mocks.usePcbCards.mockReturnValueOnce({ isPending: true });
-    const view = render(<PcbPage />);
+    const view = renderPage();
     expect(screen.getByText("Loading PCB Cards...")).toBeInTheDocument();
     view.unmount();
     mocks.usePcbCards.mockReturnValueOnce({ isPending: false, isError: true, refetch: mocks.refetch });
-    const errorView = render(<PcbPage />);
+    const errorView = renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(mocks.refetch).toHaveBeenCalled();
     errorView.unmount();
     mocks.usePcbCards.mockReturnValueOnce({ isPending: false, isError: false, data: { ok: true, value: [] } });
-    render(<PcbPage />);
+    renderPage();
     expect(screen.getByText("No PCB Cards found")).toBeInTheDocument();
   });
 
   it("validates name, submits only normalized name, and shows generated Serial", async () => {
-    render(<PcbPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Create PCB Card" }));
     const dialog = screen.getByRole("dialog");
     expect(dialog.querySelectorAll("input")).toHaveLength(1);
@@ -66,7 +71,7 @@ describe("PCB list and creation", () => {
   it("prevents duplicate submits and keeps safe backend errors visible", async () => {
     let finish: ((result: { ok: false; error: { code: string; message: string } }) => void) | undefined;
     mocks.create.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    render(<PcbPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: "Create PCB Card" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Name / Code"), { target: { value: "Card" } });
@@ -77,5 +82,14 @@ describe("PCB list and creation", () => {
     finish?.({ ok: false, error: { code: "pcb_create_failed", message: "PCB Card could not be created." } });
     await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("could not be created"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("opens the PCB detail route from a card name", () => {
+    render(<MemoryRouter initialEntries={["/pcb"]}><Routes>
+      <Route path="/pcb" element={<PcbPage />} />
+      <Route path="/pcb/:pcbCardId" element={<div>PCB detail route</div>} />
+    </Routes></MemoryRouter>);
+    fireEvent.click(screen.getByRole("link", { name: "Active Card" }));
+    expect(screen.getByText("PCB detail route")).toBeInTheDocument();
   });
 });
