@@ -1974,54 +1974,62 @@ Goal:
 
 ---
 
-## 091 — Enforce Used BOM Immutability
+## 091 — Create PcbProductionRun Schema + Security
 
 Goal:
-- once used by production, version/items cannot be edited/deleted
+- create the production-history entity needed to determine whether a BOM version has ever been used
 
-Backend-enforced.
+Include:
+- `pcb_card_id`
+- `bom_version_id`
+- optional `project_id`
+- `quantity_produced`
+- `status`
+- `produced_by_user_id`
+- `completed_at`
+- history-preserving foreign keys
+- read/security baseline and direct normal-client write denial
 
-Add direct-bypass tests.
+Schema/security only. Do not add a separate used flag to PcbBomVersion, a production RPC or UI, Inventory mutation, InventoryMovement, or stock changes.
 
 ---
 
-## 092 — Add New BOM Version Creation
+## 092 — Enforce Used BOM Immutability
 
 Goal:
-- editing a used BOM creates next version
-- old version remains historical
-- new version becomes active
+- once any PcbProductionRun references a BOM version, that version and its PcbBomItems cannot be mutated or deleted
 
-Audit version creation.
+Enforce this in the backend/database and add direct-bypass tests. Derive use from PcbProductionRun history, not a duplicate flag. An unused active BOM remains editable through the existing trusted initial-BOM save path.
+
+Do not implement version rollover here.
 
 ---
 
-## 093 — Build BOM Version History UI
+## 093 — Add New BOM Version Creation
 
 Goal:
-- active/historical versions
-- created date/by
-- used-in-production indicator
+- editing a used active BOM preserves the old used version and creates the next sequential version
+- copy/replace the edited BOM contents as appropriate
+- the old version becomes historical and the new version becomes active
+- audit version creation/change
 
-No editing of historical used version.
+Historical production stays linked to the exact version used; new production uses the latest active version.
+
+---
+
+## 094 — Build BOM Version History UI
+
+Goal:
+- show active and historical BOM versions
+- show created date/by
+- show a Production Used? indicator derived from PcbProductionRun history
+- keep used historical versions read-only
+
+Do not implement production execution.
 
 ---
 
 # PHASE J — PCB Production
-
-## 094 — Create PcbProductionRun Schema + Security
-
-Goal:
-- production history entity
-- PCB
-- BOM version
-- optional Project
-- quantity
-- actor/time
-
-No stock mutation yet.
-
----
 
 ## 095 — Add Pure PCB Requirement Calculator
 
