@@ -323,11 +323,9 @@ Client-side "stock available" display is not authorization or final validation.
 
 When adding or changing a BOM item, trusted backend validation must require an existing active stock-tracked Product of kind `component` or `pcb_finished_good` and reject the PcbCard's own `output_product_id`. Later Product archival must not invalidate, delete, or rewrite the existing BOM reference; historical versions remain readable with their referenced Product.
 
-Once a BOM version has production history:
+Once any PcbProductionRun references a BOM version, the run itself establishes that the version was used; do not add a separate used flag. Its `pcb_card_id`, `version_number`, `created_at`, and `created_by_user_id` cannot change. The version cannot be deleted, and its PcbBomItems cannot be inserted, updated, or deleted.
 
-- BOM version is immutable
-- its BOM items are immutable
-- edits create a new version
+The only allowed update to a used version is `is_active = true` to `is_active = false`, with every other field unchanged, so a trusted new-version rollover can supersede it. This never permits editing its BOM definition. Reactivation (`false` to `true`) and every other used-version update are forbidden. Edits after production create a new version; Task 093 owns the trusted atomic rollover, not Task 092.
 
 Backend policies/functions must enforce this.
 

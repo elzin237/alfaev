@@ -1997,9 +1997,9 @@ Schema/security only. Do not add a separate used flag to PcbBomVersion, a produc
 ## 092 — Enforce Used BOM Immutability
 
 Goal:
-- once any PcbProductionRun references a BOM version, that version and its PcbBomItems cannot be mutated or deleted
+- once any PcbProductionRun references a BOM version, prevent changes to its `pcb_card_id`, `version_number`, `created_at`, and `created_by_user_id`, prevent deletion of the version, and prevent insertion, update, or deletion of its PcbBomItems
 
-Enforce this in the backend/database and add direct-bypass tests. Derive use from PcbProductionRun history, not a duplicate flag. An unused active BOM remains editable through the existing trusted initial-BOM save path.
+The only allowed used-version update is `is_active` true to false with every other field unchanged, reserved for Task 093's trusted rollover. Do not allow false-to-true reactivation, other updates, or item changes. Enforce this at the database boundary and add direct-bypass tests. Derive use from PcbProductionRun history, not a duplicate flag. An unused active BOM remains editable through the existing trusted initial-BOM save path.
 
 Do not implement version rollover here.
 
@@ -2010,7 +2010,8 @@ Do not implement version rollover here.
 Goal:
 - editing a used active BOM preserves the old used version and creates the next sequential version
 - copy/replace the edited BOM contents as appropriate
-- the old version becomes historical and the new version becomes active
+- atomically lock the current card/active version, deactivate the old used version through its sole allowed true-to-false transition, and activate the new version
+- preserve the old version's items and production history; never reactivate it
 - audit version creation/change
 
 Historical production stays linked to the exact version used; new production uses the latest active version.

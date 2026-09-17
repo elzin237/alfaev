@@ -330,12 +330,10 @@ If no production history exists:
 
 1. User opens PCB card.
 2. Chooses Edit BOM.
-3. Existing used BOM is immutable.
-4. AlfaEV creates a new version.
-5. User changes component quantities/list.
-6. New version becomes active.
-7. Historical production remains linked to old version.
-8. Audit version change.
+3. User proposes changes to component quantities/list; the existing used BOM definition and items remain immutable.
+4. The trusted operation locks the card/current active version, creates the next version with those changes, deactivates the old used version from true to false, and activates the new version atomically. No other old-version field or item changes, and the old version cannot be reactivated.
+5. Historical production remains linked to the exact old version.
+6. Audit version change.
 
 ---
 

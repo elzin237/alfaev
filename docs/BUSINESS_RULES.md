@@ -523,7 +523,7 @@ If production history exists:
 - old production remains linked to the old version
 - new production uses the latest active version
 
-Historical BOM versions are immutable.
+A version used by any PcbProductionRun keeps its card identity, version number, creation timestamp/actor, and BOM items permanently immutable; it cannot be deleted. Its sole permitted lifecycle change is one-way deactivation from active to inactive when a new version supersedes it. Deactivation does not edit its contents, and an inactive used version cannot be reactivated. Production-use state is derived from run history, not stored as a separate flag.
 
 ---
 

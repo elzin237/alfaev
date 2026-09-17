@@ -923,7 +923,8 @@ Constraints:
 Rules:
 
 - Before first production, current BOM may be edited without preserving older unused drafts if desired by implementation.
-- Once a BOM version has been used in production, it is immutable.
+- Use is derived from a PcbProductionRun referencing the exact version; no separate used field is stored.
+- Once used, `pcb_card_id`, `version_number`, `created_at`, and `created_by_user_id` cannot change, and the version cannot be deleted. The only allowed update is `is_active` from true to false, with all other fields unchanged, when superseded by a new version. False-to-true reactivation is forbidden.
 - Editing after production creates the next version.
 - Historical production always references the exact version used.
 
@@ -948,7 +949,7 @@ Rules:
 - `component_product_id` may reference a stock-tracked Product of kind `component` or `pcb_finished_good`.
 - When adding or changing a BOM item, the referenced Product must exist and be active; the PcbCard's own `output_product_id` is not eligible.
 - Later Product archival does not invalidate, delete, or rewrite an existing BOM item. Historical BOM versions continue to display their referenced Product.
-- BOM items for historical used versions are immutable.
+- Once a production run references their version, BOM items cannot be inserted, updated, or deleted, including during the version's one-way deactivation.
 
 ---
 
