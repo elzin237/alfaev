@@ -169,6 +169,384 @@ async function expectPcbRunSqlFailure(
 }
 
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("blocks privileged changes to a used BOM except one-way version deactivation (Task 092)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actorId = fixture.actors.admin.profileId;
+      const { cardId, componentId, finishedId, anotherId } =
+        await createBomSaveFixture(database, actorId);
+      const versionId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions (pcb_card_id, version_number, created_by_user_id)
+         values ($1, 1, $2) returning id`, [cardId, actorId],
+      )).rows[0]!.id;
+      const unusedVersionId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions
+           (pcb_card_id, version_number, is_active, created_by_user_id)
+         values ($1, 2, false, $2) returning id`, [cardId, actorId],
+      )).rows[0]!.id;
+      const itemId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_items
+           (bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, 2) returning id`, [versionId, componentId],
+      )).rows[0]!.id;
+      const unusedItemId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_items
+           (bom_version_id, component_product_id, quantity_per_card)
+         values ($1, $2, 3) returning id`, [unusedVersionId, finishedId],
+      )).rows[0]!.id;
+      await database.query(
+        `insert into public.pcb_production_runs
+           (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3)`, [cardId, versionId, actorId],
+      );
+
+      const rejects = (sql: string, values: unknown[]) =>
+        expectPcbRunSqlFailure(database, sql, values, "PCB09");
+      await rejects("update public.pcb_bom_versions set pcb_card_id = $2 where id = $1",
+        [versionId, randomUUID()]);
+      await rejects("update public.pcb_bom_versions set version_number = 3 where id = $1",
+        [versionId]);
+      await rejects("update public.pcb_bom_versions set created_at = created_at + interval '1 second' where id = $1",
+        [versionId]);
+      await rejects("update public.pcb_bom_versions set created_by_user_id = $2 where id = $1",
+        [versionId, fixture.actors.permitted.profileId]);
+      await rejects("update public.pcb_bom_versions set is_active = true where id = $1",
+        [versionId]);
+      await rejects("update public.pcb_bom_versions set is_active = false, version_number = 3 where id = $1",
+        [versionId]);
+      await rejects("delete from public.pcb_bom_versions where id = $1", [versionId]);
+      await rejects("insert into public.pcb_bom_items (bom_version_id, component_product_id, quantity_per_card) values ($1, $2, 1)",
+        [versionId, anotherId]);
+      await rejects("update public.pcb_bom_items set quantity_per_card = 4 where id = $1", [itemId]);
+      await rejects("update public.pcb_bom_items set component_product_id = $2 where id = $1",
+        [itemId, finishedId]);
+      await rejects("update public.pcb_bom_items set bom_version_id = $2 where id = $1",
+        [itemId, unusedVersionId]);
+      await rejects("update public.pcb_bom_items set quantity_per_card = quantity_per_card where id = $1",
+        [itemId]);
+      await rejects("delete from public.pcb_bom_items where id = $1", [itemId]);
+      await rejects("update public.pcb_bom_items set bom_version_id = $2 where id = $1",
+        [unusedItemId, versionId]);
+
+      expect((await database.query(
+        "select id, component_product_id, quantity_per_card from public.pcb_bom_items where bom_version_id = $1",
+        [versionId],
+      )).rows).toEqual([{ id: itemId, component_product_id: componentId, quantity_per_card: "2" }]);
+      await database.query("update public.pcb_bom_versions set is_active = false where id = $1",
+        [versionId]);
+      await rejects("update public.pcb_bom_versions set is_active = true where id = $1",
+        [versionId]);
+      await rejects("update public.pcb_bom_versions set is_active = false where id = $1",
+        [versionId]);
+      expect((await database.query<{ is_active: boolean }>(
+        "select is_active from public.pcb_bom_versions where id = $1", [versionId],
+      )).rows).toEqual([{ is_active: false }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [versionId],
+      )).rows).toEqual([{ count: "0" }]);
+    });
+  });
+
+  it("keeps the trusted initial-BOM no-op but rejects edits after production use (Task 092)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture.actors.admin;
+      const { cardId, componentId, anotherId } =
+        await createBomSaveFixture(database, actor.profileId);
+      const initial = await commitBomCallInTestTransaction(database, actor, cardId,
+        [{ product_id: componentId, quantity_per_card: "2" }]);
+      const versionId = initial[0]!.bom_version_id;
+      const itemId = (await database.query<{ id: string }>(
+        "select id from public.pcb_bom_items where bom_version_id = $1", [versionId],
+      )).rows[0]!.id;
+      await database.query(
+        `insert into public.pcb_production_runs
+           (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3)`, [cardId, versionId, actor.profileId],
+      );
+      const noOp = await commitBomCallInTestTransaction(database, actor, cardId,
+        [{ product_id: componentId, quantity_per_card: "2" }]);
+      expect(noOp).toEqual(initial);
+      for (const payload of [
+        [{ product_id: componentId, quantity_per_card: "3" }],
+        [{ product_id: componentId, quantity_per_card: "2" },
+          { product_id: anotherId, quantity_per_card: "1" }],
+        [],
+      ]) {
+        await expect(saveBomAs(database, actor, cardId, payload))
+          .rejects.toMatchObject({ code: "PCB09" });
+      }
+      expect((await database.query(
+        "select id, component_product_id, quantity_per_card from public.pcb_bom_items where bom_version_id = $1",
+        [versionId],
+      )).rows).toEqual([{ id: itemId, component_product_id: componentId, quantity_per_card: "2" }]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where entity_id = $1", [versionId],
+      )).rows).toEqual([{ count: "1" }]);
+    });
+  });
+
+  it("serializes first production-run insertion behind a BOM item mutation (Task 092)", async () => {
+    const fixture = requireHarness();
+    const actorId = fixture.actors.admin.profileId;
+    const outputId = randomUUID();
+    const inputId = randomUUID();
+    const cardId = randomUUID();
+    const versionId = randomUUID();
+    const itemId = randomUUID();
+    const serials = [createTestSerialNumber(), createTestSerialNumber()];
+    while (serials[1] === serials[0]) serials[1] = createTestSerialNumber();
+    const applicationName = `bom-history-${randomUUID()}`;
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const writer = clients[0];
+      const production = clients[1];
+      const observer = clients[2];
+      if (!writer || !production || !observer) throw new Error("PCB concurrency clients unavailable");
+      let setupCommitted = false;
+      let waitingInsert: Promise<unknown> | undefined;
+      let waitingUpdate: Promise<unknown> | undefined;
+      try {
+        await observer.query("begin");
+        for (const [id, serial, kind] of [
+          [outputId, serials[0], "pcb_finished_good"],
+          [inputId, serials[1], "component"],
+        ]) {
+          await observer.query(
+            `insert into public.products
+               (id, serial_number, name, category, product_kind, created_by_user_id, updated_by_user_id)
+             values ($1, $2, 'History-lock Product', 'PCB', $3, $4, $4)`,
+            [id, serial, kind, actorId],
+          );
+        }
+        await observer.query(
+          `insert into public.pcb_cards (id, name, output_product_id, created_by_user_id, updated_by_user_id)
+           values ($1, 'History-lock Card', $2, $3, $3)`, [cardId, outputId, actorId],
+        );
+        await observer.query(
+          `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, created_by_user_id)
+           values ($1, $2, 1, $3)`, [versionId, cardId, actorId],
+        );
+        await observer.query(
+          `insert into public.pcb_bom_items (id, bom_version_id, component_product_id, quantity_per_card)
+           values ($1, $2, $3, 1)`, [itemId, versionId, inputId],
+        );
+        await observer.query("commit");
+        setupCommitted = true;
+
+        await writer.query("begin");
+        await writer.query("update public.pcb_bom_items set quantity_per_card = 2 where id = $1", [itemId]);
+        await production.query("begin");
+        await production.query("select pg_catalog.set_config('application_name', $1, true)", [applicationName]);
+        waitingInsert = production.query(
+          `insert into public.pcb_production_runs
+             (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+           values ($1, $2, 1, $3)`, [cardId, versionId, actorId],
+        );
+        let waitingOnLock = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const result = await observer.query<{ wait_event_type: string | null }>(
+            "select wait_event_type from pg_catalog.pg_stat_activity where application_name = $1",
+            [applicationName],
+          );
+          if (result.rows[0]?.wait_event_type === "Lock") {
+            waitingOnLock = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(waitingOnLock).toBe(true);
+        await writer.query("rollback");
+        await waitingInsert;
+        waitingInsert = undefined;
+        expect((await production.query<{ count: string }>(
+          "select count(*) from public.pcb_production_runs where bom_version_id = $1", [versionId],
+        )).rows).toEqual([{ count: "1" }]);
+        await production.query("rollback");
+
+        // Reverse the order: a pending first production run owns the parent
+        // lock, and an item writer cannot pass its history check until it ends.
+        await production.query("begin");
+        await production.query(
+          `insert into public.pcb_production_runs
+             (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+           values ($1, $2, 1, $3)`, [cardId, versionId, actorId],
+        );
+        await writer.query("begin");
+        await writer.query("select pg_catalog.set_config('application_name', $1, true)",
+          [`${applicationName}-writer`]);
+        waitingUpdate = writer.query(
+          "update public.pcb_bom_items set quantity_per_card = 2 where id = $1", [itemId],
+        );
+        let writerWaiting = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const result = await observer.query<{ wait_event_type: string | null }>(
+            "select wait_event_type from pg_catalog.pg_stat_activity where application_name = $1",
+            [`${applicationName}-writer`],
+          );
+          if (result.rows[0]?.wait_event_type === "Lock") {
+            writerWaiting = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(writerWaiting).toBe(true);
+        await production.query("rollback");
+        await waitingUpdate;
+        waitingUpdate = undefined;
+        await writer.query("rollback");
+      } finally {
+        if (waitingUpdate) {
+          await production.query("rollback");
+          await waitingUpdate.catch(() => undefined);
+          await writer.query("rollback");
+        } else if (waitingInsert) {
+          await writer.query("rollback");
+          await waitingInsert.catch(() => undefined);
+          await production.query("rollback");
+        } else {
+          await writer.query("rollback");
+          await production.query("rollback");
+        }
+        if (setupCommitted) {
+          await observer.query("delete from public.pcb_bom_items where id = $1", [itemId]);
+          await observer.query("delete from public.pcb_bom_versions where id = $1", [versionId]);
+          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
+          await observer.query("delete from public.inventory_balances where product_id = any($1::uuid[])", [[outputId, inputId]]);
+          await observer.query("delete from public.products where id = any($1::uuid[])", [[outputId, inputId]]);
+        } else {
+          await observer.query("rollback");
+        }
+      }
+    });
+  });
+
+  it("serializes version mutation and first production insertion through the same parent lock (Task 092)", async () => {
+    const fixture = requireHarness();
+    const actorId = fixture.actors.admin.profileId;
+    const outputId = randomUUID();
+    const cardId = randomUUID();
+    const versionId = randomUUID();
+    const serial = createTestSerialNumber();
+    const waitingApplication = `bom-version-${randomUUID()}`;
+    await fixture.withDatabaseClients(3, async (clients) => {
+      const versionWriter = clients[0];
+      const production = clients[1];
+      const observer = clients[2];
+      if (!versionWriter || !production || !observer) {
+        throw new Error("PCB version-concurrency clients unavailable");
+      }
+      let setupCommitted = false;
+      let pendingInsert: Promise<unknown> | undefined;
+      let pendingUpdate: Promise<unknown> | undefined;
+      try {
+        await observer.query("begin");
+        await observer.query(
+          `insert into public.products
+             (id, serial_number, name, category, product_kind, created_by_user_id, updated_by_user_id)
+           values ($1, $2, 'Version-lock output', 'PCB', 'pcb_finished_good', $3, $3)`,
+          [outputId, serial, actorId],
+        );
+        await observer.query(
+          `insert into public.pcb_cards (id, name, output_product_id, created_by_user_id, updated_by_user_id)
+           values ($1, 'Version-lock Card', $2, $3, $3)`, [cardId, outputId, actorId],
+        );
+        await observer.query(
+          `insert into public.pcb_bom_versions (id, pcb_card_id, version_number, created_by_user_id)
+           values ($1, $2, 1, $3)`, [versionId, cardId, actorId],
+        );
+        await observer.query("commit");
+        setupCommitted = true;
+
+        // Version mutation wins: production must wait for its parent row.
+        await versionWriter.query("begin");
+        await versionWriter.query(
+          "update public.pcb_bom_versions set version_number = 2 where id = $1", [versionId],
+        );
+        await production.query("begin");
+        await production.query("select pg_catalog.set_config('application_name', $1, true)",
+          [waitingApplication]);
+        pendingInsert = production.query(
+          `insert into public.pcb_production_runs
+             (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+           values ($1, $2, 1, $3)`, [cardId, versionId, actorId],
+        );
+        let productionWaiting = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const activity = await observer.query<{ wait_event_type: string | null }>(
+            "select wait_event_type from pg_catalog.pg_stat_activity where application_name = $1",
+            [waitingApplication],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            productionWaiting = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(productionWaiting).toBe(true);
+        await versionWriter.query("commit");
+        await pendingInsert;
+        pendingInsert = undefined;
+        expect((await production.query<{ version_number: string }>(
+          "select version_number from public.pcb_bom_versions where id = $1", [versionId],
+        )).rows).toEqual([{ version_number: "2" }]);
+        // Roll back the run so immutable history is never forcibly removed.
+        await production.query("rollback");
+
+        // First production wins: a version mutation must wait for its lock.
+        await production.query("begin");
+        await production.query(
+          `insert into public.pcb_production_runs
+             (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+           values ($1, $2, 1, $3)`, [cardId, versionId, actorId],
+        );
+        await versionWriter.query("begin");
+        await versionWriter.query("select pg_catalog.set_config('application_name', $1, true)",
+          [`${waitingApplication}-writer`]);
+        pendingUpdate = versionWriter.query(
+          "update public.pcb_bom_versions set version_number = 3 where id = $1", [versionId],
+        );
+        let versionWaiting = false;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          const activity = await observer.query<{ wait_event_type: string | null }>(
+            "select wait_event_type from pg_catalog.pg_stat_activity where application_name = $1",
+            [`${waitingApplication}-writer`],
+          );
+          if (activity.rows[0]?.wait_event_type === "Lock") {
+            versionWaiting = true;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(versionWaiting).toBe(true);
+        await production.query("rollback");
+        await pendingUpdate;
+        pendingUpdate = undefined;
+        await versionWriter.query("rollback");
+      } finally {
+        if (pendingUpdate) {
+          await production.query("rollback");
+          await pendingUpdate.catch(() => undefined);
+          await versionWriter.query("rollback");
+        } else if (pendingInsert) {
+          await versionWriter.query("rollback");
+          await pendingInsert.catch(() => undefined);
+          await production.query("rollback");
+        } else {
+          await versionWriter.query("rollback");
+          await production.query("rollback");
+        }
+        if (setupCommitted) {
+          await observer.query("delete from public.pcb_bom_versions where id = $1", [versionId]);
+          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
+          await observer.query("delete from public.inventory_balances where product_id = $1", [outputId]);
+          await observer.query("delete from public.products where id = $1", [outputId]);
+        } else {
+          await observer.query("rollback");
+        }
+      }
+    });
+  });
+
   it("enforces PCB production-run schema, card/BOM identity and permanent history", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
