@@ -6,6 +6,10 @@ export function pcbBomDetailQueryKey(profileId: string | undefined, cardId: stri
   return ["pcb", "bom", profileId, cardId] as const;
 }
 
+export function pcbBomHistoryQueryKey(profileId: string | undefined, cardId: string) {
+  return ["pcb", "bom-history", profileId, cardId] as const;
+}
+
 export function pcbBomChoicesQueryKey(profileId: string | undefined, cardId: string, search: string) {
   return ["pcb", "bom-choices", profileId, cardId, search.trim()] as const;
 }

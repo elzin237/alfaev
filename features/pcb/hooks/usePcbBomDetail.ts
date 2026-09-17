@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
-import { pcbBomDetailQueryKey } from "../pcbQueryKeys";
+import { pcbBomDetailQueryKey, pcbBomHistoryQueryKey } from "../pcbQueryKeys";
 import {
   getPcbBomEditor, isPcbCardId, saveInitialPcbBom,
   type PcbBomSaveItem,
@@ -36,7 +36,10 @@ export function usePcbBomDetail(cardId: string) {
     }
     const result = await saveInitialPcbBom(cardId, items);
     if (result.ok) {
-      await queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: pcbBomHistoryQueryKey(profile?.id, cardId), exact: true }),
+      ]);
     }
     return result;
   }

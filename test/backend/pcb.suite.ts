@@ -741,6 +741,97 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
   it.todo("committed first-production and concurrent used-version saves need a disposable DB (Task 093)");
   it.todo("post-deactivation fault injection needs a disposable DB (Task 093)");
 
+  it("reads exact PCB BOM version history with creator names and derived use (Task 094)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const viewer = fixture.actors.permitted;
+      const editor = fixture.actors.productCreator;
+      const { cardId, componentId, finishedId } =
+        await createBomSaveFixture(database, admin.profileId);
+      for (const [profileId, key] of [
+        [viewer.profileId, "pcb.view"], [editor.profileId, "pcb.edit"],
+      ]) {
+        await database.query(
+          `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+           select $1, id, $2 from public.permission_definitions where key = $3`,
+          [profileId, admin.profileId, key],
+        );
+      }
+      const sql = "select * from public.list_pcb_bom_versions($1::uuid)";
+      expect(await readPcbRpcAs(database, admin, sql, [cardId])).toEqual([]);
+      expect(await readPcbRpcAs(database, viewer, sql, [cardId])).toEqual([]);
+      await expect(readPcbRpcAs(database, editor, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.unpermitted, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, fixture.actors.inactive, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, null, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(readPcbRpcAs(database, admin, sql, [null]))
+        .rejects.toMatchObject({ code: "22023" });
+      await expect(readPcbRpcAs(database, admin, sql, [randomUUID()]))
+        .rejects.toMatchObject({ code: "P0002" });
+
+      const creators = (await database.query<{ id: string; full_name: string }>(
+        "select id, full_name from public.user_profiles where id = any($1::uuid[])",
+        [[admin.profileId, editor.profileId]],
+      )).rows;
+      const creatorName = (id: string) => creators.find((row) => row.id === id)?.full_name;
+      const v1 = (await commitBomCallInTestTransaction(database, admin, cardId,
+        [{ product_id: componentId, quantity_per_card: "1" }]))[0]!;
+      const unused = await readPcbRpcAs<Record<string, unknown>>(database, viewer, sql, [cardId]);
+      expect(unused).toHaveLength(1);
+      expect(unused[0]).toMatchObject({ bom_version_id: v1.bom_version_id,
+        version_number: "1", is_active: true, created_by_user_id: admin.profileId,
+        created_by_full_name: creatorName(admin.profileId), production_used: false });
+      expect(unused[0]?.created_at).toBeInstanceOf(Date);
+      expect(Object.keys(unused[0] ?? {}).sort()).toEqual([
+        "bom_version_id", "version_number", "is_active", "created_at",
+        "created_by_user_id", "created_by_full_name", "production_used",
+      ].sort());
+      await database.query(
+        `insert into public.pcb_production_runs
+           (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3)`, [cardId, v1.bom_version_id, admin.profileId],
+      );
+      expect((await readPcbRpcAs<Record<string, unknown>>(database, viewer, sql, [cardId]))[0])
+        .toMatchObject({ version_number: "1", is_active: true, production_used: true });
+
+      const v2 = (await commitBomCallInTestTransaction(database, editor, cardId, [
+        { product_id: componentId, quantity_per_card: "2" },
+        { product_id: finishedId, quantity_per_card: "1" },
+      ]))[0]!;
+      const afterRollover = await readPcbRpcAs<Record<string, unknown>>(database, viewer, sql, [cardId]);
+      expect(afterRollover.map((row) => row.version_number)).toEqual(["2", "1"]);
+      expect(afterRollover[0]).toMatchObject({ bom_version_id: v2.bom_version_id,
+        version_number: "2", is_active: true, created_by_user_id: editor.profileId,
+        created_by_full_name: creatorName(editor.profileId), production_used: false });
+      expect(afterRollover[1]).toMatchObject({ bom_version_id: v1.bom_version_id,
+        version_number: "1", is_active: false, production_used: true });
+      await database.query(
+        `insert into public.pcb_production_runs
+           (pcb_card_id, bom_version_id, quantity_produced, produced_by_user_id)
+         values ($1, $2, 1, $3)`, [cardId, v2.bom_version_id, admin.profileId],
+      );
+      await database.query("update public.user_profiles set is_active = false where id = $1",
+        [editor.profileId]);
+      await database.query(
+        `update public.pcb_cards set is_active = false,
+           archived_at = pg_catalog.now(), archived_by_user_id = $2,
+           updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardId, admin.profileId],
+      );
+      const archived = await readPcbRpcAs<Record<string, unknown>>(database, viewer, sql, [cardId]);
+      expect(archived.map((row) => row.production_used)).toEqual([true, true]);
+      expect(archived[0]).toMatchObject({ created_by_full_name: creatorName(editor.profileId),
+        version_number: "2", is_active: true });
+      await expect(readPcbRpcAs(database, editor, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
   it("serializes first production-run insertion behind a BOM item mutation (Task 092)", async () => {
     const fixture = requireHarness();
     const actorId = fixture.actors.admin.profileId;

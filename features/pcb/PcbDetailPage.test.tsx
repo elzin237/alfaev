@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({ usePcbBomDetail: vi.fn(), refetch: vi.fn(), sa
 vi.mock("./hooks/usePcbBomDetail", () => ({ usePcbBomDetail: mocks.usePcbBomDetail }));
 vi.mock("./components/PcbBomEditor", () => ({ default: ({ canEdit }: { canEdit: boolean }) =>
   <div>Editor authority: {canEdit ? "editable" : "read-only"}</div> }));
+vi.mock("./components/PcbBomHistory", () => ({ default: () => <section>BOM History section</section> }));
 
 import PcbDetailPage from "./PcbDetailPage";
 
@@ -39,7 +40,8 @@ describe("PCB detail page", () => {
     expect(screen.getByText("None")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Back to PCB Cards/ })).toHaveAttribute("href", "/pcb");
     expect(screen.getByText("Editor authority: editable")).toBeInTheDocument();
-    expect(screen.queryByText(/Production History|BOM History|Last Production/)).not.toBeInTheDocument();
+    expect(screen.getByText("BOM History section")).toBeInTheDocument();
+    expect(screen.queryByText(/Production History|Last Production/)).not.toBeInTheDocument();
   });
 
   it("renders version 1 and archived card as read-only", () => {

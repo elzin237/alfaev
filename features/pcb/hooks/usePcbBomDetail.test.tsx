@@ -16,7 +16,7 @@ vi.mock("../services/pcbBomService", () => ({
 }));
 
 import { usePcbBomDetail } from "./usePcbBomDetail";
-import { pcbBomChoicesQueryKey, pcbBomDetailQueryKey } from "../pcbQueryKeys";
+import { pcbBomChoicesQueryKey, pcbBomDetailQueryKey, pcbBomHistoryQueryKey } from "../pcbQueryKeys";
 
 const cardId = "11111111-1111-4111-8111-111111111111";
 const card = { cardId, isActive: true, items: [], versionId: null, versionNumber: null };
@@ -74,7 +74,7 @@ describe("PCB BOM detail query and edit authority", () => {
     expect(failed.result.current.canEdit).toBe(false);
   });
 
-  it("allows pcb.edit and invalidates only exact BOM detail after successful save", async () => {
+  it("allows pcb.edit and invalidates exact detail and history after successful save", async () => {
     mocks.hasPermission.mockResolvedValue({ ok: true, value: true });
     const { result, client } = setup();
     await waitFor(() => expect(result.current.canEdit).toBe(true));
@@ -84,7 +84,10 @@ describe("PCB BOM detail query and edit authority", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: pcbBomDetailQueryKey("profile-1", cardId), exact: true,
     });
-    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: pcbBomHistoryQueryKey("profile-1", cardId), exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledTimes(2);
     invalidate.mockClear();
     mocks.saveInitialPcbBom.mockResolvedValue({ ok: false, error: { code: "save_failed", message: "Safe" } });
     await act(async () => { await result.current.save([]); });
