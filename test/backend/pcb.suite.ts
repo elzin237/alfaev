@@ -168,7 +168,463 @@ async function expectPcbRunSqlFailure(
   }
 }
 
+async function createProductionFixture(database: PoolClient, actorId: string) {
+  const products = await createBomSaveFixture(database, actorId);
+  const versionId = (await database.query<{ id: string }>(
+    `insert into public.pcb_bom_versions
+       (pcb_card_id, version_number, created_by_user_id)
+     values ($1, 1, $2) returning id`,
+    [products.cardId, actorId],
+  )).rows[0]!.id;
+  await database.query(
+    `insert into public.pcb_bom_items
+       (bom_version_id, component_product_id, quantity_per_card)
+     values ($1, $2, 2), ($1, $3, 3)`,
+    [versionId, products.componentId, products.finishedId],
+  );
+  await database.query(
+    `update public.inventory_balances set quantity =
+       case when product_id = $1 then 20 else 30 end
+     where product_id in ($1, $2)`,
+    [products.componentId, products.finishedId],
+  );
+  return { ...products, versionId };
+}
+
+async function producePcbAs(
+  database: PoolClient,
+  actor: SecurityActor | null,
+  cardId: string | null,
+  quantity: string | null,
+  projectId: string | null = null,
+): Promise<string> {
+  await database.query("savepoint pcb_production_attempt");
+  try {
+    if (actor) {
+      await database.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
+        [actor.authUserId],
+      );
+      await database.query("set local role authenticated");
+    } else {
+      await database.query("set local role anon");
+    }
+    const row = (await database.query<{ run_id: string }>(
+      "select public.produce_pcb($1::uuid, $2::text, $3::uuid) as run_id",
+      [cardId, quantity, projectId],
+    )).rows[0]!;
+    await database.query("reset role");
+    await database.query("release savepoint pcb_production_attempt");
+    return row.run_id;
+  } catch (error) {
+    await database.query("rollback to savepoint pcb_production_attempt");
+    throw error;
+  }
+}
+
 export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): void {
+  it("produces two inputs and output atomically for general stock and an open Project (Task 097)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const producer = fixture.actors.supplierCreator;
+      const { cardId, componentId, finishedId, outputId, anotherId, versionId } =
+        await createProductionFixture(database, admin.profileId);
+      await database.query(
+        `update public.pcb_bom_items set quantity_per_card = 1
+         where bom_version_id = $1 and component_product_id = $2`,
+        [versionId, componentId],
+      );
+      await database.query(
+        "update public.inventory_balances set quantity = 12 where product_id = $1",
+        [componentId],
+      );
+      await database.query(
+        `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+         select $1, id, $2 from public.permission_definitions where key = 'pcb.produce'`,
+        [producer.profileId, admin.profileId],
+      );
+      const runId = await producePcbAs(database, producer, cardId, "2");
+      const run = (await database.query<Record<string, unknown>>(
+        "select * from public.pcb_production_runs where id = $1", [runId],
+      )).rows[0]!;
+      expect(run).toMatchObject({ pcb_card_id: cardId, bom_version_id: versionId,
+        project_id: null, quantity_produced: "2", status: "completed",
+        produced_by_user_id: producer.profileId });
+      expect(run.completed_at).toBeInstanceOf(Date);
+      const movements = (await database.query<Record<string, unknown>>(
+        `select product_id, quantity_delta, quantity_before, quantity_after,
+                movement_type, source_type, source_id, project_id, actor_user_id
+         from public.inventory_movements where source_id = $1
+         order by product_id`, [runId],
+      )).rows;
+      expect(movements).toHaveLength(3);
+      expect(movements.find((row) => row.product_id === componentId)).toMatchObject({
+        quantity_before: "12", quantity_delta: "-2", quantity_after: "10",
+        movement_type: "pcb_production_input", source_type: "pcb_production_input",
+        source_id: runId, project_id: null, actor_user_id: producer.profileId,
+      });
+      expect(movements.find((row) => row.product_id === finishedId)).toMatchObject({
+        quantity_before: "30", quantity_delta: "-6", quantity_after: "24",
+        movement_type: "pcb_production_input", source_type: "pcb_production_input",
+        source_id: runId, project_id: null, actor_user_id: producer.profileId,
+      });
+      expect(movements.find((row) => row.product_id === outputId)).toMatchObject({
+        quantity_before: "0", quantity_delta: "2", quantity_after: "2",
+        movement_type: "pcb_production_output", source_type: "pcb_production_output",
+        source_id: runId, project_id: null, actor_user_id: producer.profileId,
+      });
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [anotherId],
+      )).rows[0]?.quantity).toBe("0");
+      const audit = (await database.query<{
+        actor_user_id: string; entity_type: string; after_data: Record<string, unknown>;
+      }>(
+        `select actor_user_id, entity_type, after_data from public.audit_logs
+         where action_type = 'pcb_production.completed' and entity_id = $1`, [runId],
+      )).rows;
+      expect(audit).toHaveLength(1);
+      expect(audit[0]).toMatchObject({ actor_user_id: producer.profileId,
+        entity_type: "pcb_production_run",
+        after_data: { pcb_card_id: cardId, bom_version_id: versionId,
+          quantity_produced: 2, project_id: null, output_product_id: outputId } });
+
+      const projectId = (await database.query<{ id: string }>(
+        `insert into public.projects
+           (name, customer_name, start_date, delivery_date, created_by_user_id, updated_by_user_id)
+         values ('PCB production Project fixture', 'Private', '2026-09-01', '2026-09-02', $1, $1)
+         returning id`, [admin.profileId],
+      )).rows[0]!.id;
+      const groupId = (await database.query<{ id: string }>(
+        `insert into public.project_products
+           (project_id, name, created_by_user_id, updated_by_user_id)
+         values ($1, 'PCB production commitment', $2, $2) returning id`,
+        [projectId, admin.profileId],
+      )).rows[0]!.id;
+      await database.query(
+        `insert into public.project_product_components
+           (project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id)
+         values ($1, $2, 7, $3, $3)`, [groupId, componentId, admin.profileId],
+      );
+      const projectBefore = (await database.query<Record<string, unknown>>(
+        "select * from public.projects where id = $1", [projectId],
+      )).rows[0];
+      const groupBefore = (await database.query<Record<string, unknown>>(
+        "select * from public.project_products where id = $1", [groupId],
+      )).rows[0];
+      const componentsBefore = (await database.query<Record<string, unknown>>(
+        "select * from public.project_product_components where project_product_id = $1",
+        [groupId],
+      )).rows;
+      const committed = (await readPcbRpcAs<{ available_after_commitments: string }>(
+        database, admin,
+        "select available_after_commitments from public.get_inventory_project_commitments() where product_id = $1",
+        [componentId],
+      ))[0];
+      expect(String(committed?.available_after_commitments)).toBe("3");
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [componentId],
+      )).rows[0]?.quantity).toBe("10");
+      // pcb.produce is sufficient even without projects.view.
+      const projectRunId = await producePcbAs(database, producer, cardId, "5", projectId);
+      expect((await database.query<{ project_id: string; bom_version_id: string }>(
+        "select project_id, bom_version_id from public.pcb_production_runs where id = $1",
+        [projectRunId],
+      )).rows[0]).toEqual({ project_id: projectId, bom_version_id: versionId });
+      const projectMovements = (await database.query<Record<string, unknown>>(
+        "select * from public.inventory_movements where source_id = $1", [projectRunId],
+      )).rows;
+      expect(projectMovements.filter((row) => row.source_type === "pcb_production_input"))
+        .toHaveLength(2);
+      expect(projectMovements.every((row) => row.project_id === projectId)).toBe(true);
+      expect(projectMovements.filter((row) => row.source_type === "pcb_production_input")
+        .reduce((total, row) => total + BigInt(String(row.quantity_delta)), 0n)).toBe(-20n);
+      expect(projectMovements.find((row) => row.source_type === "pcb_production_output"))
+        .toMatchObject({ project_id: projectId, quantity_delta: "5", source_id: projectRunId });
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [componentId],
+      )).rows[0]?.quantity).toBe("5");
+      expect((await database.query<Record<string, unknown>>(
+        "select * from public.projects where id = $1", [projectId],
+      )).rows[0]).toEqual(projectBefore);
+      expect((await database.query<Record<string, unknown>>(
+        "select * from public.project_products where id = $1", [groupId],
+      )).rows[0]).toEqual(groupBefore);
+      expect((await database.query<Record<string, unknown>>(
+        "select * from public.project_product_components where project_product_id = $1",
+        [groupId],
+      )).rows).toEqual(componentsBefore);
+      expect((await database.query<{ status: string }>(
+        "select status from public.projects where id = $1", [projectId],
+      )).rows[0]?.status).toBe("planned");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.project_product_components where project_product_id = $1",
+        [groupId],
+      )).rows[0]?.count).toBe("1");
+    });
+  });
+
+  it("rejects unauthorized producers and malformed exact quantities without side effects (Task 097)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const { cardId, componentId, outputId } =
+        await createProductionFixture(database, admin.profileId);
+      for (const [profileId, key] of [
+        [fixture.actors.productCreator.profileId, "pcb.view"],
+        [fixture.actors.productEditor.profileId, "pcb.edit"],
+        [fixture.actors.supplierCreator.profileId, "projects.view"],
+      ]) {
+        await database.query(
+          `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+           select $1, id, $2 from public.permission_definitions where key = $3`,
+          [profileId, admin.profileId, key],
+        );
+      }
+      const auditBefore = (await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where action_type = 'pcb_production.completed'",
+      )).rows[0]!.count;
+      for (const actor of [fixture.actors.productCreator, fixture.actors.productEditor,
+        fixture.actors.brandManager, fixture.actors.supplierCreator,
+        fixture.actors.permitted, fixture.actors.unpermitted, fixture.actors.inactive, null]) {
+        await expect(producePcbAs(database, actor, cardId, "1"))
+          .rejects.toMatchObject({ code: "42501" });
+      }
+      for (const quantity of [null, "", " ", "0", "-1", "+1", "1.5", "1e3",
+        "abc", "9223372036854775808"]) {
+        await expect(producePcbAs(database, admin, cardId, quantity))
+          .rejects.toMatchObject({ code: "22023" });
+      }
+      await expect(producePcbAs(database, admin, null, "1"))
+        .rejects.toMatchObject({ code: "22023" });
+      await expect(producePcbAs(database, admin, randomUUID(), "1"))
+        .rejects.toMatchObject({ code: "P0002" });
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [componentId],
+      )).rows[0]?.quantity).toBe("20");
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [outputId],
+      )).rows[0]?.quantity).toBe("0");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_production_runs where pcb_card_id = $1", [cardId],
+      )).rows[0]?.count).toBe("0");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = $1", [componentId],
+      )).rows[0]?.count).toBe("0");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.audit_logs where action_type = 'pcb_production.completed'",
+      )).rows[0]?.count).toBe(auditBefore);
+    });
+  });
+
+  it("validates card, BOM, Project and exact large quantity at execution time (Task 097)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const { cardId, outputId, componentId } =
+        await createBomSaveFixture(database, admin.profileId);
+      await expect(producePcbAs(database, admin, cardId, "1"))
+        .rejects.toMatchObject({ code: "PCB06" });
+      const versionId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions
+           (pcb_card_id, version_number, created_by_user_id)
+         values ($1, 1, $2) returning id`, [cardId, admin.profileId],
+      )).rows[0]!.id;
+      const laterId = (await database.query<{ id: string }>(
+        `insert into public.pcb_bom_versions
+           (pcb_card_id, version_number, is_active, created_by_user_id)
+         values ($1, 2, false, $2) returning id`, [cardId, admin.profileId],
+      )).rows[0]!.id;
+      await expect(producePcbAs(database, admin, cardId, "1"))
+        .rejects.toMatchObject({ code: "PCB06" });
+      await database.query("delete from public.pcb_bom_versions where id = $1", [laterId]);
+      const openIds: string[] = [];
+      for (const status of ["planned", "in_progress", "on_hold", "completed", "cancelled"]) {
+        const id = (await database.query<{ id: string }>(
+          `insert into public.projects
+             (name, customer_name, status, start_date, delivery_date,
+              completed_at, cancelled_at, created_by_user_id, updated_by_user_id)
+           values ($1, 'Private', $2, '2026-09-01', '2026-09-02',
+             case when $2 = 'completed' then pg_catalog.now() end,
+             case when $2 = 'cancelled' then pg_catalog.now() end, $3, $3)
+           returning id`, [`PCB production ${status}`, status, admin.profileId],
+        )).rows[0]!.id;
+        if (["planned", "in_progress", "on_hold"].includes(status)) openIds.push(id);
+        else await expect(producePcbAs(database, admin, cardId, "1", id))
+          .rejects.toMatchObject({ code: "PCB10" });
+      }
+      await expect(producePcbAs(database, admin, cardId, "1", randomUUID()))
+        .rejects.toMatchObject({ code: "PCB10" });
+      for (const id of openIds) {
+        const runId = await producePcbAs(database, admin, cardId, "1", id);
+        expect((await database.query<{ bom_version_id: string; project_id: string }>(
+          "select bom_version_id, project_id from public.pcb_production_runs where id = $1",
+          [runId],
+        )).rows[0]).toEqual({ bom_version_id: versionId, project_id: id });
+      }
+      // A legitimately empty BOM still creates only its output movement.
+      const large = "9007199254740993";
+      const largeId = await producePcbAs(database, admin, cardId, large);
+      expect((await database.query<{ quantity_produced: string }>(
+        "select quantity_produced from public.pcb_production_runs where id = $1", [largeId],
+      )).rows[0]?.quantity_produced).toBe(large);
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [outputId],
+      )).rows[0]?.quantity).toBe("9007199254740996");
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where source_id = $1", [largeId],
+      )).rows[0]?.count).toBe("1");
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1", [componentId],
+      )).rows[0]?.quantity).toBe("0");
+
+      const maximumCard = await createBomSaveFixture(database, admin.profileId);
+      await database.query(
+        `insert into public.pcb_bom_versions
+           (pcb_card_id, version_number, created_by_user_id)
+         values ($1, 1, $2)`, [maximumCard.cardId, admin.profileId],
+      );
+      const maximum = "9223372036854775807";
+      const maximumRun = await producePcbAs(database, admin, maximumCard.cardId, maximum);
+      expect((await database.query<{ quantity_produced: string }>(
+        "select quantity_produced from public.pcb_production_runs where id = $1",
+        [maximumRun],
+      )).rows[0]?.quantity_produced).toBe(maximum);
+      expect((await database.query<{ quantity: string }>(
+        "select quantity from public.inventory_balances where product_id = $1",
+        [maximumCard.outputId],
+      )).rows[0]?.quantity).toBe(maximum);
+
+      await database.query("savepoint archived_card_attempt");
+      await database.query(
+        `update public.pcb_cards set is_active = false, archived_at = pg_catalog.now(),
+           archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardId, admin.profileId],
+      );
+      await expect(producePcbAs(database, admin, cardId, "1"))
+        .rejects.toMatchObject({ code: "PCB07" });
+      await database.query("rollback to savepoint archived_card_attempt");
+    });
+  });
+
+  it("rolls back insufficient stock, output overflow and archived Product failures (Task 097)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const { cardId, componentId, finishedId, outputId, versionId } =
+        await createProductionFixture(database, admin.profileId);
+      await database.query(
+        "update public.inventory_balances set quantity = 10 where product_id = $1",
+        [finishedId],
+      );
+      const snapshot = async () => {
+        const balances = (await database.query<{ product_id: string; quantity: string }>(
+          `select product_id, quantity from public.inventory_balances
+           where product_id = any($1::uuid[]) order by product_id`,
+          [[componentId, finishedId, outputId]],
+        )).rows;
+        const movements = (await database.query<{ count: string }>(
+          "select count(*) from public.inventory_movements where product_id = any($1::uuid[])",
+          [[componentId, finishedId, outputId]],
+        )).rows[0]!.count;
+        const runs = (await database.query<{ count: string }>(
+          "select count(*) from public.pcb_production_runs where pcb_card_id = $1", [cardId],
+        )).rows[0]!.count;
+        const audits = (await database.query<{ count: string }>(
+          `select count(*) from public.audit_logs
+           where action_type = 'pcb_production.completed'`,
+        )).rows[0]!.count;
+        return { balances, movements, runs, audits };
+      };
+      const before = await snapshot();
+      // The first input needs 16 (20 available); the second needs 24 (10 available).
+      await expect(producePcbAs(database, admin, cardId, "8"))
+        .rejects.toMatchObject({ code: "IVB02" });
+      expect(await snapshot()).toEqual(before);
+
+      await database.query(
+        "update public.inventory_balances set quantity = 9223372036854775807 where product_id = $1",
+        [outputId],
+      );
+      const beforeOutputOverflow = await snapshot();
+      await expect(producePcbAs(database, admin, cardId, "1"))
+        .rejects.toMatchObject({ code: "22023" });
+      expect(await snapshot()).toEqual(beforeOutputOverflow);
+      await database.query(
+        "update public.inventory_balances set quantity = 0 where product_id = $1", [outputId],
+      );
+
+      for (const productId of [componentId, outputId]) {
+        await database.query("savepoint archived_product_attempt");
+        await database.query(
+          `update public.products set is_active = false, archived_at = pg_catalog.now(),
+             archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
+           where id = $1`, [productId, admin.profileId],
+        );
+        const beforeArchived = await snapshot();
+        await expect(producePcbAs(database, admin, cardId, "1"))
+          .rejects.toMatchObject({ code: productId === outputId ? "PRD01" : "PCB04" });
+        expect(await snapshot()).toEqual(beforeArchived);
+        await database.query("rollback to savepoint archived_product_attempt");
+      }
+
+      await database.query(
+        `update public.pcb_bom_items set quantity_per_card = 9223372036854775807
+         where bom_version_id = $1 and component_product_id = $2`,
+        [versionId, componentId],
+      );
+      const beforeMultiplication = await snapshot();
+      await expect(producePcbAs(database, admin, cardId, "2"))
+        .rejects.toMatchObject({ code: "22023" });
+      expect(await snapshot()).toEqual(beforeMultiplication);
+    });
+  });
+
+  it("records the current rolled-over BOM version and preserves used history (Task 097)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const { cardId, componentId, finishedId, versionId } =
+        await createProductionFixture(database, admin.profileId);
+      const firstRunId = await producePcbAs(database, admin, cardId, "1");
+      expect((await database.query<{ bom_version_id: string }>(
+        "select bom_version_id from public.pcb_production_runs where id = $1", [firstRunId],
+      )).rows[0]?.bom_version_id).toBe(versionId);
+      const saved = await commitBomCallInTestTransaction(database, admin, cardId, [
+        { product_id: componentId, quantity_per_card: "3" },
+        { product_id: finishedId, quantity_per_card: "3" },
+      ]);
+      const v2 = saved[0]!.bom_version_id;
+      expect(saved[0]?.version_number).toBe("2");
+      const secondRunId = await producePcbAs(database, admin, cardId, "1");
+      expect((await database.query<{ bom_version_id: string }>(
+        "select bom_version_id from public.pcb_production_runs where id = $1", [secondRunId],
+      )).rows[0]?.bom_version_id).toBe(v2);
+      const nextSaved = await commitBomCallInTestTransaction(database, admin, cardId, [
+        { product_id: componentId, quantity_per_card: "4" },
+        { product_id: finishedId, quantity_per_card: "3" },
+      ]);
+      const v3 = nextSaved[0]!.bom_version_id;
+      expect(nextSaved[0]?.version_number).toBe("3");
+      const thirdRunId = await producePcbAs(database, admin, cardId, "1");
+      expect((await database.query<{ bom_version_id: string }>(
+        "select bom_version_id from public.pcb_production_runs where id = $1", [thirdRunId],
+      )).rows[0]?.bom_version_id).toBe(v3);
+      expect((await database.query<{ is_active: boolean }>(
+        "select is_active from public.pcb_bom_versions where id = $1", [v2],
+      )).rows[0]?.is_active).toBe(false);
+      expect((await database.query<{ is_active: boolean }>(
+        "select is_active from public.pcb_bom_versions where id = $1", [versionId],
+      )).rows[0]?.is_active).toBe(false);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.pcb_bom_items where bom_version_id = $1", [versionId],
+      )).rows[0]?.count).toBe("2");
+      await expect(database.query(
+        "update public.pcb_bom_items set quantity_per_card = 4 where bom_version_id = $1",
+        [versionId],
+      )).rejects.toMatchObject({ code: "PCB09" });
+    });
+  });
   it("reads narrow physical PCB production inputs only for producers (Task 096)", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {
