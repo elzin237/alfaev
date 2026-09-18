@@ -2151,6 +2151,7 @@ Goal:
 
 Requirements:
 - active Admin or `inventory.products.create`; no new permission key and `inventory.view` alone is read-only
+- reject empty, malformed, or over-1000-row batches; the trusted backend enforces the 1000-row maximum independently of frontend limits
 - revalidate the entire submitted row set and resolve all optional Brands as existing and active at execution time before creating any Product
 - require/trim nonblank Name and free-text Category; blank Brand means no Brand; each valid row creates one distinct `component` even when rows look identical
 - reject client authority over Serial, Product kind/ID, actor/timestamps, and initial quantity; allocate every unique 7-digit Serial server-side with the existing concurrency-safe allocator
@@ -2165,7 +2166,7 @@ Requirements:
 Goal:
 - maintainable `.xlsx` data-only parser, canonical three-column template, typed row model, local preview validation, and row-level errors; no database mutation
 
-Review the parser dependency before adding it. Reject unsupported/empty files, do not execute scripts/macros, and set reasonable file-size/row-count limits at implementation time; no exact limit is locked in this plan.
+Review the parser dependency before adding it. Reject unsupported/empty files, do not execute scripts/macros, enforce the Task 100B maximum of 1000 rows, and choose a reasonable file-size limit at implementation time.
 
 ---
 
@@ -2174,6 +2175,7 @@ Review the parser dependency before adding it. Reject unsupported/empty files, d
 Goal:
 - Import Excel beside Add Component on `/inventory`, without a new Sidebar item or route
 - template download, `.xlsx` upload, local preview with row number/Name/Category/Brand/status or error and total/ready/invalid summary
+- enforce the same 1000-row maximum as the trusted Task 100B backend
 - block final Import for any invalid row; require explicit confirmation and submit the complete batch through the single trusted bulk operation, never by per-row Product calls
 - on success refresh Product/Inventory queries; never partially import or permanently store the workbook for MVP
 
