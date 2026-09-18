@@ -42,5 +42,5 @@ export function buildPcbProductionPreview(
     if (!input.isActive) unavailable = true;
     rows.push({ ...input, requiredQuantity, missingQuantity });
   }
-  return { ok: true, rows, insufficient, ready: rows.length > 0 && !insufficient && !unavailable };
+  return { ok: true, rows, insufficient, ready: !insufficient && !unavailable };
 }

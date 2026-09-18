@@ -35,13 +35,26 @@ describe("PCB production preview", () => {
       rows: [{ requiredQuantity: "9223372036854775807", missingQuantity: "0" }] });
   });
 
-  it("blocks readiness for archived input/output and empty BOM", () => {
+  it("blocks readiness for archived input/output but permits an empty active BOM", () => {
     expect(buildPcbProductionPreview([input("10", { isActive: false })], "5", true))
       .toMatchObject({ ok: true, ready: false, insufficient: false });
     expect(buildPcbProductionPreview([input("10")], "5", false))
       .toMatchObject({ ok: true, ready: false });
     expect(buildPcbProductionPreview([], "5", true))
+      .toEqual({ ok: true, rows: [], ready: true, insufficient: false });
+    expect(buildPcbProductionPreview([], "1", false))
       .toEqual({ ok: true, rows: [], ready: false, insufficient: false });
+    expect(buildPcbProductionPreview([], "0", true))
+      .toEqual({ ok: false, code: "invalid_quantity" });
+    expect(buildPcbProductionPreview([], "9223372036854775808", true))
+      .toEqual({ ok: false, code: "invalid_quantity" });
+  });
+
+  it("accepts positive leading-zero quantity text consistently with production submission", () => {
+    expect(buildPcbProductionPreview([], "005", true))
+      .toEqual({ ok: true, rows: [], ready: true, insufficient: false });
+    expect(buildPcbProductionPreview([input("10")], "005", true))
+      .toMatchObject({ ok: true, ready: true, rows: [{ requiredQuantity: "10" }] });
   });
 
   it.each(["0", "-1", "1.5", "1e2", "+1", "9223372036854775808"])(
