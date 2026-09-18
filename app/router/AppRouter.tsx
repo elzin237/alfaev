@@ -16,6 +16,7 @@ import InventoryPage from "../../features/inventory/InventoryPage";
 import ProductDetailPage from "../../features/inventory/ProductDetailPage";
 import PcbPage from "../../features/pcb/PcbPage";
 import PcbDetailPage from "../../features/pcb/PcbDetailPage";
+import PcbProductionPrecheckPage from "../../features/pcb/PcbProductionPrecheckPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
 import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";
@@ -55,6 +56,9 @@ function AppRouter() {
         <Route element={<PermissionRoute permission="pcb.view" />}>
           <Route path="/pcb" element={<PcbPage />} />
           <Route path="/pcb/:pcbCardId" element={<PcbDetailPage />} />
+        </Route>
+        <Route element={<PermissionRoute permission="pcb.produce" />}>
+          <Route path="/pcb/:pcbCardId/produce" element={<PcbProductionPrecheckPage />} />
         </Route>
         <Route element={<PermissionRoute permission="work_orders.view" />}>
           <Route path="/work-orders" element={<WorkOrdersPage />} />

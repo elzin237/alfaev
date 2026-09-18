@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ usePcbBomDetail: vi.fn(), refetch: vi.fn(), save: vi.fn() }));
 vi.mock("./hooks/usePcbBomDetail", () => ({ usePcbBomDetail: mocks.usePcbBomDetail }));
+const produceAccess = vi.hoisted(() => ({ usePcbProduceAccess: vi.fn() }));
+vi.mock("./hooks/usePcbProduceAccess", () => ({ usePcbProduceAccess: produceAccess.usePcbProduceAccess }));
 vi.mock("./components/PcbBomEditor", () => ({ default: ({ canEdit }: { canEdit: boolean }) =>
   <div>Editor authority: {canEdit ? "editable" : "read-only"}</div> }));
 vi.mock("./components/PcbBomHistory", () => ({ default: () => <section>BOM History section</section> }));
@@ -26,6 +28,7 @@ function renderPage(id = cardId) {
 
 describe("PCB detail page", () => {
   beforeEach(() => {
+    produceAccess.usePcbProduceAccess.mockReturnValue(false);
     mocks.usePcbBomDetail.mockReturnValue({ detailQuery: { isPending: false, isError: false,
       data: { ok: true, value: detail }, refetch: mocks.refetch },
     canEdit: true, save: mocks.save, profileId: "profile" });
@@ -45,6 +48,7 @@ describe("PCB detail page", () => {
   });
 
   it("renders version 1 and archived card as read-only", () => {
+    produceAccess.usePcbProduceAccess.mockReturnValue(true);
     mocks.usePcbBomDetail.mockReturnValue({ detailQuery: { isPending: false, isError: false,
       data: { ok: true, value: { ...detail, isActive: false, versionNumber: 1,
         versionId: "33333333-3333-4333-8333-333333333333" } } },
@@ -53,6 +57,14 @@ describe("PCB detail page", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
     expect(screen.getByText("Editor authority: read-only")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Produce PCB" })).not.toBeInTheDocument();
+  });
+
+  it("links authorized active-card readers to the separate production precheck", () => {
+    produceAccess.usePcbProduceAccess.mockReturnValue(true);
+    renderPage();
+    expect(screen.getByRole("link", { name: "Produce PCB" }))
+      .toHaveAttribute("href", `/pcb/${cardId}/produce`);
   });
 
   it("handles loading, retryable error, not-found and invalid IDs safely", () => {
