@@ -6,7 +6,7 @@ import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/p
 import { projectPlanningQueryKey } from "../../projects/projectPlanningQueryKeys";
 import {
   pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey,
-  pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
+  pcbProductionHistoryQueryKey, pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
 } from "../pcbQueryKeys";
 import { producePcb, type ProducePcbInput, type ProducePcbResult } from "../services/pcbProductionService";
 
@@ -49,6 +49,7 @@ export function usePcbProduction(cardId: string) {
       queryClient.invalidateQueries({ queryKey: pcbProductionSourceQueryKey(profileId, cardId), exact: true }),
       queryClient.invalidateQueries({ queryKey: pcbBomDetailQueryKey(profileId, cardId), exact: true }),
       queryClient.invalidateQueries({ queryKey: pcbBomHistoryQueryKey(profileId, cardId), exact: true }),
+      queryClient.invalidateQueries({ queryKey: pcbProductionHistoryQueryKey(profileId, cardId), exact: true }),
       queryClient.invalidateQueries({ queryKey: pcbCardListQueryKey(profileId), exact: true }),
       queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profileId) }),
       queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profileId) }),

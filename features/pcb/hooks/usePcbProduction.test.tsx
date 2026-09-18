@@ -12,7 +12,7 @@ import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmen
 import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
 import { projectPlanningQueryKey } from "../../projects/projectPlanningQueryKeys";
 import {
-  pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey,
+  pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey, pcbProductionHistoryQueryKey,
   pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
 } from "../pcbQueryKeys";
 
@@ -47,6 +47,7 @@ describe("PCB production mutation and cache", () => {
       pcbProductionSourceQueryKey("profile-1", cardId),
       pcbBomDetailQueryKey("profile-1", cardId),
       pcbBomHistoryQueryKey("profile-1", cardId),
+      pcbProductionHistoryQueryKey("profile-1", cardId),
       pcbCardListQueryKey("profile-1"),
       inventoryBalanceQueryKey("profile-1", inputId),
       inventoryBalanceQueryKey("profile-1", outputId),
@@ -84,6 +85,7 @@ describe("PCB production mutation and cache", () => {
       await act(async () => { await result.current.submit(submission); });
       expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbProductionSourceQueryKey("profile-1", cardId), exact: true });
       expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbBomHistoryQueryKey("profile-1", cardId), exact: true });
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionHistoryQueryKey("profile-1", cardId), exact: true });
       if (code !== "insufficient_inventory") {
         expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
       } else {

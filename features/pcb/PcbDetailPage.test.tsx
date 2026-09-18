@@ -9,6 +9,7 @@ vi.mock("./hooks/usePcbProduceAccess", () => ({ usePcbProduceAccess: produceAcce
 vi.mock("./components/PcbBomEditor", () => ({ default: ({ canEdit }: { canEdit: boolean }) =>
   <div>Editor authority: {canEdit ? "editable" : "read-only"}</div> }));
 vi.mock("./components/PcbBomHistory", () => ({ default: () => <section>BOM History section</section> }));
+vi.mock("./components/PcbProductionHistory", () => ({ default: () => <section>Production History section</section> }));
 
 import PcbDetailPage from "./PcbDetailPage";
 
@@ -44,7 +45,9 @@ describe("PCB detail page", () => {
     expect(screen.getByRole("link", { name: /Back to PCB Cards/ })).toHaveAttribute("href", "/pcb");
     expect(screen.getByText("Editor authority: editable")).toBeInTheDocument();
     expect(screen.getByText("BOM History section")).toBeInTheDocument();
-    expect(screen.queryByText(/Production History|Last Production/)).not.toBeInTheDocument();
+    expect(screen.getByText("Production History section")).toBeInTheDocument();
+    expect(screen.getByText("BOM History section").compareDocumentPosition(
+      screen.getByText("Production History section")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("renders version 1 and archived card as read-only", () => {
@@ -57,6 +60,7 @@ describe("PCB detail page", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
     expect(screen.getByText("Editor authority: read-only")).toBeInTheDocument();
+    expect(screen.getByText("Production History section")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Produce PCB" })).not.toBeInTheDocument();
   });
 

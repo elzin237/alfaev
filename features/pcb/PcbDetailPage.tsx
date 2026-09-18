@@ -5,6 +5,7 @@ import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import PcbBomEditor from "./components/PcbBomEditor";
 import PcbBomHistory from "./components/PcbBomHistory";
+import PcbProductionHistory from "./components/PcbProductionHistory";
 import { usePcbBomDetail } from "./hooks/usePcbBomDetail";
 import { usePcbProduceAccess } from "./hooks/usePcbProduceAccess";
 import { isPcbCardId } from "./services/pcbBomService";
@@ -43,5 +44,6 @@ export default function PcbDetailPage() {
     </dl>
     <PcbBomEditor detail={detail} canEdit={canEdit} profileId={profileId} onSave={save} />
     <PcbBomHistory cardId={pcbCardId} />
+    <PcbProductionHistory cardId={pcbCardId} />
   </div>;
 }

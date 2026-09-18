@@ -1389,6 +1389,127 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
   it.todo("committed first-production and concurrent used-version saves need a disposable DB (Task 093)");
   it.todo("post-deactivation fault injection needs a disposable DB (Task 093)");
 
+  it("reads narrow PCB production history across archived and historical states (Task 099)", async () => {
+    const fixture = requireHarness();
+    await fixture.withRollbackDatabaseTransaction(async (database) => {
+      const admin = fixture.actors.admin;
+      const viewer = fixture.actors.unpermitted;
+      const producer = fixture.actors.supplierCreator;
+      const producerOnly = fixture.actors.supplierArchiver;
+      const editorOnly = fixture.actors.productCreator;
+      const { cardId, componentId } = await createBomSaveFixture(database, admin.profileId);
+      for (const [profileId, key] of [
+        [viewer.profileId, "pcb.view"], [producerOnly.profileId, "pcb.produce"],
+        [editorOnly.profileId, "pcb.edit"],
+      ]) {
+        await database.query(
+          `insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id)
+           select $1, id, $2 from public.permission_definitions where key = $3`,
+          [profileId, admin.profileId, key],
+        );
+      }
+      const sql = "select * from public.list_pcb_production_history($1::uuid)";
+      expect(await readPcbRpcAs(database, admin, sql, [cardId])).toEqual([]);
+      expect(await readPcbRpcAs(database, viewer, sql, [cardId])).toEqual([]);
+      for (const actor of [producerOnly, editorOnly, fixture.actors.brandManager,
+        fixture.actors.permitted, fixture.actors.inactive, null]) {
+        await expect(readPcbRpcAs(database, actor, sql, [cardId]))
+          .rejects.toMatchObject({ code: "42501" });
+      }
+      await expect(readPcbRpcAs(database, admin, sql, [null]))
+        .rejects.toMatchObject({ code: "22023" });
+      await expect(readPcbRpcAs(database, admin, sql, [randomUUID()]))
+        .rejects.toMatchObject({ code: "P0002" });
+      expect((await readPcbRpcAs<{ allowed: boolean }>(database, viewer,
+        "select public.has_permission('projects.view') as allowed", []))[0]?.allowed).toBe(false);
+
+      const projectIds: string[] = [];
+      for (const name of ["History Completed Project", "History Cancelled Project"]) {
+        projectIds.push((await database.query<{ id: string }>(
+          `insert into public.projects
+             (name, customer_name, start_date, delivery_date, created_by_user_id, updated_by_user_id)
+           values ($1, 'Private Customer', '2026-09-01', '2026-09-30', $2, $2)
+           returning id`, [name, admin.profileId],
+        )).rows[0]!.id);
+      }
+      const v1 = (await commitBomCallInTestTransaction(database, admin, cardId,
+        [{ product_id: componentId, quantity_per_card: "1" }]))[0]!;
+      const generalId = randomUUID();
+      const completedId = randomUUID();
+      await database.query(
+        `insert into public.pcb_production_runs
+           (id, pcb_card_id, bom_version_id, project_id, quantity_produced,
+            produced_by_user_id, completed_at)
+         values ($1, $3, $4, null, 9007199254740993, $5, '2026-09-18T10:00:00Z'),
+                ($2, $3, $4, $6, 2, $5, '2026-09-18T11:00:00Z')`,
+        [generalId, completedId, cardId, v1.bom_version_id, producer.profileId, projectIds[0]],
+      );
+      const v2 = (await commitBomCallInTestTransaction(database, admin, cardId,
+        [{ product_id: componentId, quantity_per_card: "2" }]))[0]!;
+      const latestIds = [randomUUID(), randomUUID()];
+      await database.query(
+        `insert into public.pcb_production_runs
+           (id, pcb_card_id, bom_version_id, project_id, quantity_produced,
+            produced_by_user_id, completed_at)
+         values ($1, $3, $4, $5, 3, $6, '2026-09-18T12:00:00Z'),
+                ($2, $3, $4, $5, 4, $6, '2026-09-18T12:00:00Z')`,
+        [latestIds[0], latestIds[1], cardId, v2.bom_version_id, projectIds[1], producer.profileId],
+      );
+      await database.query(
+        `update public.projects set status = 'completed', completed_at = pg_catalog.now()
+         where id = $1`, [projectIds[0]],
+      );
+      await database.query(
+        `update public.projects set status = 'cancelled', cancelled_at = pg_catalog.now()
+         where id = $1`, [projectIds[1]],
+      );
+      const producerName = (await database.query<{ full_name: string }>(
+        "select full_name from public.user_profiles where id = $1", [producer.profileId],
+      )).rows[0]!.full_name;
+      await database.query("update public.user_profiles set is_active = false where id = $1", [producer.profileId]);
+      await database.query(
+        `update public.pcb_cards set is_active = false,
+           archived_at = pg_catalog.now(), archived_by_user_id = $2,
+           updated_at = pg_catalog.now(), updated_by_user_id = $2
+         where id = $1`, [cardId, admin.profileId],
+      );
+
+      const rows = await readPcbRpcAs<Record<string, unknown>>(database, viewer, sql, [cardId]);
+      const latestDescending = [...latestIds].sort().reverse();
+      expect(rows.map((row) => row.production_run_id))
+        .toEqual([...latestDescending, completedId, generalId]);
+      expect(rows[0]).toMatchObject({ bom_version_id: v2.bom_version_id,
+        bom_version_number: "2", project_id: projectIds[1],
+        project_name: "History Cancelled Project", produced_by_user_id: producer.profileId,
+        produced_by_full_name: producerName });
+      expect(rows[2]).toMatchObject({ production_run_id: completedId,
+        bom_version_id: v1.bom_version_id, bom_version_number: "1",
+        project_id: projectIds[0], project_name: "History Completed Project",
+        quantity_produced: "2" });
+      expect(rows[3]).toMatchObject({ production_run_id: generalId,
+        bom_version_id: v1.bom_version_id, bom_version_number: "1",
+        project_id: null, project_name: null, quantity_produced: "9007199254740993",
+        produced_by_user_id: producer.profileId, produced_by_full_name: producerName });
+      expect(rows[3]?.completed_at).toBeInstanceOf(Date);
+      expect((rows[3]?.completed_at as Date).toISOString()).toBe("2026-09-18T10:00:00.000Z");
+      expect(Object.keys(rows[0] ?? {}).sort()).toEqual([
+        "production_run_id", "completed_at", "quantity_produced", "project_id",
+        "project_name", "bom_version_id", "bom_version_number",
+        "produced_by_user_id", "produced_by_full_name",
+      ].sort());
+      expect((await readPcbRpcAs(database, viewer,
+        "select id from public.projects where id = $1", [projectIds[0]]))).toEqual([]);
+      expect((await readPcbRpcAs(database, viewer,
+        "select id from public.user_profiles where id = $1", [producer.profileId]))).toEqual([]);
+      expect((await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where source_id = any($1::uuid[])",
+        [[generalId, completedId, ...latestIds]],
+      )).rows[0]?.count).toBe("0");
+      await expect(readPcbRpcAs(database, producer, sql, [cardId]))
+        .rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
   it("reads exact PCB BOM version history with creator names and derived use (Task 094)", async () => {
     const fixture = requireHarness();
     await fixture.withRollbackDatabaseTransaction(async (database) => {

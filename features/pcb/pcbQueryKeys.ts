@@ -10,6 +10,10 @@ export function pcbBomHistoryQueryKey(profileId: string | undefined, cardId: str
   return ["pcb", "bom-history", profileId, cardId] as const;
 }
 
+export function pcbProductionHistoryQueryKey(profileId: string | undefined, cardId: string) {
+  return ["pcb", "production-history", profileId, cardId] as const;
+}
+
 export function pcbBomChoicesQueryKey(profileId: string | undefined, cardId: string, search: string) {
   return ["pcb", "bom-choices", profileId, cardId, search.trim()] as const;
 }
