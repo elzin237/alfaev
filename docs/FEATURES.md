@@ -273,6 +273,8 @@ Products/components may reference a Brand.
 
 Inventory tracks Alfa Proteh products/components and stock.
 
+Authorized users can bulk-create Components from a canonical `.xlsx` template containing only required Name, required free-text Category, and optional existing active Brand. Each valid row creates a distinct `component` with its own server-allocated Serial Number and zero initial InventoryBalance; no Supplier/Catalog Number or stock movement is imported. An explicit preview and confirmation precede one all-or-nothing trusted import, and the Product list refreshes after success. The file is not permanently stored for MVP.
+
 ### Product/component fields
 
 At minimum:

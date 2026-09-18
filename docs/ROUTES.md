@@ -229,6 +229,7 @@ Purpose:
 - optional Catalog Number filtering/search
 - Physical Quantity, Committed to Projects, and Available after Commitments
 - Add Component action when authorized
+- Import Excel action beside Add Component when authorized; upload, preview, and confirmation stay within `/inventory` rather than introducing a route or Sidebar item
 - Brand management entry point when authorized
 
 Access:

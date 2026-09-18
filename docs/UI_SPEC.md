@@ -701,6 +701,7 @@ Search:
 
 Primary actions:
 
+- Import Excel, for an active Admin or `inventory.products.create` user
 - Add Component
 - Manage Brands, if authorized
 
@@ -711,6 +712,16 @@ offsets another's. Available is Physical minus Committed and may be negative. Di
 clear shortage warning for negative values. Do not present commitments as stock
 movements or editable physical quantity. Where relevant, provide a way to understand
 which Projects account for the commitment without inventing reservation movements.
+
+---
+
+## Import Components from Excel
+
+- Keep Import Excel beside Add Component on Inventory; do not add a Sidebar item or dedicated route.
+- Provide a downloadable canonical `.xlsx` template with Name, Category, and Brand columns. Accept `.xlsx` only; treat it as untrusted data, never execute macros/scripts, and do not permanently store it for MVP. Choose reasonable file-size and row-count limits during implementation; no limit is fixed here.
+- Parse locally and preview before mutation. Show row number, Name, Category, Brand, and status/error, with total/ready/invalid counts. Name/Category are required, trimmed, and nonblank; Category remains free text. Brand is optional, blank means none, and a supplied value must resolve to an existing active Brand. No implicit Brand creation.
+- Empty/unsupported files or any invalid row block final Import. Let the user correct the spreadsheet and upload again; never silently import only valid rows. Duplicate-looking rows may be warned about but must not be silently deduplicated.
+- Explicit confirmation submits all rows to one trusted bulk operation. Excel never supplies Serial, Product kind, IDs, actor/timestamps, initial stock, Supplier, or Catalog Number. The backend revalidates all rows and current Brands; on success show the result and refresh Product/Inventory queries, and on failure show no partial success.
 
 ---
 

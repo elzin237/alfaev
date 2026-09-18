@@ -324,6 +324,12 @@ Rules:
 - Archived Products remain readable where historical records require them and are immutable through normal Product editing.
 - Product reactivation/unarchive is not supported in the current scope.
 
+### Excel bulk Component creation contract
+
+The `.xlsx` template has Name, Category, and optional Brand only; it adds no Product columns or new database entity. The trusted import resolves a nonblank Brand to an existing active `Brand.id`, then creates one new active `component` Product per valid row. Duplicate-looking Name/Category/Brand values are separate Products with distinct server-allocated Serials; they are not deduplicated. The client cannot set Product ID, Serial Number, kind, actor/timestamps, or quantity. Existing Product initialization gives each new row exactly one zero InventoryBalance; import creates no InventoryMovement or Supplier/ProductSupplier record.
+
+The whole row set is validated at execution time and persisted atomically with one immutable batch-level Product-creation AuditLog event identifying the created Product IDs and count. That event is the import's creation history; redundant per-row import audits are not required. Invalid/denied batches leave no Product, balance, or success audit, although consumed sequence values are not reused.
+
 ### Serial Number allocation
 
 Conceptual requirement:

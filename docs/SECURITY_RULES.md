@@ -134,6 +134,11 @@ Product authorization:
 - Product reads require Admin access or `inventory.view`
 - direct client Product `INSERT`, `UPDATE`, and `DELETE` are denied
 - trusted Product create/edit operations must re-check authorization and allow only active Brands for new Product references or Brand changes
+- confirmed `.xlsx` Component bulk import requires an active Admin or `inventory.products.create`; `inventory.view` alone is read-only and no new permission key is added
+- the browser may parse and preview the untrusted file, but must not orchestrate row-by-row Product creation; one trusted backend operation revalidates every row and Brand at execution time before creating the batch atomically
+- the bulk operation must derive actor, IDs, `component` kind, 7-digit Serials, timestamps, and zero-balance initialization server-side; client-supplied Serial, kind, Product/actor IDs, timestamps, or initial stock are never trusted
+- any invalid row, unavailable/archived Brand, malformed payload, or denied actor fails the entire import: no Product, balance, or success audit persists; serial sequence values consumed by a rolled-back transaction are never reused
+- a successful import records one immutable batch-level Product-creation audit identifying created Product IDs and count, without redundant per-row import audit events; importing alone creates no InventoryMovement
 - Product archive/deactivate requires an active Admin or `inventory.products.edit`; `inventory.products.create` does not authorize archive and `inventory.view` remains read-only
 - Product archive/deactivate remains a trusted backend lifecycle mutation; do not add a separate `inventory.products.archive` permission
 - historical Products may continue to reference archived Brands
@@ -200,6 +205,7 @@ The browser must not directly orchestrate multi-step critical state changes.
 At minimum, trusted backend/database operations are required for:
 
 - Product Serial Number allocation
+- confirmed Excel Component bulk import
 - Work Order number allocation
 - manual Inventory adjustment
 - Create Product from Nabavka

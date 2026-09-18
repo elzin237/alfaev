@@ -2133,6 +2133,63 @@ Cover:
 
 ---
 
+# CEO Extension — Inventory Excel Component Import
+
+## 100A — Lock Inventory Excel Import Contract
+
+Goal:
+- canonicalize the `.xlsx` Name/Category/optional Brand template, Component-only creation, server-owned Serials, zero initial balance, authorization, all-or-nothing import, batch audit, file safety, and preview/confirmation UX
+
+This documentation task satisfies 100A once committed. No application code or migration belongs to 100A.
+
+---
+
+## 100B — Add Trusted Bulk Component Import Backend
+
+Goal:
+- one atomic trusted bulk creation operation; the browser must not call normal Product creation row by row
+
+Requirements:
+- active Admin or `inventory.products.create`; no new permission key and `inventory.view` alone is read-only
+- revalidate the entire submitted row set and resolve all optional Brands as existing and active at execution time before creating any Product
+- require/trim nonblank Name and free-text Category; blank Brand means no Brand; each valid row creates one distinct `component` even when rows look identical
+- reject client authority over Serial, Product kind/ID, actor/timestamps, and initial quantity; allocate every unique 7-digit Serial server-side with the existing concurrency-safe allocator
+- use normal zero InventoryBalance initialization; create no InventoryMovement, Supplier, ProductSupplier, or Catalog Number
+- commit all Products, balances, and one immutable batch-level Product-creation audit identifying created Product IDs/count together, or roll back all of them; failed import creates no success audit and consumed Serial sequence values are never reused
+- backend security, rollback, and concurrency tests
+
+---
+
+## 100C — Add Excel Parser + Preview Validation
+
+Goal:
+- maintainable `.xlsx` data-only parser, canonical three-column template, typed row model, local preview validation, and row-level errors; no database mutation
+
+Review the parser dependency before adding it. Reject unsupported/empty files, do not execute scripts/macros, and set reasonable file-size/row-count limits at implementation time; no exact limit is locked in this plan.
+
+---
+
+## 100D — Build Inventory Excel Import UI
+
+Goal:
+- Import Excel beside Add Component on `/inventory`, without a new Sidebar item or route
+- template download, `.xlsx` upload, local preview with row number/Name/Category/Brand/status or error and total/ready/invalid summary
+- block final Import for any invalid row; require explicit confirmation and submit the complete batch through the single trusted bulk operation, never by per-row Product calls
+- on success refresh Product/Inventory queries; never partially import or permanently store the workbook for MVP
+
+---
+
+## 100E — Excel Import Security / Atomicity Test Pass
+
+Goal:
+- final backend/frontend hardening before Task 101
+
+Cover unauthorized and malformed imports, missing/archived Brand, no client-selected Serial or kind, duplicate-looking rows remaining distinct, all-or-nothing rollback, concurrent unique Serial allocation, `component` kind, zero balance, no InventoryMovement, correct single batch audit, no partial result, and blocked invalid preview.
+
+After 100E, resume Task 101 unchanged.
+
+---
+
 # PHASE K — Work Order Drafts
 
 ## 101 — Create WorkOrder Schema + Status Protection

@@ -316,6 +316,14 @@ The badge counts rows/requests, not piece quantities.
 - Archived Products remain readable for historical records and are immutable through normal Product editing.
 - Product reactivation/unarchive is not supported in the current scope.
 
+### Excel Component bulk import
+
+- Inventory supports creating Components from `.xlsx` only. The initial template contains only Name, Category, and optional Brand; Supplier and Catalog Number are not imported.
+- Each valid spreadsheet row requests one new `component`. Name and free-text Category are required, trimmed, and nonblank. Blank Brand means no Brand; a provided Brand must resolve to an existing active Brand. Import never creates Brands implicitly.
+- Name, Category, and Brand are not Product identity. Visually duplicate rows are not silently deduplicated; each valid row receives its own server-allocated permanent 7-digit Serial Number. Excel never supplies Serial Number or Product kind, and `pcb_finished_good` remains reserved for trusted PCB workflows.
+- Import sets no initial stock. Each created Product receives its normal zero InventoryBalance, with no InventoryMovement; physical stock entry is a separate Inventory operation.
+- A confirmed import is all-or-nothing: the trusted backend revalidates every row and Brand before writes, then creates all Products and one immutable batch-level Product-creation audit containing created Product IDs and count in one transaction. Failed or denied import persists no Product, balance, or success audit. Rolled-back Serial allocations may leave gaps and are never reused.
+
 ### Serial Number / Šifra
 
 - required

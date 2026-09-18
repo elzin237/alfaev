@@ -264,6 +264,17 @@ Referenced Suppliers are archived rather than hard-deleted.
 
 ---
 
+## Import Components from Excel
+
+1. An active Admin or user with `inventory.products.create` opens Inventory and chooses Import Excel; no separate Sidebar item is added.
+2. User downloads the canonical `.xlsx` template if needed, then uploads a `.xlsx` file with Name, Category, and optional Brand. The client parses data only; the file is not permanently uploaded to Storage.
+3. Before any mutation, show a preview with spreadsheet row number, Name, Category, Brand, and ready/error status, plus total, ready, and invalid counts. Required Name/Category are trimmed and nonblank; blank Brand means none, and a supplied Brand must match an active existing Brand. Empty files, unsupported types, and invalid rows block confirmation. The user fixes the file and uploads it again; valid rows are not partially imported.
+4. User explicitly confirms the complete valid preview. One trusted bulk operation rechecks authority, payload, every row, and current Brand state; browser preview is not authoritative and the browser does not call per-row Product creation.
+5. The operation atomically creates one `component` per row with server-generated IDs/7-digit Serials and zero InventoryBalances, plus one immutable batch-level Product-creation audit listing created IDs/count. Excel cannot set kind, Serial, Supplier/Catalog Number, actor, timestamps, or initial stock; import creates no InventoryMovement.
+6. On any failure, no Product, balance, or success audit persists. On success, refresh Inventory/Product queries. Physical stock entry remains separate.
+
+---
+
 ## Barcode generation
 
 1. Open Product detail.
