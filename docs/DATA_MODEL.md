@@ -972,6 +972,7 @@ Fields:
 Rules:
 
 - Project is optional.
+- A newly linked Project must exist and currently be `planned`, `in_progress`, or `on_hold`; `completed` and `cancelled` are ineligible. Trusted production re-checks this at execution time, while historical run references remain preserved.
 - Production uses one immutable BOM version.
 - On successful production:
   - validate all BOM inputs

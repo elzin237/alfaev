@@ -346,6 +346,8 @@ Behavior:
 Access:
 - Admin or `pcb.produce`
 
+The optional Project picker does not require `projects.view` or grant `/projects` access. Its narrow trusted choices contain only ID, Name, and Status for open Projects (`planned`, `in_progress`, `on_hold`); the later production operation re-checks eligibility. Precheck Available is physical `InventoryBalance.quantity`, not Available after Commitments.
+
 ---
 
 # 10. Radni Nalozi / Work Orders

@@ -292,6 +292,10 @@ Task 086 owns trusted backend-only PcbCard creation. The sole client input is th
 
 PCB production must be a trusted atomic operation.
 
+The `/pcb/:pcbCardId/produce` workflow requires an active Admin or `pcb.produce`; selecting an optional Project does not additionally require `projects.view` or grant general Project reads. A trusted narrow choice read for this workflow may expose only Project ID, Name, and Status to an active Admin or `pcb.produce` user. General Project RLS and `/projects` access remain unchanged. New production may link only a Project currently in `planned`, `in_progress`, or `on_hold`; the trusted production operation must re-check its existence and status at execution time.
+
+PCB stock sufficiency uses current physical `InventoryBalance.quantity`, not Available after Commitments. Project commitments are a planning read model, not a physical-stock reservation.
+
 Before committing:
 
 - verify actor may produce PCB

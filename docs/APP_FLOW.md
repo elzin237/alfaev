@@ -344,6 +344,7 @@ If no production history exists:
 3. Enter:
    - quantity to produce
    - optional Project.
+   The optional picker shows only open Projects (`planned`, `in_progress`, `on_hold`) through a narrow trusted ID/Name/Status read available to active Admins or `pcb.produce` users; it does not require `projects.view` or grant Projects-module access.
 4. AlfaEV loads latest active BOM.
 5. Calculate every required input:
 
@@ -351,8 +352,8 @@ If no production history exists:
 
 6. Display:
    - required
-   - available
-   - missing.
+   - available physical `InventoryBalance.quantity`, not Available after Commitments
+   - missing = max(required - available, 0).
 
 ## Insufficient Inventory
 
@@ -373,7 +374,7 @@ Trusted backend transaction:
 
 1. re-check authorization
 2. re-check active BOM version/state
-3. re-check every Inventory quantity
+3. re-check optional Project existence and open status, and every physical Inventory quantity
 4. deduct all BOM input Products
 5. create negative InventoryMovement rows
 6. add produced quantity to PCB finished-goods Product

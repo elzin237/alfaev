@@ -2055,9 +2055,13 @@ Goal:
 - optional Project
 - Required / Available / Missing table
 
-Frontend precheck only.
+The `/pcb/:pcbCardId/produce` route and optional Project picker require an active Admin or `pcb.produce`, not `projects.view`. A narrow trusted Project-choice read may return only ID, Name, and Status for open Projects (`planned`, `in_progress`, `on_hold`); it grants no general Project access. Task 096 may filter those choices, but Task 097 must re-check Project existence and current status at execution time.
 
-No stock mutation.
+For each BOM input show Qty per Card, Required, Available as current physical `InventoryBalance.quantity` (not Available after Commitments), and Missing as `max(Required - Available, 0)`, using exact whole-number quantities.
+
+Read-only frontend precheck; a minimal trusted choice read is permitted.
+
+No stock mutation, InventoryMovement, PcbProductionRun, AuditLog, or production completion. Task 097 owns the trusted atomic re-check and mutation.
 
 ---
 

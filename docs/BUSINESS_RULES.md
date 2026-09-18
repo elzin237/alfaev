@@ -476,6 +476,8 @@ Required Quantity = Quantity Per Card × Production Quantity
 
 Before production completes, AlfaEV must compare all required quantities with current Inventory.
 
+For PCB production precheck, Available is current physical `InventoryBalance.quantity`, not Available after Commitments. Missing is `max(Required - Available, 0)` for each BOM input. Project commitments do not reserve or mutate physical stock; all authoritative quantities remain exact whole numbers.
+
 ### Insufficient stock
 
 If any component is insufficient:
@@ -503,6 +505,8 @@ Produced PCB cards are stock-tracked finished goods.
 ### Project link
 
 Project is optional.
+
+A new production run may link only a currently open Project (`planned`, `in_progress`, or `on_hold`), not a `completed` or `cancelled` Project. The trusted production operation re-checks Project existence and current status when it executes; a prior frontend choice is not authoritative.
 
 If Project is set:
 - the production run is linked to that Project

@@ -162,6 +162,8 @@ A trusted minimal Product-choice lookup used to create ProductSupplier relations
 
 PcbCard reads require an active Admin or View PCB Cards (`pcb.view`). Task 085 grants no direct client mutation path. Later trusted PcbCard creation, editing, production, and archive operations must enforce the corresponding existing permission or Admin status at the backend; no new PCB permission key is introduced.
 
+The PCB production route and its optional Project picker require an active Admin or `pcb.produce`; `projects.view` is not additionally required. A trusted picker read may expose only Project ID, Name, and Status and only for open Projects (`planned`, `in_progress`, `on_hold`). This does not grant general Project-table reads or `/projects` access, which still require an active Admin or `projects.view`.
+
 ### Radni Nalozi / Work Orders
 
 - View Work Orders

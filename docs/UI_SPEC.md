@@ -969,7 +969,7 @@ Production form:
 
 - PCB Card
 - Quantity to Produce
-- optional Project
+- optional Project selected from open (`planned`, `in_progress`, `on_hold`) choices showing only Project Name/Status; the choice read exposes only Project ID/Name/Status and does not require Projects-module access beyond the active Admin or `pcb.produce` production authority
 
 After Quantity input:
 
@@ -980,6 +980,8 @@ show calculated requirements table:
 - Required
 - Available
 - Missing
+
+Available is current physical `InventoryBalance.quantity`, not Available after Commitments. Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory or complete production.
 
 If all sufficient:
 
