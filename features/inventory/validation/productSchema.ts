@@ -1,8 +1,11 @@
 import { z } from "zod";
 
-export const addComponentSchema = z.object({
+export const productNameCategorySchema = z.object({
   name: z.string().trim().min(1, "Name is required."),
   category: z.string().trim().min(1, "Category is required."),
+});
+
+export const addComponentSchema = productNameCategorySchema.extend({
   brandId: z.string().trim().transform((value) => value || null),
 });
 
