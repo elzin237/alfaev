@@ -8,8 +8,10 @@ import PageHeader from "../../shared/components/PageHeader";
 import AddComponentDialog from "./components/AddComponentDialog";
 import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
+import ComponentImportDialog from "./components/ComponentImportDialog";
 import ProductList from "./components/ProductList";
 import { useBrandManagement } from "./hooks/useBrandManagement";
+import { useComponentImport } from "./hooks/useComponentImport";
 import { useProductCreation } from "./hooks/useProductCreation";
 import { useProducts } from "./hooks/useProducts";
 import { useInventoryCommitments } from "./hooks/useInventoryCommitments";
@@ -19,18 +21,21 @@ function InventoryPage() {
   const { brandsQuery, canManage, create: createBrand, update, archive } =
     useBrandManagement();
   const { canCreate, create: createProduct } = useProductCreation();
+  const { importBatch } = useComponentImport();
   const [productSearch, setProductSearch] = useState("");
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
   const productsQuery = useProducts(debouncedProductSearch);
   const commitmentsQuery = useInventoryCommitments();
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Brand | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
+  const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -61,8 +66,15 @@ function InventoryPage() {
   }
 
   function openComponentDialog() {
+    setImportSuccessMessage(null);
     setProductSuccessMessage(null);
     setIsComponentDialogOpen(true);
+  }
+
+  function openImportDialog() {
+    setProductSuccessMessage(null);
+    setImportSuccessMessage(null);
+    setIsImportDialogOpen(true);
   }
 
   async function confirmArchive() {
@@ -185,15 +197,30 @@ function InventoryPage() {
         title="Inventory"
         description="Manage AlfaEV Inventory reference data."
         actions={canCreate ? (
-          <button
-            type="button"
-            onClick={openComponentDialog}
-            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
-          >
-            Add Component
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={openImportDialog}
+              className="rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+            >
+              Import Excel
+            </button>
+            <button
+              type="button"
+              onClick={openComponentDialog}
+              className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+            >
+              Add Component
+            </button>
+          </div>
         ) : undefined}
       />
+
+      {importSuccessMessage && (
+        <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
+          {importSuccessMessage}
+        </p>
+      )}
 
       {productSuccessMessage && (
         <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">
@@ -303,6 +330,29 @@ function InventoryPage() {
         onSucceeded={(product) => {
           setProductSuccessMessage(
             `Component created. Serial Number: ${product.serialNumber}`,
+          );
+        }}
+      />
+
+      <ComponentImportDialog
+        open={isImportDialogOpen}
+        brands={brandsQuery.data?.ok ? brandsQuery.data.value : []}
+        isBrandsLoading={brandsQuery.isPending}
+        brandLoadError={
+          brandsQuery.isError || brandsQuery.data?.ok === false
+            ? brandsQuery.data?.ok === false
+              ? brandsQuery.data.error.message
+              : "The Brand list could not be loaded."
+            : null
+        }
+        onRetryBrands={() => void brandsQuery.refetch()}
+        onClose={() => setIsImportDialogOpen(false)}
+        onSubmit={importBatch}
+        onSucceeded={(result) => {
+          setImportSuccessMessage(
+            result.createdCount === 1
+              ? "1 Component imported successfully."
+              : `${result.createdCount} Components imported successfully.`,
           );
         }}
       />

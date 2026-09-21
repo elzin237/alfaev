@@ -177,7 +177,10 @@ export async function parseComponentImportWorkbook(
     return failure("too_many_rows", "A workbook can contain at most 1000 Component rows.");
   }
   if (rows.length === 0) {
-    return failure("empty_workbook", "The workbook contains no Component rows.");
+    return failure(
+      "empty_workbook",
+      "No Components found. Add Component rows below the Name, Category, and Brand headers, save the Excel file, then upload it again.",
+    );
   }
 
   return { ok: true, preview: buildComponentImportPreview(rows, availableBrands) };

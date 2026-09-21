@@ -13,6 +13,7 @@ export interface ConfirmDialogProps {
   isSubmitting?: boolean;
   confirmVariant?: ConfirmDialogVariant;
   errorMessage?: string | null;
+  layerClassName?: string;
 }
 
 function ConfirmDialog({
@@ -26,6 +27,7 @@ function ConfirmDialog({
   isSubmitting = false,
   confirmVariant = "primary",
   errorMessage = null,
+  layerClassName = "z-50",
 }: ConfirmDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -78,7 +80,7 @@ function ConfirmDialog({
       : "bg-zinc-900 text-white hover:bg-zinc-800";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+    <div className={`fixed inset-0 ${layerClassName} flex items-center justify-center bg-black/40 p-4`}>
       <section
         role="dialog"
         aria-modal="true"

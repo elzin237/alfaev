@@ -319,7 +319,13 @@ describe("Component import workbook parsing", () => {
       importFile(workbookBytes([])),
       brands,
     );
-    expect(headersOnly).toMatchObject({ ok: false, error: { code: "empty_workbook" } });
+    expect(headersOnly).toEqual({
+      ok: false,
+      error: {
+        code: "empty_workbook",
+        message: "No Components found. Add Component rows below the Name, Category, and Brand headers, save the Excel file, then upload it again.",
+      },
+    });
     expect(empty).toMatchObject({ ok: false, error: { code: "invalid_headers" } });
   });
 

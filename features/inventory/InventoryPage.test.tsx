@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
   useProductCreation: vi.fn(),
+  useComponentImport: vi.fn(),
   useProducts: vi.fn(),
   useInventoryCommitments: vi.fn(),
   refetch: vi.fn(),
@@ -13,6 +14,7 @@ const inventoryMocks = vi.hoisted(() => ({
   update: vi.fn(),
   archive: vi.fn(),
   createProduct: vi.fn(),
+  importBatch: vi.fn(),
 }));
 
 vi.mock("./hooks/useBrandManagement", () => ({
@@ -21,11 +23,29 @@ vi.mock("./hooks/useBrandManagement", () => ({
 vi.mock("./hooks/useProductCreation", () => ({
   useProductCreation: inventoryMocks.useProductCreation,
 }));
+vi.mock("./hooks/useComponentImport", () => ({
+  useComponentImport: inventoryMocks.useComponentImport,
+}));
 vi.mock("./hooks/useProducts", () => ({
   useProducts: inventoryMocks.useProducts,
 }));
 vi.mock("./hooks/useInventoryCommitments", () => ({
   useInventoryCommitments: inventoryMocks.useInventoryCommitments,
+}));
+vi.mock("./components/ComponentImportDialog", () => ({
+  default: ({
+    open,
+    onSucceeded,
+  }: {
+    open: boolean;
+    onSucceeded: (result: { createdCount: number }) => void;
+  }) => open ? (
+    <div role="dialog" aria-label="Import Components from Excel">
+      <button type="button" onClick={() => onSucceeded({ createdCount: 2 })}>
+        Complete import
+      </button>
+    </div>
+  ) : null,
 }));
 
 import InventoryPage from "./InventoryPage";
@@ -107,6 +127,9 @@ function setHookState(options: {
     canCreate: options.canCreate ?? true,
     create: inventoryMocks.createProduct,
   });
+  inventoryMocks.useComponentImport.mockReturnValue({
+    importBatch: inventoryMocks.importBatch,
+  });
   inventoryMocks.useProducts.mockReturnValue({
     isPending: options.productsPending ?? false,
     isError: options.productsError ?? false,
@@ -139,6 +162,10 @@ beforeEach(() => {
   inventoryMocks.createProduct.mockResolvedValue({
     ok: true,
     value: { productId: "product-new", serialNumber: "0000123" },
+  });
+  inventoryMocks.importBatch.mockResolvedValue({
+    ok: true,
+    value: { createdCount: 2, products: [] },
   });
   setHookState();
 });
@@ -296,6 +323,30 @@ describe("InventoryPage", () => {
     expect(screen.queryByRole("button", { name: "Archive" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add Component" }))
       .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import Excel" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows Import Excel before Add Component and opens the import dialog", () => {
+    renderInventory();
+    const pageHeader = screen.getByRole("heading", { name: "Inventory" }).closest("header");
+    if (!pageHeader) throw new Error("Inventory PageHeader was not rendered.");
+    const importButton = within(pageHeader).getByRole("button", { name: "Import Excel" });
+    const addButton = within(pageHeader).getByRole("button", { name: "Add Component" });
+    expect(importButton.compareDocumentPosition(addButton) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    fireEvent.click(importButton);
+    expect(screen.getByRole("dialog", { name: "Import Components from Excel" }))
+      .toBeInTheDocument();
+  });
+
+  it("shows authoritative imported count after successful import", () => {
+    renderInventory();
+    fireEvent.click(screen.getByRole("button", { name: "Import Excel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete import" }));
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "2 Components imported successfully.",
+    );
   });
 
   it("creates a Component with an active optional Brand and shows its generated Serial", async () => {
