@@ -243,6 +243,10 @@ describe("Component import workbook parsing", () => {
     );
     expect(result.ok && result.preview.rows[0]?.errors.map((error) => error.code))
       .toContain(code);
+    expect(result.ok && result.preview).toMatchObject({
+      canImport: false,
+      submissionRows: null,
+    });
   });
 
   it.each([0, 1, 2] as const)("rejects a formula in data column %s", async (column) => {
@@ -254,6 +258,10 @@ describe("Component import workbook parsing", () => {
     );
     expect(result.ok && result.preview.rows[0]?.errors.map((error) => error.code))
       .toContain("formula_not_allowed");
+    expect(result.ok && result.preview).toMatchObject({
+      canImport: false,
+      submissionRows: null,
+    });
   });
 
   it("rejects array-formula range metadata carried only by F", async () => {
@@ -307,6 +315,10 @@ describe("Component import workbook parsing", () => {
       code: "extra_column",
       field: "row",
       message: "Only Name, Category, and Brand columns are allowed.",
+    });
+    expect(result.ok && result.preview).toMatchObject({
+      canImport: false,
+      submissionRows: null,
     });
   });
 

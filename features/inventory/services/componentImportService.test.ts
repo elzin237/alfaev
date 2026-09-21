@@ -50,6 +50,7 @@ describe("componentImportService", () => {
     [[response[1], response[0]], "out-of-order index"],
     [[{ ...response[0], serial_number: "123" }, response[1]], "invalid serial"],
     [[{ ...response[0], product_id: " " }, response[1]], "blank Product ID"],
+    [[{ ...response[0], unexpected: "field" }, response[1]], "unexpected row field"],
     [[response[0], { ...response[1], product_id: "product-1" }], "duplicate Product IDs"],
     [[response[0], { ...response[1], serial_number: "0000001" }], "duplicate Serials"],
   ])("fails safely for malformed authoritative response: %s", async (data, _description) => {

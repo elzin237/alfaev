@@ -204,9 +204,10 @@ describe("ComponentImportDialog", () => {
       ok: false,
       error: { code: "workbook_unreadable", message: "The workbook could not be read." },
     });
-    renderDialog();
+    const { onSubmit } = renderDialog();
     await chooseWorkbook();
     expect(await screen.findByRole("alert")).toHaveTextContent("The workbook could not be read.");
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("ignores stale parse results and keeps the newest selected workbook", async () => {

@@ -73,6 +73,10 @@ function isImportedComponentRow(
   expectedIndex: number,
 ): value is ImportedComponentRow {
   return typeof value === "object" && value !== null &&
+    Object.keys(value).length === 3 &&
+    Object.keys(value).every((key) =>
+      ["input_index", "product_id", "serial_number"].includes(key)
+    ) &&
     "input_index" in value &&
     Number.isInteger(value.input_index) &&
     value.input_index === expectedIndex &&

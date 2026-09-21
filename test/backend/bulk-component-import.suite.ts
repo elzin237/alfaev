@@ -86,7 +86,21 @@ export function registerBulkComponentImportTests(
           });
         }
 
-        for (const client of [
+        const deniedNames = [
+          `Anonymous denied ${randomUUID()}`,
+          `Ordinary denied ${randomUUID()}`,
+          `Unrelated denied ${randomUUID()}`,
+          `Product edit denied ${randomUUID()}`,
+          `Brand manage denied ${randomUUID()}`,
+          `Inactive Admin denied ${randomUUID()}`,
+          `Inactive create denied ${randomUUID()}`,
+        ];
+        const auditBefore = await fixture.withRollbackDatabaseTransaction(
+          async (database) => (await database.query<{ count: string }>(
+            "select count(*) from public.audit_logs where action_type = 'product.bulk_imported'",
+          )).rows[0]?.count,
+        );
+        const deniedClients = [
           fixture.anonymousClient,
           fixture.actors.unpermitted.client,
           fixture.actors.permitted.client,
@@ -94,9 +108,10 @@ export function registerBulkComponentImportTests(
           fixture.actors.brandManager.client,
           fixture.actors.inactive.client,
           fixture.actors.inactiveBrandManager.client,
-        ]) {
+        ];
+        for (const [index, client] of deniedClients.entries()) {
           const { error } = await client.rpc("bulk_import_components", {
-            p_rows: [{ name: `Denied ${randomUUID()}`, category: "Components" }],
+            p_rows: [{ name: deniedNames[index], category: "Components" }],
           });
           expectPermissionDenied(error);
         }
@@ -115,6 +130,15 @@ export function registerBulkComponentImportTests(
           await actAs(database, fixture.actors.unpermitted);
           await expect(importRows(database, [{ name: "View Only", category: "Parts" }]))
             .rejects.toMatchObject({ code: "42501" });
+        });
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          expect((await database.query<{ count: string }>(
+            "select count(*) from public.products where name = any($1::text[])",
+            [deniedNames],
+          )).rows[0]?.count).toBe("0");
+          expect((await database.query<{ count: string }>(
+            "select count(*) from public.audit_logs where action_type = 'product.bulk_imported'",
+          )).rows[0]?.count).toBe(auditBefore);
         });
       });
 
@@ -223,10 +247,11 @@ export function registerBulkComponentImportTests(
           const audits = (await database.query<{
             actor_user_id: string; action_type: string; entity_type: string;
             entity_id: string | null; summary: string;
+            before_data: null;
             after_data: { created_count: number; created_product_ids: string[] };
           }>(
             `select actor_user_id, action_type, entity_type, entity_id,
-                    summary, after_data
+                    summary, before_data, after_data
              from public.audit_logs
              where action_type in ('product.bulk_imported', 'product.created')
                and (after_data->'created_product_ids' = $1::jsonb
@@ -239,6 +264,7 @@ export function registerBulkComponentImportTests(
             entity_type: "product",
             entity_id: null,
             summary: "Bulk imported 6 Components",
+            before_data: null,
             after_data: { created_count: 6, created_product_ids: ids },
           }]);
         });
@@ -247,6 +273,7 @@ export function registerBulkComponentImportTests(
       it("rejects unknown/archived Brands and leaves later-invalid batches untouched", async () => {
         const fixture = requireHarness();
         const archivedName = `Old Brand ${randomUUID()}`;
+        const missingName = `Missing ${randomUUID()}`;
         const uniqueName = `Would Be Imported ${randomUUID()}`;
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const auditBefore = (await database.query<{ count: string }>(
@@ -260,6 +287,9 @@ export function registerBulkComponentImportTests(
           const movementBefore = (await database.query<{ count: string }>(
             "select count(*) from public.inventory_movements",
           )).rows[0]?.count;
+          const productSupplierBefore = (await database.query<{ count: string }>(
+            "select count(*) from public.product_suppliers",
+          )).rows[0]?.count;
           await database.query(
             `insert into public.brands
                (name, is_active, created_by_user_id, updated_by_user_id,
@@ -268,7 +298,7 @@ export function registerBulkComponentImportTests(
             [archivedName, fixture.actors.admin.profileId],
           );
           await actAs(database, fixture.actors.admin);
-          for (const brand of [archivedName, `Missing ${randomUUID()}`]) {
+          for (const brand of [archivedName, missingName]) {
             await database.query("savepoint unavailable_brand");
             await expect(importRows(database, [
               { name: uniqueName, category: "Parts" },
@@ -299,6 +329,12 @@ export function registerBulkComponentImportTests(
           expect((await database.query<{ count: string }>(
             "select count(*) from public.inventory_movements",
           )).rows[0]?.count).toBe(movementBefore);
+          expect((await database.query<{ count: string }>(
+            "select count(*) from public.product_suppliers",
+          )).rows[0]?.count).toBe(productSupplierBefore);
+          expect((await database.query<{ count: string }>(
+            "select count(*) from public.brands where name = $1", [missingName],
+          )).rows[0]?.count).toBe("0");
         });
       });
 
@@ -333,16 +369,51 @@ export function registerBulkComponentImportTests(
               [adminDb, first], [creatorDb, second],
             ] as const) {
               const ids = imported.map((row) => row.product_id);
+              const products = (await database.query<{
+                id: string; product_kind: string; is_active: boolean; brand_id: string | null;
+              }>(
+                `select id, product_kind, is_active, brand_id
+                 from public.products where id = any($1::uuid[])`, [ids],
+              )).rows;
+              expect(products).toHaveLength(2);
+              expect(products.every((row) => row.product_kind === "component"
+                && row.is_active && row.brand_id === null)).toBe(true);
               expect((await database.query<{ count: string }>(
                 `select count(*) from public.inventory_balances
                  where product_id = any($1::uuid[]) and quantity = 0`, [ids],
               )).rows[0]?.count).toBe("2");
-              expect((await database.query<{ count: string }>(
-                `select count(*) from public.audit_logs
+              expect((await database.query<{
+                actor_user_id: string; entity_type: string; entity_id: string | null;
+                summary: string; before_data: null;
+                after_data: { created_count: number; created_product_ids: string[] };
+              }>(
+                `select actor_user_id, entity_type, entity_id, summary,
+                        before_data, after_data
+                 from public.audit_logs
                  where action_type = 'product.bulk_imported'
                    and after_data->'created_product_ids' = $1::jsonb`,
                 [JSON.stringify(ids)],
-              )).rows[0]?.count).toBe("1");
+              )).rows).toEqual([{
+                actor_user_id: database === adminDb
+                  ? fixture.actors.admin.profileId
+                  : fixture.actors.productCreator.profileId,
+                entity_type: "product",
+                entity_id: null,
+                summary: "Bulk imported 2 Components",
+                before_data: null,
+                after_data: { created_count: 2, created_product_ids: ids },
+              }]);
+              for (const table of ["inventory_movements", "product_suppliers"] as const) {
+                expect((await database.query<{ count: string }>(
+                  `select count(*) from public.${table} where product_id = any($1::uuid[])`,
+                  [ids],
+                )).rows[0]?.count).toBe("0");
+              }
+              expect((await database.query<{ count: string }>(
+                `select count(*) from public.audit_logs
+                 where action_type = 'product.created' and entity_id = any($1::uuid[])`,
+                [ids],
+              )).rows[0]?.count).toBe("0");
             }
           } finally {
             await Promise.all([adminDb.query("rollback"), creatorDb.query("rollback")]);
