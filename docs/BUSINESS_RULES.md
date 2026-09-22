@@ -543,13 +543,18 @@ A version used by any PcbProductionRun keeps its card identity, version number, 
 
 ### Required content
 
-A Work Order contains at minimum:
+Before Finish, a Work Order must contain:
 
 - Work Order Number
 - Project
 - Customer
 - consumed materials table
 - short description
+
+The trusted creation flow first creates the numbered Draft. At that initial creation
+point, Project, Customer snapshot, and Description may be unset. The later Draft
+save/update flow selects the Project, derives Customer from that Project, and saves
+the Description before Finish validation requires the complete business content.
 
 ### Work Order number generation
 
@@ -576,9 +581,9 @@ Rules:
 
 ### Project/customer
 
-User manually selects Project.
+User manually selects Project after the numbered Draft has been created.
 
-Customer is auto-filled from the selected Project.
+Customer is auto-filled from the selected Project when the Draft is saved/updated.
 
 One Project may have one or many Work Orders. No uniqueness rule may limit a Project
 to one Work Order. Draft Work Order materials integrate with the Project's planned

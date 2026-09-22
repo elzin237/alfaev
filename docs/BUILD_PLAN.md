@@ -2227,11 +2227,13 @@ Add allocation/concurrency tests.
 ## 103 — Add Trusted Draft Work Order Creation
 
 Goal:
-- create Draft
+- create an initially incomplete Draft with no Project, Customer snapshot, or Description
 - allocate number
 - authorize actor
 - audit creation
-- select an open Project without assuming it has no other Work Order
+
+Project selection, Customer snapshot derivation, and Description belong to the later
+Draft detail/save flow (Tasks 107–108), not this creation operation.
 
 No Inventory mutation.
 

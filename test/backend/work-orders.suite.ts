@@ -7,13 +7,18 @@ import { expectPermissionDenied } from "./helpers/assertions";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 
 interface WorkOrderRow {
-  customer_name_snapshot: string;
-  description: string;
+  customer_name_snapshot: string | null;
+  description: string | null;
   finished_at: Date | null;
   finished_by_user_id: string | null;
   id: string;
-  project_id: string;
+  project_id: string | null;
   status: "draft" | "finished";
+  work_order_number: string;
+}
+
+interface CreatedDraftWorkOrderRow {
+  work_order_id: string;
   work_order_number: string;
 }
 
@@ -89,6 +94,15 @@ async function insertWorkOrder(
     ],
   );
   return id;
+}
+
+async function createDraftWorkOrder(
+  database: PoolClient,
+): Promise<CreatedDraftWorkOrderRow> {
+  return (await database.query<CreatedDraftWorkOrderRow>(
+    `select work_order_id, work_order_number
+     from public.create_draft_work_order()`,
+  )).rows[0]!;
 }
 
 async function setOnlyWorkOrderPermission(
@@ -252,7 +266,10 @@ export function registerWorkOrderSchemaTests(
             "finished_by_user_id",
           ]);
           expect(columns.find((column) => column.column_name === "project_id"))
-            .toMatchObject({ data_type: "uuid", is_nullable: "NO" });
+            .toMatchObject({
+              data_type: "uuid",
+              is_nullable: process.env.TASK103_MIGRATION === "1" ? "YES" : "NO",
+            });
           expect(columns.find((column) => column.column_name === "status"))
             .toMatchObject({ column_default: "'draft'::text", is_nullable: "NO" });
           expect(columns.find((column) => column.column_name === "description"))
@@ -900,6 +917,439 @@ export function registerWorkOrderSchemaTests(
           }]);
         });
       });
+    },
+  );
+
+  describe.skipIf(process.env.TASK103_MIGRATION !== "1")(
+    "Task 103 trusted Draft Work Order creation (requires deployed migration)",
+    () => {
+      it("creates numbered incomplete Drafts with server-owned metadata and one audit each", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const sideEffectsBefore = (await database.query<{
+            balances: string;
+            movements: string;
+            projects: string;
+          }>(
+            `select
+               (select count(*)::text from public.inventory_balances) as balances,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.projects) as projects`,
+          )).rows[0]!;
+
+          await actAs(database, actor);
+          const first = await createDraftWorkOrder(database);
+          const second = await createDraftWorkOrder(database);
+          await database.query("reset role");
+
+          expect(first.work_order_id).toMatch(
+            /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+          );
+          expect(first.work_order_number).toMatch(/^RN-[0-9]{4}-[0-9]{4}$/);
+          expect(second.work_order_number).toMatch(/^RN-[0-9]{4}-[0-9]{4}$/);
+          expect(second.work_order_number).not.toBe(first.work_order_number);
+
+          const rows = (await database.query<{
+            created_at: Date;
+            created_by_user_id: string;
+            customer_name_snapshot: string | null;
+            description: string | null;
+            finished_at: Date | null;
+            finished_by_user_id: string | null;
+            id: string;
+            project_id: string | null;
+            status: string;
+            updated_at: Date;
+            updated_by_user_id: string;
+            work_order_number: string;
+          }>(
+            `select id, work_order_number, project_id, customer_name_snapshot,
+                    description, status, created_at, created_by_user_id,
+                    updated_at, updated_by_user_id, finished_at,
+                    finished_by_user_id
+             from public.work_orders
+             where id = any($1::uuid[])
+             order by work_order_number`,
+            [[first.work_order_id, second.work_order_id]],
+          )).rows;
+          expect(rows).toHaveLength(2);
+          for (const row of rows) {
+            expect(row).toMatchObject({
+              created_by_user_id: actor.profileId,
+              customer_name_snapshot: null,
+              description: null,
+              finished_at: null,
+              finished_by_user_id: null,
+              project_id: null,
+              status: "draft",
+              updated_by_user_id: actor.profileId,
+            });
+            expect(row.created_at.getTime()).toBe(row.updated_at.getTime());
+          }
+
+          const audits = (await database.query<{
+            action_type: string;
+            actor_user_id: string;
+            after_data: Record<string, unknown>;
+            entity_id: string;
+            entity_type: string;
+          }>(
+            `select action_type, actor_user_id, entity_type, entity_id, after_data
+             from public.audit_logs
+             where entity_type = 'work_order'
+               and entity_id = any($1::uuid[])
+             order by after_data ->> 'work_order_number'`,
+            [[first.work_order_id, second.work_order_id]],
+          )).rows;
+          expect(audits).toHaveLength(2);
+          for (const audit of audits) {
+            const created = rows.find((row) => row.id === audit.entity_id)!;
+            expect(audit).toMatchObject({
+              action_type: "work_order.created",
+              actor_user_id: actor.profileId,
+              entity_type: "work_order",
+            });
+            expect(audit.after_data).toEqual({
+              status: "draft",
+              work_order_id: created.id,
+              work_order_number: created.work_order_number,
+            });
+          }
+
+          expect((await database.query(
+            `select
+               (select count(*)::text from public.inventory_balances) as balances,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.projects) as projects`,
+          )).rows[0]).toEqual(sideEffectsBefore);
+        });
+      });
+
+      it("allows only active Admin or work_orders.create", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actorId = fixture.actors.admin.profileId;
+          const delegated = fixture.actors.unpermitted;
+          const before = (await database.query<{ audits: string; work_orders: string }>(
+            `select
+               (select count(*)::text from public.audit_logs
+                where entity_type = 'work_order') as audits,
+               (select count(*)::text from public.work_orders) as work_orders`,
+          )).rows[0]!;
+
+          for (const permissionKey of [
+            null,
+            "work_orders.view",
+            "work_orders.edit_draft",
+            "work_orders.finish",
+            "work_orders.delete_draft",
+          ] as const) {
+            await setOnlyWorkOrderPermission(
+              database,
+              delegated,
+              actorId,
+              permissionKey,
+            );
+            await actAs(database, delegated);
+            await expectRejected(
+              database,
+              () => createDraftWorkOrder(database),
+              "42501",
+            );
+            await database.query("reset role");
+          }
+
+          await actAs(database, fixture.actors.brandManager);
+          await expectRejected(
+            database,
+            () => createDraftWorkOrder(database),
+            "42501",
+          );
+          await database.query("reset role");
+
+          await setOnlyWorkOrderPermission(
+            database,
+            fixture.actors.inactive,
+            actorId,
+            "work_orders.create",
+          );
+          await actAs(database, fixture.actors.inactive);
+          await expectRejected(
+            database,
+            () => createDraftWorkOrder(database),
+            "42501",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select
+               (select count(*)::text from public.audit_logs
+                where entity_type = 'work_order') as audits,
+               (select count(*)::text from public.work_orders) as work_orders`,
+          )).rows[0]).toEqual(before);
+
+          await actAs(database, fixture.actors.admin);
+          const adminCreated = await createDraftWorkOrder(database);
+          await database.query("reset role");
+          expect(adminCreated.work_order_number).toMatch(/^RN-[0-9]{4}-[0-9]{4}$/);
+
+          await setOnlyWorkOrderPermission(
+            database,
+            delegated,
+            actorId,
+            "work_orders.create",
+          );
+          await actAs(database, delegated);
+          const created = await createDraftWorkOrder(database);
+          await database.query("reset role");
+          expect(created.work_order_number).toMatch(/^RN-[0-9]{4}-[0-9]{4}$/);
+          expect((await database.query<{ created_by_user_id: string }>(
+            `select created_by_user_id from public.work_orders
+             where id = $1::uuid`,
+            [created.work_order_id],
+          )).rows).toEqual([{ created_by_user_id: delegated.profileId }]);
+        });
+
+        const anonymous = await fixture.anonymousClient.rpc(
+          "create_draft_work_order",
+        );
+        expectPermissionDenied(anonymous.error);
+      });
+
+      it("allows incomplete Drafts but requires complete, normalized Finished content", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectId = await createProject(database, actor.profileId);
+          const draftId = randomUUID();
+          await database.query(
+            `insert into public.work_orders (
+               id, work_order_number, created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, 'RN-8000-0001', $2::uuid, $2::uuid)`,
+            [draftId, actor.profileId],
+          );
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description, status
+             from public.work_orders where id = $1::uuid`,
+            [draftId],
+          )).rows).toEqual([{
+            customer_name_snapshot: null,
+            description: null,
+            project_id: null,
+            status: "draft",
+          }]);
+
+          for (const [number, customer, description] of [
+            ["RN-8000-0002", " ", null],
+            ["RN-8000-0003", " Customer ", null],
+            ["RN-8000-0004", null, " "],
+            ["RN-8000-0005", null, " Work "],
+          ] as const) {
+            await expectRejected(
+              database,
+              () => database.query(
+                `insert into public.work_orders (
+                   work_order_number, customer_name_snapshot, description,
+                   created_by_user_id, updated_by_user_id
+                 ) values ($1::text, $2::text, $3::text, $4::uuid, $4::uuid)`,
+                [number, customer, description, actor.profileId],
+              ),
+              "23514",
+            );
+          }
+
+          for (const [number, missingField] of [
+            ["RN-8000-0006", "project"],
+            ["RN-8000-0007", "customer"],
+            ["RN-8000-0008", "description"],
+          ] as const) {
+            await expectRejected(
+              database,
+              () => database.query(
+                `insert into public.work_orders (
+                   work_order_number, project_id, customer_name_snapshot,
+                   description, status, created_by_user_id, updated_by_user_id,
+                   finished_at, finished_by_user_id
+                 ) values (
+                   $1::text,
+                   case when $2::text = 'project' then null else $3::uuid end,
+                   case when $2::text = 'customer' then null else 'Customer' end,
+                   case when $2::text = 'description' then null else 'Work' end,
+                   'finished', $4::uuid, $4::uuid,
+                   pg_catalog.clock_timestamp(), $4::uuid
+                 )`,
+                [number, missingField, projectId, actor.profileId],
+              ),
+              "23514",
+            );
+          }
+
+          const validFinishedId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: "RN-8000-0009",
+            projectId,
+            status: "finished",
+          });
+          expect((await database.query<{ status: string }>(
+            "select status from public.work_orders where id = $1::uuid",
+            [validFinishedId],
+          )).rows).toEqual([{ status: "finished" }]);
+
+          const columns = (await database.query<{
+            column_name: string;
+            is_nullable: string;
+          }>(
+            `select column_name, is_nullable
+             from information_schema.columns
+             where table_schema = 'public'
+               and table_name = 'work_orders'
+               and column_name in (
+                 'project_id', 'customer_name_snapshot', 'description'
+               )
+             order by column_name`,
+          )).rows;
+          expect(columns).toEqual([
+            { column_name: "customer_name_snapshot", is_nullable: "YES" },
+            { column_name: "description", is_nullable: "YES" },
+            { column_name: "project_id", is_nullable: "YES" },
+          ]);
+          expect((await database.query<{ definition: string }>(
+            `select pg_catalog.pg_get_constraintdef(pc.oid) as definition
+             from pg_catalog.pg_constraint as pc
+             join pg_catalog.pg_class as relation on relation.oid = pc.conrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname = 'work_orders'
+               and pc.conname = 'work_orders_finished_content_complete'`,
+          )).rows).toHaveLength(1);
+        });
+      });
+
+      it("rolls back allocation and audit if the Draft insert fails", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectId = await createProject(database, actor.profileId);
+          const businessYear = (await database.query<{ business_year: number }>(
+            `select pg_catalog.date_part(
+               'year',
+               pg_catalog.timezone(
+                 'Europe/Sarajevo',
+                 pg_catalog.clock_timestamp()
+               )
+             )::integer as business_year`,
+          )).rows[0]!.business_year;
+          await database.query(
+            "delete from public.work_order_number_counters where business_year = $1",
+            [businessYear],
+          );
+          await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${businessYear}-0001`,
+            projectId,
+          });
+          const auditBefore = (await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_type = 'work_order'`,
+          )).rows[0]!.count;
+
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => createDraftWorkOrder(database),
+            "23505",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select business_year, last_value
+             from public.work_order_number_counters
+             where business_year = $1`,
+            [businessYear],
+          )).rows).toEqual([]);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_type = 'work_order'`,
+          )).rows[0]!.count).toBe(auditBefore);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.work_orders
+             where work_order_number = $1::text`,
+            [`RN-${businessYear}-0001`],
+          )).rows).toEqual([{ count: "1" }]);
+        });
+      });
+
+      it("exposes only the trusted authenticated RPC and preserves direct-write denial", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const rpc = (await database.query<{
+            arguments: string;
+            anonymous_execute: boolean;
+            authenticated_execute: boolean;
+            public_execute: boolean;
+            result: string;
+            security_definer: boolean;
+            settings: string[];
+          }>(
+            `select
+               pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+               pg_catalog.pg_get_function_result(routine.oid) as result,
+               routine.prosecdef as security_definer,
+               routine.proconfig as settings,
+               exists (
+                 select 1
+                 from pg_catalog.aclexplode(routine.proacl) as privilege
+                 where privilege.grantee = 0
+                   and privilege.privilege_type = 'EXECUTE'
+               ) as public_execute,
+               pg_catalog.has_function_privilege(
+                 'anon', routine.oid, 'execute'
+               ) as anonymous_execute,
+               pg_catalog.has_function_privilege(
+                 'authenticated', routine.oid, 'execute'
+               ) as authenticated_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             where namespace.nspname = 'public'
+               and routine.proname = 'create_draft_work_order'`,
+          )).rows;
+          expect(rpc).toEqual([{
+            anonymous_execute: false,
+            arguments: "",
+            authenticated_execute: true,
+            public_execute: false,
+            result: "TABLE(work_order_id uuid, work_order_number text)",
+            security_definer: true,
+            settings: ['search_path=""'],
+          }]);
+
+          await actAs(database, fixture.actors.admin);
+          await expectRejected(
+            database,
+            () => database.query(
+              `insert into public.work_orders (
+                 work_order_number, created_by_user_id, updated_by_user_id
+               ) values (
+                 'RN-9000-0001', $1::uuid, $1::uuid
+               )`,
+              [fixture.actors.admin.profileId],
+            ),
+            "42501",
+          );
+          await database.query("reset role");
+        });
+
+        expectPermissionDenied((await fixture.actors.admin.client.rpc(
+          "allocate_work_order_number",
+        )).error);
+      });
+
+      it.todo(
+        "proves committed concurrent authorized Draft creation on a disposable database",
+      );
     },
   );
 }

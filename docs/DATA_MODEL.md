@@ -1013,10 +1013,13 @@ Fields:
   - unique
   - format `RN-YYYY-NNNN`
 - `project_id`
+  - nullable only while the initial Draft is incomplete
 - `customer_name_snapshot`
   - copied automatically from Project.customer_name
+  - nullable only while the initial Draft is incomplete
 - `description`
   - short text
+  - nullable only while the initial Draft is incomplete
 - `status`
   - `draft`
   - `finished`
@@ -1033,6 +1036,10 @@ Rules:
 
 - Work Order Number is allocated at creation, including Draft.
 - Number never changes or gets reused.
+- Trusted creation creates the numbered Draft before Project, Customer snapshot, and
+  Description are entered; those three fields may temporarily be NULL on Draft only.
+- Draft save/update selects Project, derives Customer from Project, and saves
+  Description. A Finished Work Order requires all three fields to be non-NULL.
 - One Project may have one or many Work Orders; `project_id` is not unique.
 - Selecting Project automatically sets/refreshes the customer snapshot while Draft.
 - Draft materials integrate with the selected Project's planned component requirements.
