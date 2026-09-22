@@ -1,5 +1,7 @@
+import WorkOrdersFeaturePage from "../../features/work-orders/WorkOrdersPage";
+
 function WorkOrdersPage() {
-  return <div>Work Orders Page</div>;
+  return <WorkOrdersFeaturePage />;
 }
 
 export default WorkOrdersPage;
