@@ -18,6 +18,8 @@ import PcbPage from "../../features/pcb/PcbPage";
 import PcbDetailPage from "../../features/pcb/PcbDetailPage";
 import PcbProductionPrecheckPage from "../../features/pcb/PcbProductionPrecheckPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
+import NewWorkOrderPage from "../../pages/work-orders/NewWorkOrderPage";
+import CreatedWorkOrderPage from "../../pages/work-orders/CreatedWorkOrderPage";
 import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";
 import DocumentationPage from "../../features/documentation/DocumentationPage";
@@ -62,6 +64,13 @@ function AppRouter() {
         </Route>
         <Route element={<PermissionRoute permission="work_orders.view" />}>
           <Route path="/work-orders" element={<WorkOrdersPage />} />
+          <Route
+            path="/work-orders/:workOrderId"
+            element={<CreatedWorkOrderPage />}
+          />
+        </Route>
+        <Route element={<PermissionRoute permission="work_orders.create" />}>
+          <Route path="/work-orders/new" element={<NewWorkOrderPage />} />
         </Route>
         <Route element={<AdminRoute />}>
           <Route path="/documents" element={<DocumentationPage />} />

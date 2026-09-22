@@ -21,6 +21,20 @@ export type WorkOrderListResult =
   | { ok: true; value: WorkOrderListItem[] }
   | { ok: false; error: WorkOrderListError };
 
+export interface CreatedDraftWorkOrder {
+  workOrderId: string;
+  workOrderNumber: string;
+}
+
+export interface WorkOrderCreateError {
+  code: "access_denied" | "work_order_create_failed";
+  message: string;
+}
+
+export type WorkOrderCreateResult =
+  | { ok: true; value: CreatedDraftWorkOrder }
+  | { ok: false; error: WorkOrderCreateError };
+
 const allowedKeys = new Set([
   "work_order_id",
   "work_order_number",
@@ -35,6 +49,7 @@ const uuidPattern =
 const workOrderNumberPattern = /^RN-[0-9]{4}-[0-9]{4}$/;
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const createResultKeys = new Set(["work_order_id", "work_order_number"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -42,6 +57,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && uuidPattern.test(value);
+}
+
+export function isWorkOrderId(value: unknown): value is string {
+  return isUuid(value);
+}
+
+export function isWorkOrderNumber(value: unknown): value is string {
+  return typeof value === "string" && workOrderNumberPattern.test(value);
 }
 
 function isTrimmedNonblank(value: unknown): value is string {
@@ -68,8 +91,7 @@ function parseWorkOrderRow(value: unknown): WorkOrderListItem | null {
     Object.keys(value).length !== allowedKeys.size ||
     Object.keys(value).some((key) => !allowedKeys.has(key)) ||
     !isUuid(value.work_order_id) ||
-    typeof value.work_order_number !== "string" ||
-    !workOrderNumberPattern.test(value.work_order_number) ||
+    !isWorkOrderNumber(value.work_order_number) ||
     !isWorkOrderStatus(value.status) ||
     !(
       (value.project_id === null && value.project_name === null) ||
@@ -118,5 +140,55 @@ export async function listWorkOrders(): Promise<WorkOrderListResult> {
     return { ok: true, value: workOrders };
   } catch {
     return listFailure();
+  }
+}
+
+function createFailure(code?: string): WorkOrderCreateResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to create Work Orders.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "work_order_create_failed",
+      message: "The Work Order could not be created. Please try again.",
+    },
+  };
+}
+
+export async function createDraftWorkOrder(): Promise<WorkOrderCreateResult> {
+  try {
+    const { data, error } = await supabase.rpc("create_draft_work_order");
+
+    if (error) return createFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) return createFailure();
+
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== createResultKeys.size ||
+      Object.keys(row).some((key) => !createResultKeys.has(key)) ||
+      !isWorkOrderId(row.work_order_id) ||
+      !isWorkOrderNumber(row.work_order_number)
+    ) {
+      return createFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        workOrderId: row.work_order_id,
+        workOrderNumber: row.work_order_number,
+      },
+    };
+  } catch {
+    return createFailure();
   }
 }

@@ -6,7 +6,7 @@ vi.mock("../../../lib/supabase/client", () => ({
   supabase: { rpc: serviceMocks.rpc },
 }));
 
-import { listWorkOrders } from "./workOrderService";
+import { createDraftWorkOrder, listWorkOrders } from "./workOrderService";
 
 const populatedRow = {
   work_order_id: "00000000-0000-4000-8000-000000000002",
@@ -103,6 +103,96 @@ describe("workOrderService", () => {
       error: {
         code: "work_order_list_failed",
         message: "The Work Order list could not be loaded.",
+      },
+    });
+  });
+
+  it("calls the zero-argument creation RPC and maps exactly one generated Draft", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{
+        work_order_id: "00000000-0000-4000-8000-000000000010",
+        work_order_number: "RN-2026-0042",
+      }],
+      error: null,
+    });
+
+    await expect(createDraftWorkOrder()).resolves.toEqual({
+      ok: true,
+      value: {
+        workOrderId: "00000000-0000-4000-8000-000000000010",
+        workOrderNumber: "RN-2026-0042",
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "create_draft_work_order",
+    );
+  });
+
+  it.each([
+    ["empty result", []],
+    ["multiple results", [
+      {
+        work_order_id: "00000000-0000-4000-8000-000000000010",
+        work_order_number: "RN-2026-0042",
+      },
+      {
+        work_order_id: "00000000-0000-4000-8000-000000000011",
+        work_order_number: "RN-2026-0043",
+      },
+    ]],
+    ["invalid UUID", [{
+      work_order_id: "not-a-uuid",
+      work_order_number: "RN-2026-0042",
+    }]],
+    ["invalid number", [{
+      work_order_id: "00000000-0000-4000-8000-000000000010",
+      work_order_number: "RN-2026-42",
+    }]],
+    ["unexpected field", [{
+      work_order_id: "00000000-0000-4000-8000-000000000010",
+      work_order_number: "RN-2026-0042",
+      status: "draft",
+    }]],
+  ])("rejects a malformed creation response with %s", async (_label, data) => {
+    serviceMocks.rpc.mockResolvedValue({ data, error: null });
+
+    await expect(createDraftWorkOrder()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "work_order_create_failed",
+        message: "The Work Order could not be created. Please try again.",
+      },
+    });
+  });
+
+  it("maps access loss and provider failures to safe creation errors", async () => {
+    serviceMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "42501", message: "raw permission details" },
+    });
+    await expect(createDraftWorkOrder()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to create Work Orders.",
+      },
+    });
+
+    serviceMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "XX000", message: "raw database details" },
+    });
+    await expect(createDraftWorkOrder()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "work_order_create_failed" },
+    });
+
+    serviceMocks.rpc.mockRejectedValueOnce(new Error("raw network details"));
+    await expect(createDraftWorkOrder()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "work_order_create_failed",
+        message: "The Work Order could not be created. Please try again.",
       },
     });
   });

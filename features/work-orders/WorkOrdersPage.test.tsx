@@ -3,17 +3,24 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 
 const pageMocks = vi.hoisted(() => ({
+  create: vi.fn(),
   refetch: vi.fn(),
+  useWorkOrderCreation: vi.fn(),
   useWorkOrders: vi.fn(),
 }));
 
 vi.mock("./hooks/useWorkOrders", () => ({
   useWorkOrders: pageMocks.useWorkOrders,
+}));
+vi.mock("./hooks/useWorkOrderCreation", () => ({
+  useWorkOrderCreation: pageMocks.useWorkOrderCreation,
 }));
 
 import WorkOrdersPage from "./WorkOrdersPage";
@@ -71,7 +78,35 @@ function visibleNumbers(): string[] {
     .map((row) => within(row).getByRole("rowheader").textContent ?? "");
 }
 
-beforeEach(() => setQueryState());
+function renderPage() {
+  return render(<WorkOrdersPage />, { wrapper: MemoryRouter });
+}
+
+function NavigationProbe() {
+  const location = useLocation();
+  return (
+    <div>
+      <span>{location.pathname}</span>
+      <span>{JSON.stringify(location.state)}</span>
+    </div>
+  );
+}
+
+beforeEach(() => {
+  setQueryState();
+  pageMocks.create.mockResolvedValue({
+    ok: true,
+    value: {
+      workOrderId: "00000000-0000-4000-8000-000000000010",
+      workOrderNumber: "RN-2026-0042",
+    },
+  });
+  pageMocks.useWorkOrderCreation.mockReturnValue({
+    canCreate: false,
+    create: pageMocks.create,
+    isPending: false,
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -80,7 +115,7 @@ afterEach(() => {
 
 describe("WorkOrdersPage", () => {
   it("renders the expected columns, rows, badges, date-times, and incomplete Draft values", () => {
-    const { container } = render(<WorkOrdersPage />);
+    const { container } = renderPage();
 
     expect(screen.getByRole("heading", { name: "Work Orders" })).toBeInTheDocument();
     for (const column of [
@@ -106,7 +141,7 @@ describe("WorkOrdersPage", () => {
   });
 
   it("searches Work Order number, Project, and Customer", () => {
-    render(<WorkOrdersPage />);
+    renderPage();
     const search = screen.getByLabelText("Search Work Orders");
 
     fireEvent.change(search, { target: { value: "2026-0001" } });
@@ -120,7 +155,7 @@ describe("WorkOrdersPage", () => {
   });
 
   it("filters Draft and Finished and composes with search", () => {
-    render(<WorkOrdersPage />);
+    renderPage();
     const filter = screen.getByLabelText("Filter by status");
 
     expect(filter).toHaveValue("all");
@@ -137,7 +172,7 @@ describe("WorkOrdersPage", () => {
   });
 
   it("shows no matches and clears search and status together", () => {
-    render(<WorkOrdersPage />);
+    renderPage();
     fireEvent.change(screen.getByLabelText("Search Work Orders"), {
       target: { value: "nothing" },
     });
@@ -156,7 +191,7 @@ describe("WorkOrdersPage", () => {
 
   it("renders loading, safe retryable error, and true empty states", () => {
     setQueryState({ isPending: true });
-    const rendered = render(<WorkOrdersPage />);
+    const rendered = renderPage();
     expect(screen.getByRole("status")).toHaveTextContent("Loading Work Orders...");
 
     setQueryState({
@@ -179,5 +214,92 @@ describe("WorkOrdersPage", () => {
     expect(screen.getByRole("heading", { name: "No Work Orders yet." }))
       .toBeInTheDocument();
     expect(screen.queryByLabelText("Search Work Orders")).not.toBeInTheDocument();
+  });
+
+  it("shows Create Work Order only when authorized and displays pending feedback", () => {
+    pageMocks.useWorkOrderCreation.mockReturnValue({
+      canCreate: true,
+      create: pageMocks.create,
+      isPending: true,
+    });
+
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
+  });
+
+  it("creates once, blocks duplicate clicks, and navigates with the backend result", async () => {
+    let resolveCreation:
+      | ((value: {
+        ok: true;
+        value: { workOrderId: string; workOrderNumber: string };
+      }) => void)
+      | undefined;
+    pageMocks.create.mockReturnValue(new Promise((resolve) => {
+      resolveCreation = resolve;
+    }));
+    pageMocks.useWorkOrderCreation.mockReturnValue({
+      canCreate: true,
+      create: pageMocks.create,
+      isPending: false,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/work-orders"]}>
+        <Routes>
+          <Route path="/work-orders" element={<WorkOrdersPage />} />
+          <Route path="/work-orders/:workOrderId" element={<NavigationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const button = screen.getByRole("button", { name: "Create Work Order" });
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(pageMocks.create).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
+
+    resolveCreation?.({
+      ok: true,
+      value: {
+        workOrderId: "00000000-0000-4000-8000-000000000010",
+        workOrderNumber: "RN-2026-0042",
+      },
+    });
+    await waitFor(() => expect(screen.getByText(
+      "/work-orders/00000000-0000-4000-8000-000000000010",
+    )).toBeInTheDocument());
+    expect(screen.getByText(/RN-2026-0042/)).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "access loss",
+      {
+        code: "access_denied",
+        message: "You no longer have permission to create Work Orders.",
+      },
+    ],
+    [
+      "generic failure",
+      {
+        code: "work_order_create_failed",
+        message: "The Work Order could not be created. Please try again.",
+      },
+    ],
+  ])("stays on the list and shows a safe %s error", async (_label, error) => {
+    pageMocks.create.mockResolvedValue({ ok: false, error });
+    pageMocks.useWorkOrderCreation.mockReturnValue({
+      canCreate: true,
+      create: pageMocks.create,
+      isPending: false,
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Create Work Order" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(error.message);
+    expect(screen.getByRole("heading", { name: "Work Orders" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Work Order" })).toBeEnabled();
   });
 });

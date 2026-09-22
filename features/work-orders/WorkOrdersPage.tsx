@@ -4,6 +4,7 @@ import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import CreateDraftWorkOrderAction from "./components/CreateDraftWorkOrderAction";
 import WorkOrderList from "./components/WorkOrderList";
 import { useWorkOrders } from "./hooks/useWorkOrders";
 import {
@@ -69,6 +70,7 @@ function WorkOrdersPage() {
       <PageHeader
         title="Work Orders"
         description="View and find Draft and Finished AlfaEV Work Orders."
+        actions={<CreateDraftWorkOrderAction />}
       />
 
       {!workOrdersQuery.isPending && workOrdersQuery.data?.ok && workOrders.length > 0 && (

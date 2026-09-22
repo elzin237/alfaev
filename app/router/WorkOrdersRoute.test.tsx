@@ -15,6 +15,12 @@ vi.mock("../auth/permissionService", () => ({
 vi.mock("../../pages/work-orders/WorkOrdersPage", () => ({
   default: () => <h1>Work Orders route content</h1>,
 }));
+vi.mock("../../pages/work-orders/NewWorkOrderPage", () => ({
+  default: () => <h1>New Work Order route content</h1>,
+}));
+vi.mock("../../pages/work-orders/CreatedWorkOrderPage", () => ({
+  default: () => <h1>Created Work Order route content</h1>,
+}));
 
 import AppRouter from "./AppRouter";
 
@@ -50,6 +56,50 @@ describe("Work Orders route", () => {
 
     expect(await screen.findByRole("heading", {
       name: "Work Orders route content",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
+      "work_orders.view",
+    ));
+    expect(routeMocks.hasPermission).not.toHaveBeenCalledWith("projects.view");
+  });
+
+  it("protects /work-orders/new with work_orders.create and never projects.view", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/work-orders/new"]}>
+          <AppRouter />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", {
+      name: "New Work Order route content",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
+      "work_orders.create",
+    ));
+    expect(routeMocks.hasPermission).not.toHaveBeenCalledWith("projects.view");
+  });
+
+  it("keeps the temporary detail destination behind work_orders.view", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[
+          "/work-orders/00000000-0000-4000-8000-000000000010",
+        ]}>
+          <AppRouter />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", {
+      name: "Created Work Order route content",
     })).toBeInTheDocument();
     await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
       "work_orders.view",
