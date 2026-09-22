@@ -515,8 +515,8 @@ export function registerWorkOrderSchemaTests(
                  and sequence_name like '%work_order%'
              ))::integer as count`,
             [[
-              "allocate_work_order_number", "create_work_order",
-              "update_work_order", "delete_draft_work_order", "finish_work_order",
+              "create_work_order", "update_work_order",
+              "delete_draft_work_order", "finish_work_order",
             ]],
           )).rows;
           expect(prematureObjects).toEqual([{ count: 0 }]);
@@ -525,6 +525,380 @@ export function registerWorkOrderSchemaTests(
         const anonymousRead = await fixture.anonymousClient
           .from("work_orders").select("id").limit(1);
         expectPermissionDenied(anonymousRead.error);
+      });
+    },
+  );
+
+  describe.skipIf(process.env.TASK102_MIGRATION !== "1")(
+    "Task 102 yearly Work Order number allocator (requires deployed migration)",
+    () => {
+      it("derives the business year in Europe/Sarajevo and allocates sequentially", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const domainBefore = (await database.query<{
+            audits: string;
+            balances: string;
+            movements: string;
+            projects: string;
+            work_orders: string;
+          }>(
+            `select
+               (select count(*)::text from public.audit_logs) as audits,
+               (select count(*)::text from public.inventory_balances) as balances,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.projects) as projects,
+               (select count(*)::text from public.work_orders) as work_orders`,
+          )).rows[0];
+          const boundary = (await database.query<{
+            after_boundary: number;
+            before_boundary: number;
+          }>(
+            `select
+               pg_catalog.date_part(
+                 'year',
+                 pg_catalog.timezone(
+                   'Europe/Sarajevo',
+                   '2025-12-31 22:59:59+00'::timestamptz
+                 )
+               )::integer as before_boundary,
+               pg_catalog.date_part(
+                 'year',
+                 pg_catalog.timezone(
+                   'Europe/Sarajevo',
+                   '2025-12-31 23:00:00+00'::timestamptz
+                 )
+               )::integer as after_boundary`,
+          )).rows[0];
+          expect(boundary).toEqual({
+            after_boundary: 2026,
+            before_boundary: 2025,
+          });
+
+          const businessYear = (await database.query<{ business_year: number }>(
+            `select pg_catalog.date_part(
+               'year',
+               pg_catalog.timezone(
+                 'Europe/Sarajevo',
+                 pg_catalog.clock_timestamp()
+               )
+             )::integer as business_year`,
+          )).rows[0]!.business_year;
+          await database.query(
+            "delete from public.work_order_number_counters where business_year = $1",
+            [businessYear],
+          );
+
+          const allocations = (await database.query<{ number: string }>(
+            `select public.allocate_work_order_number() as number
+             from pg_catalog.generate_series(1, 3)`,
+          )).rows.map((row) => row.number);
+          expect(allocations).toEqual([
+            `RN-${businessYear}-0001`,
+            `RN-${businessYear}-0002`,
+            `RN-${businessYear}-0003`,
+          ]);
+          expect((await database.query<{ last_value: number }>(
+            `select last_value
+             from public.work_order_number_counters
+             where business_year = $1`,
+            [businessYear],
+          )).rows).toEqual([{ last_value: 3 }]);
+
+          const definition = (await database.query<{ definition: string }>(
+            `select pg_catalog.pg_get_functiondef(
+               'public.allocate_work_order_number()'::pg_catalog.regprocedure
+             ) as definition`,
+          )).rows[0]!.definition;
+          expect(definition).toContain("Europe/Sarajevo");
+          expect(definition).toContain("clock_timestamp()");
+          expect(definition).toContain("timezone(");
+          expect((await database.query(
+            `select
+               (select count(*)::text from public.audit_logs) as audits,
+               (select count(*)::text from public.inventory_balances) as balances,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.projects) as projects,
+               (select count(*)::text from public.work_orders) as work_orders`,
+          )).rows[0]).toEqual(domainBefore);
+        });
+      });
+
+      it("keeps yearly counters independent and fails safely after 9999", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const firstYear = 8111;
+          const secondYear = 8112;
+          await database.query(
+            `delete from public.work_order_number_counters
+             where business_year = any($1::integer[])`,
+            [[firstYear, secondYear]],
+          );
+
+          const first = (await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [firstYear],
+          )).rows[0]!.number;
+          const second = (await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [firstYear],
+          )).rows[0]!.number;
+          const independent = (await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [secondYear],
+          )).rows[0]!.number;
+          expect([first, second, independent]).toEqual([
+            "RN-8111-0001",
+            "RN-8111-0002",
+            "RN-8112-0001",
+          ]);
+
+          await database.query(
+            `update public.work_order_number_counters
+             set last_value = 9998
+             where business_year = $1`,
+            [firstYear],
+          );
+          expect((await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [firstYear],
+          )).rows).toEqual([{ number: "RN-8111-9999" }]);
+          await expectRejected(
+            database,
+            () => database.query(
+              "select public.allocate_work_order_number_for_year($1)",
+              [firstYear],
+            ),
+            "WOR03",
+          );
+          expect((await database.query<{ last_value: number }>(
+            `select last_value
+             from public.work_order_number_counters
+             where business_year = $1`,
+            [firstYear],
+          )).rows).toEqual([{ last_value: 9999 }]);
+        });
+      });
+
+      it("allocates unique same-year numbers through concurrent connections", async () => {
+        const fixture = requireHarness();
+        await fixture.withDatabaseClients(4, async (clients) => {
+          const coordinator = clients[0]!;
+          const isolatedYear = (await coordinator.query<{ business_year: number }>(
+            `select candidate.business_year
+             from pg_catalog.generate_series(6000, 8999) as candidate(business_year)
+             where not exists (
+               select 1
+               from public.work_order_number_counters as counter
+               where counter.business_year = candidate.business_year
+             )
+               and not exists (
+                 select 1
+                 from public.work_orders as work_order
+                 where work_order.work_order_number like
+                   'RN-' || candidate.business_year::text || '-%'
+               )
+             order by candidate.business_year
+             limit 1`,
+          )).rows[0]?.business_year;
+          if (!isolatedYear) {
+            throw new Error("No isolated Work Order counter year is available");
+          }
+
+          try {
+            const allocations = await Promise.all(clients.map(async (database) => {
+              return (await database.query<{ number: string }>(
+                "select public.allocate_work_order_number_for_year($1) as number",
+                [isolatedYear],
+              )).rows[0]!.number;
+            }));
+            expect(new Set(allocations).size).toBe(allocations.length);
+            expect(allocations.every((number) =>
+              new RegExp(`^RN-${isolatedYear}-[0-9]{4}$`).test(number),
+            )).toBe(true);
+            expect(allocations.map((number) => number.slice(-4)).sort()).toEqual([
+              "0001", "0002", "0003", "0004",
+            ]);
+            expect((await coordinator.query<{ last_value: number }>(
+              `select last_value
+               from public.work_order_number_counters
+               where business_year = $1`,
+              [isolatedYear],
+            )).rows).toEqual([{ last_value: allocations.length }]);
+          } finally {
+            await coordinator.query(
+              `delete from public.work_order_number_counters
+               where business_year = $1
+                 and not exists (
+                   select 1
+                   from public.work_orders as work_order
+                   where work_order.work_order_number like
+                     'RN-' || $1::integer::text || '-%'
+                 )`,
+              [isolatedYear],
+            );
+          }
+        });
+      });
+
+      it("does not reclaim an allocated Work Order number after Draft deletion", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actorId = fixture.actors.admin.profileId;
+          const projectId = await createProject(database, actorId);
+          const businessYear = 8333;
+          await database.query(
+            "delete from public.work_order_number_counters where business_year = $1",
+            [businessYear],
+          );
+          const first = (await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [businessYear],
+          )).rows[0]!.number;
+          const draftId = await insertWorkOrder(database, {
+            actorId,
+            number: first,
+            projectId,
+          });
+          await database.query(
+            "delete from public.work_orders where id = $1::uuid",
+            [draftId],
+          );
+          const second = (await database.query<{ number: string }>(
+            "select public.allocate_work_order_number_for_year($1) as number",
+            [businessYear],
+          )).rows[0]!.number;
+          expect(first).toBe("RN-8333-0001");
+          expect(second).toBe("RN-8333-0002");
+        });
+      });
+
+      it("keeps allocator and counter storage unavailable to browser roles", async () => {
+        const fixture = requireHarness();
+        for (const client of [
+          fixture.anonymousClient,
+          fixture.actors.admin.client,
+          fixture.actors.unpermitted.client,
+        ]) {
+          expectPermissionDenied(
+            (await client.rpc("allocate_work_order_number")).error,
+          );
+          expectPermissionDenied((await client.rpc(
+            "allocate_work_order_number_for_year",
+            { p_business_year: 2026 },
+          )).error);
+          expectPermissionDenied((await client
+            .from("work_order_number_counters")
+            .insert({ business_year: 2026, last_value: 1 })).error);
+          expectPermissionDenied((await client
+            .from("work_order_number_counters")
+            .update({ last_value: 1 })
+            .eq("business_year", 2026)).error);
+          expectPermissionDenied((await client
+            .from("work_order_number_counters")
+            .delete()
+            .eq("business_year", 2026)).error);
+        }
+
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const functions = (await database.query<{
+            anonymous_execute: boolean;
+            authenticated_execute: boolean;
+            name: string;
+            security_definer: boolean;
+            settings: string[];
+          }>(
+            `select
+               routine.proname as name,
+               routine.prosecdef as security_definer,
+               routine.proconfig as settings,
+               pg_catalog.has_function_privilege(
+                 'authenticated', routine.oid, 'execute'
+               ) as authenticated_execute,
+               pg_catalog.has_function_privilege(
+                 'anon', routine.oid, 'execute'
+               ) as anonymous_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             where namespace.nspname = 'public'
+               and routine.proname = any($1::text[])
+             order by routine.proname`,
+            [[
+              "allocate_work_order_number",
+              "allocate_work_order_number_for_year",
+            ]],
+          )).rows;
+          expect(functions).toEqual([
+            {
+              anonymous_execute: false,
+              authenticated_execute: false,
+              name: "allocate_work_order_number",
+              security_definer: true,
+              settings: ['search_path=""'],
+            },
+            {
+              anonymous_execute: false,
+              authenticated_execute: false,
+              name: "allocate_work_order_number_for_year",
+              security_definer: true,
+              settings: ['search_path=""'],
+            },
+          ]);
+
+          expect((await database.query<{
+            anonymous_delete: boolean;
+            anonymous_insert: boolean;
+            anonymous_select: boolean;
+            anonymous_update: boolean;
+            authenticated_delete: boolean;
+            authenticated_insert: boolean;
+            authenticated_select: boolean;
+            authenticated_update: boolean;
+            row_security: boolean;
+          }>(
+            `select
+               class.relrowsecurity as row_security,
+               pg_catalog.has_table_privilege(
+                 'authenticated', class.oid, 'select'
+               ) as authenticated_select,
+               pg_catalog.has_table_privilege(
+                 'authenticated', class.oid, 'insert'
+               ) as authenticated_insert,
+               pg_catalog.has_table_privilege(
+                 'authenticated', class.oid, 'update'
+               ) as authenticated_update,
+               pg_catalog.has_table_privilege(
+                 'authenticated', class.oid, 'delete'
+               ) as authenticated_delete,
+               pg_catalog.has_table_privilege(
+                 'anon', class.oid, 'select'
+               ) as anonymous_select,
+               pg_catalog.has_table_privilege(
+                 'anon', class.oid, 'insert'
+               ) as anonymous_insert,
+               pg_catalog.has_table_privilege(
+                 'anon', class.oid, 'update'
+               ) as anonymous_update,
+               pg_catalog.has_table_privilege(
+                 'anon', class.oid, 'delete'
+               ) as anonymous_delete
+             from pg_catalog.pg_class as class
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = class.relnamespace
+             where namespace.nspname = 'public'
+               and class.relname = 'work_order_number_counters'`,
+          )).rows).toEqual([{
+            anonymous_delete: false,
+            anonymous_insert: false,
+            anonymous_select: false,
+            anonymous_update: false,
+            authenticated_delete: false,
+            authenticated_insert: false,
+            authenticated_select: false,
+            authenticated_update: false,
+            row_security: true,
+          }]);
+        });
       });
     },
   );

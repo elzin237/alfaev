@@ -2216,7 +2216,7 @@ Goal:
 
 Rules:
 - assigned once
-- yearly reset
+- yearly reset using the authoritative IANA business timezone `Europe/Sarajevo`
 - never reused
 - database unique constraint
 

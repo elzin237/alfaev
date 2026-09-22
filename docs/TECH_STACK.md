@@ -237,6 +237,7 @@ Requirements:
 - assigned at Draft creation
 - concurrency-safe
 - sequence resets by year
+- authoritative year and reset boundary use the IANA timezone `Europe/Sarajevo`
 - never reused after Draft deletion
 
 Use a database unique constraint on the human-facing Work Order number.

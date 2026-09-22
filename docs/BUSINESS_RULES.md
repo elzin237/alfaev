@@ -567,6 +567,7 @@ Examples:
 Rules:
 
 - numbering sequence resets each calendar year
+- the `YYYY` value and calendar-year reset boundary are determined at authoritative database allocation time in the IANA timezone `Europe/Sarajevo`
 - number is assigned at Work Order creation, including Draft
 - number is immutable
 - number is never reused after deletion of a Draft
