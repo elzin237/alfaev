@@ -11,6 +11,7 @@ import {
   getWorkOrderDetail,
   listWorkOrderProjectChoices,
   listWorkOrders,
+  updateDraftWorkOrder,
 } from "./workOrderService";
 
 const populatedRow = {
@@ -240,6 +241,115 @@ describe("workOrderService", () => {
       error: {
         code: "work_order_detail_failed",
         message: "The Work Order details could not be loaded.",
+      },
+    });
+  });
+
+  it("sends the exact authoritative timestamp and maps one strict Draft update result", async () => {
+    const exactTimestamp = "2026-09-22T10:00:00.123456+00:00";
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{
+        work_order_id: detailRow.work_order_id,
+        updated_at: "2026-09-22T10:01:00.654321+00:00",
+      }],
+      error: null,
+    });
+
+    await expect(updateDraftWorkOrder(detailRow.work_order_id, {
+      projectId: projectChoices[1].project_id,
+      description: "  Keep backend normalization authoritative  ",
+      expectedUpdatedAt: exactTimestamp,
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        workOrderId: detailRow.work_order_id,
+        updatedAt: "2026-09-22T10:01:00.654321+00:00",
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "update_draft_work_order",
+      {
+        p_work_order_id: detailRow.work_order_id,
+        p_project_id: projectChoices[1].project_id,
+        p_description: "  Keep backend normalization authoritative  ",
+        p_expected_updated_at: exactTimestamp,
+      },
+    );
+    expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty(
+      "p_customer_name_snapshot",
+    );
+  });
+
+  it.each([
+    ["empty result", []],
+    ["multiple results", [
+      { work_order_id: detailRow.work_order_id, updated_at: detailRow.updated_at },
+      { work_order_id: detailRow.work_order_id, updated_at: detailRow.updated_at },
+    ]],
+    ["different Work Order", [{
+      work_order_id: incompleteDetailRow.work_order_id,
+      updated_at: detailRow.updated_at,
+    }]],
+    ["invalid timestamp", [{
+      work_order_id: detailRow.work_order_id,
+      updated_at: "not-a-timestamp",
+    }]],
+    ["missing field", [{ work_order_id: detailRow.work_order_id }]],
+    ["unexpected field", [{
+      work_order_id: detailRow.work_order_id,
+      updated_at: detailRow.updated_at,
+      customer_name_snapshot: "Must not be exposed",
+    }]],
+  ])("rejects a malformed Draft update response with %s", async (_label, data) => {
+    serviceMocks.rpc.mockResolvedValue({ data, error: null });
+
+    await expect(updateDraftWorkOrder(detailRow.work_order_id, {
+      projectId: null,
+      description: null,
+      expectedUpdatedAt: detailRow.updated_at,
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "work_order_update_failed",
+        message: "The Draft could not be saved. Please try again.",
+      },
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied", "You no longer have permission to edit this Draft."],
+    ["WOR02", "work_order_not_editable", "This Work Order can no longer be edited."],
+    [
+      "WOR05",
+      "stale_work_order",
+      "This Draft changed since you loaded it. Reload the latest version before saving.",
+    ],
+    ["XX000", "work_order_update_failed", "The Draft could not be saved. Please try again."],
+  ])("maps %s to a safe Draft update error", async (providerCode, code, message) => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw database detail" },
+    });
+
+    await expect(updateDraftWorkOrder(detailRow.work_order_id, {
+      projectId: null,
+      description: null,
+      expectedUpdatedAt: detailRow.updated_at,
+    })).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("maps thrown Draft update failures without exposing raw details", async () => {
+    serviceMocks.rpc.mockRejectedValue(new Error("raw network detail"));
+
+    await expect(updateDraftWorkOrder(detailRow.work_order_id, {
+      projectId: null,
+      description: null,
+      expectedUpdatedAt: detailRow.updated_at,
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "work_order_update_failed",
+        message: "The Draft could not be saved. Please try again.",
       },
     });
   });

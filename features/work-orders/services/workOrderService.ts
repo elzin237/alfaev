@@ -42,6 +42,30 @@ export type WorkOrderDetailResult =
   | { ok: true; value: WorkOrderDetail }
   | { ok: false; error: WorkOrderDetailError };
 
+export interface DraftWorkOrderUpdateInput {
+  projectId: string | null;
+  description: string | null;
+  expectedUpdatedAt: string;
+}
+
+export interface UpdatedDraftWorkOrder {
+  workOrderId: string;
+  updatedAt: string;
+}
+
+export interface WorkOrderUpdateError {
+  code:
+    | "access_denied"
+    | "stale_work_order"
+    | "work_order_not_editable"
+    | "work_order_update_failed";
+  message: string;
+}
+
+export type WorkOrderUpdateResult =
+  | { ok: true; value: UpdatedDraftWorkOrder }
+  | { ok: false; error: WorkOrderUpdateError };
+
 export type WorkOrderProjectChoiceStatus =
   | "planned"
   | "in_progress"
@@ -92,6 +116,7 @@ const workOrderNumberPattern = /^RN-[0-9]{4}-[0-9]{4}$/;
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const createResultKeys = new Set(["work_order_id", "work_order_number"]);
+const updateResultKeys = new Set(["work_order_id", "updated_at"]);
 const detailAllowedKeys = new Set([
   "work_order_id",
   "work_order_number",
@@ -311,6 +336,86 @@ export async function getWorkOrderDetail(
     return detail ? { ok: true, value: detail } : detailFailure();
   } catch {
     return detailFailure();
+  }
+}
+
+function updateFailure(code?: string): WorkOrderUpdateResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to edit this Draft.",
+      },
+    };
+  }
+
+  if (code === "WOR02") {
+    return {
+      ok: false,
+      error: {
+        code: "work_order_not_editable",
+        message: "This Work Order can no longer be edited.",
+      },
+    };
+  }
+
+  if (code === "WOR05") {
+    return {
+      ok: false,
+      error: {
+        code: "stale_work_order",
+        message:
+          "This Draft changed since you loaded it. Reload the latest version before saving.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "work_order_update_failed",
+      message: "The Draft could not be saved. Please try again.",
+    },
+  };
+}
+
+export async function updateDraftWorkOrder(
+  workOrderId: string,
+  input: DraftWorkOrderUpdateInput,
+): Promise<WorkOrderUpdateResult> {
+  try {
+    const { data, error } = await supabase.rpc("update_draft_work_order", {
+      p_work_order_id: workOrderId,
+      p_project_id: input.projectId,
+      p_description: input.description,
+      p_expected_updated_at: input.expectedUpdatedAt,
+    });
+
+    if (error) return updateFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) return updateFailure();
+
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== updateResultKeys.size ||
+      Object.keys(row).some((key) => !updateResultKeys.has(key)) ||
+      !isUuid(row.work_order_id) ||
+      row.work_order_id !== workOrderId ||
+      !isTimestamp(row.updated_at)
+    ) {
+      return updateFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        workOrderId: row.work_order_id,
+        updatedAt: row.updated_at,
+      },
+    };
+  } catch {
+    return updateFailure();
   }
 }
 

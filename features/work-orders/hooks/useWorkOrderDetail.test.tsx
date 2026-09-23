@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ const detailMocks = vi.hoisted(() => ({
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
   listWorkOrderProjectChoices: vi.fn(),
+  updateDraftWorkOrder: vi.fn(),
   useAuth: vi.fn(),
 }));
 
@@ -22,6 +23,7 @@ vi.mock("../services/workOrderService", () => ({
     typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
   listWorkOrderProjectChoices: detailMocks.listWorkOrderProjectChoices,
+  updateDraftWorkOrder: detailMocks.updateDraftWorkOrder,
 }));
 
 import { useWorkOrderDetail } from "./useWorkOrderDetail";
@@ -67,6 +69,13 @@ beforeEach(() => {
   detailMocks.listWorkOrderProjectChoices.mockResolvedValue({
     ok: true,
     value: [],
+  });
+  detailMocks.updateDraftWorkOrder.mockResolvedValue({
+    ok: true,
+    value: {
+      workOrderId,
+      updatedAt: "2026-09-22T09:01:00.123456+00:00",
+    },
   });
 });
 
@@ -213,5 +222,117 @@ describe("useWorkOrderDetail", () => {
     const missing = renderDetailHook();
     expect(missing.result.current.canEditDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
+  });
+
+  it("saves through the trusted mutation and refreshes exact detail and list queries", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const input = {
+      projectId: null,
+      description: "  Raw description  ",
+      expectedUpdatedAt: "2026-09-22T09:00:00.123456+00:00",
+    };
+
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+    await act(async () => {
+      await result.current.saveDraft(input);
+    });
+
+    expect(detailMocks.updateDraftWorkOrder).toHaveBeenCalledExactlyOnceWith(
+      workOrderId,
+      input,
+    );
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "list", "profile-1"],
+      exact: true,
+    });
+    expect(invalidateQueries).not.toHaveBeenCalledWith(expect.objectContaining({
+      queryKey: ["work-orders", "project-choices", "profile-1"],
+    }));
+  });
+
+  it("preserves stale edits until explicit reload and does not invalidate list data", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    detailMocks.updateDraftWorkOrder.mockResolvedValue({
+      ok: false,
+      error: { code: "stale_work_order", message: "safe stale message" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+    await act(async () => {
+      await result.current.saveDraft({
+        projectId: null,
+        description: "Local edit",
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+    expect(invalidateQueries).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.reloadLatestDraft();
+    });
+    expect(detailMocks.getWorkOrderDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes lifecycle state or permission authority for authoritative save denials", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+
+    detailMocks.updateDraftWorkOrder.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "work_order_not_editable",
+        message: "This Work Order can no longer be edited.",
+      },
+    });
+    await act(async () => {
+      await result.current.saveDraft({
+        projectId: null,
+        description: "Local edit",
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    }));
+
+    invalidateQueries.mockClear();
+    detailMocks.updateDraftWorkOrder.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to edit this Draft.",
+      },
+    });
+    await act(async () => {
+      await result.current.saveDraft({
+        projectId: null,
+        description: "Local edit",
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "permission",
+        "auth-user-1",
+        "profile-1",
+        "work_orders.edit_draft",
+      ],
+      exact: true,
+    }));
+    expect(invalidateQueries).not.toHaveBeenCalledWith({
+      queryKey: ["work-orders", "list", "profile-1"],
+      exact: true,
+    });
   });
 });

@@ -1,10 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
 
 const pageMocks = vi.hoisted(() => ({
   detailRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
+  reloadLatestDraft: vi.fn(),
+  saveDraft: vi.fn(),
   useWorkOrderDetail: vi.fn(),
 }));
 
@@ -58,21 +66,36 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       isPending: false,
       refetch: pageMocks.projectChoicesRefetch,
     },
+    isSaving: false,
+    reloadLatestDraft: pageMocks.reloadLatestDraft,
+    saveDraft: pageMocks.saveDraft,
     ...overrides,
   };
 }
 
-function renderPage(path = `/work-orders/${workOrderId}`, state?: unknown) {
-  return render(
+function pageTree(path = `/work-orders/${workOrderId}`, state?: unknown) {
+  return (
     <MemoryRouter initialEntries={[{ pathname: path, state }]}>
       <Routes>
         <Route path="/work-orders/:workOrderId" element={<WorkOrderDetailPage />} />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
+function renderPage(path = `/work-orders/${workOrderId}`, state?: unknown) {
+  return render(pageTree(path, state));
+}
+
 beforeEach(() => {
+  pageMocks.reloadLatestDraft.mockResolvedValue(undefined);
+  pageMocks.saveDraft.mockResolvedValue({
+    ok: true,
+    value: {
+      workOrderId,
+      updatedAt: "2026-09-22T10:01:00.123456+00:00",
+    },
+  });
   pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
 });
 
@@ -181,14 +204,206 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByLabelText("Short Description")).toHaveValue(
       "Local description",
     );
-    expect(screen.getByText(/changes are local and are not saved/i))
-      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save for Later" }))
+      .toBeEnabled();
     expect(screen.getByRole("heading", { name: "Materials" }))
       .toBeInTheDocument();
     expect(screen.getByText("Materials will be added in a later step."))
       .toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /save|finish|delete/i }))
+    expect(screen.queryByRole("button", { name: /finish|delete/i }))
       .not.toBeInTheDocument();
+  });
+
+  it("saves local Project and Description with the exact authoritative timestamp", async () => {
+    const preciseDraft = {
+      ...draft,
+      updatedAt: "2026-09-22T10:00:00.123456+00:00",
+    };
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: preciseDraft },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+    }));
+    const page = renderPage();
+
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: replacementProjectId },
+    });
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "  Backend trims this  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    await waitFor(() => expect(pageMocks.saveDraft)
+      .toHaveBeenCalledExactlyOnceWith({
+        projectId: replacementProjectId,
+        description: "  Backend trims this  ",
+        expectedUpdatedAt: "2026-09-22T10:00:00.123456+00:00",
+      }));
+    expect(screen.getByRole("status")).toHaveTextContent("Draft saved.");
+    expect(screen.getByLabelText("Project")).toHaveValue(replacementProjectId);
+    expect(screen.getByRole("heading", { name: "Materials" }))
+      .toBeInTheDocument();
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      detailQuery: {
+        data: {
+          ok: true,
+          value: {
+            ...preciseDraft,
+            projectId: replacementProjectId,
+            projectName: "Beta Project",
+            customerName: "Authoritative Beta Customer",
+            description: "Backend trims this",
+            updatedAt: "2026-09-22T10:01:00.654321+00:00",
+          },
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+    }));
+    page.rerender(pageTree());
+    expect(screen.getByLabelText("Customer")).toHaveValue(
+      "Authoritative Beta Customer",
+    );
+    expect(screen.getByLabelText("Short Description")).toHaveValue(
+      "Backend trims this",
+    );
+  });
+
+  it("synchronizes a normalized no-op Description after successful save", async () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: { ...draft, description: "Test" } },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+    }));
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "  Test  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved.");
+    expect(screen.getByLabelText("Short Description")).toHaveValue("Test");
+    expect(pageMocks.saveDraft).toHaveBeenCalledExactlyOnceWith({
+      projectId,
+      description: "  Test  ",
+      expectedUpdatedAt: draft.updatedAt,
+    });
+  });
+
+  it("synchronizes a whitespace-only normalized no-op to an empty Description", async () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: { ...draft, description: null } },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+    }));
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved.");
+    expect(screen.getByLabelText("Short Description")).toHaveValue("");
+    expect(pageMocks.saveDraft).toHaveBeenCalledExactlyOnceWith({
+      projectId,
+      description: "   ",
+      expectedUpdatedAt: draft.updatedAt,
+    });
+  });
+
+  it("blocks duplicate submission and shows the pending save state", async () => {
+    let resolveSave: ((value: unknown) => void) | undefined;
+    pageMocks.saveDraft.mockReturnValue(new Promise((resolve) => {
+      resolveSave = resolve;
+    }));
+    renderPage();
+
+    const saveButton = screen.getByRole("button", { name: "Save for Later" });
+    fireEvent.click(saveButton);
+    fireEvent.click(saveButton);
+
+    expect(pageMocks.saveDraft).toHaveBeenCalledOnce();
+    resolveSave?.({
+      ok: true,
+      value: { workOrderId, updatedAt: draft.updatedAt },
+    });
+    await waitFor(() => expect(screen.getByText("Draft saved."))
+      .toBeInTheDocument());
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      isSaving: true,
+    }));
+    cleanup();
+    renderPage();
+    expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+  });
+
+  it("preserves local state after a stale save and reloads only on explicit action", async () => {
+    pageMocks.saveDraft.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "stale_work_order",
+        message:
+          "This Draft changed since you loaded it. Reload the latest version before saving.",
+      },
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: replacementProjectId },
+    });
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "Unsaved local value" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This Draft changed since you loaded it.",
+    );
+    expect(screen.getByLabelText("Project")).toHaveValue(replacementProjectId);
+    expect(screen.getByLabelText("Short Description")).toHaveValue(
+      "Unsaved local value",
+    );
+    expect(pageMocks.reloadLatestDraft).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest Draft" }));
+    await waitFor(() => expect(pageMocks.reloadLatestDraft).toHaveBeenCalledOnce());
+  });
+
+  it("keeps local fields intact and never shows success after an ordinary save failure", async () => {
+    pageMocks.saveDraft.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "work_order_update_failed",
+        message: "The Draft could not be saved. Please try again.",
+      },
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "Keep this value" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The Draft could not be saved. Please try again.",
+    );
+    expect(screen.getByLabelText("Short Description")).toHaveValue(
+      "Keep this value",
+    );
+    expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
   });
 
   it("renders a Draft read-only when edit authority is unavailable", () => {
@@ -210,6 +425,8 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("Alpha Project")).toBeInTheDocument();
     expect(screen.getByText("Alpha Customer Snapshot")).toBeInTheDocument();
     expect(screen.getByText("Build enclosure")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save for Later" }))
+      .not.toBeInTheDocument();
   });
 
   it("preserves an existing historical Project absent from new choices", () => {
@@ -291,5 +508,7 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Short Description")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save|delete|finish/i }))
+      .not.toBeInTheDocument();
   });
 });

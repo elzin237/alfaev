@@ -22,7 +22,14 @@ function BackToWorkOrdersLink() {
 
 function WorkOrderDetailPage() {
   const { workOrderId = "" } = useParams<{ workOrderId: string }>();
-  const { detailQuery, projectChoicesQuery, canEditDraft } =
+  const {
+    canEditDraft,
+    detailQuery,
+    isSaving,
+    projectChoicesQuery,
+    reloadLatestDraft,
+    saveDraft,
+  } =
     useWorkOrderDetail(workOrderId);
   let content: ReactNode;
 
@@ -82,7 +89,13 @@ function WorkOrderDetailPage() {
             projectChoices={projectChoices}
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
+            isSaving={isSaving}
+            onReloadLatest={reloadLatestDraft}
             onRetryProjectChoices={() => void projectChoicesQuery.refetch()}
+            onSave={(submission) => saveDraft({
+              ...submission,
+              expectedUpdatedAt: workOrder.updatedAt,
+            })}
           />
         ) : (
           <section className="rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">
