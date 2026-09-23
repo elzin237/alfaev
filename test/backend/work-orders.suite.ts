@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { describe, expect, it } from "vitest";
 
 import { expectPermissionDenied } from "./helpers/assertions";
+import { createTestSerialNumber } from "./helpers/serial";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 
 interface WorkOrderRow {
@@ -48,9 +49,12 @@ async function expectRejected(
   database: PoolClient,
   operation: () => Promise<unknown>,
   code: string,
+  message?: string,
 ): Promise<void> {
   await database.query("savepoint rejected_work_order_operation");
-  await expect(operation()).rejects.toMatchObject({ code });
+  await expect(operation()).rejects.toMatchObject(
+    message ? { code, message } : { code },
+  );
   await database.query("rollback to savepoint rejected_work_order_operation");
 }
 
@@ -70,6 +74,50 @@ async function createProject(
     [id, `Work Order Project ${id}`, `Customer ${id}`, actorId],
   );
   return id;
+}
+
+async function createWorkOrderItemProduct(
+  database: PoolClient,
+  actorId: string,
+): Promise<string> {
+  const id = randomUUID();
+  await database.query(
+    `insert into public.products (
+       id, serial_number, name, category, product_kind,
+       created_by_user_id, updated_by_user_id
+     ) values (
+       $1::uuid, $2::text, $3::text, 'Work Order', 'component',
+       $4::uuid, $4::uuid
+     )`,
+    [id, createTestSerialNumber(), `Work Order Product ${id}`, actorId],
+  );
+  return id;
+}
+
+async function findUnusedWorkOrderYear(
+  database: PoolClient,
+): Promise<number> {
+  const year = (await database.query<{ business_year: number }>(
+    `select candidate.business_year
+     from pg_catalog.generate_series(6000, 8999) as candidate(business_year)
+     where not exists (
+       select 1
+       from public.work_order_number_counters as counter
+       where counter.business_year = candidate.business_year
+     )
+       and not exists (
+         select 1
+         from public.work_orders as work_order
+         where work_order.work_order_number like
+           'RN-' || candidate.business_year::text || '-%'
+       )
+     order by candidate.business_year
+     limit 1`,
+  )).rows[0]?.business_year;
+  if (!year) {
+    throw new Error("No isolated Work Order fixture year is available");
+  }
+  return year;
 }
 
 async function insertWorkOrder(
@@ -169,14 +217,20 @@ export function registerWorkOrderSchemaTests(
                (select count(*)::text from public.inventory_movements) as movements`,
           )).rows[0];
 
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const firstNumber = `RN-${fixtureYear}-0001`;
+
           const firstId = await insertWorkOrder(database, {
-            actorId, number: "RN-2026-0001", projectId,
+            actorId, number: firstNumber, projectId,
           });
           const secondId = await insertWorkOrder(database, {
-            actorId, number: "RN-2026-0002", projectId,
+            actorId, number: `RN-${fixtureYear}-0002`, projectId,
           });
           const finishedId = await insertWorkOrder(database, {
-            actorId, number: "RN-2026-0003", projectId, status: "finished",
+            actorId,
+            number: `RN-${fixtureYear}-0003`,
+            projectId,
+            status: "finished",
           });
           const rows = (await database.query<WorkOrderRow>(
             `select id, work_order_number, project_id, customer_name_snapshot,
@@ -214,7 +268,7 @@ export function registerWorkOrderSchemaTests(
           await expectRejected(
             database,
             () => insertWorkOrder(database, {
-              actorId, number: "RN-2026-0001", projectId,
+              actorId, number: firstNumber, projectId,
             }),
             "23505",
           );
@@ -1263,11 +1317,22 @@ export function registerWorkOrderSchemaTests(
             "delete from public.work_order_number_counters where business_year = $1",
             [businessYear],
           );
-          await insertWorkOrder(database, {
-            actorId: actor.profileId,
-            number: `RN-${businessYear}-0001`,
-            projectId,
-          });
+          const conflictingNumber = `RN-${businessYear}-0001`;
+          const conflictExists = (await database.query<{ exists: boolean }>(
+            `select exists (
+               select 1
+               from public.work_orders
+               where work_order_number = $1::text
+             ) as exists`,
+            [conflictingNumber],
+          )).rows[0]!.exists;
+          if (!conflictExists) {
+            await insertWorkOrder(database, {
+              actorId: actor.profileId,
+              number: conflictingNumber,
+              projectId,
+            });
+          }
           const auditBefore = (await database.query<{ count: string }>(
             `select count(*) from public.audit_logs
              where entity_type = 'work_order'`,
@@ -1294,7 +1359,7 @@ export function registerWorkOrderSchemaTests(
           expect((await database.query<{ count: string }>(
             `select count(*) from public.work_orders
              where work_order_number = $1::text`,
-            [`RN-${businessYear}-0001`],
+            [conflictingNumber],
           )).rows).toEqual([{ count: "1" }]);
         });
       });
@@ -1659,6 +1724,689 @@ export function registerWorkOrderSchemaTests(
           ]);
         });
       });
+    },
+  );
+
+  describe.skipIf(process.env.TASK106_MIGRATION !== "1")(
+    "Task 106 WorkOrderItem schema and parent-state protection (requires deployed migration)",
+    () => {
+      it("creates the canonical schema, constraints, foreign keys, and justified indexes", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const columns = (await database.query<{
+            column_default: string | null;
+            column_name: string;
+            data_type: string;
+            is_nullable: "NO" | "YES";
+          }>(
+            `select column_name, data_type, is_nullable, column_default
+             from information_schema.columns
+             where table_schema = 'public'
+               and table_name = 'work_order_items'
+             order by ordinal_position`,
+          )).rows;
+          expect(columns).toEqual([
+            {
+              column_default: "gen_random_uuid()",
+              column_name: "id",
+              data_type: "uuid",
+              is_nullable: "NO",
+            },
+            {
+              column_default: null,
+              column_name: "work_order_id",
+              data_type: "uuid",
+              is_nullable: "NO",
+            },
+            {
+              column_default: null,
+              column_name: "product_id",
+              data_type: "uuid",
+              is_nullable: "NO",
+            },
+            {
+              column_default: null,
+              column_name: "quantity",
+              data_type: "bigint",
+              is_nullable: "NO",
+            },
+            {
+              column_default: "now()",
+              column_name: "added_at",
+              data_type: "timestamp with time zone",
+              is_nullable: "NO",
+            },
+            {
+              column_default: null,
+              column_name: "added_by_user_id",
+              data_type: "uuid",
+              is_nullable: "NO",
+            },
+          ]);
+
+          const foreignKeys = (await database.query<{
+            constraint_name: string;
+            delete_action: string;
+            target_table: string;
+          }>(
+            `select constraint_row.conname as constraint_name,
+                    target.relname as target_table,
+                    case constraint_row.confdeltype
+                      when 'r' then 'RESTRICT'
+                      else constraint_row.confdeltype::text
+                    end as delete_action
+             from pg_catalog.pg_constraint as constraint_row
+             join pg_catalog.pg_class as source
+               on source.oid = constraint_row.conrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = source.relnamespace
+             join pg_catalog.pg_class as target
+               on target.oid = constraint_row.confrelid
+             where namespace.nspname = 'public'
+               and source.relname = 'work_order_items'
+               and constraint_row.contype = 'f'
+             order by constraint_row.conname`,
+          )).rows;
+          expect(foreignKeys).toEqual([
+            {
+              constraint_name: "work_order_items_added_by_user_id_fkey",
+              delete_action: "RESTRICT",
+              target_table: "user_profiles",
+            },
+            {
+              constraint_name: "work_order_items_product_id_fkey",
+              delete_action: "RESTRICT",
+              target_table: "products",
+            },
+            {
+              constraint_name: "work_order_items_work_order_id_fkey",
+              delete_action: "RESTRICT",
+              target_table: "work_orders",
+            },
+          ]);
+
+          const constraints = (await database.query<{
+            definition: string;
+            name: string;
+            type: string;
+          }>(
+            `select constraint_row.conname as name,
+                    constraint_row.contype as type,
+                    pg_catalog.pg_get_constraintdef(constraint_row.oid) as definition
+             from pg_catalog.pg_constraint as constraint_row
+             join pg_catalog.pg_class as relation
+               on relation.oid = constraint_row.conrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname = 'work_order_items'
+               and constraint_row.contype in ('c', 'u')
+             order by constraint_row.conname`,
+          )).rows;
+          expect(constraints).toEqual([
+            {
+              definition: "CHECK ((quantity > 0))",
+              name: "work_order_items_quantity_positive",
+              type: "c",
+            },
+            {
+              definition: "UNIQUE (work_order_id, product_id)",
+              name: "work_order_items_work_order_product_key",
+              type: "u",
+            },
+          ]);
+          expect((await database.query<{ index_name: string }>(
+            `select indexname as index_name
+             from pg_catalog.pg_indexes
+             where schemaname = 'public'
+               and tablename = 'work_order_items'
+             order by indexname`,
+          )).rows).toEqual([
+            { index_name: "work_order_items_pkey" },
+            { index_name: "work_order_items_product_id_idx" },
+            { index_name: "work_order_items_work_order_product_key" },
+          ]);
+
+          const actorId = fixture.actors.admin.profileId;
+          const projectId = await createProject(database, actorId);
+          const workOrderId = await insertWorkOrder(database, {
+            actorId,
+            number: "RN-8200-0001",
+            projectId,
+          });
+          const productId = await createWorkOrderItemProduct(database, actorId);
+          const inserted = (await database.query<{
+            added_at: Date;
+            id: string;
+            quantity: string;
+          }>(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1, $2, 1, $3)
+             returning id, quantity, added_at`,
+            [workOrderId, productId, actorId],
+          )).rows[0]!;
+          expect(inserted).toMatchObject({
+            added_at: expect.any(Date),
+            id: expect.any(String),
+            quantity: "1",
+          });
+          await expectRejected(
+            database,
+            () => database.query(
+              `insert into public.work_order_items
+                 (work_order_id, product_id, quantity, added_by_user_id)
+               values ($1, $2, 1, $3)`,
+              [workOrderId, productId, actorId],
+            ),
+            "23505",
+          );
+          for (const quantity of [0, -1]) {
+            const anotherProductId = await createWorkOrderItemProduct(database, actorId);
+            await expectRejected(
+              database,
+              () => database.query(
+                `insert into public.work_order_items
+                   (work_order_id, product_id, quantity, added_by_user_id)
+                 values ($1, $2, $3, $4)`,
+                [workOrderId, anotherProductId, quantity, actorId],
+              ),
+              "23514",
+            );
+          }
+        });
+      });
+
+      it("allows trusted Draft item changes without domain side effects", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actorId = fixture.actors.admin.profileId;
+          const projectId = await createProject(database, actorId);
+          const workOrderId = await insertWorkOrder(database, {
+            actorId,
+            number: "RN-8201-0001",
+            projectId,
+          });
+          const productId = await createWorkOrderItemProduct(database, actorId);
+          const before = (await database.query<{
+            audits: string;
+            balance_quantity: string;
+            movements: string;
+            project: Record<string, unknown>;
+            project_components: string;
+            project_products: string;
+            work_order_status: string;
+          }>(
+            `select
+               (select count(*)::text from public.audit_logs) as audits,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1) as balance_quantity,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select pg_catalog.to_jsonb(project) from public.projects as project
+                where project.id = $2) as project,
+               (select count(*)::text from public.project_product_components
+                where project_product_id in (
+                  select id from public.project_products where project_id = $2
+                )) as project_components,
+               (select count(*)::text from public.project_products
+                where project_id = $2) as project_products,
+               (select status from public.work_orders where id = $3) as work_order_status`,
+            [productId, projectId, workOrderId],
+          )).rows[0]!;
+
+          const itemId = (await database.query<{ id: string }>(
+            `insert into public.work_order_items
+               (work_order_id, product_id, quantity, added_by_user_id)
+             values ($1, $2, 2, $3)
+             returning id`,
+            [workOrderId, productId, actorId],
+          )).rows[0]!.id;
+          expect((await database.query<{ quantity: string }>(
+            `update public.work_order_items
+             set quantity = 3
+             where id = $1
+             returning quantity`,
+            [itemId],
+          )).rows).toEqual([{ quantity: "3" }]);
+          expect((await database.query(
+            "delete from public.work_order_items where id = $1 returning id",
+            [itemId],
+          )).rowCount).toBe(1);
+
+          const after = (await database.query(
+            `select
+               (select count(*)::text from public.audit_logs) as audits,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1) as balance_quantity,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select pg_catalog.to_jsonb(project) from public.projects as project
+                where project.id = $2) as project,
+               (select count(*)::text from public.project_product_components
+                where project_product_id in (
+                  select id from public.project_products where project_id = $2
+                )) as project_components,
+               (select count(*)::text from public.project_products
+                where project_id = $2) as project_products,
+               (select status from public.work_orders where id = $3) as work_order_status`,
+            [productId, projectId, workOrderId],
+          )).rows[0];
+          expect(after).toEqual(before);
+        });
+      });
+
+      it("rejects every item mutation involving a Finished Work Order with WOR04", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actorId = fixture.actors.admin.profileId;
+          const projectId = await createProject(database, actorId);
+          const draftId = await insertWorkOrder(database, {
+            actorId,
+            number: "RN-8202-0001",
+            projectId,
+          });
+          const finishedId = await insertWorkOrder(database, {
+            actorId,
+            number: "RN-8202-0002",
+            projectId,
+          });
+          const firstProductId = await createWorkOrderItemProduct(database, actorId);
+          const secondProductId = await createWorkOrderItemProduct(database, actorId);
+          const itemId = (await database.query<{ id: string }>(
+            `insert into public.work_order_items
+               (work_order_id, product_id, quantity, added_by_user_id)
+             values ($1, $2, 1, $3)
+             returning id`,
+            [finishedId, firstProductId, actorId],
+          )).rows[0]!.id;
+          await database.query(
+            `update public.work_orders
+             set status = 'finished',
+                 finished_at = pg_catalog.now(),
+                 finished_by_user_id = $2,
+                 updated_at = pg_catalog.now(),
+                 updated_by_user_id = $2
+             where id = $1`,
+            [finishedId, actorId],
+          );
+
+          for (const operation of [
+            () => database.query(
+              `insert into public.work_order_items
+                 (work_order_id, product_id, quantity, added_by_user_id)
+               values ($1, $2, 1, $3)`,
+              [finishedId, secondProductId, actorId],
+            ),
+            () => database.query(
+              "update public.work_order_items set quantity = 2 where id = $1",
+              [itemId],
+            ),
+            () => database.query(
+              "delete from public.work_order_items where id = $1",
+              [itemId],
+            ),
+            () => database.query(
+              "update public.work_order_items set work_order_id = $2 where id = $1",
+              [itemId, draftId],
+            ),
+          ]) {
+            await expectRejected(
+              database,
+              operation,
+              "WOR04",
+              "Finished Work Order items are immutable",
+            );
+          }
+
+          const draftItemId = (await database.query<{ id: string }>(
+            `insert into public.work_order_items
+               (work_order_id, product_id, quantity, added_by_user_id)
+             values ($1, $2, 1, $3)
+             returning id`,
+            [draftId, secondProductId, actorId],
+          )).rows[0]!.id;
+          await expectRejected(
+            database,
+            () => database.query(
+              "update public.work_order_items set work_order_id = $2 where id = $1",
+              [draftItemId, finishedId],
+            ),
+            "WOR04",
+            "Finished Work Order items are immutable",
+          );
+          expect((await database.query<{ work_order_id: string }>(
+            "select work_order_id from public.work_order_items where id = $1",
+            [draftItemId],
+          )).rows).toEqual([{ work_order_id: draftId }]);
+        });
+      });
+
+      it("enforces the read boundary, direct-write denial, and hardened trigger contract", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actorId = fixture.actors.admin.profileId;
+          const projectId = await createProject(database, actorId);
+          const workOrderId = await insertWorkOrder(database, {
+            actorId,
+            number: "RN-8203-0001",
+            projectId,
+          });
+          const productId = await createWorkOrderItemProduct(database, actorId);
+          const itemId = (await database.query<{ id: string }>(
+            `insert into public.work_order_items
+               (work_order_id, product_id, quantity, added_by_user_id)
+             values ($1, $2, 1, $3)
+             returning id`,
+            [workOrderId, productId, actorId],
+          )).rows[0]!.id;
+
+          await actAs(database, fixture.actors.admin);
+          expect((await database.query(
+            "select id from public.work_order_items where id = $1",
+            [itemId],
+          )).rows).toEqual([{ id: itemId }]);
+          await database.query("reset role");
+
+          await setOnlyWorkOrderPermission(
+            database,
+            fixture.actors.unpermitted,
+            actorId,
+            "work_orders.view",
+          );
+          await actAs(database, fixture.actors.unpermitted);
+          expect((await database.query<{
+            inventory_view: boolean;
+            projects_view: boolean;
+          }>(
+            `select public.has_permission('inventory.view') as inventory_view,
+                    public.has_permission('projects.view') as projects_view`,
+          )).rows).toEqual([{
+            inventory_view: false,
+            projects_view: false,
+          }]);
+          expect((await database.query(
+            "select id from public.work_order_items where id = $1",
+            [itemId],
+          )).rows).toEqual([{ id: itemId }]);
+          await database.query("reset role");
+
+          for (const [actor, permission] of [
+            [fixture.actors.productCreator, null],
+            [fixture.actors.supplierCreator, "inventory.view"],
+            [fixture.actors.inactive, "work_orders.view"],
+          ] as const) {
+            await setOnlyWorkOrderPermission(database, actor, actorId, permission);
+            await actAs(database, actor);
+            expect((await database.query(
+              "select id from public.work_order_items where id = $1",
+              [itemId],
+            )).rows).toEqual([]);
+            await database.query("reset role");
+          }
+
+          const tableSecurity = (await database.query<{
+            authenticated_delete: boolean;
+            authenticated_insert: boolean;
+            authenticated_select: boolean;
+            authenticated_update: boolean;
+            policy_expression: string;
+            row_security: boolean;
+          }>(
+            `select relation.relrowsecurity as row_security,
+                    pg_catalog.has_table_privilege(
+                      'authenticated', relation.oid, 'select'
+                    ) as authenticated_select,
+                    pg_catalog.has_table_privilege(
+                      'authenticated', relation.oid, 'insert'
+                    ) as authenticated_insert,
+                    pg_catalog.has_table_privilege(
+                      'authenticated', relation.oid, 'update'
+                    ) as authenticated_update,
+                    pg_catalog.has_table_privilege(
+                      'authenticated', relation.oid, 'delete'
+                    ) as authenticated_delete,
+                    pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+                      as policy_expression
+             from pg_catalog.pg_class as relation
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             join pg_catalog.pg_policy as policy
+               on policy.polrelid = relation.oid
+             where namespace.nspname = 'public'
+               and relation.relname = 'work_order_items'
+               and policy.polname = 'work_order_items_select_authorized'`,
+          )).rows;
+          expect(tableSecurity).toEqual([{
+            authenticated_delete: false,
+            authenticated_insert: false,
+            authenticated_select: true,
+            authenticated_update: false,
+            policy_expression: "(current_user_is_admin() OR has_permission('work_orders.view'::text))",
+            row_security: true,
+          }]);
+
+          const helper = (await database.query<{
+            anon_execute: boolean;
+            authenticated_execute: boolean;
+            public_execute: boolean;
+            security_definer: boolean;
+            settings: string[];
+            volatility: string;
+          }>(
+            `select routine.prosecdef as security_definer,
+                    routine.proconfig as settings,
+                    routine.provolatile as volatility,
+                    pg_catalog.has_function_privilege(
+                      'anon', routine.oid, 'execute'
+                    ) as anon_execute,
+                    pg_catalog.has_function_privilege(
+                      'authenticated', routine.oid, 'execute'
+                    ) as authenticated_execute,
+                    exists (
+                      select 1
+                      from pg_catalog.aclexplode(routine.proacl) as privilege
+                      where privilege.grantee = 0
+                        and privilege.privilege_type = 'EXECUTE'
+                    ) as public_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             where namespace.nspname = 'public'
+               and routine.proname = 'enforce_work_order_item_parent_draft'`,
+          )).rows;
+          expect(helper).toEqual([{
+            anon_execute: false,
+            authenticated_execute: false,
+            public_execute: false,
+            security_definer: true,
+            settings: ['search_path=""'],
+            volatility: "v",
+          }]);
+          const triggerDefinition = (await database.query<{ definition: string }>(
+            `select pg_catalog.pg_get_triggerdef(trigger.oid) as definition
+             from pg_catalog.pg_trigger as trigger
+             join pg_catalog.pg_class as relation
+               on relation.oid = trigger.tgrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname = 'work_order_items'
+               and trigger.tgname = 'work_order_items_enforce_parent_draft'
+               and not trigger.tgisinternal`,
+          )).rows[0]!.definition;
+          expect(triggerDefinition).toContain("BEFORE INSERT OR DELETE OR UPDATE");
+          expect(triggerDefinition).toContain("FOR EACH ROW");
+        });
+
+        expectPermissionDenied((await fixture.anonymousClient
+          .from("work_order_items").select("id").limit(1)).error);
+        const directInsert = await fixture.actors.admin.client
+          .from("work_order_items").insert({
+            added_by_user_id: fixture.actors.admin.profileId,
+            product_id: randomUUID(),
+            quantity: 1,
+            work_order_id: randomUUID(),
+          });
+        expectPermissionDenied(directInsert.error);
+        expectPermissionDenied((await fixture.actors.admin.client
+          .from("work_order_items").update({ quantity: 2 })
+          .eq("id", randomUUID())).error);
+        expectPermissionDenied((await fixture.actors.admin.client
+          .from("work_order_items").delete()
+          .eq("id", randomUUID())).error);
+      });
+
+      it("serializes item mutation and finishing through the parent Work Order lock", async () => {
+        const fixture = requireHarness();
+        const actorId = fixture.actors.admin.profileId;
+        const projectId = randomUUID();
+        const workOrderId = randomUUID();
+        const productId = randomUUID();
+        const applicationName = `work-order-item-lock-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const itemWriter = clients[0];
+          const finisher = clients[1];
+          const observer = clients[2];
+          if (!itemWriter || !finisher || !observer) {
+            throw new Error("Work Order item concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let waitingFinish: Promise<unknown> | undefined;
+          let waitingInsert: Promise<unknown> | undefined;
+          const waitForLock = async (name: string) => {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const activity = await observer.query<{
+                wait_event_type: string | null;
+              }>(
+                `select wait_event_type
+                 from pg_catalog.pg_stat_activity
+                 where application_name = $1`,
+                [name],
+              );
+              if (activity.rows[0]?.wait_event_type === "Lock") return;
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            throw new Error(`Expected PostgreSQL lock wait for ${name}`);
+          };
+
+          try {
+            await observer.query("begin");
+            await observer.query(
+              `insert into public.projects (
+                 id, name, customer_name, start_date, delivery_date,
+                 created_by_user_id, updated_by_user_id
+               ) values (
+                 $1, 'Item concurrency Project', 'Customer', '2026-09-21',
+                 '2026-09-30', $2, $2
+               )`,
+              [projectId, actorId],
+            );
+            await observer.query(
+              `insert into public.products (
+                 id, serial_number, name, category, product_kind,
+                 created_by_user_id, updated_by_user_id
+               ) values ($1, $2, 'Item concurrency Product', 'Work Order',
+                 'component', $3, $3)`,
+              [productId, createTestSerialNumber(), actorId],
+            );
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, project_id, customer_name_snapshot,
+                 description, created_by_user_id, updated_by_user_id
+               ) values ($1, 'RN-8204-0001', $2, 'Customer', 'Assembly', $3, $3)`,
+              [workOrderId, projectId, actorId],
+            );
+            await observer.query("commit");
+            setupCommitted = true;
+
+            // Item mutation owns the parent lock; Finish must wait.
+            await itemWriter.query("begin");
+            await itemWriter.query(
+              `insert into public.work_order_items
+                 (work_order_id, product_id, quantity, added_by_user_id)
+               values ($1, $2, 1, $3)`,
+              [workOrderId, productId, actorId],
+            );
+            await finisher.query("begin");
+            await finisher.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [applicationName],
+            );
+            waitingFinish = finisher.query(
+              `update public.work_orders
+               set status = 'finished', finished_at = pg_catalog.now(),
+                   finished_by_user_id = $2, updated_at = pg_catalog.now(),
+                   updated_by_user_id = $2
+               where id = $1`,
+              [workOrderId, actorId],
+            );
+            await waitForLock(applicationName);
+            await itemWriter.query("rollback");
+            await waitingFinish;
+            waitingFinish = undefined;
+            await finisher.query("rollback");
+
+            // Finish owns the parent lock; item mutation must wait until the
+            // status decision ends. Roll back to keep shared dev removable.
+            await finisher.query("begin");
+            await finisher.query(
+              `update public.work_orders
+               set status = 'finished', finished_at = pg_catalog.now(),
+                   finished_by_user_id = $2, updated_at = pg_catalog.now(),
+                   updated_by_user_id = $2
+               where id = $1`,
+              [workOrderId, actorId],
+            );
+            await itemWriter.query("begin");
+            await itemWriter.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [`${applicationName}-item`],
+            );
+            waitingInsert = itemWriter.query(
+              `insert into public.work_order_items
+                 (work_order_id, product_id, quantity, added_by_user_id)
+               values ($1, $2, 1, $3)`,
+              [workOrderId, productId, actorId],
+            );
+            await waitForLock(`${applicationName}-item`);
+            await finisher.query("rollback");
+            await waitingInsert;
+            waitingInsert = undefined;
+            await itemWriter.query("rollback");
+          } finally {
+            if (waitingFinish) {
+              await itemWriter.query("rollback");
+              await waitingFinish.catch(() => undefined);
+              await finisher.query("rollback");
+            } else if (waitingInsert) {
+              await finisher.query("rollback");
+              await waitingInsert.catch(() => undefined);
+              await itemWriter.query("rollback");
+            } else {
+              await itemWriter.query("rollback");
+              await finisher.query("rollback");
+            }
+            if (setupCommitted) {
+              await observer.query(
+                "delete from public.work_order_items where work_order_id = $1",
+                [workOrderId],
+              );
+              await observer.query("delete from public.work_orders where id = $1", [workOrderId]);
+              await observer.query(
+                "delete from public.inventory_balances where product_id = $1",
+                [productId],
+              );
+              await observer.query("delete from public.products where id = $1", [productId]);
+              await observer.query("delete from public.projects where id = $1", [projectId]);
+            } else {
+              await observer.query("rollback");
+            }
+          }
+        });
+      });
+
+      it.todo(
+        "committed Finish winning the item-mutation race requires a disposable database because Finished Work Orders are intentionally undeletable",
+      );
     },
   );
 }
