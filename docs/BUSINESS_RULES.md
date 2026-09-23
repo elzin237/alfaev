@@ -584,6 +584,13 @@ Rules:
 User manually selects Project after the numbered Draft has been created.
 
 Customer is auto-filled from the selected Project when the Draft is saved/updated.
+Saved Drafts may remain incomplete: clearing Project also clears the Customer
+snapshot, and blank Description normalizes to NULL. A new or replacement Project
+must be open (`planned`, `in_progress`, or `on_hold`), while an existing selected
+Project may be retained after later completion/cancellation. Saving the same Project
+refreshes Customer from the trusted current Project row. A normalized no-op changes
+neither update metadata nor audit history, and stale `updated_at` submissions are
+rejected rather than overwriting newer Draft state.
 
 One Project may have one or many Work Orders. No uniqueness rule may limit a Project
 to one Work Order. Draft Work Order materials integrate with the Project's planned

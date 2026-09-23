@@ -2292,15 +2292,21 @@ No scanner yet.
 ## 108 — Add Draft Save / Update Backend
 
 Goal:
-- authorized Draft-only updates
+- trusted authorized Draft-only header updates for Project, derived Customer snapshot,
+  and Description
 
 Protect:
 - Finished cannot be updated
 - Customer snapshot derives from selected Project
-- Project material intent stays synchronized with planned requirements
-- concurrent Draft Work Orders cannot double-allocate the same planned requirement
+- new/replacement Project must be open while an existing historical selection may remain
+- stale `updated_at` is rejected under a Work Order row lock
+- normalized no-op does not update metadata or create audit noise
 
 Audit only meaningful saved changes according to audit policy.
+
+Task 108 does not persist WorkOrderItems or allocate Project requirements. Task 114
+owns trusted item persistence and the planned-requirement allocation boundary across
+multiple Draft Work Orders.
 
 ---
 

@@ -52,6 +52,11 @@ interface WorkOrderProjectChoiceRow {
   status: "in_progress" | "on_hold" | "planned";
 }
 
+interface UpdatedDraftWorkOrderRow {
+  updated_at: string;
+  work_order_id: string;
+}
+
 async function actAs(
   database: PoolClient,
   actor: SecurityActor,
@@ -238,6 +243,29 @@ async function listWorkOrderProjectChoices(
   return (await database.query<WorkOrderProjectChoiceRow>(
     "select * from public.list_work_order_project_choices()",
   )).rows;
+}
+
+async function updateDraftWorkOrder(
+  database: PoolClient,
+  values: {
+    description: string | null;
+    expectedUpdatedAt: string | null;
+    projectId: string | null;
+    workOrderId: string | null;
+  },
+): Promise<UpdatedDraftWorkOrderRow> {
+  return (await database.query<UpdatedDraftWorkOrderRow>(
+    `select updated.work_order_id, updated.updated_at::text as updated_at
+     from public.update_draft_work_order(
+       $1::uuid, $2::uuid, $3::text, $4::timestamptz
+     ) as updated`,
+    [
+      values.workOrderId,
+      values.projectId,
+      values.description,
+      values.expectedUpdatedAt,
+    ],
+  )).rows[0]!;
 }
 
 async function setOnlyWorkOrderPermission(
@@ -3000,6 +3028,879 @@ export function registerWorkOrderSchemaTests(
               table_name: "work_orders",
             },
           ]);
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.TASK108_MIGRATION !== "1")(
+    "Task 108 trusted Draft Work Order update (requires deployed migration)",
+    () => {
+      it("allows Admin and edit-draft authority to save normalized trusted header data", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const editor = fixture.actors.unpermitted;
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const projectId = await createWorkOrderReadProject(database, {
+            actorId: admin.profileId,
+            customerName: "Trusted Customer",
+            name: "Trusted Draft Project",
+            status: "planned",
+          });
+          const workOrderId = randomUUID();
+          await database.query(
+            `insert into public.work_orders (
+               id, work_order_number, status,
+               created_by_user_id, updated_by_user_id
+             ) values ($1, $2, 'draft', $3, $3)`,
+            [workOrderId, `RN-${fixtureYear}-0001`, admin.profileId],
+          );
+          const original = (await database.query<{
+            created_at: Date;
+            created_by_user_id: string;
+            updated_at: string;
+          }>(
+            `select created_at, created_by_user_id,
+                    updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows[0]!;
+          const sideEffectsBefore = (await database.query(
+            `select
+               (select count(*)::text from public.work_order_items
+                where work_order_id = $1) as items,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(balance)
+                  order by balance.product_id)
+                from public.inventory_balances as balance) as balances,
+               (select pg_catalog.to_jsonb(project)
+                from public.projects as project where project.id = $2) as project`,
+            [workOrderId, projectId],
+          )).rows[0];
+
+          await actAs(database, admin);
+          const adminSave = await updateDraftWorkOrder(database, {
+            description: "  Initial description  ",
+            expectedUpdatedAt: original.updated_at,
+            projectId,
+            workOrderId,
+          });
+          await database.query("reset role");
+          expect(adminSave.work_order_id).toBe(workOrderId);
+          expect(adminSave.updated_at).not.toBe(original.updated_at);
+
+          await setOnlyWorkOrderPermission(
+            database,
+            editor,
+            admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, editor);
+          expect((await database.query<{ can_view: boolean }>(
+            "select public.has_permission('work_orders.view') as can_view",
+          )).rows).toEqual([{ can_view: false }]);
+          const editorSave = await updateDraftWorkOrder(database, {
+            description: "  Updated description  ",
+            expectedUpdatedAt: adminSave.updated_at,
+            projectId,
+            workOrderId,
+          });
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select work_order_number, project_id, customer_name_snapshot,
+                    description, status, created_at, created_by_user_id,
+                    updated_at::text as updated_at, updated_by_user_id, finished_at,
+                    finished_by_user_id
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows).toEqual([{
+            created_at: original.created_at,
+            created_by_user_id: original.created_by_user_id,
+            customer_name_snapshot: "Trusted Customer",
+            description: "Updated description",
+            finished_at: null,
+            finished_by_user_id: null,
+            project_id: projectId,
+            status: "draft",
+            updated_at: editorSave.updated_at,
+            updated_by_user_id: editor.profileId,
+            work_order_number: `RN-${fixtureYear}-0001`,
+          }]);
+
+          const audits = (await database.query<{
+            action_type: string;
+            actor_user_id: string;
+            after_data: Record<string, unknown>;
+            before_data: Record<string, unknown>;
+            entity_id: string;
+            entity_type: string;
+            summary: string;
+          }>(
+            `select actor_user_id, action_type, entity_type, entity_id,
+                    summary, before_data, after_data
+             from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'
+             order by after_data ->> 'description'`,
+            [workOrderId],
+          )).rows;
+          expect(audits).toEqual([
+            {
+              action_type: "work_order.updated",
+              actor_user_id: admin.profileId,
+              after_data: {
+                customer_name_snapshot: "Trusted Customer",
+                description: "Initial description",
+                project_id: projectId,
+              },
+              before_data: {
+                customer_name_snapshot: null,
+                description: null,
+                project_id: null,
+              },
+              entity_id: workOrderId,
+              entity_type: "work_order",
+              summary: `Updated Work Order RN-${fixtureYear}-0001`,
+            },
+            {
+              action_type: "work_order.updated",
+              actor_user_id: editor.profileId,
+              after_data: {
+                customer_name_snapshot: "Trusted Customer",
+                description: "Updated description",
+                project_id: projectId,
+              },
+              before_data: {
+                customer_name_snapshot: "Trusted Customer",
+                description: "Initial description",
+                project_id: projectId,
+              },
+              entity_id: workOrderId,
+              entity_type: "work_order",
+              summary: `Updated Work Order RN-${fixtureYear}-0001`,
+            },
+          ]);
+          expect((await database.query(
+            `select
+               (select count(*)::text from public.work_order_items
+                where work_order_id = $1) as items,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(balance)
+                  order by balance.product_id)
+                from public.inventory_balances as balance) as balances,
+               (select pg_catalog.to_jsonb(project)
+                from public.projects as project where project.id = $2) as project`,
+            [workOrderId, projectId],
+          )).rows[0]).toEqual(sideEffectsBefore);
+        });
+      });
+
+      it("supports incomplete Draft saves, clearing, no-ops, and stale rejection", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const projectId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Snapshot Customer",
+            name: "No-op Project",
+            status: "in_progress",
+          });
+          const workOrderId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${fixtureYear}-0001`,
+            projectId,
+          });
+          const beforeNoOp = (await database.query<{
+            updated_at: string;
+            updated_by_user_id: string;
+          }>(
+            `select updated_at::text as updated_at, updated_by_user_id
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows[0]!;
+          const auditBefore = (await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'`,
+            [workOrderId],
+          )).rows[0]!.count;
+
+          await actAs(database, actor);
+          const noOp = await updateDraftWorkOrder(database, {
+            description: "  Assembly work  ",
+            expectedUpdatedAt: beforeNoOp.updated_at,
+            projectId,
+            workOrderId,
+          });
+          expect(noOp).toEqual({
+            updated_at: beforeNoOp.updated_at,
+            work_order_id: workOrderId,
+          });
+
+          const changed = await updateDraftWorkOrder(database, {
+            description: "Changed once",
+            expectedUpdatedAt: noOp.updated_at,
+            projectId,
+            workOrderId,
+          });
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Changed once",
+              expectedUpdatedAt: noOp.updated_at,
+              projectId,
+              workOrderId,
+            }),
+            "WOR05",
+            "Work Order Draft has changed. Reload and try again.",
+          );
+
+          const cleared = await updateDraftWorkOrder(database, {
+            description: "   ",
+            expectedUpdatedAt: changed.updated_at,
+            projectId: null,
+            workOrderId,
+          });
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description,
+                    updated_at::text as updated_at, updated_by_user_id
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows).toEqual([{
+            customer_name_snapshot: null,
+            description: null,
+            project_id: null,
+            updated_at: cleared.updated_at,
+            updated_by_user_id: actor.profileId,
+          }]);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'`,
+            [workOrderId],
+          )).rows).toEqual([{ count: String(Number(auditBefore) + 2) }]);
+          expect((await database.query(
+            `select updated_at, updated_by_user_id
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows[0]).not.toEqual(beforeNoOp);
+        });
+      });
+
+      it("enforces Project eligibility while preserving an existing historical Project", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const existingCompletedId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Refreshed Historical Customer",
+            name: "Existing Completed Project",
+            status: "completed",
+          });
+          const otherCompletedId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Other Completed Customer",
+            name: "Other Completed Project",
+            status: "completed",
+          });
+          const cancelledId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Cancelled Customer",
+            name: "Cancelled Project",
+            status: "cancelled",
+          });
+          const openId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Open Customer",
+            name: "Open Project",
+            status: "on_hold",
+          });
+          const inProgressId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "In Progress Customer",
+            name: "In Progress Project",
+            status: "in_progress",
+          });
+          const workOrderId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${fixtureYear}-0001`,
+            projectId: existingCompletedId,
+          });
+          const cancelledWorkOrderId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${fixtureYear}-0002`,
+            projectId: cancelledId,
+          });
+          const initial = (await database.query<{ updated_at: string }>(
+            `select updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows[0]!;
+          const cancelledInitial = (await database.query<{
+            updated_at: string;
+          }>(
+            `select updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [cancelledWorkOrderId],
+          )).rows[0]!;
+
+          await actAs(database, actor);
+          const retained = await updateDraftWorkOrder(database, {
+            description: "Historical Project retained",
+            expectedUpdatedAt: initial.updated_at,
+            projectId: existingCompletedId,
+            workOrderId,
+          });
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows).toEqual([{
+            customer_name_snapshot: "Refreshed Historical Customer",
+            description: "Historical Project retained",
+            project_id: existingCompletedId,
+          }]);
+          await updateDraftWorkOrder(database, {
+            description: "Cancelled Project retained",
+            expectedUpdatedAt: cancelledInitial.updated_at,
+            projectId: cancelledId,
+            workOrderId: cancelledWorkOrderId,
+          });
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description
+             from public.work_orders where id = $1`,
+            [cancelledWorkOrderId],
+          )).rows).toEqual([{
+            customer_name_snapshot: "Cancelled Customer",
+            description: "Cancelled Project retained",
+            project_id: cancelledId,
+          }]);
+
+          for (const ineligibleId of [otherCompletedId, cancelledId]) {
+            await expectRejected(
+              database,
+              () => updateDraftWorkOrder(database, {
+                description: "Rejected replacement",
+                expectedUpdatedAt: retained.updated_at,
+                projectId: ineligibleId,
+                workOrderId,
+              }),
+              "22023",
+              "Selected Project is unavailable for Work Order Draft",
+            );
+          }
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Missing replacement",
+              expectedUpdatedAt: retained.updated_at,
+              projectId: randomUUID(),
+              workOrderId,
+            }),
+            "P0002",
+            "Project not found",
+          );
+
+          const inProgressReplacement = await updateDraftWorkOrder(database, {
+            description: "In-progress replacement",
+            expectedUpdatedAt: retained.updated_at,
+            projectId: inProgressId,
+            workOrderId,
+          });
+          const replaced = await updateDraftWorkOrder(database, {
+            description: "Open replacement",
+            expectedUpdatedAt: inProgressReplacement.updated_at,
+            projectId: openId,
+            workOrderId,
+          });
+          const cleared = await updateDraftWorkOrder(database, {
+            description: null,
+            expectedUpdatedAt: replaced.updated_at,
+            projectId: null,
+            workOrderId,
+          });
+          await database.query("reset role");
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description,
+                    updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows).toEqual([{
+            customer_name_snapshot: null,
+            description: null,
+            project_id: null,
+            updated_at: cleared.updated_at,
+          }]);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'`,
+            [workOrderId],
+          )).rows).toEqual([{ count: "4" }]);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'`,
+            [cancelledWorkOrderId],
+          )).rows).toEqual([{ count: "1" }]);
+        });
+      });
+
+      it("rejects invalid lifecycle, identity, and permission cases without mutation or audit", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const projectId = await createProject(database, admin.profileId);
+          const draftId = await insertWorkOrder(database, {
+            actorId: admin.profileId,
+            number: `RN-${fixtureYear}-0001`,
+            projectId,
+          });
+          const finishedId = await insertWorkOrder(database, {
+            actorId: admin.profileId,
+            number: `RN-${fixtureYear}-0002`,
+            projectId,
+            status: "finished",
+          });
+          const draftBefore = (await database.query<WorkOrderRow & {
+            updated_by_user_id: string;
+          }>(
+            "select * from public.work_orders where id = $1",
+            [draftId],
+          )).rows[0]!;
+          const draftExpectedUpdatedAt = (await database.query<{
+            updated_at: string;
+          }>(
+            `select updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [draftId],
+          )).rows[0]!.updated_at;
+          const auditBefore = (await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = any($1::uuid[])
+               and action_type = 'work_order.updated'`,
+            [[draftId, finishedId]],
+          )).rows[0]!.count;
+
+          await actAs(database, admin);
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Changed",
+              expectedUpdatedAt: null,
+              projectId,
+              workOrderId: draftId,
+            }),
+            "22023",
+            "Expected Work Order update timestamp is required",
+          );
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: null,
+              expectedUpdatedAt: draftExpectedUpdatedAt,
+              projectId: null,
+              workOrderId: null,
+            }),
+            "22023",
+            "Work Order ID is required",
+          );
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Changed",
+              expectedUpdatedAt: draftExpectedUpdatedAt,
+              projectId,
+              workOrderId: randomUUID(),
+            }),
+            "P0002",
+            "Work Order not found",
+          );
+          const finishedUpdatedAt = (await database.query<{
+            updated_at: string;
+          }>(
+            `select updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [finishedId],
+          )).rows[0]!.updated_at;
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Changed",
+              expectedUpdatedAt: finishedUpdatedAt,
+              projectId,
+              workOrderId: finishedId,
+            }),
+            "WOR02",
+            "Finished Work Orders cannot be modified",
+          );
+          await database.query("reset role");
+
+          const deniedActor = fixture.actors.unpermitted;
+          for (const permission of [
+            null,
+            "work_orders.view",
+            "work_orders.create",
+            "work_orders.finish",
+            "work_orders.delete_draft",
+          ] as const) {
+            await setOnlyWorkOrderPermission(
+              database,
+              deniedActor,
+              admin.profileId,
+              permission,
+            );
+            await actAs(database, deniedActor);
+            await expectRejected(
+              database,
+              () => updateDraftWorkOrder(database, {
+                description: "Denied",
+                expectedUpdatedAt: draftExpectedUpdatedAt,
+                projectId,
+                workOrderId: draftId,
+              }),
+              "42501",
+              "Access denied",
+            );
+            await database.query("reset role");
+          }
+
+          await setOnlyWorkOrderPermission(
+            database,
+            fixture.actors.inactive,
+            admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, fixture.actors.inactive);
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Denied inactive",
+              expectedUpdatedAt: draftExpectedUpdatedAt,
+              projectId,
+              workOrderId: draftId,
+            }),
+            "42501",
+            "Access denied",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select * from public.work_orders where id = $1",
+            [draftId],
+          )).rows).toEqual([draftBefore]);
+          expect((await database.query<{ count: string }>(
+            `select count(*) from public.audit_logs
+             where entity_id = any($1::uuid[])
+               and action_type = 'work_order.updated'`,
+            [[draftId, finishedId]],
+          )).rows[0]!.count).toBe(auditBefore);
+        });
+
+        expectPermissionDenied((await fixture.anonymousClient.rpc(
+          "update_draft_work_order",
+          {
+            p_description: null,
+            p_expected_updated_at: new Date().toISOString(),
+            p_project_id: null,
+            p_work_order_id: randomUUID(),
+          },
+        )).error);
+      });
+
+      it("rolls back the Draft mutation when its immutable audit append fails", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const fixtureYear = await findUnusedWorkOrderYear(database);
+          const projectId = await createProject(database, actor.profileId);
+          const workOrderId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${fixtureYear}-0001`,
+            projectId,
+          });
+          const before = (await database.query(
+            "select * from public.work_orders where id = $1",
+            [workOrderId],
+          )).rows[0];
+          const expectedUpdatedAt = (await database.query<{
+            updated_at: string;
+          }>(
+            `select updated_at::text as updated_at
+             from public.work_orders where id = $1`,
+            [workOrderId],
+          )).rows[0]!.updated_at;
+          await database.query(
+            `create function pg_temp.reject_work_order_update_audit()
+             returns trigger language plpgsql set search_path = ''
+             as $test_function$
+             begin
+               if new.action_type = 'work_order.updated' then
+                 raise exception 'Simulated Work Order audit failure'
+                   using errcode = 'TST08';
+               end if;
+               return new;
+             end;
+             $test_function$`,
+          );
+          await database.query(
+            `create trigger reject_work_order_update_audit_test
+             before insert on public.audit_logs for each row
+             execute function pg_temp.reject_work_order_update_audit()`,
+          );
+
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => updateDraftWorkOrder(database, {
+              description: "Must roll back",
+              expectedUpdatedAt,
+              projectId,
+              workOrderId,
+            }),
+            "TST08",
+            "Simulated Work Order audit failure",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select * from public.work_orders where id = $1",
+            [workOrderId],
+          )).rows).toEqual([before]);
+          expect((await database.query(
+            `select id from public.audit_logs
+             where entity_id = $1 and action_type = 'work_order.updated'`,
+            [workOrderId],
+          )).rows).toEqual([]);
+        });
+      });
+
+      it("serializes stale Draft decisions through the Work Order row lock", async () => {
+        const fixture = requireHarness();
+        const actor = fixture.actors.admin;
+        const projectId = randomUUID();
+        const workOrderId = randomUUID();
+        const applicationName = `draft-update-lock-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const winner = clients[0];
+          const staleUpdater = clients[1];
+          const observer = clients[2];
+          if (!winner || !staleUpdater || !observer) {
+            throw new Error("Draft update concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let waitingOutcome: Promise<
+            | { error: unknown; ok: false }
+            | { ok: true; value: UpdatedDraftWorkOrderRow }
+          > | undefined;
+          const initialUpdatedAt = "2026-09-21 10:00:00+00";
+          const winnerUpdatedAt = "2026-09-21 10:01:00+00";
+
+          const waitForLock = async () => {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const activity = await observer.query<{
+                wait_event_type: string | null;
+              }>(
+                `select wait_event_type
+                 from pg_catalog.pg_stat_activity
+                 where application_name = $1`,
+                [applicationName],
+              );
+              if (activity.rows[0]?.wait_event_type === "Lock") return;
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            throw new Error("Expected stale Draft update to wait on a row lock");
+          };
+
+          try {
+            const fixtureYear = await findUnusedWorkOrderYear(observer);
+            await observer.query("begin");
+            await observer.query(
+              `insert into public.projects (
+                 id, name, customer_name, start_date, delivery_date,
+                 created_by_user_id, updated_by_user_id
+               ) values (
+                 $1, 'Draft lock Project', 'Draft lock Customer',
+                 '2026-09-21', '2026-09-30', $2, $2
+               )`,
+              [projectId, actor.profileId],
+            );
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, project_id, customer_name_snapshot,
+                 description, status, created_at, created_by_user_id,
+                 updated_at, updated_by_user_id
+               ) values (
+                 $1, $2, $3, 'Draft lock Customer', 'Original', 'draft',
+                 $4, $5, $4, $5
+               )`,
+              [
+                workOrderId,
+                `RN-${fixtureYear}-0001`,
+                projectId,
+                initialUpdatedAt,
+                actor.profileId,
+              ],
+            );
+            await observer.query("commit");
+            setupCommitted = true;
+
+            await winner.query("begin");
+            await winner.query(
+              "select id from public.work_orders where id = $1 for update",
+              [workOrderId],
+            );
+
+            await staleUpdater.query("begin");
+            await staleUpdater.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [applicationName],
+            );
+            await actAs(staleUpdater, actor);
+            waitingOutcome = updateDraftWorkOrder(staleUpdater, {
+              description: "Stale contender",
+              expectedUpdatedAt: initialUpdatedAt,
+              projectId,
+              workOrderId,
+            }).then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ error, ok: false as const }),
+            );
+            await waitForLock();
+
+            await winner.query(
+              `update public.work_orders
+               set description = 'Concurrent winner', updated_at = $2,
+                   updated_by_user_id = $3
+               where id = $1`,
+              [workOrderId, winnerUpdatedAt, actor.profileId],
+            );
+            await winner.query("commit");
+            expect(await waitingOutcome).toMatchObject({
+              error: {
+                code: "WOR05",
+                message: "Work Order Draft has changed. Reload and try again.",
+              },
+              ok: false,
+            });
+            waitingOutcome = undefined;
+            await staleUpdater.query("rollback");
+
+            expect((await observer.query(
+              `select description, updated_at::text as updated_at
+               from public.work_orders where id = $1`,
+              [workOrderId],
+            )).rows).toEqual([{
+              description: "Concurrent winner",
+              updated_at: winnerUpdatedAt,
+            }]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = $1 and action_type = 'work_order.updated'`,
+              [workOrderId],
+            )).rows).toEqual([]);
+          } finally {
+            await winner.query("rollback").catch(() => undefined);
+            if (waitingOutcome) {
+              await waitingOutcome;
+            }
+            await staleUpdater.query("rollback").catch(() => undefined);
+            if (setupCommitted) {
+              await observer.query(
+                "delete from public.work_orders where id = $1",
+                [workOrderId],
+              );
+              await observer.query(
+                "delete from public.projects where id = $1",
+                [projectId],
+              );
+            } else {
+              await observer.query("rollback").catch(() => undefined);
+            }
+          }
+        });
+      });
+
+      it("uses hardened authenticated-only execution and preserves direct-write denial", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const functionRow = (await database.query<{
+            arguments: string;
+            authenticated_execute: boolean;
+            definition: string;
+            language: string;
+            anon_execute: boolean;
+            public_execute: boolean;
+            result: string;
+            security_definer: boolean;
+            settings: string[];
+            volatility: string;
+          }>(
+            `select pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+                    pg_catalog.pg_get_function_result(routine.oid) as result,
+                    pg_catalog.pg_get_functiondef(routine.oid) as definition,
+                    language.lanname as language,
+                    routine.provolatile as volatility,
+                    routine.prosecdef as security_definer,
+                    routine.proconfig as settings,
+                    pg_catalog.has_function_privilege(
+                      'anon', routine.oid, 'execute'
+                    ) as anon_execute,
+                    pg_catalog.has_function_privilege(
+                      'authenticated', routine.oid, 'execute'
+                    ) as authenticated_execute,
+                    exists (
+                      select 1 from pg_catalog.aclexplode(routine.proacl) as privilege
+                      where privilege.grantee = 0
+                        and privilege.privilege_type = 'EXECUTE'
+                    ) as public_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             join pg_catalog.pg_language as language
+               on language.oid = routine.prolang
+             where namespace.nspname = 'public'
+               and routine.proname = 'update_draft_work_order'`,
+          )).rows[0]!;
+          expect(functionRow).toMatchObject({
+            anon_execute: false,
+            arguments: "p_work_order_id uuid, p_project_id uuid, p_description text, p_expected_updated_at timestamp with time zone",
+            authenticated_execute: true,
+            language: "plpgsql",
+            public_execute: false,
+            result: "TABLE(work_order_id uuid, updated_at timestamp with time zone)",
+            security_definer: true,
+            settings: ['search_path=""'],
+            volatility: "v",
+          });
+          const normalizedDefinition = functionRow.definition.toLowerCase();
+          expect(normalizedDefinition).toContain("for update");
+          expect(normalizedDefinition).toContain("for share");
+          expect(normalizedDefinition).toContain("append_audit_log");
+          expect(normalizedDefinition).not.toContain("inventory_balances");
+          expect(normalizedDefinition).not.toContain("inventory_movements");
+          expect(normalizedDefinition).not.toContain("work_order_items");
+
+          const actor = fixture.actors.unpermitted;
+          await setOnlyWorkOrderPermission(
+            database,
+            actor,
+            fixture.actors.admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => database.query(
+              `update public.work_orders set description = 'Direct write'
+               where id = $1`,
+              [randomUUID()],
+            ),
+            "42501",
+          );
+          await database.query("reset role");
         });
       });
     },

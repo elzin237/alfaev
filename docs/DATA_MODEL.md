@@ -1040,6 +1040,13 @@ Rules:
   Description are entered; those three fields may temporarily be NULL on Draft only.
 - Draft save/update selects Project, derives Customer from Project, and saves
   Description. A Finished Work Order requires all three fields to be non-NULL.
+- A saved Draft may remain incomplete. Project NULL requires Customer snapshot NULL;
+  blank Description is normalized to NULL.
+- A new/replacement Project must be `planned`, `in_progress`, or `on_hold`. An
+  already-selected Project may be retained after later completion/cancellation, and
+  its Customer snapshot is refreshed from the trusted Project row when saved.
+- Draft header updates use the authoritative `updated_at` value for optimistic
+  concurrency. Normalized no-ops do not change update metadata or create audit noise.
 - One Project may have one or many Work Orders; `project_id` is not unique.
 - Selecting Project automatically sets/refreshes the customer snapshot while Draft.
 - Draft materials integrate with the selected Project's planned component requirements.
