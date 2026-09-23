@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import EmptyState from "../../../shared/components/EmptyState";
+import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
 import type {
   WorkOrderDetail,
   WorkOrderProjectChoice,
@@ -67,6 +68,9 @@ function WorkOrderDraftShell({
     | null
   >(null);
   const [isReloading, setIsReloading] = useState(false);
+  const [capturedSerialNumber, setCapturedSerialNumber] = useState<
+    string | null
+  >(null);
   const submissionInFlight = useRef(false);
 
   useEffect(() => {
@@ -255,12 +259,44 @@ function WorkOrderDraftShell({
         )}
       </section>
 
-      <section aria-label="Materials">
-        <EmptyState
-          title="Materials"
-          description="Materials will be added in a later step."
-        />
-      </section>
+      {canEdit ? (
+        <section
+          aria-labelledby="work-order-materials-heading"
+          className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8"
+        >
+          <h2
+            id="work-order-materials-heading"
+            className="text-xl font-bold text-zinc-900"
+          >
+            Materials
+          </h2>
+          <div className="mt-6">
+            <WorkOrderBarcodeScanInput onScan={setCapturedSerialNumber} />
+          </div>
+          {capturedSerialNumber && (
+            <p
+              role="status"
+              className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800"
+            >
+              Captured Serial Number:{" "}
+              <span className="font-mono font-semibold">
+                {capturedSerialNumber}
+              </span>
+              . Product lookup will be added next.
+            </p>
+          )}
+          <p className="mt-4 text-sm leading-6 text-zinc-500">
+            Scanned Products will appear here in a later step.
+          </p>
+        </section>
+      ) : (
+        <section aria-label="Materials">
+          <EmptyState
+            title="Materials"
+            description="Materials will be added in a later step."
+          />
+        </section>
+      )}
 
       {(canEdit || saveFeedback) && (
         <section

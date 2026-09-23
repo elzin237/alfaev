@@ -208,10 +208,55 @@ describe("WorkOrderDetailPage", () => {
       .toBeEnabled();
     expect(screen.getByRole("heading", { name: "Materials" }))
       .toBeInTheDocument();
-    expect(screen.getByText("Materials will be added in a later step."))
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .toBeInTheDocument();
+    expect(screen.getByText("Scanned Products will appear here in a later step."))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /finish|delete/i }))
       .not.toBeInTheDocument();
+  });
+
+  it("captures only the latest Serial locally without saving or resolving a Product", () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    scanner.focus();
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Captured Serial Number: 0000123. Product lookup will be added next.",
+    );
+    expect(scanner).toHaveValue("");
+    expect(scanner).toHaveFocus();
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Product added|Material added|Product found/i))
+      .not.toBeInTheDocument();
+
+    fireEvent.change(scanner, { target: { value: "7654321" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Captured Serial Number: 7654321.",
+    );
+    expect(screen.queryByText(/0000123/)).not.toBeInTheDocument();
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps invalid scanner input local and does not trigger Save for Later", () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Enter a 7-digit Serial Number.",
+    );
+    expect(scanner).toHaveValue("123");
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Captured Serial Number/)).not.toBeInTheDocument();
   });
 
   it("saves local Project and Description with the exact authoritative timestamp", async () => {
@@ -425,6 +470,10 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("Alpha Project")).toBeInTheDocument();
     expect(screen.getByText("Alpha Customer Snapshot")).toBeInTheDocument();
     expect(screen.getByText("Build enclosure")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByText("Materials will be added in a later step."))
+      .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save for Later" }))
       .not.toBeInTheDocument();
   });
@@ -508,6 +557,8 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Short Description")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
+      .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save|delete|finish/i }))
       .not.toBeInTheDocument();
   });
