@@ -18,8 +18,8 @@ vi.mock("../../pages/work-orders/WorkOrdersPage", () => ({
 vi.mock("../../pages/work-orders/NewWorkOrderPage", () => ({
   default: () => <h1>New Work Order route content</h1>,
 }));
-vi.mock("../../pages/work-orders/CreatedWorkOrderPage", () => ({
-  default: () => <h1>Created Work Order route content</h1>,
+vi.mock("../../pages/work-orders/WorkOrderDetailPage", () => ({
+  default: () => <h1>Work Order detail route content</h1>,
 }));
 
 import AppRouter from "./AppRouter";
@@ -84,7 +84,7 @@ describe("Work Orders route", () => {
     expect(routeMocks.hasPermission).not.toHaveBeenCalledWith("projects.view");
   });
 
-  it("keeps the temporary detail destination behind work_orders.view", async () => {
+  it("keeps the Work Order detail route behind work_orders.view", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -99,7 +99,7 @@ describe("Work Orders route", () => {
     );
 
     expect(await screen.findByRole("heading", {
-      name: "Created Work Order route content",
+      name: "Work Order detail route content",
     })).toBeInTheDocument();
     await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
       "work_orders.view",
