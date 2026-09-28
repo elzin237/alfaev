@@ -87,6 +87,43 @@ export type WorkOrderProductResolutionResult =
   | { ok: true; value: ResolvedWorkOrderProduct }
   | { ok: false; error: WorkOrderProductResolutionError };
 
+export type ExactInventoryQuantity = string;
+
+export interface WorkOrderMaterialInventory {
+  productId: string;
+  currentInventory: ExactInventoryQuantity;
+}
+
+export interface WorkOrderMaterialInventoryError {
+  code:
+    | "access_denied"
+    | "invalid_request"
+    | "inventory_unavailable"
+    | "material_inventory_failed"
+    | "material_not_found"
+    | "product_unavailable"
+    | "work_order_not_editable";
+  message: string;
+}
+
+export type WorkOrderMaterialInventoryResult =
+  | { ok: true; value: WorkOrderMaterialInventory }
+  | { ok: false; error: WorkOrderMaterialInventoryError };
+
+export interface ResolvedDraftWorkOrderMaterial {
+  productId: string;
+  serialNumber: string;
+  productName: string;
+  currentInventory: ExactInventoryQuantity;
+}
+
+export type WorkOrderMaterialLoadResult =
+  | { ok: true; value: ResolvedDraftWorkOrderMaterial }
+  | {
+    ok: false;
+    error: WorkOrderProductResolutionError | WorkOrderMaterialInventoryError;
+  };
+
 export type WorkOrderProjectChoiceStatus =
   | "planned"
   | "in_progress"
@@ -160,7 +197,12 @@ const resolvedProductAllowedKeys = new Set([
   "serial_number",
   "name",
 ]);
+const materialInventoryAllowedKeys = new Set([
+  "product_id",
+  "current_inventory",
+]);
 const productSerialNumberPattern = /^[0-9]{7}$/;
+const postgresBigintMax = 9223372036854775807n;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -550,6 +592,138 @@ export async function resolveWorkOrderProductBarcode(
     };
   } catch {
     return productResolutionFailure();
+  }
+}
+
+function materialInventoryFailure(
+  code?: string,
+): WorkOrderMaterialInventoryResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to edit this Draft.",
+      },
+    };
+  }
+
+  if (code === "WOR02") {
+    return {
+      ok: false,
+      error: {
+        code: "work_order_not_editable",
+        message: "This Work Order can no longer be edited.",
+      },
+    };
+  }
+
+  if (code === "PRD05") {
+    return {
+      ok: false,
+      error: {
+        code: "product_unavailable",
+        message: "This Product is archived or unavailable for this Work Order.",
+      },
+    };
+  }
+
+  if (code === "IVB01") {
+    return {
+      ok: false,
+      error: {
+        code: "inventory_unavailable",
+        message: "Current Inventory could not be loaded for this Product.",
+      },
+    };
+  }
+
+  if (code === "22023") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_request",
+        message: "The material Inventory request is invalid.",
+      },
+    };
+  }
+
+  if (code === "P0002") {
+    return {
+      ok: false,
+      error: {
+        code: "material_not_found",
+        message: "The Work Order or Product could not be found.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "material_inventory_failed",
+      message: "Current Inventory could not be loaded. Please try again.",
+    },
+  };
+}
+
+function parseExactInventoryQuantity(value: unknown): string | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value >= 0 ? String(value) : null;
+  }
+  if (
+    typeof value !== "string" ||
+    !/^(0|[1-9][0-9]*)$/.test(value) ||
+    value.length > 19 ||
+    BigInt(value) > postgresBigintMax
+  ) {
+    return null;
+  }
+  return value;
+}
+
+export async function getWorkOrderMaterialInventory(
+  workOrderId: string,
+  productId: string,
+): Promise<WorkOrderMaterialInventoryResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "get_work_order_material_inventory",
+      {
+        p_work_order_id: workOrderId,
+        p_product_id: productId,
+      },
+    );
+
+    if (error) return materialInventoryFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) {
+      return materialInventoryFailure();
+    }
+
+    const row: unknown = data[0];
+    const currentInventory = isRecord(row)
+      ? parseExactInventoryQuantity(row.current_inventory)
+      : null;
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== materialInventoryAllowedKeys.size ||
+      Object.keys(row).some((key) => !materialInventoryAllowedKeys.has(key)) ||
+      !isUuid(row.product_id) ||
+      row.product_id !== productId ||
+      currentInventory === null
+    ) {
+      return materialInventoryFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        productId: row.product_id,
+        currentInventory,
+      },
+    };
+  } catch {
+    return materialInventoryFailure();
   }
 }
 

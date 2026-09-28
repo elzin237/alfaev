@@ -5,11 +5,13 @@ import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import {
   getWorkOrderDetail,
+  getWorkOrderMaterialInventory,
   isWorkOrderId,
   listWorkOrderProjectChoices,
   resolveWorkOrderProductBarcode,
   updateDraftWorkOrder,
   type DraftWorkOrderUpdateInput,
+  type WorkOrderMaterialLoadResult,
 } from "../services/workOrderService";
 import {
   workOrderDetailQueryKey,
@@ -79,9 +81,32 @@ export function useWorkOrderDetail(workOrderId: string) {
       }
     },
   });
-  const barcodeResolutionMutation = useMutation({
-    mutationFn: (serialNumber: string) =>
-      resolveWorkOrderProductBarcode(workOrderId, serialNumber),
+  const materialLoadMutation = useMutation({
+    mutationFn: async (
+      serialNumber: string,
+    ): Promise<WorkOrderMaterialLoadResult> => {
+      const productResult = await resolveWorkOrderProductBarcode(
+        workOrderId,
+        serialNumber,
+      );
+      if (!productResult.ok) return productResult;
+
+      const inventoryResult = await getWorkOrderMaterialInventory(
+        workOrderId,
+        productResult.value.id,
+      );
+      if (!inventoryResult.ok) return inventoryResult;
+
+      return {
+        ok: true,
+        value: {
+          productId: productResult.value.id,
+          serialNumber: productResult.value.serialNumber,
+          productName: productResult.value.name,
+          currentInventory: inventoryResult.value.currentInventory,
+        },
+      };
+    },
     retry: false,
     onSuccess: (result) => {
       if (result.ok) return;
@@ -105,11 +130,11 @@ export function useWorkOrderDetail(workOrderId: string) {
   return {
     canEditDraft,
     detailQuery,
-    isResolvingBarcode: barcodeResolutionMutation.isPending,
+    isLoadingMaterial: materialLoadMutation.isPending,
     isSaving: saveMutation.isPending,
     projectChoicesQuery,
     reloadLatestDraft,
-    resolveBarcode: barcodeResolutionMutation.mutateAsync,
+    loadMaterial: materialLoadMutation.mutateAsync,
     saveDraft: saveMutation.mutateAsync,
   };
 }

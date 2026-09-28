@@ -25,11 +25,11 @@ function WorkOrderDetailPage() {
   const {
     canEditDraft,
     detailQuery,
-    isResolvingBarcode,
+    isLoadingMaterial,
     isSaving,
     projectChoicesQuery,
     reloadLatestDraft,
-    resolveBarcode,
+    loadMaterial,
     saveDraft,
   } =
     useWorkOrderDetail(workOrderId);
@@ -92,10 +92,10 @@ function WorkOrderDetailPage() {
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
             isSaving={isSaving}
-            isResolvingBarcode={isResolvingBarcode}
+            isLoadingMaterial={isLoadingMaterial}
             onReloadLatest={reloadLatestDraft}
             onRetryProjectChoices={() => void projectChoicesQuery.refetch()}
-            onResolveBarcode={resolveBarcode}
+            onLoadMaterial={loadMaterial}
             onSave={(submission) => saveDraft({
               ...submission,
               expectedUpdatedAt: workOrder.updatedAt,

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const detailMocks = vi.hoisted(() => ({
+  getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
   listWorkOrderProjectChoices: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock("../../../app/auth/permissionService", () => ({
   hasPermission: detailMocks.hasPermission,
 }));
 vi.mock("../services/workOrderService", () => ({
+  getWorkOrderMaterialInventory: detailMocks.getWorkOrderMaterialInventory,
   getWorkOrderDetail: detailMocks.getWorkOrderDetail,
   isWorkOrderId: (value: unknown) =>
     typeof value === "string" &&
@@ -78,6 +80,13 @@ beforeEach(() => {
       id: "00000000-0000-4000-8000-000000000030",
       serialNumber: "0000123",
       name: "Relay Module",
+    },
+  });
+  detailMocks.getWorkOrderMaterialInventory.mockResolvedValue({
+    ok: true,
+    value: {
+      productId: "00000000-0000-4000-8000-000000000030",
+      currentInventory: "17",
     },
   });
   detailMocks.updateDraftWorkOrder.mockResolvedValue({
@@ -346,28 +355,63 @@ describe("useWorkOrderDetail", () => {
     });
   });
 
-  it("resolves a barcode for the current Work Order without invalidating queries", async () => {
+  it("resolves a Product before loading exact material Inventory", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
     const { result, queryClient } = renderDetailHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
     await waitFor(() => expect(result.current.canEditDraft).toBe(true));
     await act(async () => {
-      await expect(result.current.resolveBarcode("0000123")).resolves
-        .toMatchObject({ ok: true });
+      await expect(result.current.loadMaterial("0000123")).resolves.toEqual({
+        ok: true,
+        value: {
+          productId: "00000000-0000-4000-8000-000000000030",
+          serialNumber: "0000123",
+          productName: "Relay Module",
+          currentInventory: "17",
+        },
+      });
     });
 
     expect(detailMocks.resolveWorkOrderProductBarcode)
       .toHaveBeenCalledExactlyOnceWith(workOrderId, "0000123");
+    expect(detailMocks.getWorkOrderMaterialInventory)
+      .toHaveBeenCalledExactlyOnceWith(
+        workOrderId,
+        "00000000-0000-4000-8000-000000000030",
+      );
+    expect(detailMocks.resolveWorkOrderProductBarcode.mock.invocationCallOrder[0])
+      .toBeLessThan(
+        detailMocks.getWorkOrderMaterialInventory.mock.invocationCallOrder[0]!,
+      );
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
-  it("exposes barcode-resolution pending state", async () => {
+  it("does not read Inventory when Product resolution fails", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
-    let finishResolution: ((value: unknown) => void) | undefined;
-    detailMocks.resolveWorkOrderProductBarcode.mockReturnValue(
+    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "product_not_found",
+        message: "No Product was found for this Serial Number.",
+      },
+    });
+    const { result } = renderDetailHook();
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+
+    await act(async () => {
+      await expect(result.current.loadMaterial("0000123")).resolves
+        .toMatchObject({ ok: false, error: { code: "product_not_found" } });
+    });
+    expect(detailMocks.getWorkOrderMaterialInventory).not.toHaveBeenCalled();
+  });
+
+  it("exposes pending state across the complete material-read workflow", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    let finishInventory: ((value: unknown) => void) | undefined;
+    detailMocks.getWorkOrderMaterialInventory.mockReturnValue(
       new Promise((resolve) => {
-        finishResolution = resolve;
+        finishInventory = resolve;
       }),
     );
     const { result } = renderDetailHook();
@@ -375,25 +419,24 @@ describe("useWorkOrderDetail", () => {
 
     let resolution: Promise<unknown> | undefined;
     act(() => {
-      resolution = result.current.resolveBarcode("0000123");
+      resolution = result.current.loadMaterial("0000123");
     });
-    await waitFor(() => expect(result.current.isResolvingBarcode).toBe(true));
+    await waitFor(() => expect(result.current.isLoadingMaterial).toBe(true));
 
     await act(async () => {
-      finishResolution?.({
+      finishInventory?.({
         ok: true,
         value: {
-          id: "00000000-0000-4000-8000-000000000030",
-          serialNumber: "0000123",
-          name: "Relay Module",
+          productId: "00000000-0000-4000-8000-000000000030",
+          currentInventory: "17",
         },
       });
       await resolution;
     });
-    await waitFor(() => expect(result.current.isResolvingBarcode).toBe(false));
+    await waitFor(() => expect(result.current.isLoadingMaterial).toBe(false));
   });
 
-  it("refreshes only authoritative lifecycle or permission state for resolver denials", async () => {
+  it("refreshes only authoritative lifecycle or permission state for material denials", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
     const { result, queryClient } = renderDetailHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
@@ -407,7 +450,7 @@ describe("useWorkOrderDetail", () => {
       },
     });
     await act(async () => {
-      await result.current.resolveBarcode("0000123");
+      await result.current.loadMaterial("0000123");
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["work-orders", "detail", "profile-1", workOrderId],
@@ -415,7 +458,7 @@ describe("useWorkOrderDetail", () => {
     });
 
     invalidateQueries.mockClear();
-    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValueOnce({
+    detailMocks.getWorkOrderMaterialInventory.mockResolvedValueOnce({
       ok: false,
       error: {
         code: "access_denied",
@@ -423,7 +466,7 @@ describe("useWorkOrderDetail", () => {
       },
     });
     await act(async () => {
-      await result.current.resolveBarcode("0000124");
+      await result.current.loadMaterial("0000124");
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: [
@@ -436,15 +479,15 @@ describe("useWorkOrderDetail", () => {
     });
 
     invalidateQueries.mockClear();
-    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValueOnce({
+    detailMocks.getWorkOrderMaterialInventory.mockResolvedValueOnce({
       ok: false,
       error: {
-        code: "product_not_found",
-        message: "No Product was found for this Serial Number.",
+        code: "inventory_unavailable",
+        message: "Current Inventory could not be loaded for this Product.",
       },
     });
     await act(async () => {
-      await result.current.resolveBarcode("0000125");
+      await result.current.loadMaterial("0000125");
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
   });

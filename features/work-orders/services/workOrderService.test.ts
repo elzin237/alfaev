@@ -8,6 +8,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 
 import {
   createDraftWorkOrder,
+  getWorkOrderMaterialInventory,
   getWorkOrderDetail,
   listWorkOrderProjectChoices,
   listWorkOrders,
@@ -66,6 +67,11 @@ const resolvedProductRow = {
   product_id: "00000000-0000-4000-8000-000000000030",
   serial_number: "0000123",
   name: "Relay Module",
+};
+
+const materialInventoryRow = {
+  product_id: resolvedProductRow.product_id,
+  current_inventory: "9223372036854775807",
 };
 
 beforeEach(() => vi.resetAllMocks());
@@ -456,6 +462,129 @@ describe("workOrderService", () => {
       error: {
         code: "product_resolution_failed",
         message: "The Product could not be resolved. Please try again.",
+      },
+    });
+  });
+
+  it("reads exact material Inventory through the trusted RPC without Number coercion", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [materialInventoryRow],
+      error: null,
+    });
+
+    await expect(getWorkOrderMaterialInventory(
+      detailRow.work_order_id,
+      resolvedProductRow.product_id,
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        productId: resolvedProductRow.product_id,
+        currentInventory: "9223372036854775807",
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_work_order_material_inventory",
+      {
+        p_work_order_id: detailRow.work_order_id,
+        p_product_id: resolvedProductRow.product_id,
+      },
+    );
+    expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty(
+      "p_inventory_view",
+    );
+  });
+
+  it("normalizes only a safe numeric Inventory response to exact decimal text", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{ ...materialInventoryRow, current_inventory: 0 }],
+      error: null,
+    });
+
+    await expect(getWorkOrderMaterialInventory(
+      detailRow.work_order_id,
+      resolvedProductRow.product_id,
+    )).resolves.toMatchObject({
+      ok: true,
+      value: { currentInventory: "0" },
+    });
+  });
+
+  it.each([
+    ["different Product", { ...materialInventoryRow, product_id: detailRow.work_order_id }],
+    ["invalid UUID", { ...materialInventoryRow, product_id: "invalid" }],
+    ["missing field", { product_id: materialInventoryRow.product_id }],
+    ["extra field", { ...materialInventoryRow, product_name: "Hidden" }],
+    ["unsafe number", { ...materialInventoryRow, current_inventory: 9007199254740992 }],
+    ["negative", { ...materialInventoryRow, current_inventory: "-1" }],
+    ["decimal", { ...materialInventoryRow, current_inventory: "1.5" }],
+    ["leading zero", { ...materialInventoryRow, current_inventory: "01" }],
+    ["overflow", { ...materialInventoryRow, current_inventory: "9223372036854775808" }],
+    ["missing row", null],
+  ])("rejects malformed material Inventory with %s", async (_label, row) => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: row === null ? [] : [row],
+      error: null,
+    });
+
+    await expect(getWorkOrderMaterialInventory(
+      detailRow.work_order_id,
+      resolvedProductRow.product_id,
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "material_inventory_failed",
+        message: "Current Inventory could not be loaded. Please try again.",
+      },
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied", "You no longer have permission to edit this Draft."],
+    ["WOR02", "work_order_not_editable", "This Work Order can no longer be edited."],
+    [
+      "PRD05",
+      "product_unavailable",
+      "This Product is archived or unavailable for this Work Order.",
+    ],
+    [
+      "IVB01",
+      "inventory_unavailable",
+      "Current Inventory could not be loaded for this Product.",
+    ],
+    ["22023", "invalid_request", "The material Inventory request is invalid."],
+    ["P0002", "material_not_found", "The Work Order or Product could not be found."],
+    [
+      "XX000",
+      "material_inventory_failed",
+      "Current Inventory could not be loaded. Please try again.",
+    ],
+  ])("maps material Inventory error %s safely", async (
+    providerCode,
+    code,
+    message,
+  ) => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw backend details" },
+    });
+
+    await expect(getWorkOrderMaterialInventory(
+      detailRow.work_order_id,
+      resolvedProductRow.product_id,
+    )).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("maps thrown material Inventory failures without exposing raw details", async () => {
+    serviceMocks.rpc.mockRejectedValue(new Error("raw provider network details"));
+
+    await expect(getWorkOrderMaterialInventory(
+      detailRow.work_order_id,
+      resolvedProductRow.product_id,
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "material_inventory_failed",
+        message: "Current Inventory could not be loaded. Please try again.",
       },
     });
   });

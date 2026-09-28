@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import EmptyState from "../../../shared/components/EmptyState";
 import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
+import WorkOrderMaterialsTable from "./WorkOrderMaterialsTable";
+import type { DraftWorkOrderMaterial } from "./WorkOrderMaterialRow";
 import type {
   WorkOrderDetail,
-  ResolvedWorkOrderProduct,
-  WorkOrderProductResolutionResult,
+  WorkOrderMaterialLoadResult,
   WorkOrderProjectChoice,
   WorkOrderUpdateResult,
 } from "../services/workOrderService";
@@ -22,12 +23,12 @@ interface WorkOrderDraftShellProps {
   projectChoicesError: string | null;
   projectChoicesLoading: boolean;
   isSaving: boolean;
-  isResolvingBarcode: boolean;
+  isLoadingMaterial: boolean;
   onReloadLatest: () => Promise<void>;
   onRetryProjectChoices: () => void;
-  onResolveBarcode: (
+  onLoadMaterial: (
     serialNumber: string,
-  ) => Promise<WorkOrderProductResolutionResult>;
+  ) => Promise<WorkOrderMaterialLoadResult>;
   onSave: (
     submission: WorkOrderDraftSubmission,
   ) => Promise<WorkOrderUpdateResult>;
@@ -59,10 +60,10 @@ function WorkOrderDraftShell({
   projectChoicesError,
   projectChoicesLoading,
   isSaving,
-  isResolvingBarcode,
+  isLoadingMaterial,
   onReloadLatest,
   onRetryProjectChoices,
-  onResolveBarcode,
+  onLoadMaterial,
   onSave,
 }: WorkOrderDraftShellProps) {
   const [selectedProjectId, setSelectedProjectId] = useState(
@@ -76,15 +77,13 @@ function WorkOrderDraftShell({
     | null
   >(null);
   const [isReloading, setIsReloading] = useState(false);
-  const [resolvedProduct, setResolvedProduct] = useState<
-    ResolvedWorkOrderProduct | null
-  >(null);
+  const [materials, setMaterials] = useState<DraftWorkOrderMaterial[]>([]);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const barcodeResolutionInFlight = useRef(false);
   const submissionInFlight = useRef(false);
 
   useEffect(() => {
-    setResolvedProduct(null);
+    setMaterials([]);
     setBarcodeError(null);
   }, [workOrder.id]);
 
@@ -157,15 +156,20 @@ function WorkOrderDraftShell({
   }
 
   async function handleBarcodeScan(serialNumber: string) {
-    if (barcodeResolutionInFlight.current || isResolvingBarcode) return;
+    if (barcodeResolutionInFlight.current || isLoadingMaterial) return;
 
     barcodeResolutionInFlight.current = true;
-    setResolvedProduct(null);
     setBarcodeError(null);
     try {
-      const result = await onResolveBarcode(serialNumber);
+      const result = await onLoadMaterial(serialNumber);
       if (result.ok) {
-        setResolvedProduct(result.value);
+        setMaterials((current) => [
+          ...current,
+          {
+            ...result.value,
+            quantity: "",
+          },
+        ]);
       } else {
         setBarcodeError(result.error.message);
       }
@@ -174,6 +178,18 @@ function WorkOrderDraftShell({
     } finally {
       barcodeResolutionInFlight.current = false;
     }
+  }
+
+  function handleQuantityChange(index: number, quantity: string) {
+    setMaterials((current) => current.map((material, materialIndex) =>
+      materialIndex === index ? { ...material, quantity } : material
+    ));
+  }
+
+  function handleRemoveMaterial(index: number) {
+    setMaterials((current) => current.filter((_, materialIndex) =>
+      materialIndex !== index
+    ));
   }
 
   return (
@@ -307,29 +323,14 @@ function WorkOrderDraftShell({
           </h2>
           <div className="mt-6">
             <WorkOrderBarcodeScanInput
-              disabled={isResolvingBarcode}
+              disabled={isLoadingMaterial}
               onScan={(serialNumber) => void handleBarcodeScan(serialNumber)}
             />
           </div>
-          {isResolvingBarcode && (
+          {isLoadingMaterial && (
             <p role="status" className="mt-4 text-sm text-zinc-600">
-              Resolving Product...
+              Loading material...
             </p>
-          )}
-          {resolvedProduct && (
-            <div
-              role="status"
-              className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
-            >
-              <p className="font-semibold">Resolved Product</p>
-              <p className="mt-2">
-                Serial Number:{" "}
-                <span className="font-mono font-semibold">
-                  {resolvedProduct.serialNumber}
-                </span>
-              </p>
-              <p className="mt-1">Name: {resolvedProduct.name}</p>
-            </div>
           )}
           {barcodeError && (
             <p
@@ -339,9 +340,11 @@ function WorkOrderDraftShell({
               {barcodeError}
             </p>
           )}
-          <p className="mt-4 text-sm leading-6 text-zinc-500">
-            Scanned Products will appear here in a later step.
-          </p>
+          <WorkOrderMaterialsTable
+            materials={materials}
+            onQuantityChange={handleQuantityChange}
+            onRemove={handleRemoveMaterial}
+          />
         </section>
       ) : (
         <section aria-label="Materials">

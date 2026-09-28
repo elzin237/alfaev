@@ -12,7 +12,7 @@ const pageMocks = vi.hoisted(() => ({
   detailRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
   reloadLatestDraft: vi.fn(),
-  resolveBarcode: vi.fn(),
+  loadMaterial: vi.fn(),
   saveDraft: vi.fn(),
   useWorkOrderDetail: vi.fn(),
 }));
@@ -68,9 +68,9 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       refetch: pageMocks.projectChoicesRefetch,
     },
     isSaving: false,
-    isResolvingBarcode: false,
+    isLoadingMaterial: false,
     reloadLatestDraft: pageMocks.reloadLatestDraft,
-    resolveBarcode: pageMocks.resolveBarcode,
+    loadMaterial: pageMocks.loadMaterial,
     saveDraft: pageMocks.saveDraft,
     ...overrides,
   };
@@ -99,12 +99,13 @@ beforeEach(() => {
       updatedAt: "2026-09-22T10:01:00.123456+00:00",
     },
   });
-  pageMocks.resolveBarcode.mockResolvedValue({
+  pageMocks.loadMaterial.mockResolvedValue({
     ok: true,
     value: {
-      id: "00000000-0000-4000-8000-000000000030",
+      productId: "00000000-0000-4000-8000-000000000030",
       serialNumber: "0000123",
-      name: "Relay Module",
+      productName: "Relay Module",
+      currentInventory: "17",
     },
   });
   pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
@@ -221,13 +222,13 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
       .toBeInTheDocument();
-    expect(screen.getByText("Scanned Products will appear here in a later step."))
+    expect(screen.getByText("No materials added yet."))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /finish|delete/i }))
       .not.toBeInTheDocument();
   });
 
-  it("resolves only the latest scanned Product without saving the Draft or a material", async () => {
+  it("adds distinct scanned Products as local material rows with exact Inventory", async () => {
     renderPage();
     const scanner = screen.getByRole("textbox", {
       name: "Scan Product Barcode",
@@ -236,37 +237,142 @@ describe("WorkOrderDetailPage", () => {
     fireEvent.change(scanner, { target: { value: "0000123" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
 
-    await waitFor(() => expect(pageMocks.resolveBarcode)
+    await waitFor(() => expect(pageMocks.loadMaterial)
       .toHaveBeenCalledExactlyOnceWith("0000123"));
-    expect(screen.getByText("Resolved Product")).toBeInTheDocument();
-    expect(screen.getByText("Serial Number:")).toHaveTextContent("0000123");
-    expect(screen.getByText("Name: Relay Module")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Serial Number" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Product Name" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Quantity" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Current Inventory" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Remove" }))
+      .toBeInTheDocument();
+    expect(screen.getByText("0000123")).toBeInTheDocument();
+    expect(screen.getByText("Relay Module")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveValue("");
     expect(scanner).toHaveValue("");
     expect(scanner).toHaveFocus();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Product added|Material added|saved material/i))
-      .not.toBeInTheDocument();
 
-    pageMocks.resolveBarcode.mockResolvedValueOnce({
+    pageMocks.loadMaterial.mockResolvedValueOnce({
       ok: true,
       value: {
-        id: "00000000-0000-4000-8000-000000000031",
+        productId: "00000000-0000-4000-8000-000000000031",
         serialNumber: "7654321",
-        name: "Controller Board",
+        productName: "Controller Board",
+        currentInventory: "0",
       },
     });
     fireEvent.change(scanner, { target: { value: "7654321" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
-    expect(await screen.findByText("Name: Controller Board"))
+    expect(await screen.findByText("Controller Board"))
       .toBeInTheDocument();
-    expect(screen.getByText("Serial Number:")).toHaveTextContent("7654321");
-    expect(screen.queryByText(/0000123/)).not.toBeInTheDocument();
+    expect(screen.getByText("7654321")).toBeInTheDocument();
+    expect(screen.getByText("0000123")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps Quantity local, validates whole-number text, and removes without a mutation", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    fireEvent.change(quantity, { target: { value: "1.5" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Quantity must be a positive whole number.",
+    );
+    fireEvent.change(quantity, { target: { value: "0" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Quantity must be a positive whole number.",
+    );
+    fireEvent.change(quantity, { target: { value: "9223372036854775808" } });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Quantity is above the supported whole-number range.",
+    );
+    fireEvent.change(quantity, { target: { value: "18" } });
+    expect(screen.queryByText("Quantity must be a positive whole number."))
+      .not.toBeInTheDocument();
+    expect(quantity).toHaveValue("18");
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove Relay Module (0000123)",
+    }));
+    expect(screen.getByText("No materials added yet.")).toBeInTheDocument();
+    expect(pageMocks.loadMaterial).toHaveBeenCalledOnce();
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps local materials separate from Save for Later", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    fireEvent.change(quantity, { target: { value: "5" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+
+    await waitFor(() => expect(pageMocks.saveDraft)
+      .toHaveBeenCalledExactlyOnceWith({
+        projectId,
+        description: "Build enclosure",
+        expectedUpdatedAt: draft.updatedAt,
+      }));
+    expect(pageMocks.saveDraft.mock.calls[0]?.[0]).not.toHaveProperty(
+      "materials",
+    );
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveValue("5");
+  });
+
+  it("does not append a partial row when Inventory loading fails", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    expect(await screen.findByText("Relay Module")).toBeInTheDocument();
+
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "inventory_unavailable",
+        message: "Current Inventory could not be loaded for this Product.",
+      },
+    });
+    fireEvent.change(scanner, { target: { value: "7654321" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Current Inventory could not be loaded for this Product.",
+    );
+    expect(screen.getByText("Relay Module")).toBeInTheDocument();
+    expect(screen.queryByText("7654321")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(1);
   });
 
   it("blocks overlapping scans, shows pending state, and refocuses when enabled", async () => {
     let finishResolution: ((value: unknown) => void) | undefined;
-    pageMocks.resolveBarcode.mockReturnValue(new Promise((resolve) => {
+    pageMocks.loadMaterial.mockReturnValue(new Promise((resolve) => {
       finishResolution = resolve;
     }));
     const page = renderPage();
@@ -277,22 +383,23 @@ describe("WorkOrderDetailPage", () => {
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
     fireEvent.change(scanner, { target: { value: "0000124" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
-    expect(pageMocks.resolveBarcode).toHaveBeenCalledExactlyOnceWith("0000123");
+    expect(pageMocks.loadMaterial).toHaveBeenCalledExactlyOnceWith("0000123");
 
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
-      isResolvingBarcode: true,
+      isLoadingMaterial: true,
     }));
     page.rerender(pageTree());
     scanner = screen.getByRole("textbox", { name: "Scan Product Barcode" });
     expect(scanner).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("Resolving Product...");
+    expect(screen.getByRole("status")).toHaveTextContent("Loading material...");
 
     finishResolution?.({
       ok: true,
       value: {
-        id: "00000000-0000-4000-8000-000000000030",
+        productId: "00000000-0000-4000-8000-000000000030",
         serialNumber: "0000123",
-        name: "Relay Module",
+        productName: "Relay Module",
+        currentInventory: "17",
       },
     });
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
@@ -312,11 +419,15 @@ describe("WorkOrderDetailPage", () => {
       "product_resolution_failed",
       "The Product could not be resolved. Please try again.",
     ],
+    [
+      "material_inventory_failed",
+      "Current Inventory could not be loaded. Please try again.",
+    ],
   ])("shows safe inline %s feedback without fake resolved state", async (
     code,
     message,
   ) => {
-    pageMocks.resolveBarcode.mockResolvedValue({
+    pageMocks.loadMaterial.mockResolvedValue({
       ok: false,
       error: { code, message },
     });
@@ -328,7 +439,7 @@ describe("WorkOrderDetailPage", () => {
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
-    expect(screen.queryByText("Resolved Product")).not.toBeInTheDocument();
+    expect(screen.getByText("No materials added yet.")).toBeInTheDocument();
     expect(scanner).not.toBeDisabled();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
   });
