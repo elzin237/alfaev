@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 interface WorkOrderBarcodeScanInputProps {
   disabled?: boolean;
   onScan: (serialNumber: string) => void;
+  refocusOnEnable?: boolean;
 }
 
 const productSerialNumberPattern = /^[0-9]{7}$/;
@@ -10,6 +11,7 @@ const productSerialNumberPattern = /^[0-9]{7}$/;
 function WorkOrderBarcodeScanInput({
   disabled = false,
   onScan,
+  refocusOnEnable = true,
 }: WorkOrderBarcodeScanInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const wasDisabled = useRef(disabled);
@@ -17,9 +19,11 @@ function WorkOrderBarcodeScanInput({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (wasDisabled.current && !disabled) inputRef.current?.focus();
+    if (refocusOnEnable && wasDisabled.current && !disabled) {
+      inputRef.current?.focus();
+    }
     wasDisabled.current = disabled;
-  }, [disabled]);
+  }, [disabled, refocusOnEnable]);
 
   return (
     <div>

@@ -3,12 +3,17 @@ import WorkOrderMaterialRow, {
 } from "./WorkOrderMaterialRow";
 
 interface WorkOrderMaterialsTableProps {
+  focusRequest: {
+    productId: string;
+    requestId: number;
+  } | null;
   materials: DraftWorkOrderMaterial[];
-  onQuantityChange: (index: number, quantity: string) => void;
-  onRemove: (index: number) => void;
+  onQuantityChange: (productId: string, quantity: string) => void;
+  onRemove: (productId: string) => void;
 }
 
 function WorkOrderMaterialsTable({
+  focusRequest,
   materials,
   onQuantityChange,
   onRemove,
@@ -42,10 +47,12 @@ function WorkOrderMaterialsTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 bg-white">
-          {materials.map((material, index) => (
+          {materials.map((material) => (
             <WorkOrderMaterialRow
-              key={`${material.productId}-${index}`}
-              index={index}
+              key={material.productId}
+              focusRequestId={focusRequest?.productId === material.productId
+                ? focusRequest.requestId
+                : null}
               material={material}
               onQuantityChange={onQuantityChange}
               onRemove={onRemove}

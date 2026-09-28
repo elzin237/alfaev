@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -252,11 +253,12 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("0000123")).toBeInTheDocument();
     expect(screen.getByText("Relay Module")).toBeInTheDocument();
     expect(screen.getByText("17")).toBeInTheDocument();
-    expect(screen.getByRole("textbox", {
+    const firstQuantity = screen.getByRole("textbox", {
       name: "Quantity for Relay Module (0000123)",
-    })).toHaveValue("");
+    });
+    expect(firstQuantity).toHaveValue("");
     expect(scanner).toHaveValue("");
-    expect(scanner).toHaveFocus();
+    expect(firstQuantity).toHaveFocus();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
 
     pageMocks.loadMaterial.mockResolvedValueOnce({
@@ -276,6 +278,133 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("0000123")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("focuses an existing Product without replacing its Quantity or Inventory snapshot", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    fireEvent.change(quantity, { target: { value: "25" } });
+    scanner.focus();
+
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        productName: "Relay Module",
+        currentInventory: "999",
+      },
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(pageMocks.loadMaterial).toHaveBeenCalledTimes(2));
+    expect(screen.getAllByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveLength(1);
+    expect(quantity).toHaveValue("25");
+    expect(quantity).toHaveFocus();
+    const row = screen.getByText("0000123").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row!).getByText("17")).toBeInTheDocument();
+    expect(within(row!).queryByText("999")).not.toBeInTheDocument();
+  });
+
+  it("uses stable Product identity across multiple rows, removal, and rescan", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    const scan = (serialNumber: string) => {
+      fireEvent.change(scanner, { target: { value: serialNumber } });
+      fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    };
+
+    scan("0000123");
+    const quantityA = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000031",
+        serialNumber: "0000456",
+        productName: "Controller Board",
+        currentInventory: "8",
+      },
+    });
+    scan("0000456");
+    const quantityB = await screen.findByRole("textbox", {
+      name: "Quantity for Controller Board (0000456)",
+    });
+    expect(quantityB).toHaveFocus();
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000032",
+        serialNumber: "0000789",
+        productName: "Power Board",
+        currentInventory: "9",
+      },
+    });
+    scan("0000789");
+    const quantityC = await screen.findByRole("textbox", {
+      name: "Quantity for Power Board (0000789)",
+    });
+    fireEvent.change(quantityC, { target: { value: "7" } });
+    expect(quantityC).toHaveFocus();
+    const stableQuantityCId = quantityC.id;
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove Controller Board (0000456)",
+    }));
+    expect(screen.queryByText("Controller Board")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Power Board (0000789)",
+    })).toHaveAttribute("id", stableQuantityCId);
+
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        productName: "Relay Module",
+        currentInventory: "99",
+      },
+    });
+    scan("0000123");
+    await waitFor(() => expect(quantityA).toHaveFocus());
+    expect(quantityC).toHaveValue("7");
+    expect(screen.getAllByRole("textbox", { name: /^Quantity for / }))
+      .toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove Relay Module (0000123)",
+    }));
+    pageMocks.loadMaterial.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        productId: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        productName: "Relay Module",
+        currentInventory: "44",
+      },
+    });
+    scan("0000123");
+    const readdedQuantityA = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    expect(readdedQuantityA).toHaveValue("");
+    expect(readdedQuantityA).toHaveFocus();
+    const readdedRow = screen.getByText("0000123").closest("tr");
+    expect(within(readdedRow!).getByText("44")).toBeInTheDocument();
   });
 
   it("keeps Quantity local, validates whole-number text, and removes without a mutation", async () => {
@@ -368,9 +497,13 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("Relay Module")).toBeInTheDocument();
     expect(screen.queryByText("7654321")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(1);
+    expect(scanner).toHaveFocus();
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).not.toHaveFocus();
   });
 
-  it("blocks overlapping scans, shows pending state, and refocuses when enabled", async () => {
+  it("blocks overlapping scans and finishes with the new Quantity focused", async () => {
     let finishResolution: ((value: unknown) => void) | undefined;
     pageMocks.loadMaterial.mockReturnValue(new Promise((resolve) => {
       finishResolution = resolve;
@@ -404,9 +537,12 @@ describe("WorkOrderDetailPage", () => {
     });
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
     page.rerender(pageTree());
-    await waitFor(() => expect(screen.getByRole("textbox", {
-      name: "Scan Product Barcode",
-    })).toHaveFocus());
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    await waitFor(() => expect(quantity).toHaveFocus());
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .not.toHaveFocus();
   });
 
   it.each([

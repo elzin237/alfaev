@@ -78,12 +78,18 @@ function WorkOrderDraftShell({
   >(null);
   const [isReloading, setIsReloading] = useState(false);
   const [materials, setMaterials] = useState<DraftWorkOrderMaterial[]>([]);
+  const [materialFocusRequest, setMaterialFocusRequest] = useState<{
+    productId: string;
+    requestId: number;
+  } | null>(null);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const barcodeResolutionInFlight = useRef(false);
+  const nextMaterialFocusRequestId = useRef(0);
   const submissionInFlight = useRef(false);
 
   useEffect(() => {
     setMaterials([]);
+    setMaterialFocusRequest(null);
     setBarcodeError(null);
   }, [workOrder.id]);
 
@@ -163,13 +169,22 @@ function WorkOrderDraftShell({
     try {
       const result = await onLoadMaterial(serialNumber);
       if (result.ok) {
-        setMaterials((current) => [
-          ...current,
-          {
-            ...result.value,
-            quantity: "",
-          },
-        ]);
+        setMaterials((current) => current.some(
+          (material) => material.productId === result.value.productId,
+        )
+          ? current
+          : [
+            ...current,
+            {
+              ...result.value,
+              quantity: "",
+            },
+          ]);
+        nextMaterialFocusRequestId.current += 1;
+        setMaterialFocusRequest({
+          productId: result.value.productId,
+          requestId: nextMaterialFocusRequestId.current,
+        });
       } else {
         setBarcodeError(result.error.message);
       }
@@ -180,15 +195,15 @@ function WorkOrderDraftShell({
     }
   }
 
-  function handleQuantityChange(index: number, quantity: string) {
-    setMaterials((current) => current.map((material, materialIndex) =>
-      materialIndex === index ? { ...material, quantity } : material
+  function handleQuantityChange(productId: string, quantity: string) {
+    setMaterials((current) => current.map((material) =>
+      material.productId === productId ? { ...material, quantity } : material
     ));
   }
 
-  function handleRemoveMaterial(index: number) {
-    setMaterials((current) => current.filter((_, materialIndex) =>
-      materialIndex !== index
+  function handleRemoveMaterial(productId: string) {
+    setMaterials((current) => current.filter((material) =>
+      material.productId !== productId
     ));
   }
 
@@ -325,6 +340,7 @@ function WorkOrderDraftShell({
             <WorkOrderBarcodeScanInput
               disabled={isLoadingMaterial}
               onScan={(serialNumber) => void handleBarcodeScan(serialNumber)}
+              refocusOnEnable={false}
             />
           </div>
           {isLoadingMaterial && (
@@ -341,6 +357,7 @@ function WorkOrderDraftShell({
             </p>
           )}
           <WorkOrderMaterialsTable
+            focusRequest={materialFocusRequest}
             materials={materials}
             onQuantityChange={handleQuantityChange}
             onRemove={handleRemoveMaterial}
