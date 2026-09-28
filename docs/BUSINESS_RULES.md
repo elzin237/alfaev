@@ -613,6 +613,11 @@ returns only Product ID, Serial Number, and Name, does not grant general Product
 access, and does not create a WorkOrderItem, change Inventory, or create audit
 history. Later item persistence and Finish operations re-check Product eligibility.
 
+Current Inventory shown for a resolved Draft material is the Product's physical
+`InventoryBalance.quantity`, exposed through a narrow trusted Work Order read. It
+does not subtract Project commitments, grant general Inventory access, reserve
+stock, or create any Inventory effect. Finish later re-checks authoritative stock.
+
 ### Draft
 
 Saving as draft:

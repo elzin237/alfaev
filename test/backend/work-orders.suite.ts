@@ -63,6 +63,11 @@ interface ResolvedWorkOrderProductRow {
   serial_number: string;
 }
 
+interface WorkOrderMaterialInventoryRow {
+  current_inventory: string;
+  product_id: string;
+}
+
 async function actAs(
   database: PoolClient,
   actor: SecurityActor,
@@ -320,6 +325,18 @@ async function resolveWorkOrderProductBarcode(
     `select product_id, serial_number, name
      from public.resolve_work_order_product_barcode($1::uuid, $2::text)`,
     [workOrderId, serialNumber],
+  )).rows;
+}
+
+async function getWorkOrderMaterialInventory(
+  database: PoolClient,
+  workOrderId: string | null,
+  productId: string | null,
+): Promise<WorkOrderMaterialInventoryRow[]> {
+  return (await database.query<WorkOrderMaterialInventoryRow>(
+    `select product_id, current_inventory
+     from public.get_work_order_material_inventory($1::uuid, $2::uuid)`,
+    [workOrderId, productId],
   )).rows;
 }
 
@@ -4390,6 +4407,475 @@ export function registerWorkOrderSchemaTests(
             policy_expression: "(current_user_is_admin() OR has_permission('inventory.view'::text))",
             policy_name: "products_select_inventory_readers",
           }]);
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.TASK112A_MIGRATION !== "1")(
+    "Task 112A trusted Work Order material Inventory read (requires deployed migration)",
+    () => {
+      async function createMaterialProduct(
+        database: PoolClient,
+        values: {
+          actorId: string;
+          active?: boolean;
+          kind: "component" | "pcb_finished_good";
+          quantity: bigint;
+        },
+      ): Promise<string> {
+        const id = randomUUID();
+        const active = values.active ?? true;
+        await database.query(
+          `insert into public.products (
+             id, serial_number, name, category, product_kind, is_active,
+             created_by_user_id, updated_by_user_id,
+             archived_at, archived_by_user_id
+           ) values (
+             $1::uuid, $2::text, $3::text, 'Work Order', $4::text, $5::boolean,
+             $6::uuid, $6::uuid,
+             case when $5::boolean then null else pg_catalog.clock_timestamp() end,
+             case when $5::boolean then null else $6::uuid end
+           )`,
+          [
+            id,
+            createTestSerialNumber(),
+            `Material Product ${id}`,
+            values.kind,
+            active,
+            values.actorId,
+          ],
+        );
+        await database.query(
+          `update public.inventory_balances
+           set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
+           where product_id = $1::uuid`,
+          [id, values.quantity.toString()],
+        );
+        return id;
+      }
+
+      async function createMaterialDraft(
+        database: PoolClient,
+        actorId: string,
+      ): Promise<string> {
+        const id = randomUUID();
+        const year = await findUnusedWorkOrderYear(database);
+        await database.query(
+          `insert into public.work_orders (
+             id, work_order_number, status,
+             created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::text, 'draft', $3::uuid, $3::uuid)`,
+          [id, `RN-${year}-0001`, actorId],
+        );
+        return id;
+      }
+
+      async function setMaterialInventoryPermission(
+        database: PoolClient,
+        actor: SecurityActor,
+        adminProfileId: string,
+        permissionKey: string | null,
+      ): Promise<void> {
+        await database.query(
+          `delete from public.user_permissions as permission
+           using public.permission_definitions as definition
+           where permission.permission_definition_id = definition.id
+             and permission.user_id = $1::uuid
+             and (
+               definition.key like 'work_orders.%'
+               or definition.key like 'inventory.%'
+             )`,
+          [actor.profileId],
+        );
+        if (!permissionKey) return;
+        await database.query(
+          `insert into public.user_permissions (
+             user_id, permission_definition_id, granted_by_user_id
+           )
+           select $1::uuid, definition.id, $2::uuid
+           from public.permission_definitions as definition
+           where definition.key = $3::text`,
+          [actor.profileId, adminProfileId, permissionKey],
+        );
+      }
+
+      it("authorizes only Admin or edit-draft actors without granting general Inventory reads", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const editor = fixture.actors.unpermitted;
+          const workOrderId = await createMaterialDraft(database, admin.profileId);
+          const productId = await createMaterialProduct(database, {
+            actorId: admin.profileId,
+            kind: "component",
+            quantity: 0n,
+          });
+
+          await actAs(database, admin);
+          expect(await getWorkOrderMaterialInventory(
+            database, workOrderId, productId,
+          )).toEqual([{ current_inventory: "0", product_id: productId }]);
+          await database.query("reset role");
+
+          await setMaterialInventoryPermission(
+            database, editor, admin.profileId, "work_orders.edit_draft",
+          );
+          await actAs(database, editor);
+          expect(await getWorkOrderMaterialInventory(
+            database, workOrderId, productId,
+          )).toEqual([{ current_inventory: "0", product_id: productId }]);
+          expect((await database.query(
+            "select product_id from public.inventory_balances",
+          )).rows).toEqual([]);
+          expect((await database.query(
+            "select id from public.products where id = $1::uuid",
+            [productId],
+          )).rows).toEqual([]);
+          await database.query("reset role");
+
+          for (const permissionKey of [
+            "work_orders.view",
+            "inventory.view",
+            "work_orders.create",
+            "inventory.products.edit",
+            null,
+          ]) {
+            await setMaterialInventoryPermission(
+              database, editor, admin.profileId, permissionKey,
+            );
+            await actAs(database, editor);
+            await expectRejected(
+              database,
+              () => getWorkOrderMaterialInventory(
+                database, workOrderId, productId,
+              ),
+              "42501",
+              "Access denied",
+            );
+            await database.query("reset role");
+          }
+
+          await setMaterialInventoryPermission(
+            database,
+            fixture.actors.inactive,
+            admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, fixture.actors.inactive);
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, workOrderId, productId,
+            ),
+            "42501",
+            "Access denied",
+          );
+          await database.query("reset role");
+        });
+
+        expectPermissionDenied((await fixture.anonymousClient.rpc(
+          "get_work_order_material_inventory",
+          { p_product_id: randomUUID(), p_work_order_id: randomUUID() },
+        )).error);
+      });
+
+      it("enforces Draft and active Product context with the established safe errors", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const draftId = await createMaterialDraft(database, actor.profileId);
+          const componentId = await createMaterialProduct(database, {
+            actorId: actor.profileId,
+            kind: "component",
+            quantity: 0n,
+          });
+          const finishedGoodId = await createMaterialProduct(database, {
+            actorId: actor.profileId,
+            kind: "pcb_finished_good",
+            quantity: 17n,
+          });
+          const archivedId = await createMaterialProduct(database, {
+            active: false,
+            actorId: actor.profileId,
+            kind: "component",
+            quantity: 5n,
+          });
+          const missingBalanceProductId = await createMaterialProduct(database, {
+            actorId: actor.profileId,
+            kind: "component",
+            quantity: 0n,
+          });
+          await database.query(
+            "delete from public.inventory_balances where product_id = $1::uuid",
+            [missingBalanceProductId],
+          );
+          const projectId = await createProject(database, actor.profileId);
+          const year = await findUnusedWorkOrderYear(database);
+          const finishedId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${year}-0001`,
+            projectId,
+            status: "finished",
+          });
+
+          await actAs(database, actor);
+          expect(await getWorkOrderMaterialInventory(
+            database, draftId, componentId,
+          )).toEqual([{ current_inventory: "0", product_id: componentId }]);
+          expect(await getWorkOrderMaterialInventory(
+            database, draftId, finishedGoodId,
+          )).toEqual([{ current_inventory: "17", product_id: finishedGoodId }]);
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(database, null, componentId),
+            "22023",
+            "Work Order ID is required",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(database, draftId, null),
+            "22023",
+            "Product ID is required",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, randomUUID(), componentId,
+            ),
+            "P0002",
+            "Work Order not found",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, finishedId, componentId,
+            ),
+            "WOR02",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, draftId, randomUUID(),
+            ),
+            "P0002",
+            "Product not found",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, draftId, archivedId,
+            ),
+            "PRD05",
+            "Product is unavailable for Work Order",
+          );
+          await expectRejected(
+            database,
+            () => getWorkOrderMaterialInventory(
+              database, draftId, missingBalanceProductId,
+            ),
+            "IVB01",
+            "Inventory balance not found",
+          );
+          await database.query("reset role");
+        });
+      });
+
+      it("returns physical Inventory exactly without subtracting Project commitments or mutating state", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const workOrderId = await createMaterialDraft(database, actor.profileId);
+          const productId = await createMaterialProduct(database, {
+            actorId: actor.profileId,
+            kind: "component",
+            quantity: 17n,
+          });
+          const projectId = await createProject(database, actor.profileId);
+          const projectProductId = randomUUID();
+          await database.query(
+            `insert into public.project_products (
+               id, project_id, name, created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::uuid, 'Committed assembly', $3::uuid, $3::uuid)`,
+            [projectProductId, projectId, actor.profileId],
+          );
+          await database.query(
+            `insert into public.project_product_components (
+               project_product_id, product_id, required_quantity,
+               created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::uuid, 100, $3::uuid, $3::uuid)`,
+            [projectProductId, productId, actor.profileId],
+          );
+          const before = (await database.query(
+            `select
+               (select pg_catalog.to_jsonb(work_order)
+                from public.work_orders as work_order where id = $1) as work_order,
+               (select pg_catalog.to_jsonb(product)
+                from public.products as product where id = $2) as product,
+               (select pg_catalog.to_jsonb(balance)
+                from public.inventory_balances as balance
+                where balance.product_id = $2) as balance,
+               (select count(*)::text from public.work_order_items
+                where work_order_id = $1) as items,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.audit_logs) as audits,
+               (select pg_catalog.to_jsonb(project)
+                from public.projects as project where id = $3) as project,
+               (select pg_catalog.to_jsonb(project_product)
+                from public.project_products as project_product
+                where id = $4) as project_product,
+               (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(component)
+                  order by component.id)
+                from public.project_product_components as component
+                where component.project_product_id = $4) as components,
+               (select count(*)::text from public.pcb_cards) as pcb_cards,
+               (select count(*)::text from public.pcb_bom_versions)
+                 as pcb_bom_versions,
+               (select count(*)::text from public.pcb_bom_items) as pcb_bom_items,
+               (select count(*)::text from public.pcb_production_runs)
+                 as pcb_production_runs`,
+            [workOrderId, productId, projectId, projectProductId],
+          )).rows[0];
+
+          await actAs(database, actor);
+          const result = await getWorkOrderMaterialInventory(
+            database, workOrderId, productId,
+          );
+          expect(result).toEqual([{
+            current_inventory: "17",
+            product_id: productId,
+          }]);
+          expect(Object.keys(result[0]!).sort()).toEqual([
+            "current_inventory", "product_id",
+          ]);
+          await database.query("reset role");
+
+          const after = (await database.query(
+            `select
+               (select pg_catalog.to_jsonb(work_order)
+                from public.work_orders as work_order where id = $1) as work_order,
+               (select pg_catalog.to_jsonb(product)
+                from public.products as product where id = $2) as product,
+               (select pg_catalog.to_jsonb(balance)
+                from public.inventory_balances as balance
+                where balance.product_id = $2) as balance,
+               (select count(*)::text from public.work_order_items
+                where work_order_id = $1) as items,
+               (select count(*)::text from public.inventory_movements) as movements,
+               (select count(*)::text from public.audit_logs) as audits,
+               (select pg_catalog.to_jsonb(project)
+                from public.projects as project where id = $3) as project,
+               (select pg_catalog.to_jsonb(project_product)
+                from public.project_products as project_product
+                where id = $4) as project_product,
+               (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(component)
+                  order by component.id)
+                from public.project_product_components as component
+                where component.project_product_id = $4) as components,
+               (select count(*)::text from public.pcb_cards) as pcb_cards,
+               (select count(*)::text from public.pcb_bom_versions)
+                 as pcb_bom_versions,
+               (select count(*)::text from public.pcb_bom_items) as pcb_bom_items,
+               (select count(*)::text from public.pcb_production_runs)
+                 as pcb_production_runs`,
+            [workOrderId, productId, projectId, projectProductId],
+          )).rows[0];
+          expect(after).toEqual(before);
+        });
+      });
+
+      it("uses hardened authenticated-only execution and preserves Product and Inventory RLS", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const functionRow = (await database.query<{
+            arguments: string;
+            authenticated_execute: boolean;
+            definition: string;
+            language: string;
+            anon_execute: boolean;
+            public_execute: boolean;
+            result: string;
+            security_definer: boolean;
+            settings: string[];
+            volatility: string;
+          }>(
+            `select pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+                    pg_catalog.pg_get_function_result(routine.oid) as result,
+                    pg_catalog.pg_get_functiondef(routine.oid) as definition,
+                    language.lanname as language,
+                    routine.provolatile as volatility,
+                    routine.prosecdef as security_definer,
+                    routine.proconfig as settings,
+                    pg_catalog.has_function_privilege(
+                      'anon', routine.oid, 'execute'
+                    ) as anon_execute,
+                    pg_catalog.has_function_privilege(
+                      'authenticated', routine.oid, 'execute'
+                    ) as authenticated_execute,
+                    exists (
+                      select 1 from pg_catalog.aclexplode(routine.proacl) as privilege
+                      where privilege.grantee = 0
+                        and privilege.privilege_type = 'EXECUTE'
+                    ) as public_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             join pg_catalog.pg_language as language
+               on language.oid = routine.prolang
+             where namespace.nspname = 'public'
+               and routine.proname = 'get_work_order_material_inventory'`,
+          )).rows[0]!;
+          expect(functionRow).toMatchObject({
+            anon_execute: false,
+            arguments: "p_work_order_id uuid, p_product_id uuid",
+            authenticated_execute: true,
+            language: "plpgsql",
+            public_execute: false,
+            result: "TABLE(product_id uuid, current_inventory bigint)",
+            security_definer: true,
+            settings: ['search_path=""'],
+            volatility: "s",
+          });
+          const definition = functionRow.definition.toLowerCase();
+          expect(definition).not.toMatch(/\b(insert|update|delete)\b/);
+          expect(definition).not.toContain("for update");
+          expect(definition).not.toContain("for share");
+          expect(definition).not.toContain("inventory_movements");
+          expect(definition).not.toContain("work_order_items");
+          expect(definition).not.toContain("audit_logs");
+          expect(definition).not.toContain("project_products");
+          expect(definition).not.toContain("commitment");
+
+          const policies = (await database.query<{
+            policy_expression: string;
+            policy_name: string;
+            table_name: string;
+          }>(
+            `select relation.relname as table_name,
+                    policy.polname as policy_name,
+                    pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+                      as policy_expression
+             from pg_catalog.pg_policy as policy
+             join pg_catalog.pg_class as relation
+               on relation.oid = policy.polrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname in ('inventory_balances', 'products')
+             order by relation.relname, policy.polname`,
+          )).rows;
+          expect(policies).toEqual([
+            {
+              policy_expression: "(current_user_is_admin() OR has_permission('inventory.view'::text))",
+              policy_name: "inventory_balances_select_inventory_readers",
+              table_name: "inventory_balances",
+            },
+            {
+              policy_expression: "(current_user_is_admin() OR has_permission('inventory.view'::text))",
+              policy_name: "products_select_inventory_readers",
+              table_name: "products",
+            },
+          ]);
         });
       });
     },

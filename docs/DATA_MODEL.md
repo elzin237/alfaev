@@ -1088,6 +1088,10 @@ Barcode workflow:
 - both `component` and `pcb_finished_good` are eligible for resolution
 - resolution does not grant general Product reads and creates no WorkOrderItem,
   Inventory effect, or AuditLog entry
+- a narrow trusted Draft-context read may return only the resolved active Product
+  ID and its physical `InventoryBalance.quantity` for Current Inventory display
+- Current Inventory is a point-in-time informational snapshot, not
+  `available_after_commitments` and not a reservation; Finish re-checks stock
 - add/locate WorkOrderItem
 - user enters quantity
 

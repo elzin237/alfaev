@@ -2368,7 +2368,18 @@ No WorkOrderItem mutation yet.
 
 ---
 
-## 112 — Build Work Order Materials Table
+## 112A — Add Trusted Work Order Material Current Inventory Read
+
+Goal:
+- expose only Product ID and physical InventoryBalance quantity for one eligible
+  Product in an authorized Draft Work Order context
+- preserve normal Product and InventoryBalance RLS boundaries
+- keep the read informational: no reservation, commitment subtraction, mutation,
+  or audit
+
+---
+
+## 112B — Build Work Order Materials Table
 
 Goal:
 - scanned Product row

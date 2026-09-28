@@ -373,6 +373,12 @@ Barcode scan input:
 - do not trust arbitrary product data supplied by client
 - resolution is read-only and creates no WorkOrderItem, Inventory mutation, or
   AuditLog entry
+- Current Inventory display may use a narrow trusted Draft-context read authorized
+  for active Admin or `work_orders.edit_draft`; it exposes only the matching active
+  Product ID and physical InventoryBalance quantity, without granting general
+  Product or InventoryBalance access
+- displayed Current Inventory is an informational snapshot, not a reservation;
+  Finish re-checks authoritative physical Inventory before deduction
 
 Draft rows may only reference valid active Products where business rules permit.
 
