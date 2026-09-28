@@ -96,4 +96,20 @@ describe("WorkOrderBarcodeScanInput", () => {
     fireEvent.keyDown(document.body, { key: "Enter", code: "Enter" });
     expect(onScan).not.toHaveBeenCalled();
   });
+
+  it("refocuses after an asynchronous resolution re-enables the scanner", () => {
+    const onScan = vi.fn();
+    const view = render(
+      <WorkOrderBarcodeScanInput disabled onScan={onScan} />,
+    );
+    const disabledInput = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    expect(disabledInput).toBeDisabled();
+
+    view.rerender(<WorkOrderBarcodeScanInput onScan={onScan} />);
+
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .toHaveFocus();
+  });
 });

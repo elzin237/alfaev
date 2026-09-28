@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface WorkOrderBarcodeScanInputProps {
   disabled?: boolean;
@@ -12,8 +12,14 @@ function WorkOrderBarcodeScanInput({
   onScan,
 }: WorkOrderBarcodeScanInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const wasDisabled = useRef(disabled);
   const [serialNumber, setSerialNumber] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (wasDisabled.current && !disabled) inputRef.current?.focus();
+    wasDisabled.current = disabled;
+  }, [disabled]);
 
   return (
     <div>

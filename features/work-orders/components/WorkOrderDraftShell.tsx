@@ -4,6 +4,8 @@ import EmptyState from "../../../shared/components/EmptyState";
 import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
 import type {
   WorkOrderDetail,
+  ResolvedWorkOrderProduct,
+  WorkOrderProductResolutionResult,
   WorkOrderProjectChoice,
   WorkOrderUpdateResult,
 } from "../services/workOrderService";
@@ -20,8 +22,12 @@ interface WorkOrderDraftShellProps {
   projectChoicesError: string | null;
   projectChoicesLoading: boolean;
   isSaving: boolean;
+  isResolvingBarcode: boolean;
   onReloadLatest: () => Promise<void>;
   onRetryProjectChoices: () => void;
+  onResolveBarcode: (
+    serialNumber: string,
+  ) => Promise<WorkOrderProductResolutionResult>;
   onSave: (
     submission: WorkOrderDraftSubmission,
   ) => Promise<WorkOrderUpdateResult>;
@@ -53,8 +59,10 @@ function WorkOrderDraftShell({
   projectChoicesError,
   projectChoicesLoading,
   isSaving,
+  isResolvingBarcode,
   onReloadLatest,
   onRetryProjectChoices,
+  onResolveBarcode,
   onSave,
 }: WorkOrderDraftShellProps) {
   const [selectedProjectId, setSelectedProjectId] = useState(
@@ -68,10 +76,17 @@ function WorkOrderDraftShell({
     | null
   >(null);
   const [isReloading, setIsReloading] = useState(false);
-  const [capturedSerialNumber, setCapturedSerialNumber] = useState<
-    string | null
+  const [resolvedProduct, setResolvedProduct] = useState<
+    ResolvedWorkOrderProduct | null
   >(null);
+  const [barcodeError, setBarcodeError] = useState<string | null>(null);
+  const barcodeResolutionInFlight = useRef(false);
   const submissionInFlight = useRef(false);
+
+  useEffect(() => {
+    setResolvedProduct(null);
+    setBarcodeError(null);
+  }, [workOrder.id]);
 
   useEffect(() => {
     setSelectedProjectId(workOrder.projectId ?? "");
@@ -138,6 +153,26 @@ function WorkOrderDraftShell({
       await onReloadLatest();
     } finally {
       setIsReloading(false);
+    }
+  }
+
+  async function handleBarcodeScan(serialNumber: string) {
+    if (barcodeResolutionInFlight.current || isResolvingBarcode) return;
+
+    barcodeResolutionInFlight.current = true;
+    setResolvedProduct(null);
+    setBarcodeError(null);
+    try {
+      const result = await onResolveBarcode(serialNumber);
+      if (result.ok) {
+        setResolvedProduct(result.value);
+      } else {
+        setBarcodeError(result.error.message);
+      }
+    } catch {
+      setBarcodeError("The Product could not be resolved. Please try again.");
+    } finally {
+      barcodeResolutionInFlight.current = false;
     }
   }
 
@@ -271,18 +306,37 @@ function WorkOrderDraftShell({
             Materials
           </h2>
           <div className="mt-6">
-            <WorkOrderBarcodeScanInput onScan={setCapturedSerialNumber} />
+            <WorkOrderBarcodeScanInput
+              disabled={isResolvingBarcode}
+              onScan={(serialNumber) => void handleBarcodeScan(serialNumber)}
+            />
           </div>
-          {capturedSerialNumber && (
-            <p
+          {isResolvingBarcode && (
+            <p role="status" className="mt-4 text-sm text-zinc-600">
+              Resolving Product...
+            </p>
+          )}
+          {resolvedProduct && (
+            <div
               role="status"
-              className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800"
+              className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
             >
-              Captured Serial Number:{" "}
-              <span className="font-mono font-semibold">
-                {capturedSerialNumber}
-              </span>
-              . Product lookup will be added next.
+              <p className="font-semibold">Resolved Product</p>
+              <p className="mt-2">
+                Serial Number:{" "}
+                <span className="font-mono font-semibold">
+                  {resolvedProduct.serialNumber}
+                </span>
+              </p>
+              <p className="mt-1">Name: {resolvedProduct.name}</p>
+            </div>
+          )}
+          {barcodeError && (
+            <p
+              role="alert"
+              className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700"
+            >
+              {barcodeError}
             </p>
           )}
           <p className="mt-4 text-sm leading-6 text-zinc-500">

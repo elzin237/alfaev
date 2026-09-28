@@ -12,6 +12,7 @@ const pageMocks = vi.hoisted(() => ({
   detailRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
   reloadLatestDraft: vi.fn(),
+  resolveBarcode: vi.fn(),
   saveDraft: vi.fn(),
   useWorkOrderDetail: vi.fn(),
 }));
@@ -67,7 +68,9 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       refetch: pageMocks.projectChoicesRefetch,
     },
     isSaving: false,
+    isResolvingBarcode: false,
     reloadLatestDraft: pageMocks.reloadLatestDraft,
+    resolveBarcode: pageMocks.resolveBarcode,
     saveDraft: pageMocks.saveDraft,
     ...overrides,
   };
@@ -94,6 +97,14 @@ beforeEach(() => {
     value: {
       workOrderId,
       updatedAt: "2026-09-22T10:01:00.123456+00:00",
+    },
+  });
+  pageMocks.resolveBarcode.mockResolvedValue({
+    ok: true,
+    value: {
+      id: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      name: "Relay Module",
     },
   });
   pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
@@ -216,7 +227,7 @@ describe("WorkOrderDetailPage", () => {
       .not.toBeInTheDocument();
   });
 
-  it("captures only the latest Serial locally without saving or resolving a Product", () => {
+  it("resolves only the latest scanned Product without saving the Draft or a material", async () => {
     renderPage();
     const scanner = screen.getByRole("textbox", {
       name: "Scan Product Barcode",
@@ -225,21 +236,100 @@ describe("WorkOrderDetailPage", () => {
     fireEvent.change(scanner, { target: { value: "0000123" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
 
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Captured Serial Number: 0000123. Product lookup will be added next.",
-    );
+    await waitFor(() => expect(pageMocks.resolveBarcode)
+      .toHaveBeenCalledExactlyOnceWith("0000123"));
+    expect(screen.getByText("Resolved Product")).toBeInTheDocument();
+    expect(screen.getByText("Serial Number:")).toHaveTextContent("0000123");
+    expect(screen.getByText("Name: Relay Module")).toBeInTheDocument();
     expect(scanner).toHaveValue("");
     expect(scanner).toHaveFocus();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Product added|Material added|Product found/i))
+    expect(screen.queryByText(/Product added|Material added|saved material/i))
       .not.toBeInTheDocument();
 
+    pageMocks.resolveBarcode.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        id: "00000000-0000-4000-8000-000000000031",
+        serialNumber: "7654321",
+        name: "Controller Board",
+      },
+    });
     fireEvent.change(scanner, { target: { value: "7654321" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Captured Serial Number: 7654321.",
-    );
+    expect(await screen.findByText("Name: Controller Board"))
+      .toBeInTheDocument();
+    expect(screen.getByText("Serial Number:")).toHaveTextContent("7654321");
     expect(screen.queryByText(/0000123/)).not.toBeInTheDocument();
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
+  it("blocks overlapping scans, shows pending state, and refocuses when enabled", async () => {
+    let finishResolution: ((value: unknown) => void) | undefined;
+    pageMocks.resolveBarcode.mockReturnValue(new Promise((resolve) => {
+      finishResolution = resolve;
+    }));
+    const page = renderPage();
+    let scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    fireEvent.change(scanner, { target: { value: "0000124" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    expect(pageMocks.resolveBarcode).toHaveBeenCalledExactlyOnceWith("0000123");
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      isResolvingBarcode: true,
+    }));
+    page.rerender(pageTree());
+    scanner = screen.getByRole("textbox", { name: "Scan Product Barcode" });
+    expect(scanner).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Resolving Product...");
+
+    finishResolution?.({
+      ok: true,
+      value: {
+        id: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        name: "Relay Module",
+      },
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook());
+    page.rerender(pageTree());
+    await waitFor(() => expect(screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    })).toHaveFocus());
+  });
+
+  it.each([
+    ["product_not_found", "No Product was found for this Serial Number."],
+    [
+      "product_unavailable",
+      "This Product is archived or unavailable for this Work Order.",
+    ],
+    [
+      "product_resolution_failed",
+      "The Product could not be resolved. Please try again.",
+    ],
+  ])("shows safe inline %s feedback without fake resolved state", async (
+    code,
+    message,
+  ) => {
+    pageMocks.resolveBarcode.mockResolvedValue({
+      ok: false,
+      error: { code, message },
+    });
+    renderPage();
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.queryByText("Resolved Product")).not.toBeInTheDocument();
+    expect(scanner).not.toBeDisabled();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
   });
 

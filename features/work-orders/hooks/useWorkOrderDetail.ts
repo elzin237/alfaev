@@ -7,6 +7,7 @@ import {
   getWorkOrderDetail,
   isWorkOrderId,
   listWorkOrderProjectChoices,
+  resolveWorkOrderProductBarcode,
   updateDraftWorkOrder,
   type DraftWorkOrderUpdateInput,
 } from "../services/workOrderService";
@@ -78,6 +79,24 @@ export function useWorkOrderDetail(workOrderId: string) {
       }
     },
   });
+  const barcodeResolutionMutation = useMutation({
+    mutationFn: (serialNumber: string) =>
+      resolveWorkOrderProductBarcode(workOrderId, serialNumber),
+    retry: false,
+    onSuccess: (result) => {
+      if (result.ok) return;
+
+      if (result.error.code === "work_order_not_editable") {
+        void queryClient.invalidateQueries({ queryKey: detailKey, exact: true })
+          .catch(() => undefined);
+      } else if (result.error.code === "access_denied") {
+        void queryClient.invalidateQueries({
+          queryKey: editPermissionKey,
+          exact: true,
+        }).catch(() => undefined);
+      }
+    },
+  });
 
   async function reloadLatestDraft(): Promise<void> {
     await detailQuery.refetch();
@@ -86,9 +105,11 @@ export function useWorkOrderDetail(workOrderId: string) {
   return {
     canEditDraft,
     detailQuery,
+    isResolvingBarcode: barcodeResolutionMutation.isPending,
     isSaving: saveMutation.isPending,
     projectChoicesQuery,
     reloadLatestDraft,
+    resolveBarcode: barcodeResolutionMutation.mutateAsync,
     saveDraft: saveMutation.mutateAsync,
   };
 }

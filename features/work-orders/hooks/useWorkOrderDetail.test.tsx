@@ -7,6 +7,7 @@ const detailMocks = vi.hoisted(() => ({
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
   listWorkOrderProjectChoices: vi.fn(),
+  resolveWorkOrderProductBarcode: vi.fn(),
   updateDraftWorkOrder: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -23,6 +24,7 @@ vi.mock("../services/workOrderService", () => ({
     typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
   listWorkOrderProjectChoices: detailMocks.listWorkOrderProjectChoices,
+  resolveWorkOrderProductBarcode: detailMocks.resolveWorkOrderProductBarcode,
   updateDraftWorkOrder: detailMocks.updateDraftWorkOrder,
 }));
 
@@ -69,6 +71,14 @@ beforeEach(() => {
   detailMocks.listWorkOrderProjectChoices.mockResolvedValue({
     ok: true,
     value: [],
+  });
+  detailMocks.resolveWorkOrderProductBarcode.mockResolvedValue({
+    ok: true,
+    value: {
+      id: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      name: "Relay Module",
+    },
   });
   detailMocks.updateDraftWorkOrder.mockResolvedValue({
     ok: true,
@@ -334,5 +344,108 @@ describe("useWorkOrderDetail", () => {
       queryKey: ["work-orders", "list", "profile-1"],
       exact: true,
     });
+  });
+
+  it("resolves a barcode for the current Work Order without invalidating queries", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+    await act(async () => {
+      await expect(result.current.resolveBarcode("0000123")).resolves
+        .toMatchObject({ ok: true });
+    });
+
+    expect(detailMocks.resolveWorkOrderProductBarcode)
+      .toHaveBeenCalledExactlyOnceWith(workOrderId, "0000123");
+    expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("exposes barcode-resolution pending state", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    let finishResolution: ((value: unknown) => void) | undefined;
+    detailMocks.resolveWorkOrderProductBarcode.mockReturnValue(
+      new Promise((resolve) => {
+        finishResolution = resolve;
+      }),
+    );
+    const { result } = renderDetailHook();
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+
+    let resolution: Promise<unknown> | undefined;
+    act(() => {
+      resolution = result.current.resolveBarcode("0000123");
+    });
+    await waitFor(() => expect(result.current.isResolvingBarcode).toBe(true));
+
+    await act(async () => {
+      finishResolution?.({
+        ok: true,
+        value: {
+          id: "00000000-0000-4000-8000-000000000030",
+          serialNumber: "0000123",
+          name: "Relay Module",
+        },
+      });
+      await resolution;
+    });
+    await waitFor(() => expect(result.current.isResolvingBarcode).toBe(false));
+  });
+
+  it("refreshes only authoritative lifecycle or permission state for resolver denials", async () => {
+    detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+
+    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "work_order_not_editable",
+        message: "This Work Order can no longer be edited.",
+      },
+    });
+    await act(async () => {
+      await result.current.resolveBarcode("0000123");
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    });
+
+    invalidateQueries.mockClear();
+    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to edit this Draft.",
+      },
+    });
+    await act(async () => {
+      await result.current.resolveBarcode("0000124");
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "permission",
+        "auth-user-1",
+        "profile-1",
+        "work_orders.edit_draft",
+      ],
+      exact: true,
+    });
+
+    invalidateQueries.mockClear();
+    detailMocks.resolveWorkOrderProductBarcode.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "product_not_found",
+        message: "No Product was found for this Serial Number.",
+      },
+    });
+    await act(async () => {
+      await result.current.resolveBarcode("0000125");
+    });
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });

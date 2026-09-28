@@ -11,6 +11,7 @@ import {
   getWorkOrderDetail,
   listWorkOrderProjectChoices,
   listWorkOrders,
+  resolveWorkOrderProductBarcode,
   updateDraftWorkOrder,
 } from "./workOrderService";
 
@@ -60,6 +61,12 @@ const projectChoices = [
     status: "on_hold",
   },
 ] as const;
+
+const resolvedProductRow = {
+  product_id: "00000000-0000-4000-8000-000000000030",
+  serial_number: "0000123",
+  name: "Relay Module",
+};
 
 beforeEach(() => vi.resetAllMocks());
 
@@ -350,6 +357,105 @@ describe("workOrderService", () => {
       error: {
         code: "work_order_update_failed",
         message: "The Draft could not be saved. Please try again.",
+      },
+    });
+  });
+
+  it("resolves a Product through the exact trusted RPC and preserves leading zeroes", async () => {
+    serviceMocks.rpc.mockResolvedValue({ data: [resolvedProductRow], error: null });
+
+    await expect(resolveWorkOrderProductBarcode(
+      detailRow.work_order_id,
+      "0000123",
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        id: resolvedProductRow.product_id,
+        serialNumber: "0000123",
+        name: "Relay Module",
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "resolve_work_order_product_barcode",
+      {
+        p_work_order_id: detailRow.work_order_id,
+        p_serial_number: "0000123",
+      },
+    );
+  });
+
+  it.each([
+    ["mismatched serial", { ...resolvedProductRow, serial_number: "0000124" }],
+    ["invalid UUID", { ...resolvedProductRow, product_id: "invalid" }],
+    ["invalid serial", { ...resolvedProductRow, serial_number: "123" }],
+    ["blank name", { ...resolvedProductRow, name: "" }],
+    ["untrimmed name", { ...resolvedProductRow, name: " Relay Module " }],
+    ["missing field", (() => {
+      const { name: _name, ...row } = resolvedProductRow;
+      return row;
+    })()],
+    ["extra field", { ...resolvedProductRow, product_kind: "component" }],
+  ])("rejects a malformed resolved Product with %s", async (_label, row) => {
+    serviceMocks.rpc.mockResolvedValue({ data: [row], error: null });
+
+    await expect(resolveWorkOrderProductBarcode(
+      detailRow.work_order_id,
+      "0000123",
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_resolution_failed",
+        message: "The Product could not be resolved. Please try again.",
+      },
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied", "You no longer have permission to edit this Draft."],
+    ["WOR02", "work_order_not_editable", "This Work Order can no longer be edited."],
+    ["22023", "invalid_serial_number", "Enter a valid 7-digit Serial Number."],
+    ["P0002", "product_not_found", "No Product was found for this Serial Number."],
+    [
+      "PRD05",
+      "product_unavailable",
+      "This Product is archived or unavailable for this Work Order.",
+    ],
+    [
+      "XX000",
+      "product_resolution_failed",
+      "The Product could not be resolved. Please try again.",
+    ],
+  ])("maps resolver error %s safely", async (providerCode, code, message) => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw backend details" },
+    });
+
+    await expect(resolveWorkOrderProductBarcode(
+      detailRow.work_order_id,
+      "0000123",
+    )).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("maps malformed cardinality and thrown resolver failures safely", async () => {
+    serviceMocks.rpc.mockResolvedValueOnce({ data: [], error: null });
+    await expect(resolveWorkOrderProductBarcode(
+      detailRow.work_order_id,
+      "0000123",
+    )).resolves.toMatchObject({
+      ok: false,
+      error: { code: "product_resolution_failed" },
+    });
+
+    serviceMocks.rpc.mockRejectedValueOnce(new Error("raw network details"));
+    await expect(resolveWorkOrderProductBarcode(
+      detailRow.work_order_id,
+      "0000123",
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "product_resolution_failed",
+        message: "The Product could not be resolved. Please try again.",
       },
     });
   });

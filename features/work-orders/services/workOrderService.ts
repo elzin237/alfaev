@@ -66,6 +66,27 @@ export type WorkOrderUpdateResult =
   | { ok: true; value: UpdatedDraftWorkOrder }
   | { ok: false; error: WorkOrderUpdateError };
 
+export interface ResolvedWorkOrderProduct {
+  id: string;
+  serialNumber: string;
+  name: string;
+}
+
+export interface WorkOrderProductResolutionError {
+  code:
+    | "access_denied"
+    | "invalid_serial_number"
+    | "product_not_found"
+    | "product_resolution_failed"
+    | "product_unavailable"
+    | "work_order_not_editable";
+  message: string;
+}
+
+export type WorkOrderProductResolutionResult =
+  | { ok: true; value: ResolvedWorkOrderProduct }
+  | { ok: false; error: WorkOrderProductResolutionError };
+
 export type WorkOrderProjectChoiceStatus =
   | "planned"
   | "in_progress"
@@ -134,6 +155,12 @@ const projectChoiceAllowedKeys = new Set([
   "customer_name",
   "status",
 ]);
+const resolvedProductAllowedKeys = new Set([
+  "product_id",
+  "serial_number",
+  "name",
+]);
+const productSerialNumberPattern = /^[0-9]{7}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -416,6 +443,113 @@ export async function updateDraftWorkOrder(
     };
   } catch {
     return updateFailure();
+  }
+}
+
+function productResolutionFailure(
+  code?: string,
+): WorkOrderProductResolutionResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have permission to edit this Draft.",
+      },
+    };
+  }
+
+  if (code === "WOR02") {
+    return {
+      ok: false,
+      error: {
+        code: "work_order_not_editable",
+        message: "This Work Order can no longer be edited.",
+      },
+    };
+  }
+
+  if (code === "22023") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_serial_number",
+        message: "Enter a valid 7-digit Serial Number.",
+      },
+    };
+  }
+
+  if (code === "P0002") {
+    return {
+      ok: false,
+      error: {
+        code: "product_not_found",
+        message: "No Product was found for this Serial Number.",
+      },
+    };
+  }
+
+  if (code === "PRD05") {
+    return {
+      ok: false,
+      error: {
+        code: "product_unavailable",
+        message: "This Product is archived or unavailable for this Work Order.",
+      },
+    };
+  }
+
+  return {
+    ok: false,
+    error: {
+      code: "product_resolution_failed",
+      message: "The Product could not be resolved. Please try again.",
+    },
+  };
+}
+
+export async function resolveWorkOrderProductBarcode(
+  workOrderId: string,
+  serialNumber: string,
+): Promise<WorkOrderProductResolutionResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "resolve_work_order_product_barcode",
+      {
+        p_work_order_id: workOrderId,
+        p_serial_number: serialNumber,
+      },
+    );
+
+    if (error) return productResolutionFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) {
+      return productResolutionFailure();
+    }
+
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== resolvedProductAllowedKeys.size ||
+      Object.keys(row).some((key) => !resolvedProductAllowedKeys.has(key)) ||
+      !isUuid(row.product_id) ||
+      typeof row.serial_number !== "string" ||
+      !productSerialNumberPattern.test(row.serial_number) ||
+      row.serial_number !== serialNumber ||
+      !isTrimmedNonblank(row.name)
+    ) {
+      return productResolutionFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        id: row.product_id,
+        serialNumber: row.serial_number,
+        name: row.name,
+      },
+    };
+  } catch {
+    return productResolutionFailure();
   }
 }
 
