@@ -361,9 +361,18 @@ Draft Work Order:
 
 Barcode scan input:
 
-- validate exact expected Serial Number format
-- resolve by unique Product Serial Number
+- trusted Product resolution requires an active Admin or `work_orders.edit_draft`
+  and an existing Draft Work Order; it does not additionally require
+  `work_orders.view` or `inventory.view`
+- validate the exact seven-digit Serial Number format on the backend without
+  trimming or numeric conversion
+- resolve only an existing active Product by unique Product Serial Number;
+  `component` and `pcb_finished_good` are eligible
+- expose only Product ID, Serial Number, and Name through this narrow read
+- do not broaden Product RLS or grant general Product-table access
 - do not trust arbitrary product data supplied by client
+- resolution is read-only and creates no WorkOrderItem, Inventory mutation, or
+  AuditLog entry
 
 Draft rows may only reference valid active Products where business rules permit.
 

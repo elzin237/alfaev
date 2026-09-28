@@ -2337,15 +2337,32 @@ Do not resolve Product yet.
 
 ---
 
-## 111 — Add Barcode Product Resolution
+## 111A — Add Trusted Barcode Product Resolution Backend
 
 Goal:
-- resolve scanned Serial Number to valid Product
+- resolve scanned Serial Number to a valid active Product through a narrow trusted
+  Draft Work Order read
 
 Errors:
 - invalid format
 - Product not found
 - archived/ineligible Product
+
+Authorization:
+- active Admin or `work_orders.edit_draft`
+- no `inventory.view` requirement or general Product access
+
+Return only Product ID, Serial Number, and Name. Both `component` and
+`pcb_finished_good` are eligible. No WorkOrderItem, Inventory, Work Order, Product,
+or AuditLog mutation.
+
+---
+
+## 111B — Wire Barcode Product Resolution UI
+
+Goal:
+- connect the Task 110 scanner to the trusted Task 111A resolver
+- show resolved Product identity and safe resolver errors
 
 No WorkOrderItem mutation yet.
 

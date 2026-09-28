@@ -1083,7 +1083,11 @@ Constraints:
 Barcode workflow:
 
 - scanner yields Serial Number / Šifra
-- resolve Product by unique `serial_number`
+- a narrow trusted Draft-context read resolves an existing active Product by exact
+  unique `serial_number` and returns only Product ID, Serial Number, and Name
+- both `component` and `pcb_finished_good` are eligible for resolution
+- resolution does not grant general Product reads and creates no WorkOrderItem,
+  Inventory effect, or AuditLog entry
 - add/locate WorkOrderItem
 - user enters quantity
 

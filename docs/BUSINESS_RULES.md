@@ -601,10 +601,17 @@ double-allocation of the same planned requirement.
 
 When a product barcode is scanned while editing a Work Order:
 
-- resolve product by Serial Number / Šifra
+- resolve an existing active Product by its exact 7-digit Serial Number / Šifra
+- allow either stock-tracked Product kind: `component` or `pcb_finished_good`
 - add product to materials table
 - populate product data automatically
 - user manually enters consumed quantity
+
+The narrow trusted resolver is authorized only for an active Admin or
+`work_orders.edit_draft` actor in the context of an existing Draft Work Order. It
+returns only Product ID, Serial Number, and Name, does not grant general Product
+access, and does not create a WorkOrderItem, change Inventory, or create audit
+history. Later item persistence and Finish operations re-check Product eligibility.
 
 ### Draft
 
