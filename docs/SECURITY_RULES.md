@@ -379,8 +379,23 @@ Barcode scan input:
   Product or InventoryBalance access
 - displayed Current Inventory is an informational snapshot, not a reservation;
   Finish re-checks authoritative physical Inventory before deduction
+- Save for Later uses one trusted atomic desired-state operation for the Draft
+  header and complete Materials set; it requires an exact expected `updated_at`,
+  and any meaningful header or material change advances that unified Draft version
+- desired material quantities are positive whole `bigint` decimal strings; new
+  Product references are revalidated as active `component` or
+  `pcb_finished_good` Products and locked against a concurrent archive
+- unchanged or quantity-updated persisted item rows preserve their original ID and
+  add metadata; a normalized full no-op performs no write and creates no audit
+- persisted Draft materials may be reloaded through a narrow trusted read for an
+  active Admin, `work_orders.view`, or `work_orders.edit_draft` actor; this does
+  not broaden normal Product or InventoryBalance RLS
+- Draft persistence never checks, reserves, deducts, or otherwise mutates Inventory
 
-Draft rows may only reference valid active Products where business rules permit.
+New Draft material references may only target valid active Products where business
+rules permit. A previously persisted reference remains historical if its Product is
+archived later; it may remain, have its Draft quantity changed, or be removed, while
+Finish performs its own authoritative Product and Inventory checks.
 
 ---
 

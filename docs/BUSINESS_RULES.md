@@ -593,9 +593,8 @@ neither update metadata nor audit history, and stale `updated_at` submissions ar
 rejected rather than overwriting newer Draft state.
 
 One Project may have one or many Work Orders. No uniqueness rule may limit a Project
-to one Work Order. Draft Work Order materials integrate with the Project's planned
-component requirements, and allocation across multiple Draft Work Orders must avoid
-double-allocation of the same planned requirement.
+to one Work Order. Draft material persistence records intended material rows but does
+not reserve Inventory or calculate/allocate Project commitments.
 
 ### Barcode scanning
 
@@ -622,9 +621,21 @@ stock, or create any Inventory effect. Finish later re-checks authoritative stoc
 
 Saving as draft:
 
-- preserves current data
+- atomically persists the normalized header and complete desired Materials set
 - allows later editing
 - does not affect Inventory
+- accepts positive whole `bigint` material quantities as exact decimal strings
+- revalidates every newly introduced Product reference at save time
+- preserves original item identity/add metadata when an existing Quantity changes
+- advances the Work Order's unified `updated_at` version for any meaningful header
+  or material change
+- performs no mutation and creates no audit for a normalized full no-op
+
+Persisted Draft materials are reloaded through a narrow trusted Work Order read that
+may expose only Product identity, persisted Quantity, and current physical Inventory.
+It does not grant general Product or Inventory access. A persisted item remains
+historically readable if its Product is archived later; adding a new archived Product
+is forbidden. Inventory sufficiency remains a Finish-time decision.
 
 ### Finish
 

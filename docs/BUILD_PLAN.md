@@ -2304,9 +2304,9 @@ Protect:
 
 Audit only meaningful saved changes according to audit policy.
 
-Task 108 does not persist WorkOrderItems or allocate Project requirements. Task 114
-owns trusted item persistence and the planned-requirement allocation boundary across
-multiple Draft Work Orders.
+Task 108 does not persist WorkOrderItems. Task 114A owns trusted atomic Draft header
+and desired-state material persistence; Draft persistence does not reserve Inventory
+or calculate Project commitments.
 
 ---
 
@@ -2407,17 +2407,37 @@ Add component tests.
 
 ---
 
-## 114 — Add Draft Item Persistence
+## 114A — Add Atomic Draft Persistence Backend + Trusted Material Read
 
 Goal:
-- add/update/remove WorkOrderItem rows through authorized Draft backend path
+- atomically save the normalized Draft header and complete desired WorkOrderItem set
+- reload persisted Draft materials through a narrow trusted read
 
 Rules:
-- quantity > 0
+- quantities are positive whole `bigint` values transported as decimal strings
+- diff desired state so unchanged rows retain identity and add metadata
+- newly referenced Products are revalidated as active eligible stock-tracked kinds
+- existing persisted references remain historical after later Product archival
 - Finished parent rejected
+- exact `updated_at` protects the unified header/material Draft version
+- normalized full no-op performs no mutation and creates no audit
+- one meaningful save creates one atomic `work_order.updated` audit
 - no Inventory mutation
-- validate allocation against Project requirements across all Draft Work Orders
-- prevent double-allocation under concurrency
+- no Inventory sufficiency, reservation, or Project commitment calculation
+- preserve normal Product/Inventory RLS and direct WorkOrderItem write denial
+
+Backend only. Keep the existing header-only compatibility RPC unchanged.
+
+---
+
+## 114B — Integrate Persisted Draft Materials in the Frontend
+
+Goal:
+- load persisted Draft materials through the Task 114A trusted read
+- switch Save for Later to the Task 114A atomic header/material RPC
+- refresh the local authoritative Draft version from the returned exact `updated_at`
+
+Do not add Inventory mutation or Finish behavior.
 
 ---
 

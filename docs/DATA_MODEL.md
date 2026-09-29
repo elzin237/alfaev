@@ -1049,8 +1049,8 @@ Rules:
   concurrency. Normalized no-ops do not change update metadata or create audit noise.
 - One Project may have one or many Work Orders; `project_id` is not unique.
 - Selecting Project automatically sets/refreshes the customer snapshot while Draft.
-- Draft materials integrate with the selected Project's planned component requirements.
-- Allocation across multiple Draft Work Orders must not double-allocate the same planned requirement.
+- Draft material persistence does not reserve Inventory or allocate Project planning
+  commitments; Finish owns authoritative physical-stock validation.
 - Draft is editable according to permission.
 - Draft does not affect Inventory.
 - Finished is immutable.
@@ -1098,6 +1098,19 @@ Barcode workflow:
 Rules:
 
 - WorkOrderItem rows are editable only while parent WorkOrder is Draft.
+- Save for Later submits the complete desired set atomically with the Draft header.
+- Quantity is a positive whole `bigint` transported as an exact decimal string.
+- Existing retained/updated rows preserve `id`, `added_at`, and
+  `added_by_user_id`; only newly inserted rows receive new server-owned add metadata.
+- A new Product reference must resolve at save time to an active `component` or
+  `pcb_finished_good`. An existing persisted reference may remain, change Quantity,
+  or be removed after later Product archival.
+- Any meaningful header or material save advances the parent WorkOrder `updated_at`
+  exactly once; a normalized full no-op changes no row and creates no audit.
+- Persisted Draft material reads use a narrow trusted projection of Product ID,
+  Serial Number, Name, persisted Quantity, and physical InventoryBalance Quantity;
+  normal Product and InventoryBalance RLS remains unchanged.
+- Draft persistence has no Inventory or commitment side effects.
 - On Finish, rows become immutable.
 
 ---

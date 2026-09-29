@@ -68,6 +68,19 @@ interface WorkOrderMaterialInventoryRow {
   product_id: string;
 }
 
+interface SavedDraftWorkOrderRow {
+  updated_at: string;
+  work_order_id: string;
+}
+
+interface DraftWorkOrderMaterialRow {
+  current_inventory: string;
+  product_id: string;
+  product_name: string;
+  quantity: string;
+  serial_number: string;
+}
+
 async function actAs(
   database: PoolClient,
   actor: SecurityActor,
@@ -337,6 +350,44 @@ async function getWorkOrderMaterialInventory(
     `select product_id, current_inventory
      from public.get_work_order_material_inventory($1::uuid, $2::uuid)`,
     [workOrderId, productId],
+  )).rows;
+}
+
+async function saveDraftWorkOrder(
+  database: PoolClient,
+  values: {
+    description: string | null;
+    expectedUpdatedAt: string | null;
+    items: unknown;
+    projectId: string | null;
+    workOrderId: string | null;
+  },
+): Promise<SavedDraftWorkOrderRow> {
+  return (await database.query<SavedDraftWorkOrderRow>(
+    `select saved.work_order_id, saved.updated_at::text as updated_at
+     from public.save_draft_work_order(
+       $1::uuid, $2::uuid, $3::text, $4::jsonb, $5::timestamptz
+     ) as saved`,
+    [
+      values.workOrderId,
+      values.projectId,
+      values.description,
+      values.items === null ? null : JSON.stringify(values.items),
+      values.expectedUpdatedAt,
+    ],
+  )).rows[0]!;
+}
+
+async function listDraftWorkOrderMaterials(
+  database: PoolClient,
+  workOrderId: string | null,
+): Promise<DraftWorkOrderMaterialRow[]> {
+  return (await database.query<DraftWorkOrderMaterialRow>(
+    `select product_id, serial_number, product_name,
+            quantity::text as quantity,
+            current_inventory::text as current_inventory
+     from public.list_draft_work_order_materials($1::uuid)`,
+    [workOrderId],
   )).rows;
 }
 
@@ -1588,6 +1639,24 @@ export function registerWorkOrderSchemaTests(
                  'RN-9000-0001', $1::uuid, $1::uuid
                )`,
               [fixture.actors.admin.profileId],
+            ),
+            "42501",
+          );
+          await expectRejected(
+            database,
+            () => database.query(
+              `update public.work_order_items
+               set quantity = quantity where work_order_id = $1::uuid`,
+              [randomUUID()],
+            ),
+            "42501",
+          );
+          await expectRejected(
+            database,
+            () => database.query(
+              `delete from public.work_order_items
+               where work_order_id = $1::uuid`,
+              [randomUUID()],
             ),
             "42501",
           );
@@ -4876,6 +4945,1324 @@ export function registerWorkOrderSchemaTests(
               table_name: "products",
             },
           ]);
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.TASK114A_MIGRATION !== "1")(
+    "Task 114A atomic Draft persistence and material read (requires deployed migration)",
+    () => {
+      async function createPersistenceProduct(
+        database: PoolClient,
+        values: {
+          active?: boolean;
+          actorId: string;
+          kind?: "component" | "pcb_finished_good";
+          name?: string;
+          quantity?: bigint;
+        },
+      ): Promise<{ id: string; name: string; serialNumber: string }> {
+        const id = randomUUID();
+        const active = values.active ?? true;
+        const name = values.name ?? `Persisted Material ${id}`;
+        const serialNumber = createTestSerialNumber();
+        await database.query(
+          `insert into public.products (
+             id, serial_number, name, category, product_kind, is_active,
+             created_by_user_id, updated_by_user_id,
+             archived_at, archived_by_user_id
+           ) values (
+             $1::uuid, $2::text, $3::text, 'Work Order', $4::text, $5::boolean,
+             $6::uuid, $6::uuid,
+             case when $5::boolean then null else pg_catalog.clock_timestamp() end,
+             case when $5::boolean then null else $6::uuid end
+           )`,
+          [
+            id,
+            serialNumber,
+            name,
+            values.kind ?? "component",
+            active,
+            values.actorId,
+          ],
+        );
+        await database.query(
+          `update public.inventory_balances
+           set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
+           where product_id = $1::uuid`,
+          [id, (values.quantity ?? 0n).toString()],
+        );
+        return { id, name, serialNumber };
+      }
+
+      async function createPersistenceDraft(
+        database: PoolClient,
+        values: {
+          actorId: string;
+          description?: string | null;
+          projectId?: string | null;
+          status?: "draft" | "finished";
+          suffix?: number;
+        },
+      ): Promise<{ id: string; updatedAt: string }> {
+        const id = randomUUID();
+        const year = await findUnusedWorkOrderYear(database);
+        const status = values.status ?? "draft";
+        const projectId = values.projectId ?? null;
+        const customerName = projectId ? "Snapshot Customer" : null;
+        await database.query(
+          `insert into public.work_orders (
+             id, work_order_number, project_id, customer_name_snapshot,
+             description, status, created_by_user_id, updated_by_user_id,
+             finished_at, finished_by_user_id
+           ) values (
+             $1::uuid, $2::text, $3::uuid, $4::text,
+             $5::text, $6::text, $7::uuid, $7::uuid,
+             case when $6::text = 'finished' then pg_catalog.clock_timestamp() end,
+             case when $6::text = 'finished' then $7::uuid end
+           )`,
+          [
+            id,
+            `RN-${year}-${String(values.suffix ?? 1).padStart(4, "0")}`,
+            projectId,
+            customerName,
+            values.description ?? null,
+            status,
+            values.actorId,
+          ],
+        );
+        const updatedAt = (await database.query<{ updated_at: string }>(
+          `select updated_at::text as updated_at
+           from public.work_orders where id = $1::uuid`,
+          [id],
+        )).rows[0]!.updated_at;
+        return { id, updatedAt };
+      }
+
+      async function grantOnlyPersistencePermission(
+        database: PoolClient,
+        actor: SecurityActor,
+        adminProfileId: string,
+        permissionKey: string | null,
+      ): Promise<void> {
+        await database.query(
+          `delete from public.user_permissions as permission
+           using public.permission_definitions as definition
+           where permission.permission_definition_id = definition.id
+             and permission.user_id = $1::uuid
+             and (
+               definition.key like 'work_orders.%'
+               or definition.key like 'inventory.%'
+               or definition.key like 'projects.%'
+             )`,
+          [actor.profileId],
+        );
+        if (!permissionKey) return;
+        await database.query(
+          `insert into public.user_permissions (
+             user_id, permission_definition_id, granted_by_user_id
+           )
+           select $1::uuid, definition.id, $2::uuid
+           from public.permission_definitions as definition
+           where definition.key = $3::text`,
+          [actor.profileId, adminProfileId, permissionKey],
+        );
+      }
+
+      it("authorizes atomic saves and narrow reads through their exact independent boundaries", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const actor = fixture.actors.unpermitted;
+          const projectId = await createProject(database, admin.profileId);
+          const draft = await createPersistenceDraft(database, {
+            actorId: admin.profileId,
+          });
+          const product = await createPersistenceProduct(database, {
+            actorId: admin.profileId,
+            quantity: 12n,
+          });
+
+          await actAs(database, admin);
+          const adminSave = await saveDraftWorkOrder(database, {
+            description: "  Initial assembly  ",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [{ product_id: product.id, quantity: "2" }],
+            projectId,
+            workOrderId: draft.id,
+          });
+          expect(adminSave.work_order_id).toBe(draft.id);
+          expect(await listDraftWorkOrderMaterials(database, draft.id)).toEqual([{
+            current_inventory: "12",
+            product_id: product.id,
+            product_name: product.name,
+            quantity: "2",
+            serial_number: product.serialNumber,
+          }]);
+          await database.query("reset role");
+
+          await grantOnlyPersistencePermission(
+            database, actor, admin.profileId, "work_orders.edit_draft",
+          );
+          await actAs(database, actor);
+          const editorSave = await saveDraftWorkOrder(database, {
+            description: "Initial assembly",
+            expectedUpdatedAt: adminSave.updated_at,
+            items: [{ product_id: product.id, quantity: "3" }],
+            projectId,
+            workOrderId: draft.id,
+          });
+          expect(editorSave.updated_at).not.toBe(adminSave.updated_at);
+          expect(await listDraftWorkOrderMaterials(database, draft.id)).toHaveLength(1);
+          expect((await database.query(
+            "select id from public.products where id = $1::uuid",
+            [product.id],
+          )).rows).toEqual([]);
+          expect((await database.query(
+            `select product_id from public.inventory_balances
+             where product_id = $1::uuid`,
+            [product.id],
+          )).rows).toEqual([]);
+          await database.query("reset role");
+
+          for (const permission of [
+            "work_orders.view",
+            "work_orders.create",
+            "work_orders.finish",
+            "work_orders.delete_draft",
+            null,
+          ] as const) {
+            await grantOnlyPersistencePermission(
+              database, actor, admin.profileId, permission,
+            );
+            await actAs(database, actor);
+            await expectRejected(
+              database,
+              () => saveDraftWorkOrder(database, {
+                description: "Denied",
+                expectedUpdatedAt: editorSave.updated_at,
+                items: [{ product_id: product.id, quantity: "3" }],
+                projectId,
+                workOrderId: draft.id,
+              }),
+              "42501",
+              "Access denied",
+            );
+            if (permission === "work_orders.view") {
+              expect(await listDraftWorkOrderMaterials(database, draft.id)).toHaveLength(1);
+            } else {
+              await expectRejected(
+                database,
+                () => listDraftWorkOrderMaterials(database, draft.id),
+                "42501",
+                "Access denied",
+              );
+            }
+            await database.query("reset role");
+          }
+
+          await grantOnlyPersistencePermission(
+            database,
+            fixture.actors.inactive,
+            admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, fixture.actors.inactive);
+          await expectRejected(
+            database,
+            () => saveDraftWorkOrder(database, {
+              description: null,
+              expectedUpdatedAt: editorSave.updated_at,
+              items: [],
+              projectId: null,
+              workOrderId: draft.id,
+            }),
+            "42501",
+            "Access denied",
+          );
+          await expectRejected(
+            database,
+            () => listDraftWorkOrderMaterials(database, draft.id),
+            "42501",
+            "Access denied",
+          );
+          await database.query("reset role");
+        });
+
+        expectPermissionDenied((await fixture.anonymousClient.rpc(
+          "save_draft_work_order",
+          {
+            p_description: null,
+            p_expected_updated_at: new Date().toISOString(),
+            p_items: [],
+            p_project_id: null,
+            p_work_order_id: randomUUID(),
+          },
+        )).error);
+        expectPermissionDenied((await fixture.anonymousClient.rpc(
+          "list_draft_work_order_materials",
+          { p_work_order_id: randomUUID() },
+        )).error);
+      });
+
+      it("strictly validates lifecycle, optimistic version, and the exact desired-items JSON contract", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectId = await createProject(database, actor.profileId);
+          const draft = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+          });
+          const finished = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+            description: "Finished",
+            projectId,
+            status: "finished",
+            suffix: 2,
+          });
+          const product = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+          });
+          const valid = [{ product_id: product.id, quantity: "1" }];
+          await actAs(database, actor);
+
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: null, expectedUpdatedAt: draft.updatedAt,
+            items: [], projectId: null, workOrderId: null,
+          }), "22023", "Work Order ID is required");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: null, expectedUpdatedAt: null,
+            items: [], projectId: null, workOrderId: draft.id,
+          }), "22023", "Expected Work Order update timestamp is required");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: null, expectedUpdatedAt: draft.updatedAt,
+            items: [], projectId: null, workOrderId: randomUUID(),
+          }), "P0002", "Work Order not found");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "No", expectedUpdatedAt: finished.updatedAt,
+            items: [], projectId, workOrderId: finished.id,
+          }), "WOR02");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "No", expectedUpdatedAt: "2000-01-01T00:00:00Z",
+            items: valid, projectId: null, workOrderId: draft.id,
+          }), "WOR05");
+
+          const invalidItems: unknown[] = [
+            null,
+            {},
+            ["not-an-object"],
+            [{ quantity: "1" }],
+            [{ product_id: "not-a-uuid", quantity: "1" }],
+            [{ product_id: product.id }],
+            [{ product_id: product.id, quantity: 1 }],
+            [{ product_id: product.id, quantity: "0" }],
+            [{ product_id: product.id, quantity: "-1" }],
+            [{ product_id: product.id, quantity: "1.5" }],
+            [{ product_id: product.id, quantity: "1e3" }],
+            [{ product_id: product.id, quantity: "abc" }],
+            [{ product_id: product.id, quantity: "9223372036854775808" }],
+            [
+              { product_id: product.id, quantity: "1" },
+              { product_id: product.id, quantity: "2" },
+            ],
+            [{ product_id: product.id, quantity: "1", added_at: "forged" }],
+          ];
+          for (const items of invalidItems) {
+            await expectRejected(
+              database,
+              () => saveDraftWorkOrder(database, {
+                description: null,
+                expectedUpdatedAt: draft.updatedAt,
+                items,
+                projectId: null,
+                workOrderId: draft.id,
+              }),
+              "22023",
+            );
+          }
+
+          const empty = await saveDraftWorkOrder(database, {
+            description: null,
+            expectedUpdatedAt: draft.updatedAt,
+            items: [],
+            projectId: null,
+            workOrderId: draft.id,
+          });
+          expect(empty.updated_at).toBe(draft.updatedAt);
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [draft.id],
+          )).rows).toEqual([]);
+          await database.query("reset role");
+        });
+      });
+
+      it("preserves Task 108 Project, Customer, and Description normalization semantics", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const plannedId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Planned Customer",
+            name: "Planned Project",
+            status: "planned",
+          });
+          const inProgressId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "In-progress Customer",
+            name: "In-progress Project",
+            status: "in_progress",
+          });
+          const onHoldId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "On-hold Customer",
+            name: "On-hold Project",
+            status: "on_hold",
+          });
+          const completedId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Completed Customer",
+            name: "Completed Project",
+            status: "completed",
+          });
+          const cancelledId = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Cancelled Customer",
+            name: "Cancelled Project",
+            status: "cancelled",
+          });
+          const draft = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+          });
+
+          await actAs(database, actor);
+          const planned = await saveDraftWorkOrder(database, {
+            description: "  Trimmed description  ",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [],
+            projectId: plannedId,
+            workOrderId: draft.id,
+          });
+          const inProgress = await saveDraftWorkOrder(database, {
+            description: "Trimmed description",
+            expectedUpdatedAt: planned.updated_at,
+            items: [],
+            projectId: inProgressId,
+            workOrderId: draft.id,
+          });
+          const onHold = await saveDraftWorkOrder(database, {
+            description: "Trimmed description",
+            expectedUpdatedAt: inProgress.updated_at,
+            items: [],
+            projectId: onHoldId,
+            workOrderId: draft.id,
+          });
+          for (const unavailableProjectId of [completedId, cancelledId]) {
+            await expectRejected(database, () => saveDraftWorkOrder(database, {
+              description: "Rejected replacement",
+              expectedUpdatedAt: onHold.updated_at,
+              items: [],
+              projectId: unavailableProjectId,
+              workOrderId: draft.id,
+            }), "22023", "Selected Project is unavailable for Work Order Draft");
+          }
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select project_id, customer_name_snapshot, description
+             from public.work_orders where id = $1::uuid`,
+            [draft.id],
+          )).rows).toEqual([{
+            customer_name_snapshot: "On-hold Customer",
+            description: "Trimmed description",
+            project_id: onHoldId,
+          }]);
+
+          for (const historicalProjectId of [completedId, cancelledId]) {
+            const historicalDraft = await createPersistenceDraft(database, {
+              actorId: actor.profileId,
+              description: "Historical",
+              projectId: historicalProjectId,
+            });
+            await actAs(database, actor);
+            const retained = await saveDraftWorkOrder(database, {
+              description: "  Refreshed historical  ",
+              expectedUpdatedAt: historicalDraft.updatedAt,
+              items: [],
+              projectId: historicalProjectId,
+              workOrderId: historicalDraft.id,
+            });
+            const cleared = await saveDraftWorkOrder(database, {
+              description: "   ",
+              expectedUpdatedAt: retained.updated_at,
+              items: [],
+              projectId: null,
+              workOrderId: historicalDraft.id,
+            });
+            expect(cleared.updated_at).not.toBe(retained.updated_at);
+            await database.query("reset role");
+            expect((await database.query(
+              `select project_id, customer_name_snapshot, description
+               from public.work_orders where id = $1::uuid`,
+              [historicalDraft.id],
+            )).rows).toEqual([{
+              customer_name_snapshot: null,
+              description: null,
+              project_id: null,
+            }]);
+          }
+        });
+      });
+
+      it("diffs desired materials, preserves add metadata, supports archived history, and audits once", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const draft = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+          });
+          const retained = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+            quantity: 4n,
+          });
+          const removed = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+            kind: "pcb_finished_good",
+            quantity: 5n,
+          });
+          const added = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+            quantity: 6n,
+          });
+          const archivedNew = await createPersistenceProduct(database, {
+            active: false,
+            actorId: actor.profileId,
+          });
+          await actAs(database, actor);
+          const first = await saveDraftWorkOrder(database, {
+            description: "  Build  ",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [
+              { product_id: retained.id, quantity: "1" },
+              { product_id: removed.id, quantity: "2" },
+            ],
+            projectId: null,
+            workOrderId: draft.id,
+          });
+          await database.query("reset role");
+
+          const originalRows = (await database.query<{
+            added_at: string;
+            added_by_user_id: string;
+            id: string;
+            product_id: string;
+            quantity: string;
+          }>(
+            `select id, product_id, quantity::text as quantity,
+                    added_at::text as added_at, added_by_user_id
+             from public.work_order_items
+             where work_order_id = $1::uuid order by product_id`,
+            [draft.id],
+          )).rows;
+          await database.query(
+            `update public.products
+             set is_active = false,
+                 archived_at = pg_catalog.clock_timestamp(),
+                 archived_by_user_id = $2::uuid,
+                 updated_at = pg_catalog.clock_timestamp(),
+                 updated_by_user_id = $2::uuid
+             where id = $1::uuid`,
+            [retained.id, actor.profileId],
+          );
+
+          await actAs(database, actor);
+          const noOp = await saveDraftWorkOrder(database, {
+            description: "Build",
+            expectedUpdatedAt: first.updated_at,
+            items: [
+              { product_id: retained.id, quantity: "1" },
+              { product_id: removed.id, quantity: "2" },
+            ],
+            projectId: null,
+            workOrderId: draft.id,
+          });
+          expect(noOp.updated_at).toBe(first.updated_at);
+
+          const mixed = await saveDraftWorkOrder(database, {
+            description: "Build",
+            expectedUpdatedAt: noOp.updated_at,
+            items: [
+              { product_id: retained.id, quantity: "9223372036854775807" },
+              { product_id: added.id, quantity: "3" },
+            ],
+            projectId: null,
+            workOrderId: draft.id,
+          });
+          expect(mixed.updated_at).not.toBe(noOp.updated_at);
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Build",
+            expectedUpdatedAt: mixed.updated_at,
+            items: [
+              { product_id: retained.id, quantity: "9223372036854775807" },
+              { product_id: added.id, quantity: "3" },
+              { product_id: archivedNew.id, quantity: "1" },
+            ],
+            projectId: null,
+            workOrderId: draft.id,
+          }), "PRD05", "Product is unavailable for Work Order");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Build",
+            expectedUpdatedAt: mixed.updated_at,
+            items: [
+              { product_id: retained.id, quantity: "9223372036854775807" },
+              { product_id: added.id, quantity: "3" },
+              { product_id: randomUUID(), quantity: "1" },
+            ],
+            projectId: null,
+            workOrderId: draft.id,
+          }), "PRD05", "Product is unavailable for Work Order");
+          await database.query("reset role");
+
+          const rows = (await database.query<{
+            added_at: string;
+            added_by_user_id: string;
+            id: string;
+            product_id: string;
+            quantity: string;
+          }>(
+            `select id, product_id, quantity::text as quantity,
+                    added_at::text as added_at, added_by_user_id
+             from public.work_order_items
+             where work_order_id = $1::uuid order by product_id`,
+            [draft.id],
+          )).rows;
+          const retainedBefore = originalRows.find(
+            (row) => row.product_id === retained.id,
+          )!;
+          const retainedAfter = rows.find(
+            (row) => row.product_id === retained.id,
+          )!;
+          expect(retainedAfter).toEqual({
+            ...retainedBefore,
+            quantity: "9223372036854775807",
+          });
+          expect(rows.some((row) => row.product_id === removed.id)).toBe(false);
+          expect(rows.find((row) => row.product_id === added.id)).toMatchObject({
+            added_by_user_id: actor.profileId,
+            quantity: "3",
+          });
+
+          const audits = (await database.query<{
+            after_data: {
+              materials: Array<{ product_id: string; quantity: number | string }>;
+            };
+            before_data: {
+              materials: Array<{ product_id: string; quantity: number | string }>;
+            };
+          }>(
+            `select before_data, after_data
+             from public.audit_logs
+             where entity_id = $1::uuid
+               and action_type = 'work_order.updated'
+             order by created_at, id`,
+            [draft.id],
+          )).rows;
+          expect(audits).toHaveLength(2);
+          expect(audits[1]!.before_data.materials.map((item) => item.product_id))
+            .toEqual([...audits[1]!.before_data.materials]
+              .map((item) => item.product_id).sort());
+          expect(audits[1]!.after_data.materials.map((item) => item.product_id))
+            .toEqual([...audits[1]!.after_data.materials]
+              .map((item) => item.product_id).sort());
+          for (const audit of audits) {
+            for (const material of [
+              ...audit.before_data.materials,
+              ...audit.after_data.materials,
+            ]) {
+              expect(Object.keys(material).sort()).toEqual([
+                "product_id", "quantity",
+              ]);
+            }
+          }
+
+          await actAs(database, actor);
+          const cleared = await saveDraftWorkOrder(database, {
+            description: "Build",
+            expectedUpdatedAt: mixed.updated_at,
+            items: [],
+            projectId: null,
+            workOrderId: draft.id,
+          });
+          expect(cleared.updated_at).not.toBe(mixed.updated_at);
+          await database.query("reset role");
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [draft.id],
+          )).rows).toEqual([]);
+        });
+      });
+
+      it("keeps header, materials, version, and audit atomic across invalid and failed saves", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectId = await createProject(database, actor.profileId);
+          const draft = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+          });
+          const product = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+          });
+          const before = (await database.query(
+            "select * from public.work_orders where id = $1::uuid",
+            [draft.id],
+          )).rows[0];
+          await actAs(database, actor);
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Must roll back",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [{ product_id: product.id, quantity: "0" }],
+            projectId,
+            workOrderId: draft.id,
+          }), "22023");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Must roll back",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [{ product_id: product.id, quantity: "1" }],
+            projectId: randomUUID(),
+            workOrderId: draft.id,
+          }), "P0002", "Project not found");
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select * from public.work_orders where id = $1::uuid",
+            [draft.id],
+          )).rows[0]).toEqual(before);
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [draft.id],
+          )).rows).toEqual([]);
+
+          await database.query(
+            `create function pg_temp.reject_atomic_draft_save_audit()
+             returns trigger language plpgsql set search_path = ''
+             as $test_function$
+             begin
+               if new.action_type = 'work_order.updated' then
+                 raise exception 'Simulated atomic Draft audit failure'
+                   using errcode = 'TST14';
+               end if;
+               return new;
+             end;
+             $test_function$`,
+          );
+          await database.query(
+            `create trigger reject_atomic_draft_save_audit_test
+             before insert on public.audit_logs for each row
+             execute function pg_temp.reject_atomic_draft_save_audit()`,
+          );
+          await actAs(database, actor);
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Must roll back",
+            expectedUpdatedAt: draft.updatedAt,
+            items: [{ product_id: product.id, quantity: "1" }],
+            projectId,
+            workOrderId: draft.id,
+          }), "TST14", "Simulated atomic Draft audit failure");
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select * from public.work_orders where id = $1::uuid",
+            [draft.id],
+          )).rows[0]).toEqual(before);
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [draft.id],
+          )).rows).toEqual([]);
+          expect((await database.query(
+            `select id from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.updated'`,
+            [draft.id],
+          )).rows).toEqual([]);
+        });
+      });
+
+      it("serializes stale saves and new-Product archival races through stable parent/Product locks", async () => {
+        const fixture = requireHarness();
+        const actor = fixture.actors.admin;
+        const workOrderId = randomUUID();
+        const productId = randomUUID();
+        const saveFirstProductId = randomUUID();
+        const initialUpdatedAt = "2026-09-28 12:00:00+00";
+        const winnerUpdatedAt = "2026-09-28 12:01:00+00";
+        const staleApplication = `task-114a-stale-${randomUUID()}`;
+        const archiveApplication = `task-114a-archive-${randomUUID()}`;
+        const saveFirstApplication = `task-114a-save-first-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const blocker = clients[0];
+          const contender = clients[1];
+          const observer = clients[2];
+          if (!blocker || !contender || !observer) {
+            throw new Error("Task 114A concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let pending:
+            | Promise<{ error: unknown; ok: false } | { ok: true; value: SavedDraftWorkOrderRow }>
+            | undefined;
+
+          const waitForLock = async (applicationName: string) => {
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const activity = await observer.query<{
+                wait_event_type: string | null;
+              }>(
+                `select wait_event_type
+                 from pg_catalog.pg_stat_activity
+                 where application_name = $1::text`,
+                [applicationName],
+              );
+              if (activity.rows[0]?.wait_event_type === "Lock") return;
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            throw new Error(`Expected ${applicationName} to wait on a lock`);
+          };
+
+          try {
+            const fixtureYear = await findUnusedWorkOrderYear(observer);
+            await observer.query("begin");
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, description, status,
+                 created_at, created_by_user_id, updated_at, updated_by_user_id
+               ) values (
+                 $1::uuid, $2::text, 'Original', 'draft',
+                 $3::timestamptz, $4::uuid, $3::timestamptz, $4::uuid
+               )`,
+              [
+                workOrderId,
+                `RN-${fixtureYear}-0001`,
+                initialUpdatedAt,
+                actor.profileId,
+              ],
+            );
+            await observer.query(
+              `insert into public.products (
+                 id, serial_number, name, category, product_kind,
+                 created_by_user_id, updated_by_user_id
+               ) values
+                 (
+                   $1::uuid, $2::text, 'Task 114A race Product',
+                   'Work Order', 'component', $5::uuid, $5::uuid
+                 ),
+                 (
+                   $3::uuid, $4::text, 'Task 114A save-first Product',
+                   'Work Order', 'component', $5::uuid, $5::uuid
+                 )`,
+              [
+                productId,
+                createTestSerialNumber(),
+                saveFirstProductId,
+                createTestSerialNumber(),
+                actor.profileId,
+              ],
+            );
+            await observer.query("commit");
+            setupCommitted = true;
+
+            await blocker.query("begin");
+            await blocker.query(
+              "select id from public.work_orders where id = $1::uuid for update",
+              [workOrderId],
+            );
+            await contender.query("begin");
+            await contender.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [staleApplication],
+            );
+            await actAs(contender, actor);
+            pending = saveDraftWorkOrder(contender, {
+              description: "Stale contender",
+              expectedUpdatedAt: initialUpdatedAt,
+              items: [],
+              projectId: null,
+              workOrderId,
+            }).then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ error, ok: false as const }),
+            );
+            await waitForLock(staleApplication);
+            await blocker.query(
+              `update public.work_orders
+               set description = 'Winner', updated_at = $2::timestamptz,
+                   updated_by_user_id = $3::uuid
+               where id = $1::uuid`,
+              [workOrderId, winnerUpdatedAt, actor.profileId],
+            );
+            await blocker.query("commit");
+            expect(await pending).toMatchObject({
+              error: {
+                code: "WOR05",
+                message: "Work Order Draft has changed. Reload and try again.",
+              },
+              ok: false,
+            });
+            pending = undefined;
+            await contender.query("rollback");
+
+            await blocker.query("begin");
+            await blocker.query(
+              "select id from public.products where id = $1::uuid for update",
+              [productId],
+            );
+            await blocker.query(
+              `update public.products
+               set is_active = false,
+                   archived_at = pg_catalog.clock_timestamp(),
+                   archived_by_user_id = $2::uuid,
+                   updated_at = pg_catalog.clock_timestamp(),
+                   updated_by_user_id = $2::uuid
+               where id = $1::uuid`,
+              [productId, actor.profileId],
+            );
+            await contender.query("begin");
+            await contender.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [archiveApplication],
+            );
+            await actAs(contender, actor);
+            pending = saveDraftWorkOrder(contender, {
+              description: "Winner",
+              expectedUpdatedAt: winnerUpdatedAt,
+              items: [{ product_id: productId, quantity: "1" }],
+              projectId: null,
+              workOrderId,
+            }).then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ error, ok: false as const }),
+            );
+            await waitForLock(archiveApplication);
+            await blocker.query("commit");
+            expect(await pending).toMatchObject({
+              error: {
+                code: "PRD05",
+                message: "Product is unavailable for Work Order",
+              },
+              ok: false,
+            });
+            pending = undefined;
+            await contender.query("rollback");
+
+            expect((await observer.query(
+              `select description, updated_at::text as updated_at
+               from public.work_orders where id = $1::uuid`,
+              [workOrderId],
+            )).rows).toEqual([{
+              description: "Winner",
+              updated_at: winnerUpdatedAt,
+            }]);
+            expect((await observer.query(
+              `select id from public.work_order_items
+               where work_order_id = $1::uuid`,
+              [workOrderId],
+            )).rows).toEqual([]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = $1::uuid
+                 and action_type = 'work_order.updated'`,
+              [workOrderId],
+            )).rows).toEqual([]);
+            expect((await observer.query<{ quantity: string }>(
+              `select quantity::text as quantity
+               from public.inventory_balances where product_id = $1::uuid`,
+              [productId],
+            )).rows).toEqual([{ quantity: "0" }]);
+
+            // Complementary order: the save validates and holds FOR SHARE first.
+            // The archive must wait until the save transaction ends. Roll back the
+            // save so this committed-concurrency test leaves no immutable audit.
+            await contender.query("begin");
+            await actAs(contender, actor);
+            const saveFirst = await saveDraftWorkOrder(contender, {
+              description: "Winner",
+              expectedUpdatedAt: winnerUpdatedAt,
+              items: [{ product_id: saveFirstProductId, quantity: "1" }],
+              projectId: null,
+              workOrderId,
+            });
+            expect(saveFirst.updated_at).not.toBe(winnerUpdatedAt);
+
+            await blocker.query("begin");
+            await blocker.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [saveFirstApplication],
+            );
+            const pendingArchive = blocker.query(
+              `update public.products
+               set is_active = false,
+                   archived_at = pg_catalog.clock_timestamp(),
+                   archived_by_user_id = $2::uuid,
+                   updated_at = pg_catalog.clock_timestamp(),
+                   updated_by_user_id = $2::uuid
+               where id = $1::uuid`,
+              [saveFirstProductId, actor.profileId],
+            );
+            await waitForLock(saveFirstApplication);
+            await contender.query("rollback");
+            await pendingArchive;
+            await blocker.query("rollback");
+
+            expect((await observer.query(
+              `select id from public.work_order_items
+               where work_order_id = $1::uuid`,
+              [workOrderId],
+            )).rows).toEqual([]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = $1::uuid
+                 and action_type = 'work_order.updated'`,
+              [workOrderId],
+            )).rows).toEqual([]);
+            expect((await observer.query<{ is_active: boolean }>(
+              `select is_active from public.products where id = $1::uuid`,
+              [saveFirstProductId],
+            )).rows).toEqual([{ is_active: true }]);
+          } finally {
+            await blocker.query("rollback").catch(() => undefined);
+            if (pending) await pending;
+            await contender.query("rollback").catch(() => undefined);
+            if (setupCommitted) {
+              await observer.query(
+                "delete from public.work_orders where id = $1::uuid",
+                [workOrderId],
+              );
+              await observer.query(
+                `delete from public.inventory_balances
+                 where product_id = any($1::uuid[])`,
+                [[productId, saveFirstProductId]],
+              );
+              await observer.query(
+                "delete from public.products where id = any($1::uuid[])",
+                [[productId, saveFirstProductId]],
+              );
+              expect((await observer.query<{ count: string }>(
+                `select (
+                   (select pg_catalog.count(*) from public.work_orders
+                    where id = $1::uuid)
+                   +
+                   (select pg_catalog.count(*) from public.work_order_items
+                    where work_order_id = $1::uuid)
+                   +
+                   (select pg_catalog.count(*) from public.products
+                    where id = any($2::uuid[]))
+                   +
+                   (select pg_catalog.count(*) from public.inventory_balances
+                    where product_id = any($2::uuid[]))
+                   +
+                   (select pg_catalog.count(*) from public.audit_logs
+                    where entity_id = $1::uuid)
+                 )::text as count`,
+                [workOrderId, [productId, saveFirstProductId]],
+              )).rows).toEqual([{ count: "0" }]);
+            } else {
+              await observer.query("rollback").catch(() => undefined);
+            }
+          }
+        });
+      });
+
+      it("returns exact persisted material history and rejects invalid Draft-read contexts", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const draft = await createPersistenceDraft(database, {
+            actorId: actor.profileId,
+          });
+          const first = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+            name: "First historical input",
+            quantity: 9223372036854775807n,
+          });
+          const second = await createPersistenceProduct(database, {
+            actorId: actor.profileId,
+            name: "Second input",
+            quantity: 9n,
+          });
+          const projectId = await createProject(database, actor.profileId);
+          const projectProductId = randomUUID();
+          await database.query(
+            `insert into public.project_products (
+               id, project_id, name, created_by_user_id, updated_by_user_id
+             ) values (
+               $1::uuid, $2::uuid, 'Task 114A commitment', $3::uuid, $3::uuid
+             )`,
+            [projectProductId, projectId, actor.profileId],
+          );
+          await database.query(
+            `insert into public.project_product_components (
+               project_product_id, product_id, required_quantity,
+               created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::uuid, 100, $3::uuid, $3::uuid)`,
+            [projectProductId, first.id, actor.profileId],
+          );
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_at, added_by_user_id
+             ) values
+               ($1, $2, 9223372036854775807, '2026-09-28T10:00:00Z', $4),
+               ($1, $3, 2, '2026-09-28T10:01:00Z', $4)`,
+            [draft.id, first.id, second.id, actor.profileId],
+          );
+          await database.query(
+            `update public.products
+             set is_active = false,
+                 archived_at = pg_catalog.clock_timestamp(),
+                 archived_by_user_id = $2::uuid,
+                 updated_at = pg_catalog.clock_timestamp(),
+                 updated_by_user_id = $2::uuid
+             where id = $1::uuid`,
+            [first.id, actor.profileId],
+          );
+
+          await actAs(database, actor);
+          const rows = await listDraftWorkOrderMaterials(database, draft.id);
+          expect(rows).toEqual([
+            {
+              current_inventory: "9223372036854775807",
+              product_id: first.id,
+              product_name: first.name,
+              quantity: "9223372036854775807",
+              serial_number: first.serialNumber,
+            },
+            {
+              current_inventory: "9",
+              product_id: second.id,
+              product_name: second.name,
+              quantity: "2",
+              serial_number: second.serialNumber,
+            },
+          ]);
+          expect(Object.keys(rows[0]!).sort()).toEqual([
+            "current_inventory",
+            "product_id",
+            "product_name",
+            "quantity",
+            "serial_number",
+          ]);
+          await expectRejected(
+            database,
+            () => listDraftWorkOrderMaterials(database, null),
+            "22023",
+            "Work Order ID is required",
+          );
+          await expectRejected(
+            database,
+            () => listDraftWorkOrderMaterials(database, randomUUID()),
+            "P0002",
+            "Work Order not found",
+          );
+          await database.query("reset role");
+
+          await database.query(
+            "delete from public.inventory_balances where product_id = $1::uuid",
+            [second.id],
+          );
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => listDraftWorkOrderMaterials(database, draft.id),
+            "IVB01",
+            "Inventory balance not found",
+          );
+          await database.query("reset role");
+
+          await database.query(
+            `update public.work_orders
+             set status = 'finished',
+                 project_id = $2::uuid,
+                 customer_name_snapshot = 'Finished Customer',
+                 description = 'Finished Description',
+                 finished_at = pg_catalog.clock_timestamp(),
+                 finished_by_user_id = $3::uuid
+             where id = $1::uuid`,
+            [draft.id, projectId, actor.profileId],
+          );
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => listDraftWorkOrderMaterials(database, draft.id),
+            "WOR02",
+          );
+          await database.query("reset role");
+        });
+      });
+
+      it("hardens both RPCs, leaves table RLS/direct writes intact, and has zero Inventory side effects", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const functions = (await database.query<{
+            arguments: string;
+            authenticated_execute: boolean;
+            definition: string;
+            language: string;
+            name: string;
+            anon_execute: boolean;
+            public_execute: boolean;
+            result: string;
+            security_definer: boolean;
+            settings: string[];
+            volatility: string;
+          }>(
+            `select routine.proname as name,
+                    pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+                    pg_catalog.pg_get_function_result(routine.oid) as result,
+                    pg_catalog.pg_get_functiondef(routine.oid) as definition,
+                    language.lanname as language,
+                    routine.provolatile as volatility,
+                    routine.prosecdef as security_definer,
+                    routine.proconfig as settings,
+                    pg_catalog.has_function_privilege(
+                      'anon', routine.oid, 'execute'
+                    ) as anon_execute,
+                    pg_catalog.has_function_privilege(
+                      'authenticated', routine.oid, 'execute'
+                    ) as authenticated_execute,
+                    exists (
+                      select 1 from pg_catalog.aclexplode(routine.proacl) as privilege
+                      where privilege.grantee = 0
+                        and privilege.privilege_type = 'EXECUTE'
+                    ) as public_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             join pg_catalog.pg_language as language
+               on language.oid = routine.prolang
+             where namespace.nspname = 'public'
+               and routine.proname in (
+                 'save_draft_work_order',
+                 'list_draft_work_order_materials'
+               )
+             order by routine.proname`,
+          )).rows;
+          expect(functions.map((routine) => ({
+            authenticated_execute: routine.authenticated_execute,
+            language: routine.language,
+            name: routine.name,
+            anon_execute: routine.anon_execute,
+            public_execute: routine.public_execute,
+            security_definer: routine.security_definer,
+            settings: routine.settings,
+            volatility: routine.volatility,
+          }))).toEqual([
+            {
+              anon_execute: false,
+              authenticated_execute: true,
+              language: "plpgsql",
+              name: "list_draft_work_order_materials",
+              public_execute: false,
+              security_definer: true,
+              settings: ['search_path=""'],
+              volatility: "s",
+            },
+            {
+              anon_execute: false,
+              authenticated_execute: true,
+              language: "plpgsql",
+              name: "save_draft_work_order",
+              public_execute: false,
+              security_definer: true,
+              settings: ['search_path=""'],
+              volatility: "v",
+            },
+          ]);
+          expect(functions.find((routine) => routine.name === "save_draft_work_order"))
+            .toMatchObject({
+              arguments: "p_work_order_id uuid, p_project_id uuid, p_description text, p_items jsonb, p_expected_updated_at timestamp with time zone",
+              result: "TABLE(work_order_id uuid, updated_at timestamp with time zone)",
+            });
+          expect(functions.find(
+            (routine) => routine.name === "list_draft_work_order_materials",
+          )).toMatchObject({
+            arguments: "p_work_order_id uuid",
+            result: "TABLE(product_id uuid, serial_number text, product_name text, quantity bigint, current_inventory bigint)",
+          });
+          const saveDefinition = functions.find(
+            (routine) => routine.name === "save_draft_work_order",
+          )!.definition.toLowerCase();
+          expect(saveDefinition).toContain("for update");
+          expect(saveDefinition).toContain("for share");
+          expect(saveDefinition).toContain("append_audit_log");
+          expect(saveDefinition).not.toContain("update public.inventory_balances");
+          expect(saveDefinition).not.toContain("inventory_movements");
+          expect(saveDefinition).not.toContain("project_product");
+          const readDefinition = functions.find(
+            (routine) => routine.name === "list_draft_work_order_materials",
+          )!.definition.toLowerCase();
+          expect(readDefinition).not.toMatch(/\b(insert|update|delete)\b/);
+          expect(readDefinition).not.toContain("inventory_movements");
+
+          const policies = (await database.query<{
+            policy_expression: string;
+            policy_name: string;
+            table_name: string;
+          }>(
+            `select relation.relname as table_name,
+                    policy.polname as policy_name,
+                    pg_catalog.pg_get_expr(policy.polqual, policy.polrelid)
+                      as policy_expression
+             from pg_catalog.pg_policy as policy
+             join pg_catalog.pg_class as relation
+               on relation.oid = policy.polrelid
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname in (
+                 'inventory_balances', 'products', 'work_order_items'
+               )
+             order by relation.relname, policy.polname`,
+          )).rows;
+          expect(policies).toEqual([
+            {
+              policy_expression: "(current_user_is_admin() OR has_permission('inventory.view'::text))",
+              policy_name: "inventory_balances_select_inventory_readers",
+              table_name: "inventory_balances",
+            },
+            {
+              policy_expression: "(current_user_is_admin() OR has_permission('inventory.view'::text))",
+              policy_name: "products_select_inventory_readers",
+              table_name: "products",
+            },
+            {
+              policy_expression: "(current_user_is_admin() OR has_permission('work_orders.view'::text))",
+              policy_name: "work_order_items_select_authorized",
+              table_name: "work_order_items",
+            },
+          ]);
+
+          const actor = fixture.actors.unpermitted;
+          await grantOnlyPersistencePermission(
+            database, actor, fixture.actors.admin.profileId,
+            "work_orders.edit_draft",
+          );
+          await actAs(database, actor);
+          await expectRejected(
+            database,
+            () => database.query(
+              `insert into public.work_order_items (
+                 work_order_id, product_id, quantity, added_by_user_id
+               ) values ($1, $2, 1, $3)`,
+              [randomUUID(), randomUUID(), actor.profileId],
+            ),
+            "42501",
+          );
+          await database.query("reset role");
+
+          expect((await database.query<{ count: string }>(
+            `select count(*) from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             where namespace.nspname = 'public'
+               and routine.proname = 'update_draft_work_order'`,
+          )).rows).toEqual([{ count: "1" }]);
         });
       });
     },
