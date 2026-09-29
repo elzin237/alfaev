@@ -111,6 +111,26 @@ export type DraftWorkOrderSaveResult =
   | { ok: true; value: UpdatedDraftWorkOrder }
   | { ok: false; error: DraftWorkOrderSaveError };
 
+export interface DeletedDraftWorkOrder {
+  workOrderId: string;
+  workOrderNumber: string;
+}
+
+export interface DraftWorkOrderDeleteError {
+  code:
+    | "delete_access_denied"
+    | "draft_delete_failed"
+    | "invalid_delete_request"
+    | "stale_work_order"
+    | "work_order_not_deletable"
+    | "work_order_not_found";
+  message: string;
+}
+
+export type DraftWorkOrderDeleteResult =
+  | { ok: true; value: DeletedDraftWorkOrder }
+  | { ok: false; error: DraftWorkOrderDeleteError };
+
 export interface ResolvedWorkOrderProduct {
   id: string;
   serialNumber: string;
@@ -220,6 +240,7 @@ const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const createResultKeys = new Set(["work_order_id", "work_order_number"]);
 const updateResultKeys = new Set(["work_order_id", "updated_at"]);
+const deleteResultKeys = new Set(["work_order_id", "work_order_number"]);
 const detailAllowedKeys = new Set([
   "work_order_id",
   "work_order_number",
@@ -842,6 +863,100 @@ export async function saveDraftWorkOrder(
     return { ok: true, value: { workOrderId: row.work_order_id, updatedAt: row.updated_at } };
   } catch {
     return saveDraftFailure();
+  }
+}
+
+function deleteDraftFailure(code?: string): DraftWorkOrderDeleteResult {
+  if (code === "42501") {
+    return {
+      ok: false,
+      error: {
+        code: "delete_access_denied",
+        message: "You no longer have permission to delete this Draft.",
+      },
+    };
+  }
+  if (code === "WOR02") {
+    return {
+      ok: false,
+      error: {
+        code: "work_order_not_deletable",
+        message: "This Work Order can no longer be deleted.",
+      },
+    };
+  }
+  if (code === "WOR05") {
+    return {
+      ok: false,
+      error: {
+        code: "stale_work_order",
+        message:
+          "This Draft changed somewhere else. Reload the latest Draft before deleting it.",
+      },
+    };
+  }
+  if (code === "P0002") {
+    return {
+      ok: false,
+      error: {
+        code: "work_order_not_found",
+        message: "The Work Order could not be found.",
+      },
+    };
+  }
+  if (code === "22023") {
+    return {
+      ok: false,
+      error: {
+        code: "invalid_delete_request",
+        message: "The Draft deletion request is invalid.",
+      },
+    };
+  }
+  return {
+    ok: false,
+    error: {
+      code: "draft_delete_failed",
+      message: "The Draft could not be deleted. Please try again.",
+    },
+  };
+}
+
+export async function deleteDraftWorkOrder(
+  workOrderId: string,
+  expectedUpdatedAt: string,
+): Promise<DraftWorkOrderDeleteResult> {
+  try {
+    const { data, error } = await supabase.rpc("delete_draft_work_order", {
+      p_work_order_id: workOrderId,
+      p_expected_updated_at: expectedUpdatedAt,
+    });
+    if (error) return deleteDraftFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) {
+      return deleteDraftFailure();
+    }
+
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== deleteResultKeys.size ||
+      Object.keys(row).some((key) => !deleteResultKeys.has(key)) ||
+      !isUuid(row.work_order_id) ||
+      row.work_order_id !== workOrderId ||
+      !isWorkOrderNumber(row.work_order_number)
+    ) {
+      return deleteDraftFailure();
+    }
+
+    return {
+      ok: true,
+      value: {
+        workOrderId: row.work_order_id,
+        workOrderNumber: row.work_order_number,
+      },
+    };
+  } catch {
+    return deleteDraftFailure();
   }
 }
 

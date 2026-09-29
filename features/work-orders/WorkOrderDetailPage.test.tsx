@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const pageMocks = vi.hoisted(() => ({
+  deleteDraft: vi.fn(),
   detailRefetch: vi.fn(),
   materialsRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
@@ -58,6 +59,7 @@ const projectChoices = [
 
 function successfulHook(overrides: Record<string, unknown> = {}) {
   return {
+    canDeleteDraft: false,
     canEditDraft: true,
     detailQuery: {
       data: { ok: true, value: draft },
@@ -78,10 +80,12 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       refetch: pageMocks.materialsRefetch,
     },
     isSaving: false,
+    isDeleting: false,
     isLoadingMaterial: false,
     reloadLatestDraft: pageMocks.reloadLatestDraft,
     loadMaterial: pageMocks.loadMaterial,
     saveDraft: pageMocks.saveDraft,
+    deleteDraft: pageMocks.deleteDraft,
     ...overrides,
   };
 }
@@ -90,6 +94,7 @@ function pageTree(path = `/work-orders/${workOrderId}`, state?: unknown) {
   return (
     <MemoryRouter initialEntries={[{ pathname: path, state }]}>
       <Routes>
+        <Route path="/work-orders" element={<p>Work Orders destination</p>} />
         <Route path="/work-orders/:workOrderId" element={<WorkOrderDetailPage />} />
       </Routes>
     </MemoryRouter>
@@ -112,6 +117,10 @@ beforeEach(() => {
       workOrderId,
       updatedAt: "2026-09-22T10:01:00.123456+00:00",
     },
+  });
+  pageMocks.deleteDraft.mockResolvedValue({
+    ok: true,
+    value: { workOrderId, workOrderNumber: draft.workOrderNumber },
   });
   pageMocks.loadMaterial.mockResolvedValue({
     ok: true,
@@ -146,6 +155,7 @@ describe("WorkOrderDetailPage", () => {
     const props = {
       workOrder: draft,
       canEdit: true,
+      canDelete: true,
       projectChoices,
       projectChoicesError: null,
       projectChoicesLoading: false,
@@ -154,12 +164,14 @@ describe("WorkOrderDetailPage", () => {
       materialsError: null,
       materialsReady: true,
       isSaving: false,
+      isDeleting: false,
       isLoadingMaterial: false,
       onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
       onRetryMaterials: vi.fn(),
       onRetryProjectChoices: vi.fn(),
       onLoadMaterial: vi.fn(),
       onSave,
+      onDelete: pageMocks.deleteDraft,
     };
 
     const beforeHydration = document.createElement("div");
@@ -190,6 +202,7 @@ describe("WorkOrderDetailPage", () => {
     const props = {
       workOrder: draft,
       canEdit: true,
+      canDelete: true,
       projectChoices,
       projectChoicesError: null,
       projectChoicesLoading: false,
@@ -198,12 +211,14 @@ describe("WorkOrderDetailPage", () => {
       materialsError: null,
       materialsReady: true,
       isSaving: false,
+      isDeleting: false,
       isLoadingMaterial: false,
       onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
       onRetryMaterials: vi.fn(),
       onRetryProjectChoices: vi.fn(),
       onLoadMaterial: vi.fn(),
       onSave: vi.fn(),
+      onDelete: pageMocks.deleteDraft,
     };
     const beforeHydration = document.createElement("div");
     beforeHydration.innerHTML = renderToStaticMarkup(
@@ -929,6 +944,237 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save for Later" }))
       .not.toBeInTheDocument();
+  });
+
+  it("shows Delete independently for an authorized read-only Draft and requires confirmation", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canEditDraft: false,
+      canDeleteDraft: true,
+    }));
+    renderPage();
+
+    const deleteButton = screen.getByRole("button", { name: "Delete Draft" });
+    expect(screen.queryByRole("button", { name: "Save for Later" }))
+      .not.toBeInTheDocument();
+    fireEvent.click(deleteButton);
+    expect(pageMocks.deleteDraft).not.toHaveBeenCalled();
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Delete Draft Work Order?",
+    });
+    expect(dialog).toHaveTextContent("RN-2026-0042");
+    expect(dialog).toHaveTextContent("permanently");
+    expect(dialog).toHaveTextContent("number will not be reused");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(pageMocks.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("confirms once with the exact current version and navigates only after success", async () => {
+    let finishDelete: ((value: unknown) => void) | undefined;
+    pageMocks.deleteDraft.mockReturnValue(new Promise((resolve) => {
+      finishDelete = resolve;
+    }));
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+    }));
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    const dialog = screen.getByRole("dialog");
+    const confirm = within(dialog).getByRole("button", { name: "Delete Draft" });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(pageMocks.deleteDraft).toHaveBeenCalledExactlyOnceWith(
+      draft.updatedAt,
+    );
+    expect(screen.queryByText("Work Orders destination")).not.toBeInTheDocument();
+
+    finishDelete?.({
+      ok: true,
+      value: { workOrderId, workOrderNumber: draft.workOrderNumber },
+    });
+    expect(await screen.findByText("Work Orders destination"))
+      .toBeInTheDocument();
+  });
+
+  it("returns safely to the list when the backend reports the Draft is gone", async () => {
+    pageMocks.deleteDraft.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "work_order_not_found",
+        message: "The Work Order could not be found.",
+      },
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+    }));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Delete Draft",
+    }));
+    expect(await screen.findByText("Work Orders destination"))
+      .toBeInTheDocument();
+    expect(pageMocks.deleteDraft).toHaveBeenCalledOnce();
+  });
+
+  it("uses the exact save-returned timestamp for a later delete", async () => {
+    const savedTimestamp = "2026-09-22T10:01:00.654321+00:00";
+    pageMocks.saveDraft.mockResolvedValue({
+      ok: true,
+      value: { workOrderId, updatedAt: savedTimestamp },
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+    }));
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved.");
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Delete Draft",
+    }));
+
+    await waitFor(() => expect(pageMocks.deleteDraft)
+      .toHaveBeenCalledExactlyOnceWith(savedTimestamp));
+  });
+
+  it("preserves local edits on stale delete and requires reload plus reconfirmation", async () => {
+    const reloadedTimestamp = "2026-09-22T10:05:00.987654+00:00";
+    pageMocks.deleteDraft
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: "stale_work_order",
+          message:
+            "This Draft changed somewhere else. Reload the latest Draft before deleting it.",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { workOrderId, workOrderNumber: draft.workOrderNumber },
+      });
+    pageMocks.reloadLatestDraft.mockResolvedValue({
+      ok: true,
+      detail: {
+        ...draft,
+        description: "Latest description",
+        updatedAt: reloadedTimestamp,
+      },
+      materials: [],
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+    }));
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "Unsaved local edit" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Delete Draft",
+    }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This Draft changed somewhere else",
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Short Description"))
+      .toHaveValue("Unsaved local edit");
+    expect(pageMocks.deleteDraft).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest Draft" }));
+    await waitFor(() => expect(screen.getByLabelText("Short Description"))
+      .toHaveValue("Latest description"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Delete Draft",
+    }));
+    await waitFor(() => expect(pageMocks.deleteDraft)
+      .toHaveBeenLastCalledWith(reloadedTimestamp));
+    expect(pageMocks.deleteDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it("disables all conflicting Draft controls while deletion is pending", async () => {
+    const persistedMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    pageMocks.deleteDraft.mockReturnValue(new Promise(() => undefined));
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+      materialsQuery: {
+        data: { ok: true, value: [persistedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    const page = renderPage();
+    expect(await screen.findByText("Relay Module")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Draft" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Delete Draft",
+    }));
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+      isDeleting: true,
+      materialsQuery: {
+        data: { ok: true, value: [persistedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    page.rerender(pageTree());
+    expect(screen.getByRole("button", { name: "Save for Later" })).toBeDisabled();
+    expect(screen.getByLabelText("Project")).toBeDisabled();
+    expect(screen.getByLabelText("Short Description")).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" })).toBeDisabled();
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toBeDisabled();
+    expect(screen.getByRole("button", {
+      name: "Remove Relay Module (0000123)",
+    })).toBeDisabled();
+  });
+
+  it("disables Delete while Save for Later is pending", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+      isSaving: true,
+    }));
+    renderPage();
+    expect(screen.getByRole("button", { name: "Delete Draft" })).toBeDisabled();
+    expect(pageMocks.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("hides Delete without authority and for Finished Work Orders", () => {
+    const draftPage = renderPage();
+    expect(screen.queryByRole("button", { name: "Delete Draft" }))
+      .not.toBeInTheDocument();
+    draftPage.unmount();
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canDeleteDraft: true,
+      detailQuery: {
+        data: { ok: true, value: { ...draft, status: "finished" } },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+    }));
+    renderPage();
+    expect(screen.queryByRole("button", { name: "Delete Draft" }))
+      .not.toBeInTheDocument();
+    expect(pageMocks.deleteDraft).not.toHaveBeenCalled();
   });
 
   it("hydrates persisted materials exactly and includes them in the atomic save", async () => {

@@ -4,6 +4,7 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import {
+  deleteDraftWorkOrder,
   getWorkOrderDetail,
   getWorkOrderMaterialInventory,
   isWorkOrderId,
@@ -38,6 +39,11 @@ export function useWorkOrderDetail(workOrderId: string) {
     profile?.id,
     "work_orders.edit_draft",
   );
+  const deletePermissionKey = permissionQueryKey(
+    session?.user.id,
+    profile?.id,
+    "work_orders.delete_draft",
+  );
   const detailQuery = useQuery({
     queryKey: detailKey,
     queryFn: () => getWorkOrderDetail(workOrderId),
@@ -50,6 +56,12 @@ export function useWorkOrderDetail(workOrderId: string) {
     enabled: Boolean(hasActiveIdentity && !isAdmin),
     staleTime: 60_000,
   });
+  const deletePermissionQuery = useQuery({
+    queryKey: deletePermissionKey,
+    queryFn: () => hasPermission("work_orders.delete_draft"),
+    enabled: Boolean(hasActiveIdentity && !isAdmin),
+    staleTime: 60_000,
+  });
   const detail = detailQuery.data?.ok ? detailQuery.data.value : undefined;
   const hasEditPermission = hasActiveIdentity && (
     isAdmin || (
@@ -58,6 +70,15 @@ export function useWorkOrderDetail(workOrderId: string) {
   );
   const canEditDraft = Boolean(
     hasEditPermission && detail?.status === "draft",
+  );
+  const hasDeletePermission = hasActiveIdentity && (
+    isAdmin || (
+      deletePermissionQuery.data?.ok === true &&
+      deletePermissionQuery.data.value
+    )
+  );
+  const canDeleteDraft = Boolean(
+    hasDeletePermission && detail?.status === "draft",
   );
   const projectChoicesQuery = useQuery({
     queryKey: workOrderProjectChoicesQueryKey(profile?.id),
@@ -169,6 +190,33 @@ export function useWorkOrderDetail(workOrderId: string) {
       }
     },
   });
+  const deleteMutation = useMutation({
+    mutationFn: (expectedUpdatedAt: string) =>
+      deleteDraftWorkOrder(workOrderId, expectedUpdatedAt),
+    retry: false,
+    onSuccess: async (result) => {
+      if (result.ok || result.error.code === "work_order_not_found") {
+        await Promise.all([
+          queryClient.cancelQueries({ queryKey: detailKey, exact: true }),
+          queryClient.cancelQueries({ queryKey: materialsKey, exact: true }),
+        ]);
+        queryClient.removeQueries({ queryKey: detailKey, exact: true });
+        queryClient.removeQueries({ queryKey: materialsKey, exact: true });
+        await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
+        return;
+      }
+
+      if (result.error.code === "work_order_not_deletable") {
+        void queryClient.invalidateQueries({ queryKey: detailKey, exact: true })
+          .catch(() => undefined);
+      } else if (result.error.code === "delete_access_denied") {
+        void queryClient.invalidateQueries({
+          queryKey: deletePermissionKey,
+          exact: true,
+        }).catch(() => undefined);
+      }
+    },
+  });
 
   async function reloadLatestDraft() {
     const [latestDetail, latestMaterials] = await Promise.all([
@@ -190,8 +238,11 @@ export function useWorkOrderDetail(workOrderId: string) {
   }
 
   return {
+    canDeleteDraft,
     canEditDraft,
+    deleteDraft: deleteMutation.mutateAsync,
     detailQuery,
+    isDeleting: deleteMutation.isPending,
     isLoadingMaterial: materialLoadMutation.isPending,
     isSaving: saveMutation.isPending,
     materialsQuery,

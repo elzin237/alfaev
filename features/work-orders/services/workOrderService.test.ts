@@ -8,6 +8,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 
 import {
   createDraftWorkOrder,
+  deleteDraftWorkOrder,
   getWorkOrderMaterialInventory,
   getWorkOrderDetail,
   listDraftWorkOrderMaterials,
@@ -859,5 +860,93 @@ describe("workOrderService", () => {
     });
     expect(result).toMatchObject({ ok: false, error: { code } });
     if (!result.ok) expect(result.error.message).not.toContain("raw detail");
+  });
+
+  it("deletes through the trusted RPC with the exact microsecond timestamp", async () => {
+    const expectedUpdatedAt = "2026-09-22T12:34:56.123456+00:00";
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{
+        work_order_id: detailRow.work_order_id,
+        work_order_number: detailRow.work_order_number,
+      }],
+      error: null,
+    });
+
+    await expect(deleteDraftWorkOrder(
+      detailRow.work_order_id,
+      expectedUpdatedAt,
+    )).resolves.toEqual({
+      ok: true,
+      value: {
+        workOrderId: detailRow.work_order_id,
+        workOrderNumber: detailRow.work_order_number,
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "delete_draft_work_order",
+      {
+        p_work_order_id: detailRow.work_order_id,
+        p_expected_updated_at: expectedUpdatedAt,
+      },
+    );
+  });
+
+  it.each([
+    ["empty result", []],
+    ["multiple results", [
+      { work_order_id: detailRow.work_order_id, work_order_number: detailRow.work_order_number },
+      { work_order_id: incompleteRow.work_order_id, work_order_number: incompleteRow.work_order_number },
+    ]],
+    ["mismatched ID", [{ work_order_id: incompleteRow.work_order_id, work_order_number: detailRow.work_order_number }]],
+    ["malformed UUID", [{ work_order_id: "bad-id", work_order_number: detailRow.work_order_number }]],
+    ["malformed number", [{ work_order_id: detailRow.work_order_id, work_order_number: "RN-2026-42" }]],
+    ["missing field", [{ work_order_id: detailRow.work_order_id }]],
+    ["extra field", [{ work_order_id: detailRow.work_order_id, work_order_number: detailRow.work_order_number, status: "draft" }]],
+  ])("rejects a malformed delete response with %s", async (_label, data) => {
+    serviceMocks.rpc.mockResolvedValue({ data, error: null });
+    await expect(deleteDraftWorkOrder(
+      detailRow.work_order_id,
+      detailRow.updated_at,
+    )).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "draft_delete_failed",
+        message: "The Draft could not be deleted. Please try again.",
+      },
+    });
+  });
+
+  it.each([
+    ["42501", "delete_access_denied", "You no longer have permission to delete this Draft."],
+    ["WOR02", "work_order_not_deletable", "This Work Order can no longer be deleted."],
+    ["WOR05", "stale_work_order", "This Draft changed somewhere else. Reload the latest Draft before deleting it."],
+    ["P0002", "work_order_not_found", "The Work Order could not be found."],
+    ["22023", "invalid_delete_request", "The Draft deletion request is invalid."],
+    ["XX000", "draft_delete_failed", "The Draft could not be deleted. Please try again."],
+  ])("maps delete error %s safely", async (providerCode, code, message) => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw database details" },
+    });
+    await expect(deleteDraftWorkOrder(
+      detailRow.work_order_id,
+      detailRow.updated_at,
+    )).resolves.toEqual({ ok: false, error: { code, message } });
+  });
+
+  it("maps thrown delete failures without exposing raw details", async () => {
+    serviceMocks.rpc.mockRejectedValue(new Error("raw network details"));
+    const result = await deleteDraftWorkOrder(
+      detailRow.work_order_id,
+      detailRow.updated_at,
+    );
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: "draft_delete_failed",
+        message: "The Draft could not be deleted. Please try again.",
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("raw");
   });
 });

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const detailMocks = vi.hoisted(() => ({
+  deleteDraftWorkOrder: vi.fn(),
   getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock("../../../app/auth/permissionService", () => ({
   hasPermission: detailMocks.hasPermission,
 }));
 vi.mock("../services/workOrderService", () => ({
+  deleteDraftWorkOrder: detailMocks.deleteDraftWorkOrder,
   getWorkOrderMaterialInventory: detailMocks.getWorkOrderMaterialInventory,
   getWorkOrderDetail: detailMocks.getWorkOrderDetail,
   isWorkOrderId: (value: unknown) =>
@@ -59,6 +61,20 @@ function renderDetailHook(id = workOrderId) {
     ...renderHook(() => useWorkOrderDetail(id), { wrapper }),
     queryClient,
   };
+}
+
+function allowPermissions({
+  deleteDraft = false,
+  editDraft = false,
+}: { deleteDraft?: boolean; editDraft?: boolean }) {
+  detailMocks.hasPermission.mockImplementation(async (permission: string) => ({
+    ok: true,
+    value: permission === "work_orders.delete_draft"
+      ? deleteDraft
+      : permission === "work_orders.edit_draft"
+      ? editDraft
+      : false,
+  }));
 }
 
 beforeEach(() => {
@@ -101,6 +117,10 @@ beforeEach(() => {
       workOrderId,
       updatedAt: "2026-09-22T09:01:00.123456+00:00",
     },
+  });
+  detailMocks.deleteDraftWorkOrder.mockResolvedValue({
+    ok: true,
+    value: { workOrderId, workOrderNumber: draftDetail.workOrderNumber },
   });
 });
 
@@ -150,6 +170,31 @@ describe("useWorkOrderDetail", () => {
       detailMocks.listWorkOrderProjectChoices,
     ).toHaveBeenCalledOnce());
     expect(detailMocks.hasPermission).not.toHaveBeenCalled();
+    expect(result.current.canDeleteDraft).toBe(true);
+  });
+
+  it("derives delete authority independently from edit and fails closed for other permissions", async () => {
+    allowPermissions({ deleteDraft: true, editDraft: false });
+    const deleter = renderDetailHook();
+    await waitFor(() => expect(deleter.result.current.canDeleteDraft).toBe(true));
+    expect(deleter.result.current.canEditDraft).toBe(false);
+    expect(detailMocks.hasPermission).toHaveBeenCalledWith(
+      "work_orders.delete_draft",
+    );
+    deleter.unmount();
+
+    detailMocks.hasPermission.mockClear();
+    allowPermissions({ deleteDraft: false, editDraft: true });
+    const editor = renderDetailHook();
+    await waitFor(() => expect(editor.result.current.canEditDraft).toBe(true));
+    expect(editor.result.current.canDeleteDraft).toBe(false);
+    editor.unmount();
+
+    detailMocks.hasPermission.mockClear();
+    allowPermissions({});
+    const viewer = renderDetailHook();
+    await waitFor(() => expect(detailMocks.hasPermission).toHaveBeenCalledTimes(2));
+    expect(viewer.result.current.canDeleteDraft).toBe(false);
   });
 
   it("allows work_orders.edit_draft and fails closed for view-only permission", async () => {
@@ -183,6 +228,7 @@ describe("useWorkOrderDetail", () => {
 
     await waitFor(() => expect(result.current.detailQuery.isSuccess).toBe(true));
     expect(result.current.canEditDraft).toBe(false);
+    expect(result.current.canDeleteDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
     expect(detailMocks.listDraftWorkOrderMaterials).not.toHaveBeenCalled();
   });
@@ -247,6 +293,7 @@ describe("useWorkOrderDetail", () => {
     });
     const inactive = renderDetailHook();
     expect(inactive.result.current.canEditDraft).toBe(false);
+    expect(inactive.result.current.canDeleteDraft).toBe(false);
     inactive.unmount();
 
     detailMocks.useAuth.mockReturnValueOnce({
@@ -256,6 +303,7 @@ describe("useWorkOrderDetail", () => {
     });
     const missing = renderDetailHook();
     expect(missing.result.current.canEditDraft).toBe(false);
+    expect(missing.result.current.canDeleteDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
   });
 
@@ -516,5 +564,73 @@ describe("useWorkOrderDetail", () => {
       await result.current.loadMaterial("0000125");
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("deletes with the exact version, clears exact caches, and refreshes only the list", async () => {
+    allowPermissions({ deleteDraft: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const removeQueries = vi.spyOn(queryClient, "removeQueries");
+    const exactVersion = "2026-09-22T10:00:00.123456+00:00";
+
+    await waitFor(() => expect(result.current.canDeleteDraft).toBe(true));
+    await act(async () => {
+      await result.current.deleteDraft(exactVersion);
+    });
+
+    expect(detailMocks.deleteDraftWorkOrder).toHaveBeenCalledExactlyOnceWith(
+      workOrderId,
+      exactVersion,
+    );
+    expect(removeQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    });
+    expect(removeQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "draft-materials", "profile-1", workOrderId],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "list", "profile-1"],
+      exact: true,
+    });
+  });
+
+  it.each([
+    ["work_order_not_deletable", ["work-orders", "detail", "profile-1", workOrderId]],
+    ["delete_access_denied", ["permission", "auth-user-1", "profile-1", "work_orders.delete_draft"]],
+  ])("refreshes authoritative state after %s", async (code, queryKey) => {
+    allowPermissions({ deleteDraft: true });
+    detailMocks.deleteDraftWorkOrder.mockResolvedValue({
+      ok: false,
+      error: { code, message: "safe delete failure" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canDeleteDraft).toBe(true));
+    await act(async () => {
+      await result.current.deleteDraft(draftDetail.updatedAt);
+    });
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey,
+      exact: true,
+    }));
+    expect(detailMocks.deleteDraftWorkOrder).toHaveBeenCalledOnce();
+  });
+
+  it("does not refresh or retry automatically for a stale delete", async () => {
+    allowPermissions({ deleteDraft: true });
+    detailMocks.deleteDraftWorkOrder.mockResolvedValue({
+      ok: false,
+      error: { code: "stale_work_order", message: "safe stale message" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canDeleteDraft).toBe(true));
+    await act(async () => {
+      await result.current.deleteDraft(draftDetail.updatedAt);
+    });
+    expect(invalidateQueries).not.toHaveBeenCalled();
+    expect(detailMocks.deleteDraftWorkOrder).toHaveBeenCalledOnce();
   });
 });

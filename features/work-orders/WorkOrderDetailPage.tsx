@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
@@ -22,10 +22,14 @@ function BackToWorkOrdersLink() {
 
 function WorkOrderDetailPage() {
   const { workOrderId = "" } = useParams<{ workOrderId: string }>();
+  const navigate = useNavigate();
   const {
+    canDeleteDraft,
     canEditDraft,
+    deleteDraft,
     detailQuery,
     isLoadingMaterial,
+    isDeleting,
     isSaving,
     materialsQuery,
     projectChoicesQuery,
@@ -97,6 +101,7 @@ function WorkOrderDetailPage() {
           <WorkOrderDraftShell
             workOrder={workOrder}
             canEdit={canEditDraft}
+            canDelete={canDeleteDraft}
             projectChoices={projectChoices}
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
@@ -105,6 +110,7 @@ function WorkOrderDetailPage() {
             materialsError={materialsError}
             materialsReady={materialsQuery.data?.ok === true}
             isSaving={isSaving}
+            isDeleting={isDeleting}
             isLoadingMaterial={isLoadingMaterial}
             onReloadLatest={reloadLatestDraft}
             onRetryMaterials={() => void materialsQuery.refetch()}
@@ -120,6 +126,13 @@ function WorkOrderDetailPage() {
               })),
               materialSnapshot: submission.materials,
             })}
+            onDelete={async (expectedUpdatedAt) => {
+              const result = await deleteDraft(expectedUpdatedAt);
+              if (result.ok || result.error.code === "work_order_not_found") {
+                navigate("/work-orders", { replace: true });
+              }
+              return result;
+            }}
           />
         ) : (
           <section className="rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">
