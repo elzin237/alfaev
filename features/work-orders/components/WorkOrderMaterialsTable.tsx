@@ -10,6 +10,9 @@ interface WorkOrderMaterialsTableProps {
   materials: DraftWorkOrderMaterial[];
   onQuantityChange: (productId: string, quantity: string) => void;
   onRemove: (productId: string) => void;
+  readOnly?: boolean;
+  disabled?: boolean;
+  showRequiredErrors?: boolean;
 }
 
 function WorkOrderMaterialsTable({
@@ -17,6 +20,9 @@ function WorkOrderMaterialsTable({
   materials,
   onQuantityChange,
   onRemove,
+  readOnly = false,
+  disabled = false,
+  showRequiredErrors = false,
 }: WorkOrderMaterialsTableProps) {
   if (materials.length === 0) {
     return (
@@ -34,7 +40,7 @@ function WorkOrderMaterialsTable({
               "Product Name",
               "Quantity",
               "Current Inventory",
-              "Remove",
+              ...(readOnly ? [] : ["Remove"]),
             ].map((heading) => (
               <th
                 key={heading}
@@ -56,6 +62,9 @@ function WorkOrderMaterialsTable({
               material={material}
               onQuantityChange={onQuantityChange}
               onRemove={onRemove}
+              readOnly={readOnly}
+              disabled={disabled}
+              showRequiredError={showRequiredErrors}
             />
           ))}
         </tbody>

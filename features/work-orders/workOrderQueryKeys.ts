@@ -14,3 +14,10 @@ export function workOrderProjectChoicesQueryKey(
 ) {
   return ["work-orders", "project-choices", profileId] as const;
 }
+
+export function workOrderDraftMaterialsQueryKey(
+  profileId: string | undefined,
+  workOrderId: string,
+) {
+  return ["work-orders", "draft-materials", profileId, workOrderId] as const;
+}

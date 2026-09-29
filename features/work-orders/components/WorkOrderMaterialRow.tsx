@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 
 import type { ExactInventoryQuantity } from "../services/workOrderService";
+import { getWorkOrderMaterialQuantityError } from "../workOrderMaterialQuantity";
 
 export interface DraftWorkOrderMaterial {
   productId: string;
@@ -15,19 +16,9 @@ interface WorkOrderMaterialRowProps {
   material: DraftWorkOrderMaterial;
   onQuantityChange: (productId: string, quantity: string) => void;
   onRemove: (productId: string) => void;
-}
-
-const postgresBigintMax = 9223372036854775807n;
-
-function quantityError(quantity: string): string | null {
-  if (quantity === "") return null;
-  if (!/^[1-9][0-9]*$/.test(quantity)) {
-    return "Quantity must be a positive whole number.";
-  }
-  if (quantity.length > 19 || BigInt(quantity) > postgresBigintMax) {
-    return "Quantity is above the supported whole-number range.";
-  }
-  return null;
+  readOnly?: boolean;
+  disabled?: boolean;
+  showRequiredError?: boolean;
 }
 
 function WorkOrderMaterialRow({
@@ -35,9 +26,15 @@ function WorkOrderMaterialRow({
   material,
   onQuantityChange,
   onRemove,
+  readOnly = false,
+  disabled = false,
+  showRequiredError = false,
 }: WorkOrderMaterialRowProps) {
   const quantityInputRef = useRef<HTMLInputElement>(null);
-  const error = quantityError(material.quantity);
+  const error = getWorkOrderMaterialQuantityError(
+    material.quantity,
+    showRequiredError,
+  );
   const inputId = `work-order-material-quantity-${material.productId}`;
   const errorId = `${inputId}-error`;
 
@@ -54,43 +51,55 @@ function WorkOrderMaterialRow({
         {material.productName}
       </td>
       <td className="min-w-48 px-4 py-4">
-        <label htmlFor={inputId} className="sr-only">
-          Quantity for {material.productName} ({material.serialNumber})
-        </label>
-        <input
-          ref={quantityInputRef}
-          id={inputId}
-          type="text"
-          inputMode="numeric"
-          autoComplete="off"
-          value={material.quantity}
-          aria-describedby={error ? errorId : undefined}
-          aria-invalid={Boolean(error)}
-          onChange={(event) => onQuantityChange(
-            material.productId,
-            event.target.value,
-          )}
-          className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-        />
-        {error && (
-          <p id={errorId} role="alert" className="mt-2 text-xs font-medium text-red-700">
-            {error}
-          </p>
+        {readOnly ? (
+          <span className="text-sm tabular-nums text-zinc-900">
+            {material.quantity}
+          </span>
+        ) : (
+          <>
+            <label htmlFor={inputId} className="sr-only">
+              Quantity for {material.productName} ({material.serialNumber})
+            </label>
+            <input
+              ref={quantityInputRef}
+              id={inputId}
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              value={material.quantity}
+              disabled={disabled}
+              aria-describedby={error ? errorId : undefined}
+              aria-invalid={Boolean(error)}
+              onChange={(event) => onQuantityChange(
+                material.productId,
+                event.target.value,
+              )}
+              className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition disabled:cursor-not-allowed disabled:bg-zinc-100 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+            />
+            {error && (
+              <p id={errorId} role="alert" className="mt-2 text-xs font-medium text-red-700">
+                {error}
+              </p>
+            )}
+          </>
         )}
       </td>
       <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-zinc-900">
         {material.currentInventory}
       </td>
-      <td className="px-4 py-4 text-right">
-        <button
-          type="button"
-          onClick={() => onRemove(material.productId)}
-          aria-label={`Remove ${material.productName} (${material.serialNumber})`}
-          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50"
-        >
-          Remove
-        </button>
-      </td>
+      {!readOnly && (
+        <td className="px-4 py-4 text-right">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onRemove(material.productId)}
+            aria-label={`Remove ${material.productName} (${material.serialNumber})`}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Remove
+          </button>
+        </td>
+      )}
     </tr>
   );
 }

@@ -7,9 +7,10 @@ const detailMocks = vi.hoisted(() => ({
   getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
+  listDraftWorkOrderMaterials: vi.fn(),
   listWorkOrderProjectChoices: vi.fn(),
   resolveWorkOrderProductBarcode: vi.fn(),
-  updateDraftWorkOrder: vi.fn(),
+  saveDraftWorkOrder: vi.fn(),
   useAuth: vi.fn(),
 }));
 
@@ -26,8 +27,9 @@ vi.mock("../services/workOrderService", () => ({
     typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value),
   listWorkOrderProjectChoices: detailMocks.listWorkOrderProjectChoices,
+  listDraftWorkOrderMaterials: detailMocks.listDraftWorkOrderMaterials,
   resolveWorkOrderProductBarcode: detailMocks.resolveWorkOrderProductBarcode,
-  updateDraftWorkOrder: detailMocks.updateDraftWorkOrder,
+  saveDraftWorkOrder: detailMocks.saveDraftWorkOrder,
 }));
 
 import { useWorkOrderDetail } from "./useWorkOrderDetail";
@@ -74,6 +76,10 @@ beforeEach(() => {
     ok: true,
     value: [],
   });
+  detailMocks.listDraftWorkOrderMaterials.mockResolvedValue({
+    ok: true,
+    value: [],
+  });
   detailMocks.resolveWorkOrderProductBarcode.mockResolvedValue({
     ok: true,
     value: {
@@ -89,7 +95,7 @@ beforeEach(() => {
       currentInventory: "17",
     },
   });
-  detailMocks.updateDraftWorkOrder.mockResolvedValue({
+  detailMocks.saveDraftWorkOrder.mockResolvedValue({
     ok: true,
     value: {
       workOrderId,
@@ -123,6 +129,12 @@ describe("useWorkOrderDetail", () => {
       "project-choices",
       "profile-1",
     ])).toBeDefined();
+    expect(queryClient.getQueryState([
+      "work-orders",
+      "draft-materials",
+      "profile-1",
+      workOrderId,
+    ])).toBeDefined();
   });
 
   it("lets an active Admin edit a Draft and loads choices without permission lookup", async () => {
@@ -150,12 +162,15 @@ describe("useWorkOrderDetail", () => {
     editor.unmount();
     detailMocks.hasPermission.mockClear();
     detailMocks.listWorkOrderProjectChoices.mockClear();
+    detailMocks.listDraftWorkOrderMaterials.mockClear();
 
     detailMocks.hasPermission.mockResolvedValueOnce({ ok: true, value: false });
     const viewer = renderDetailHook();
     await waitFor(() => expect(detailMocks.hasPermission).toHaveBeenCalled());
     expect(viewer.result.current.canEditDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
+    await waitFor(() => expect(detailMocks.listDraftWorkOrderMaterials)
+      .toHaveBeenCalledOnce());
   });
 
   it("does not fetch choices for a Finished Work Order", async () => {
@@ -169,6 +184,7 @@ describe("useWorkOrderDetail", () => {
     await waitFor(() => expect(result.current.detailQuery.isSuccess).toBe(true));
     expect(result.current.canEditDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
+    expect(detailMocks.listDraftWorkOrderMaterials).not.toHaveBeenCalled();
   });
 
   it("does not fetch detail or choices for an invalid ID", () => {
@@ -243,7 +259,7 @@ describe("useWorkOrderDetail", () => {
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
   });
 
-  it("saves through the trusted mutation and refreshes exact detail and list queries", async () => {
+  it("saves through the atomic mutation and updates Draft caches before refreshing the list", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
     const { result, queryClient } = renderDetailHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
@@ -251,6 +267,8 @@ describe("useWorkOrderDetail", () => {
       projectId: null,
       description: "  Raw description  ",
       expectedUpdatedAt: "2026-09-22T09:00:00.123456+00:00",
+      items: [],
+      materialSnapshot: [],
     };
 
     await waitFor(() => expect(result.current.canEditDraft).toBe(true));
@@ -258,14 +276,15 @@ describe("useWorkOrderDetail", () => {
       await result.current.saveDraft(input);
     });
 
-    expect(detailMocks.updateDraftWorkOrder).toHaveBeenCalledExactlyOnceWith(
+    expect(detailMocks.saveDraftWorkOrder).toHaveBeenCalledExactlyOnceWith(
       workOrderId,
-      input,
+      {
+        projectId: input.projectId,
+        description: input.description,
+        expectedUpdatedAt: input.expectedUpdatedAt,
+        items: [],
+      },
     );
-    expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
-      exact: true,
-    });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["work-orders", "list", "profile-1"],
       exact: true,
@@ -277,7 +296,7 @@ describe("useWorkOrderDetail", () => {
 
   it("preserves stale edits until explicit reload and does not invalidate list data", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
-    detailMocks.updateDraftWorkOrder.mockResolvedValue({
+    detailMocks.saveDraftWorkOrder.mockResolvedValue({
       ok: false,
       error: { code: "stale_work_order", message: "safe stale message" },
     });
@@ -290,6 +309,8 @@ describe("useWorkOrderDetail", () => {
         projectId: null,
         description: "Local edit",
         expectedUpdatedAt: draftDetail.updatedAt,
+        items: [],
+        materialSnapshot: [],
       });
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
@@ -298,6 +319,7 @@ describe("useWorkOrderDetail", () => {
       await result.current.reloadLatestDraft();
     });
     expect(detailMocks.getWorkOrderDetail).toHaveBeenCalledTimes(2);
+    expect(detailMocks.listDraftWorkOrderMaterials).toHaveBeenCalledTimes(2);
   });
 
   it("refreshes lifecycle state or permission authority for authoritative save denials", async () => {
@@ -306,7 +328,7 @@ describe("useWorkOrderDetail", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     await waitFor(() => expect(result.current.canEditDraft).toBe(true));
 
-    detailMocks.updateDraftWorkOrder.mockResolvedValueOnce({
+    detailMocks.saveDraftWorkOrder.mockResolvedValueOnce({
       ok: false,
       error: {
         code: "work_order_not_editable",
@@ -318,6 +340,8 @@ describe("useWorkOrderDetail", () => {
         projectId: null,
         description: "Local edit",
         expectedUpdatedAt: draftDetail.updatedAt,
+        items: [],
+        materialSnapshot: [],
       });
     });
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
@@ -326,7 +350,7 @@ describe("useWorkOrderDetail", () => {
     }));
 
     invalidateQueries.mockClear();
-    detailMocks.updateDraftWorkOrder.mockResolvedValueOnce({
+    detailMocks.saveDraftWorkOrder.mockResolvedValueOnce({
       ok: false,
       error: {
         code: "access_denied",
@@ -338,6 +362,8 @@ describe("useWorkOrderDetail", () => {
         projectId: null,
         description: "Local edit",
         expectedUpdatedAt: draftDetail.updatedAt,
+        items: [],
+        materialSnapshot: [],
       });
     });
     await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({

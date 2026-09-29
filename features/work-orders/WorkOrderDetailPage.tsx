@@ -27,6 +27,7 @@ function WorkOrderDetailPage() {
     detailQuery,
     isLoadingMaterial,
     isSaving,
+    materialsQuery,
     projectChoicesQuery,
     reloadLatestDraft,
     loadMaterial,
@@ -68,6 +69,14 @@ function WorkOrderDetailPage() {
       : projectChoicesQuery.data?.ok === false
       ? projectChoicesQuery.data.error.message
       : null;
+    const persistedMaterials = materialsQuery.data?.ok
+      ? materialsQuery.data.value
+      : [];
+    const materialsError = materialsQuery.isError
+      ? "Draft materials could not be loaded. Please try again."
+      : materialsQuery.data?.ok === false
+      ? materialsQuery.data.error.message
+      : null;
 
     content = (
       <>
@@ -91,14 +100,25 @@ function WorkOrderDetailPage() {
             projectChoices={projectChoices}
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
+            persistedMaterials={persistedMaterials}
+            materialsLoading={materialsQuery.isPending}
+            materialsError={materialsError}
+            materialsReady={materialsQuery.data?.ok === true}
             isSaving={isSaving}
             isLoadingMaterial={isLoadingMaterial}
             onReloadLatest={reloadLatestDraft}
+            onRetryMaterials={() => void materialsQuery.refetch()}
             onRetryProjectChoices={() => void projectChoicesQuery.refetch()}
             onLoadMaterial={loadMaterial}
             onSave={(submission) => saveDraft({
-              ...submission,
-              expectedUpdatedAt: workOrder.updatedAt,
+              projectId: submission.projectId,
+              description: submission.description,
+              expectedUpdatedAt: submission.expectedUpdatedAt,
+              items: submission.materials.map((material) => ({
+                productId: material.productId,
+                quantity: material.quantity,
+              })),
+              materialSnapshot: submission.materials,
             })}
           />
         ) : (

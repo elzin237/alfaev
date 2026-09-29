@@ -66,6 +66,51 @@ export type WorkOrderUpdateResult =
   | { ok: true; value: UpdatedDraftWorkOrder }
   | { ok: false; error: WorkOrderUpdateError };
 
+export interface PersistedDraftWorkOrderMaterial {
+  productId: string;
+  serialNumber: string;
+  productName: string;
+  quantity: string;
+  currentInventory: ExactInventoryQuantity;
+}
+
+export interface DraftWorkOrderMaterialsError {
+  code:
+    | "access_denied"
+    | "draft_materials_load_failed"
+    | "inventory_unavailable"
+    | "work_order_not_draft"
+    | "work_order_not_found";
+  message: string;
+}
+
+export type DraftWorkOrderMaterialsResult =
+  | { ok: true; value: PersistedDraftWorkOrderMaterial[] }
+  | { ok: false; error: DraftWorkOrderMaterialsError };
+
+export interface SaveDraftWorkOrderInput {
+  projectId: string | null;
+  description: string;
+  items: Array<{ productId: string; quantity: string }>;
+  expectedUpdatedAt: string;
+}
+
+export interface DraftWorkOrderSaveError {
+  code:
+    | "access_denied"
+    | "draft_reference_not_found"
+    | "draft_save_failed"
+    | "invalid_draft"
+    | "product_unavailable"
+    | "stale_work_order"
+    | "work_order_not_editable";
+  message: string;
+}
+
+export type DraftWorkOrderSaveResult =
+  | { ok: true; value: UpdatedDraftWorkOrder }
+  | { ok: false; error: DraftWorkOrderSaveError };
+
 export interface ResolvedWorkOrderProduct {
   id: string;
   serialNumber: string;
@@ -199,6 +244,13 @@ const resolvedProductAllowedKeys = new Set([
 ]);
 const materialInventoryAllowedKeys = new Set([
   "product_id",
+  "current_inventory",
+]);
+const draftMaterialAllowedKeys = new Set([
+  "product_id",
+  "serial_number",
+  "product_name",
+  "quantity",
   "current_inventory",
 ]);
 const productSerialNumberPattern = /^[0-9]{7}$/;
@@ -680,6 +732,117 @@ function parseExactInventoryQuantity(value: unknown): string | null {
     return null;
   }
   return value;
+}
+
+function parseExactPositiveQuantity(value: unknown): string | null {
+  const parsed = parseExactInventoryQuantity(value);
+  return parsed !== null && parsed !== "0" ? parsed : null;
+}
+
+function draftMaterialsFailure(code?: string): DraftWorkOrderMaterialsResult {
+  if (code === "42501") {
+    return { ok: false, error: { code: "access_denied", message: "You do not have permission to view these Draft materials." } };
+  }
+  if (code === "WOR02") {
+    return { ok: false, error: { code: "work_order_not_draft", message: "This Work Order is no longer a Draft." } };
+  }
+  if (code === "P0002") {
+    return { ok: false, error: { code: "work_order_not_found", message: "The Work Order could not be found." } };
+  }
+  if (code === "IVB01") {
+    return { ok: false, error: { code: "inventory_unavailable", message: "Current Inventory could not be loaded for one or more materials." } };
+  }
+  return { ok: false, error: { code: "draft_materials_load_failed", message: "Draft materials could not be loaded. Please try again." } };
+}
+
+export async function listDraftWorkOrderMaterials(
+  workOrderId: string,
+): Promise<DraftWorkOrderMaterialsResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "list_draft_work_order_materials",
+      { p_work_order_id: workOrderId },
+    );
+    if (error) return draftMaterialsFailure(error.code);
+    if (!Array.isArray(data)) return draftMaterialsFailure();
+
+    const seenProductIds = new Set<string>();
+    const materials: PersistedDraftWorkOrderMaterial[] = [];
+    for (const value of data) {
+      const quantity = isRecord(value)
+        ? parseExactPositiveQuantity(value.quantity)
+        : null;
+      const currentInventory = isRecord(value)
+        ? parseExactInventoryQuantity(value.current_inventory)
+        : null;
+      if (
+        !isRecord(value) ||
+        Object.keys(value).length !== draftMaterialAllowedKeys.size ||
+        Object.keys(value).some((key) => !draftMaterialAllowedKeys.has(key)) ||
+        !isUuid(value.product_id) ||
+        seenProductIds.has(value.product_id) ||
+        typeof value.serial_number !== "string" ||
+        !productSerialNumberPattern.test(value.serial_number) ||
+        !isTrimmedNonblank(value.product_name) ||
+        quantity === null ||
+        currentInventory === null
+      ) return draftMaterialsFailure();
+
+      seenProductIds.add(value.product_id);
+      materials.push({
+        productId: value.product_id,
+        serialNumber: value.serial_number,
+        productName: value.product_name,
+        quantity,
+        currentInventory,
+      });
+    }
+    return { ok: true, value: materials };
+  } catch {
+    return draftMaterialsFailure();
+  }
+}
+
+function saveDraftFailure(code?: string): DraftWorkOrderSaveResult {
+  if (code === "42501") return { ok: false, error: { code: "access_denied", message: "You no longer have permission to edit this Draft." } };
+  if (code === "WOR02") return { ok: false, error: { code: "work_order_not_editable", message: "This Work Order can no longer be edited." } };
+  if (code === "WOR05") return { ok: false, error: { code: "stale_work_order", message: "This Draft changed somewhere else. Reload the latest Draft before saving." } };
+  if (code === "PRD05") return { ok: false, error: { code: "product_unavailable", message: "One of the materials is archived or unavailable for this Work Order." } };
+  if (code === "22023") return { ok: false, error: { code: "invalid_draft", message: "The Draft contains invalid data. Review the fields and materials." } };
+  if (code === "P0002") return { ok: false, error: { code: "draft_reference_not_found", message: "The Work Order, Project, or Product could not be found." } };
+  return { ok: false, error: { code: "draft_save_failed", message: "The Draft could not be saved. Please try again." } };
+}
+
+export async function saveDraftWorkOrder(
+  workOrderId: string,
+  input: SaveDraftWorkOrderInput,
+): Promise<DraftWorkOrderSaveResult> {
+  try {
+    const items = input.items
+      .map((item) => ({ product_id: item.productId, quantity: item.quantity }))
+      .sort((left, right) => left.product_id.localeCompare(right.product_id));
+    const { data, error } = await supabase.rpc("save_draft_work_order", {
+      p_work_order_id: workOrderId,
+      p_project_id: input.projectId,
+      p_description: input.description,
+      p_items: items,
+      p_expected_updated_at: input.expectedUpdatedAt,
+    });
+    if (error) return saveDraftFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) return saveDraftFailure();
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== updateResultKeys.size ||
+      Object.keys(row).some((key) => !updateResultKeys.has(key)) ||
+      !isUuid(row.work_order_id) ||
+      row.work_order_id !== workOrderId ||
+      !isTimestamp(row.updated_at)
+    ) return saveDraftFailure();
+    return { ok: true, value: { workOrderId: row.work_order_id, updatedAt: row.updated_at } };
+  } catch {
+    return saveDraftFailure();
+  }
 }
 
 export async function getWorkOrderMaterialInventory(

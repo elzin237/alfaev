@@ -8,9 +8,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
+import { renderToStaticMarkup } from "react-dom/server";
 
 const pageMocks = vi.hoisted(() => ({
   detailRefetch: vi.fn(),
+  materialsRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
   reloadLatestDraft: vi.fn(),
   loadMaterial: vi.fn(),
@@ -23,6 +25,7 @@ vi.mock("./hooks/useWorkOrderDetail", () => ({
 }));
 
 import WorkOrderDetailPage from "./WorkOrderDetailPage";
+import WorkOrderDraftShell from "./components/WorkOrderDraftShell";
 
 const workOrderId = "00000000-0000-4000-8000-000000000010";
 const projectId = "00000000-0000-4000-8000-000000000020";
@@ -68,6 +71,12 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       isPending: false,
       refetch: pageMocks.projectChoicesRefetch,
     },
+    materialsQuery: {
+      data: { ok: true, value: [] },
+      isError: false,
+      isPending: false,
+      refetch: pageMocks.materialsRefetch,
+    },
     isSaving: false,
     isLoadingMaterial: false,
     reloadLatestDraft: pageMocks.reloadLatestDraft,
@@ -92,7 +101,11 @@ function renderPage(path = `/work-orders/${workOrderId}`, state?: unknown) {
 }
 
 beforeEach(() => {
-  pageMocks.reloadLatestDraft.mockResolvedValue(undefined);
+  pageMocks.reloadLatestDraft.mockResolvedValue({
+    ok: true,
+    detail: draft,
+    materials: [],
+  });
   pageMocks.saveDraft.mockResolvedValue({
     ok: true,
     value: {
@@ -118,6 +131,97 @@ afterEach(() => {
 });
 
 describe("WorkOrderDetailPage", () => {
+  it("keeps a successful material query gated until local hydration is established", async () => {
+    const persistedMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    const onSave = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { workOrderId, updatedAt: draft.updatedAt },
+    });
+    const props = {
+      workOrder: draft,
+      canEdit: true,
+      projectChoices,
+      projectChoicesError: null,
+      projectChoicesLoading: false,
+      persistedMaterials: [persistedMaterial],
+      materialsLoading: false,
+      materialsError: null,
+      materialsReady: true,
+      isSaving: false,
+      isLoadingMaterial: false,
+      onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
+      onRetryMaterials: vi.fn(),
+      onRetryProjectChoices: vi.fn(),
+      onLoadMaterial: vi.fn(),
+      onSave,
+    };
+
+    const beforeHydration = document.createElement("div");
+    beforeHydration.innerHTML = renderToStaticMarkup(
+      <WorkOrderDraftShell {...props} />,
+    );
+    expect(within(beforeHydration).getByRole("button", {
+      name: "Save for Later",
+    })).toBeDisabled();
+    expect(within(beforeHydration).queryByRole("textbox", {
+      name: "Scan Product Barcode",
+    })).not.toBeInTheDocument();
+    expect(within(beforeHydration).getByRole("status"))
+      .toHaveTextContent("Preparing Draft materials...");
+    expect(within(beforeHydration).queryByText("No materials added yet."))
+      .not.toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
+
+    render(<WorkOrderDraftShell {...props} />);
+    expect(await screen.findByText("Relay Module")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save for Later" }))
+      .toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .toBeEnabled();
+  });
+
+  it("enables a truly empty material baseline only after local hydration", async () => {
+    const props = {
+      workOrder: draft,
+      canEdit: true,
+      projectChoices,
+      projectChoicesError: null,
+      projectChoicesLoading: false,
+      persistedMaterials: [],
+      materialsLoading: false,
+      materialsError: null,
+      materialsReady: true,
+      isSaving: false,
+      isLoadingMaterial: false,
+      onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
+      onRetryMaterials: vi.fn(),
+      onRetryProjectChoices: vi.fn(),
+      onLoadMaterial: vi.fn(),
+      onSave: vi.fn(),
+    };
+    const beforeHydration = document.createElement("div");
+    beforeHydration.innerHTML = renderToStaticMarkup(
+      <WorkOrderDraftShell {...props} />,
+    );
+    expect(within(beforeHydration).queryByText("No materials added yet."))
+      .not.toBeInTheDocument();
+    expect(within(beforeHydration).getByRole("button", {
+      name: "Save for Later",
+    })).toBeDisabled();
+
+    render(<WorkOrderDraftShell {...props} />);
+    expect(await screen.findByText("No materials added yet."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save for Later" }))
+      .toBeEnabled();
+  });
+
   it("shows not found for an invalid route ID", () => {
     renderPage("/work-orders/not-a-uuid");
 
@@ -444,7 +548,7 @@ describe("WorkOrderDetailPage", () => {
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
   });
 
-  it("keeps local materials separate from Save for Later", async () => {
+  it("atomically saves local materials with Draft header fields", async () => {
     renderPage();
     const scanner = screen.getByRole("textbox", {
       name: "Scan Product Barcode",
@@ -463,10 +567,18 @@ describe("WorkOrderDetailPage", () => {
         projectId,
         description: "Build enclosure",
         expectedUpdatedAt: draft.updatedAt,
+        items: [{
+          productId: "00000000-0000-4000-8000-000000000030",
+          quantity: "5",
+        }],
+        materialSnapshot: [{
+          productId: "00000000-0000-4000-8000-000000000030",
+          serialNumber: "0000123",
+          productName: "Relay Module",
+          quantity: "5",
+          currentInventory: "17",
+        }],
       }));
-    expect(pageMocks.saveDraft.mock.calls[0]?.[0]).not.toHaveProperty(
-      "materials",
-    );
     expect(screen.getByRole("textbox", {
       name: "Quantity for Relay Module (0000123)",
     })).toHaveValue("5");
@@ -624,6 +736,8 @@ describe("WorkOrderDetailPage", () => {
         projectId: replacementProjectId,
         description: "  Backend trims this  ",
         expectedUpdatedAt: "2026-09-22T10:00:00.123456+00:00",
+        items: [],
+        materialSnapshot: [],
       }));
     expect(screen.getByRole("status")).toHaveTextContent("Draft saved.");
     expect(screen.getByLabelText("Project")).toHaveValue(replacementProjectId);
@@ -649,9 +763,7 @@ describe("WorkOrderDetailPage", () => {
       },
     }));
     page.rerender(pageTree());
-    expect(screen.getByLabelText("Customer")).toHaveValue(
-      "Authoritative Beta Customer",
-    );
+    expect(screen.getByLabelText("Customer")).toHaveValue("Beta Customer");
     expect(screen.getByLabelText("Short Description")).toHaveValue(
       "Backend trims this",
     );
@@ -679,6 +791,8 @@ describe("WorkOrderDetailPage", () => {
       projectId,
       description: "  Test  ",
       expectedUpdatedAt: draft.updatedAt,
+      items: [],
+      materialSnapshot: [],
     });
   });
 
@@ -704,6 +818,8 @@ describe("WorkOrderDetailPage", () => {
       projectId,
       description: "   ",
       expectedUpdatedAt: draft.updatedAt,
+      items: [],
+      materialSnapshot: [],
     });
   });
 
@@ -809,10 +925,248 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("Build enclosure")).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
       .not.toBeInTheDocument();
-    expect(screen.getByText("Materials will be added in a later step."))
+    expect(screen.getByText("No materials added yet."))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save for Later" }))
       .not.toBeInTheDocument();
+  });
+
+  it("hydrates persisted materials exactly and includes them in the atomic save", async () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: {
+          ok: true,
+          value: [{
+            productId: "00000000-0000-4000-8000-000000000030",
+            serialNumber: "0000123",
+            productName: "Relay Module",
+            quantity: "9223372036854775807",
+            currentInventory: "9007199254740993",
+          }],
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveValue("9223372036854775807");
+    expect(screen.getByText("9007199254740993")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    await waitFor(() => expect(pageMocks.saveDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [{
+          productId: "00000000-0000-4000-8000-000000000030",
+          quantity: "9223372036854775807",
+        }],
+      }),
+    ));
+  });
+
+  it("blocks scanner and Save until the persisted-material baseline loads", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: undefined,
+        isError: false,
+        isPending: true,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading Draft materials...",
+    );
+    expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save for Later" }))
+      .toBeDisabled();
+  });
+
+  it("shows a retryable material error without presenting an empty baseline", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: {
+          ok: false,
+          error: {
+            code: "draft_materials_load_failed",
+            message: "Draft materials could not be loaded. Please try again.",
+          },
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(screen.getByRole("heading", { name: "Unable to load Materials" }))
+      .toBeInTheDocument();
+    expect(screen.queryByText("No materials added yet."))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save for Later" }))
+      .toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(pageMocks.materialsRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("renders persisted Draft materials read-only for a viewer", async () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canEditDraft: false,
+      materialsQuery: {
+        data: {
+          ok: true,
+          value: [{
+            productId: "00000000-0000-4000-8000-000000000030",
+            serialNumber: "0000123",
+            productName: "Relay Module",
+            quantity: "4",
+            currentInventory: "17",
+          }],
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(await screen.findByText("Relay Module")).toBeInTheDocument();
+    expect(screen.getByText("0000123")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /^Quantity for/ }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Remove / }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("blocks an empty material Quantity and preserves exact save versions", async () => {
+    renderPage();
+    const scanner = screen.getByRole("textbox", { name: "Scan Product Barcode" });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+    await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+    expect(screen.getByText("Quantity is required.")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    }), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    await waitFor(() => expect(pageMocks.saveDraft).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    await waitFor(() => expect(pageMocks.saveDraft).toHaveBeenCalledTimes(2));
+    expect(pageMocks.saveDraft.mock.calls[1]?.[0].expectedUpdatedAt)
+      .toBe("2026-09-22T10:01:00.123456+00:00");
+  });
+
+  it("does not overwrite unsaved material edits during a routine query update", async () => {
+    const originalMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: { ok: true, value: [originalMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    const page = renderPage();
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    fireEvent.change(quantity, { target: { value: "9" } });
+
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: { ok: true, value: [{ ...originalMaterial, quantity: "4" }] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    page.rerender(pageTree());
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveValue("9");
+  });
+
+  it("explicit stale reload replaces header and complete material state", async () => {
+    const persistedMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      materialsQuery: {
+        data: { ok: true, value: [persistedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    pageMocks.saveDraft.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "stale_work_order",
+        message: "This Draft changed somewhere else. Reload the latest Draft before saving.",
+      },
+    });
+    pageMocks.reloadLatestDraft.mockResolvedValue({
+      ok: true,
+      detail: {
+        ...draft,
+        projectId: null,
+        projectName: null,
+        customerName: null,
+        description: "Server description",
+        updatedAt: "2026-09-22T11:00:00.654321+00:00",
+      },
+      materials: [{
+        productId: "00000000-0000-4000-8000-000000000031",
+        serialNumber: "0000456",
+        productName: "Server Product",
+        quantity: "7",
+        currentInventory: "8",
+      }],
+    });
+    renderPage();
+    const quantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    fireEvent.change(quantity, { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "Local description" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    await screen.findByRole("button", { name: "Reload latest Draft" });
+    expect(quantity).toHaveValue("9");
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload latest Draft" }));
+    expect(await screen.findByText("Server Product")).toBeInTheDocument();
+    expect(screen.queryByText("Relay Module")).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Server Product (0000456)",
+    })).toHaveValue("7");
+    expect(screen.getByLabelText("Short Description"))
+      .toHaveValue("Server description");
   });
 
   it("preserves an existing historical Project absent from new choices", () => {

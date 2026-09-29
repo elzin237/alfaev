@@ -10,9 +10,11 @@ import {
   createDraftWorkOrder,
   getWorkOrderMaterialInventory,
   getWorkOrderDetail,
+  listDraftWorkOrderMaterials,
   listWorkOrderProjectChoices,
   listWorkOrders,
   resolveWorkOrderProductBarcode,
+  saveDraftWorkOrder,
   updateDraftWorkOrder,
 } from "./workOrderService";
 
@@ -735,5 +737,127 @@ describe("workOrderService", () => {
         message: "The Work Order could not be created. Please try again.",
       },
     });
+  });
+
+  it("loads strict persisted Draft materials in server order with exact bigint text", async () => {
+    const rows = [
+      {
+        product_id: "00000000-0000-4000-8000-000000000031",
+        serial_number: "0000001",
+        product_name: "First Product",
+        quantity: "9223372036854775807",
+        current_inventory: "0",
+      },
+      {
+        product_id: "00000000-0000-4000-8000-000000000032",
+        serial_number: "0000002",
+        product_name: "Second Product",
+        quantity: 2,
+        current_inventory: "9223372036854775807",
+      },
+    ];
+    serviceMocks.rpc.mockResolvedValue({ data: rows, error: null });
+
+    await expect(listDraftWorkOrderMaterials(detailRow.work_order_id)).resolves
+      .toEqual({
+        ok: true,
+        value: [
+          {
+            productId: rows[0]!.product_id,
+            serialNumber: "0000001",
+            productName: "First Product",
+            quantity: "9223372036854775807",
+            currentInventory: "0",
+          },
+          {
+            productId: rows[1]!.product_id,
+            serialNumber: "0000002",
+            productName: "Second Product",
+            quantity: "2",
+            currentInventory: "9223372036854775807",
+          },
+        ],
+      });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "list_draft_work_order_materials",
+      { p_work_order_id: detailRow.work_order_id },
+    );
+  });
+
+  it.each([
+    ["duplicate", [
+      { product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", current_inventory: "0" },
+      { product_id: resolvedProductRow.product_id, serial_number: "0000002", product_name: "B", quantity: "2", current_inventory: "0" },
+    ]],
+    ["zero quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "0", current_inventory: "0" }]],
+    ["overflow quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "9223372036854775808", current_inventory: "0" }]],
+    ["unsafe numeric quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: 9007199254740992, current_inventory: "0" }]],
+    ["invalid serial", [{ product_id: resolvedProductRow.product_id, serial_number: "123", product_name: "A", quantity: "1", current_inventory: "0" }]],
+    ["untrimmed name", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: " A ", quantity: "1", current_inventory: "0" }]],
+    ["extra field", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", current_inventory: "0", hidden: true }]],
+  ])("rejects malformed persisted Draft materials with %s", async (_label, data) => {
+    serviceMocks.rpc.mockResolvedValue({ data, error: null });
+    await expect(listDraftWorkOrderMaterials(detailRow.work_order_id)).resolves
+      .toMatchObject({ ok: false, error: { code: "draft_materials_load_failed" } });
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["WOR02", "work_order_not_draft"],
+    ["P0002", "work_order_not_found"],
+    ["IVB01", "inventory_unavailable"],
+    ["XX000", "draft_materials_load_failed"],
+  ])("maps persisted-material error %s safely", async (providerCode, code) => {
+    serviceMocks.rpc.mockResolvedValue({ data: null, error: { code: providerCode, message: "raw detail" } });
+    const result = await listDraftWorkOrderMaterials(detailRow.work_order_id);
+    expect(result).toMatchObject({ ok: false, error: { code } });
+    if (!result.ok) expect(result.error.message).not.toContain("raw detail");
+  });
+
+  it("atomically saves the exact desired material set and preserves timestamp precision", async () => {
+    const returnedTimestamp = "2026-09-22T12:34:56.123456+00:00";
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{ work_order_id: detailRow.work_order_id, updated_at: returnedTimestamp }],
+      error: null,
+    });
+    await expect(saveDraftWorkOrder(detailRow.work_order_id, {
+      projectId: null,
+      description: " Draft ",
+      expectedUpdatedAt: "2026-09-22T11:11:11.654321+00:00",
+      items: [
+        { productId: "00000000-0000-4000-8000-000000000032", quantity: "9223372036854775807" },
+        { productId: "00000000-0000-4000-8000-000000000031", quantity: "1" },
+      ],
+    })).resolves.toEqual({ ok: true, value: { workOrderId: detailRow.work_order_id, updatedAt: returnedTimestamp } });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith("save_draft_work_order", {
+      p_work_order_id: detailRow.work_order_id,
+      p_project_id: null,
+      p_description: " Draft ",
+      p_items: [
+        { product_id: "00000000-0000-4000-8000-000000000031", quantity: "1" },
+        { product_id: "00000000-0000-4000-8000-000000000032", quantity: "9223372036854775807" },
+      ],
+      p_expected_updated_at: "2026-09-22T11:11:11.654321+00:00",
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["WOR02", "work_order_not_editable"],
+    ["WOR05", "stale_work_order"],
+    ["PRD05", "product_unavailable"],
+    ["22023", "invalid_draft"],
+    ["P0002", "draft_reference_not_found"],
+    ["XX000", "draft_save_failed"],
+  ])("maps atomic save error %s safely", async (providerCode, code) => {
+    serviceMocks.rpc.mockResolvedValue({ data: null, error: { code: providerCode, message: "raw detail" } });
+    const result = await saveDraftWorkOrder(detailRow.work_order_id, {
+      projectId: null,
+      description: "",
+      items: [],
+      expectedUpdatedAt: detailRow.updated_at,
+    });
+    expect(result).toMatchObject({ ok: false, error: { code } });
+    if (!result.ok) expect(result.error.message).not.toContain("raw detail");
   });
 });

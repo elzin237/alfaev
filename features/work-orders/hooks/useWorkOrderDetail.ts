@@ -7,14 +7,17 @@ import {
   getWorkOrderDetail,
   getWorkOrderMaterialInventory,
   isWorkOrderId,
+  listDraftWorkOrderMaterials,
   listWorkOrderProjectChoices,
   resolveWorkOrderProductBarcode,
-  updateDraftWorkOrder,
-  type DraftWorkOrderUpdateInput,
+  saveDraftWorkOrder,
+  type PersistedDraftWorkOrderMaterial,
+  type SaveDraftWorkOrderInput,
   type WorkOrderMaterialLoadResult,
 } from "../services/workOrderService";
 import {
   workOrderDetailQueryKey,
+  workOrderDraftMaterialsQueryKey,
   workOrderListQueryKey,
   workOrderProjectChoicesQueryKey,
 } from "../workOrderQueryKeys";
@@ -26,6 +29,10 @@ export function useWorkOrderDetail(workOrderId: string) {
   const hasValidWorkOrderId = isWorkOrderId(workOrderId);
   const detailKey = workOrderDetailQueryKey(profile?.id, workOrderId);
   const listKey = workOrderListQueryKey(profile?.id);
+  const materialsKey = workOrderDraftMaterialsQueryKey(
+    profile?.id,
+    workOrderId,
+  );
   const editPermissionKey = permissionQueryKey(
     session?.user.id,
     profile?.id,
@@ -58,15 +65,55 @@ export function useWorkOrderDetail(workOrderId: string) {
     enabled: Boolean(profile?.id && canEditDraft),
     staleTime: 60_000,
   });
+  const materialsQuery = useQuery({
+    queryKey: materialsKey,
+    queryFn: () => listDraftWorkOrderMaterials(workOrderId),
+    enabled: Boolean(
+      profile?.id && profile.isActive && hasValidWorkOrderId &&
+        detail?.status === "draft",
+    ),
+    staleTime: 60_000,
+  });
   const saveMutation = useMutation({
-    mutationFn: (input: DraftWorkOrderUpdateInput) =>
-      updateDraftWorkOrder(workOrderId, input),
-    onSuccess: async (result) => {
+    mutationFn: (input: SaveDraftWorkOrderInput & {
+      materialSnapshot: PersistedDraftWorkOrderMaterial[];
+    }) => {
+      const { materialSnapshot: _materialSnapshot, ...serviceInput } = input;
+      return saveDraftWorkOrder(workOrderId, serviceInput);
+    },
+    onSuccess: async (result, input) => {
       if (result.ok) {
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
-          queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
-        ]);
+        const selectedProject = projectChoicesQuery.data?.ok
+          ? projectChoicesQuery.data.value.find((choice) =>
+            choice.id === input.projectId
+          )
+          : undefined;
+        queryClient.setQueryData(detailKey, (current: typeof detailQuery.data) =>
+          current?.ok
+            ? {
+              ok: true as const,
+              value: {
+                ...current.value,
+                projectId: input.projectId,
+                projectName: selectedProject?.name ??
+                  (input.projectId === current.value.projectId
+                    ? current.value.projectName
+                    : null),
+                customerName: selectedProject?.customerName ??
+                  (input.projectId === current.value.projectId
+                    ? current.value.customerName
+                    : null),
+                description: input.description.trim() || null,
+                updatedAt: result.value.updatedAt,
+              },
+            }
+            : current
+        );
+        queryClient.setQueryData(materialsKey, {
+          ok: true as const,
+          value: input.materialSnapshot,
+        });
+        await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
         return;
       }
 
@@ -123,8 +170,23 @@ export function useWorkOrderDetail(workOrderId: string) {
     },
   });
 
-  async function reloadLatestDraft(): Promise<void> {
-    await detailQuery.refetch();
+  async function reloadLatestDraft() {
+    const [latestDetail, latestMaterials] = await Promise.all([
+      detailQuery.refetch(),
+      materialsQuery.refetch(),
+    ]);
+    if (
+      latestDetail.data?.ok &&
+      latestDetail.data.value.status === "draft" &&
+      latestMaterials.data?.ok
+    ) {
+      return {
+        ok: true as const,
+        detail: latestDetail.data.value,
+        materials: latestMaterials.data.value,
+      };
+    }
+    return { ok: false as const };
   }
 
   return {
@@ -132,6 +194,7 @@ export function useWorkOrderDetail(workOrderId: string) {
     detailQuery,
     isLoadingMaterial: materialLoadMutation.isPending,
     isSaving: saveMutation.isPending,
+    materialsQuery,
     projectChoicesQuery,
     reloadLatestDraft,
     loadMaterial: materialLoadMutation.mutateAsync,
