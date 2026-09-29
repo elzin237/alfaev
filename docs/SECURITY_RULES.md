@@ -474,11 +474,29 @@ Do not trust a client-generated PDF as the permanent official document.
 
 Storage rules:
 
-- private bucket
+- private `work-order-pdfs` bucket accepting only `application/pdf` objects up to
+  10 MiB
 - no public permanent URL
 - authorize access before issuing signed/controlled link
 - use unpredictable object keys/internal IDs
 - prevent arbitrary path access
+
+Object names are server-generated and use the internal Work Order UUID:
+
+- temporary: `_tmp/<work_order_id>/<object_uuid>.pdf`
+- final: `final/<work_order_id>/<object_uuid>.pdf`
+
+Authenticated browsers cannot read temporary objects or write, replace, or delete
+any object in this bucket, including when the actor is Admin. Trusted service-role
+code owns all temporary/final byte operations. A final object is browser-readable
+only to an active Admin or `work_orders.view` actor after the Work Order is Finished
+and an immutable `WorkOrderPdf` row references that exact path. `work_orders.finish`
+alone grants no PDF read access. An uploaded but unreferenced final candidate remains
+inaccessible.
+
+`WorkOrderPdf` metadata is read-only to the same authorized viewers, only for a
+Finished Work Order. Direct browser INSERT/UPDATE/DELETE is denied, and database-level
+immutability prevents replacement or deletion even through later trusted workflows.
 
 Finalize safely:
 

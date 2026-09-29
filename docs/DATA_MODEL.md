@@ -1167,21 +1167,30 @@ Fields:
 
 - `id`
 - `work_order_id`
-  - unique
+  - required and unique
+  - FK to WorkOrder with `ON DELETE RESTRICT`
 - `storage_reference`
-  - path/key/identifier determined by selected storage backend
+  - required and unique
+  - exactly `final/<work_order_id>/<object_uuid>.pdf`
 - `generated_at`
+  - required
 - `generated_by_user_id`
+  - required FK to UserProfile with `ON DELETE RESTRICT`
 - `document_version`
-  - initial value 1
+  - required, defaults to 1, and must equal 1 in current scope
 - `content_hash`
-  - optional but recommended for integrity verification
+  - nullable lowercase SHA-256 hex; exactly 64 `[0-9a-f]` characters when present
 
 Rules:
 
 - generated only for Finished Work Order
 - document remains tied to that Work Order
-- normal application workflows do not overwrite/delete the historical PDF
+- referenced object must already exist in private bucket `work-order-pdfs`, have MIME
+  `application/pdf`, and exactly match the final storage reference
+- temporary `_tmp/<work_order_id>/<object_uuid>.pdf` paths can never be persisted as
+  the permanent reference
+- one canonical PDF per Work Order; metadata cannot be updated or deleted
+- normal application workflows do not overwrite/delete the historical PDF or bytes
 - exact PDF visual layout is defined later in UI/document specification
 
 ---

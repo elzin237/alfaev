@@ -700,6 +700,23 @@ If a mistake must be corrected later:
 - use a separate explicit correction/reversal process
 - never silently rewrite the Finished record
 
+### Permanent Work Order PDF
+
+- Each Finished Work Order has at most one canonical `WorkOrderPdf` in the current
+  scope, with document version exactly 1.
+- PDF bytes live only in the private `work-order-pdfs` bucket; PostgreSQL stores only
+  immutable metadata and the exact final object reference.
+- Temporary objects use `_tmp/<work_order_id>/<object_uuid>.pdf`; permanent objects
+  use `final/<work_order_id>/<object_uuid>.pdf`. Both IDs are internal UUIDs, never a
+  Work Order number or user filename.
+- A permanent metadata row may reference only an existing `application/pdf` final
+  object in its own Work Order namespace, and only after that Work Order is Finished.
+- Uploading a final candidate does not expose it. Browser read access begins only
+  after an exact `WorkOrderPdf` reference exists and is limited to an active Admin or
+  `work_orders.view` actor.
+- `WorkOrderPdf` rows cannot be updated or deleted. There is no current replacement,
+  re-versioning, or removal workflow.
+
 ---
 
 ## 10. Documentation Rules

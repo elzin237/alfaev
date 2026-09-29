@@ -10,6 +10,7 @@ import { registerProductEditTests, registerProductSchemaTests } from "./products
 import { registerBulkComponentImportTests } from "./bulk-component-import.suite";
 import { registerWorkOrderSchemaTests } from "./work-orders.suite";
 import { registerWorkOrderFinishPreflightTests } from "./work-order-finish-preflight.suite";
+import { registerWorkOrderPdfTests } from "./work-order-pdfs.suite";
 import { registerInventoryLedgerTests } from "./inventory-ledger.suite";
 import { registerInventoryPrimitiveTests, registerManualInventoryAdjustmentTests } from "./inventory-mutation.suite";
 import { registerInventoryReadsTests } from "./inventory-reads.suite";
@@ -33,6 +34,7 @@ describe("Supabase security helpers", () => {
   registerBulkComponentImportTests(requireHarness);
   registerWorkOrderSchemaTests(requireHarness);
   registerWorkOrderFinishPreflightTests(requireHarness);
+  registerWorkOrderPdfTests(requireHarness);
   registerInventoryLedgerTests(requireHarness);
   registerInventoryPrimitiveTests(requireHarness);
   registerProductEditTests(requireHarness);

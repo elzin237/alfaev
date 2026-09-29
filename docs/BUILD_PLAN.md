@@ -2535,13 +2535,21 @@ Concrete trusted boundary:
 ## 118 — Create Private Work Order PDF Storage + Policies
 
 Goal:
-- private Supabase Storage bucket/policies
+- private `work-order-pdfs` Supabase Storage bucket and immutable `WorkOrderPdf`
+  metadata foundation
 
 Rules:
-- no anonymous access
-- authorized read only
-- no arbitrary client overwrite
-- temporary/final object convention
+- bucket is private, PDF-only, and limited to 10 MiB
+- trusted service-role code exclusively owns temporary/final object writes
+- temporary paths are `_tmp/<work_order_id>/<object_uuid>.pdf` and are never
+  browser-readable or valid permanent references
+- final paths are `final/<work_order_id>/<object_uuid>.pdf`
+- authenticated read requires an exact immutable `WorkOrderPdf` reference to the
+  final object, a Finished Work Order, and active Admin or `work_orders.view`
+- uploading a final candidate alone never exposes it
+- direct browser metadata/object writes, replacements, and deletes remain denied
+- one version-1 canonical PDF row per Work Order; database immutability prevents
+  UPDATE/DELETE
 
 No PDF generation yet.
 
