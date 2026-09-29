@@ -397,6 +397,15 @@ rules permit. A previously persisted reference remains historical if its Product
 archived later; it may remain, have its Draft quantity changed, or be removed, while
 Finish performs its own authoritative Product and Inventory checks.
 
+Draft deletion uses only a trusted backend operation authorized for an active Admin
+or an active actor with `work_orders.delete_draft`; it does not additionally require
+Work Order view/edit or Project/Inventory permissions. The operation locks the parent
+Work Order, re-checks actor continuity and authority, verifies the exact expected
+`updated_at`, and rejects Finished Work Orders. It deletes that Draft's WorkOrderItem
+rows and parent atomically, appends exactly one immutable `work_order.deleted` audit,
+and never reclaims its Work Order Number. Draft deletion does not mutate Inventory,
+Projects, Products, PCB data, PDFs, or Storage. Direct browser deletes remain denied.
+
 ---
 
 # 14. Work Order Finish Security

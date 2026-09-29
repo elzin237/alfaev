@@ -81,6 +81,11 @@ interface DraftWorkOrderMaterialRow {
   serial_number: string;
 }
 
+interface DeletedDraftWorkOrderRow {
+  work_order_id: string;
+  work_order_number: string;
+}
+
 async function actAs(
   database: PoolClient,
   actor: SecurityActor,
@@ -389,6 +394,18 @@ async function listDraftWorkOrderMaterials(
      from public.list_draft_work_order_materials($1::uuid)`,
     [workOrderId],
   )).rows;
+}
+
+async function deleteDraftWorkOrder(
+  database: PoolClient,
+  workOrderId: string | null,
+  expectedUpdatedAt: string | null,
+): Promise<DeletedDraftWorkOrderRow> {
+  return (await database.query<DeletedDraftWorkOrderRow>(
+    `select deleted.work_order_id, deleted.work_order_number
+     from public.delete_draft_work_order($1::uuid, $2::timestamptz) as deleted`,
+    [workOrderId, expectedUpdatedAt],
+  )).rows[0]!;
 }
 
 async function setOnlyWorkOrderPermission(
@@ -825,7 +842,7 @@ export function registerWorkOrderSchemaTests(
              ))::integer as count`,
             [[
               "create_work_order", "update_work_order",
-              "delete_draft_work_order", "finish_work_order",
+              "finish_work_order",
             ]],
           )).rows;
           expect(prematureObjects).toEqual([{ count: 0 }]);
@@ -6265,6 +6282,820 @@ export function registerWorkOrderSchemaTests(
           )).rows).toEqual([{ count: "1" }]);
         });
       });
+    },
+  );
+
+  describe.skipIf(process.env.TASK115A_MIGRATION !== "1")(
+    "Task 115A trusted Draft Work Order deletion (requires deployed migration)",
+    () => {
+      async function createDeletionDraft(
+        database: PoolClient,
+        actorId: string,
+      ): Promise<{ id: string; number: string; updatedAt: string }> {
+        const id = randomUUID();
+        const year = await findUnusedWorkOrderYear(database);
+        const number = `RN-${year}-0001`;
+        await database.query(
+          `insert into public.work_orders (
+             id, work_order_number, status,
+             created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::text, 'draft', $3::uuid, $3::uuid)`,
+          [id, number, actorId],
+        );
+        const updatedAt = (await database.query<{ updated_at: string }>(
+          `select updated_at::text as updated_at
+           from public.work_orders where id = $1::uuid`,
+          [id],
+        )).rows[0]!.updated_at;
+        return { id, number, updatedAt };
+      }
+
+      it("authorizes only active Admin or work_orders.delete_draft", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const actor = fixture.actors.unpermitted;
+          const adminDraft = await createDeletionDraft(database, admin.profileId);
+          await actAs(database, admin);
+          await expect(deleteDraftWorkOrder(
+            database, adminDraft.id, adminDraft.updatedAt,
+          )).resolves.toEqual({
+            work_order_id: adminDraft.id,
+            work_order_number: adminDraft.number,
+          });
+          await database.query("reset role");
+
+          const delegatedDraft = await createDeletionDraft(database, admin.profileId);
+          const delegatedProductId = await createWorkOrderItemProduct(
+            database, admin.profileId,
+          );
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 1, $3::uuid)`,
+            [delegatedDraft.id, delegatedProductId, admin.profileId],
+          );
+          await setOnlyWorkOrderPermission(
+            database, actor, admin.profileId, "work_orders.delete_draft",
+          );
+          await actAs(database, actor);
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [delegatedDraft.id],
+          )).rows).toEqual([]);
+          await expect(deleteDraftWorkOrder(
+            database, delegatedDraft.id, delegatedDraft.updatedAt,
+          )).resolves.toEqual({
+            work_order_id: delegatedDraft.id,
+            work_order_number: delegatedDraft.number,
+          });
+          await database.query("reset role");
+
+          const deniedDraft = await createDeletionDraft(database, admin.profileId);
+          for (const permission of [
+            "work_orders.view",
+            "work_orders.edit_draft",
+            "work_orders.create",
+            "work_orders.finish",
+            "inventory.view",
+            null,
+          ] as const) {
+            await setOnlyWorkOrderPermission(
+              database, actor, admin.profileId, permission,
+            );
+            await actAs(database, actor);
+            await expectRejected(
+              database,
+              () => deleteDraftWorkOrder(
+                database, deniedDraft.id, deniedDraft.updatedAt,
+              ),
+              "42501",
+              "Access denied",
+            );
+            await database.query("reset role");
+          }
+
+          await setOnlyWorkOrderPermission(
+            database,
+            fixture.actors.inactive,
+            admin.profileId,
+            "work_orders.delete_draft",
+          );
+          await actAs(database, fixture.actors.inactive);
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(
+              database, deniedDraft.id, deniedDraft.updatedAt,
+            ),
+            "42501",
+            "Access denied",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [deniedDraft.id],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            `select id from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+            [deniedDraft.id],
+          )).rows).toEqual([]);
+        });
+
+        expectPermissionDenied((await fixture.anonymousClient.rpc(
+          "delete_draft_work_order",
+          {
+            p_expected_updated_at: new Date().toISOString(),
+            p_work_order_id: randomUUID(),
+          },
+        )).error);
+      });
+
+      it("validates inputs, lifecycle, exact optimistic version, and Finished defense", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const draft = await createDeletionDraft(database, admin.profileId);
+          const projectId = await createProject(database, admin.profileId);
+          const finishedDraft = await createDeletionDraft(
+            database, admin.profileId,
+          );
+          const finishedId = finishedDraft.id;
+          const finishedProductId = await createWorkOrderItemProduct(
+            database, admin.profileId,
+          );
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 4, $3::uuid)`,
+            [finishedId, finishedProductId, admin.profileId],
+          );
+          await database.query(
+            `update public.work_orders
+             set project_id = $2::uuid,
+                 customer_name_snapshot = 'Finished Customer',
+                 description = 'Finished work',
+                 status = 'finished',
+                 finished_at = pg_catalog.now(),
+                 finished_by_user_id = $3::uuid
+             where id = $1::uuid`,
+            [finishedId, projectId, admin.profileId],
+          );
+          const finishedUpdatedAt = (await database.query<{ updated_at: string }>(
+            `select updated_at::text as updated_at from public.work_orders
+             where id = $1::uuid`,
+            [finishedId],
+          )).rows[0]!.updated_at;
+
+          await actAs(database, admin);
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(database, null, draft.updatedAt),
+            "22023",
+            "Work Order ID is required",
+          );
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(database, draft.id, null),
+            "22023",
+            "Expected Work Order update timestamp is required",
+          );
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(database, randomUUID(), draft.updatedAt),
+            "P0002",
+            "Work Order not found",
+          );
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(database, finishedId, finishedUpdatedAt),
+            "WOR02",
+            "Finished Work Orders cannot be deleted",
+          );
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(
+              database, draft.id, "2000-01-01T00:00:00Z",
+            ),
+            "WOR05",
+            "Work Order Draft has changed. Reload and try again.",
+          );
+          await database.query("reset role");
+
+          await expectRejected(
+            database,
+            () => database.query(
+              "delete from public.work_orders where id = $1::uuid",
+              [finishedId],
+            ),
+            "WOR02",
+            "Finished Work Orders cannot be deleted",
+          );
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [finishedId],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            `select id from public.work_order_items
+             where work_order_id = $1::uuid`,
+            [finishedId],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            `select id from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+            [finishedId],
+          )).rows).toEqual([]);
+        });
+      });
+
+      it("deletes only the target Draft and its items with one deterministic audit", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const target = await createDeletionDraft(database, admin.profileId);
+          const unrelated = await createDeletionDraft(database, admin.profileId);
+          const linkedProjectId = await createProject(database, admin.profileId);
+          await database.query(
+            `update public.work_orders
+             set project_id = $2::uuid,
+                 customer_name_snapshot = 'Deletion Snapshot Customer'
+             where id = $1::uuid`,
+            [target.id, linkedProjectId],
+          );
+          const firstProductId = await createWorkOrderItemProduct(
+            database, admin.profileId,
+          );
+          const secondProductId = await createWorkOrderItemProduct(
+            database, admin.profileId,
+          );
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values
+               ($1::uuid, $3::uuid, 7, $5::uuid),
+               ($1::uuid, $2::uuid, 3, $5::uuid),
+               ($4::uuid, $2::uuid, 11, $5::uuid)`,
+            [
+              target.id,
+              firstProductId,
+              secondProductId,
+              unrelated.id,
+              admin.profileId,
+            ],
+          );
+          const auditCountBefore = Number((await database.query<{ count: string }>(
+            "select pg_catalog.count(*)::text as count from public.audit_logs",
+          )).rows[0]!.count);
+
+          const before = (await database.query<{
+            balances: string;
+            movements: string;
+            pcb_bom_items: string;
+            pcb_bom_versions: string;
+            pcb_cards: string;
+            pcb_production_runs: string;
+            project_components: string;
+            project_products: string;
+            products: string;
+            project_state: unknown;
+          }>(
+            `select
+               (select pg_catalog.count(*)::text from public.inventory_balances)
+                 as balances,
+               (select pg_catalog.count(*)::text from public.inventory_movements)
+                 as movements,
+               (select pg_catalog.count(*)::text from public.pcb_bom_items)
+                 as pcb_bom_items,
+               (select pg_catalog.count(*)::text from public.pcb_bom_versions)
+                 as pcb_bom_versions,
+               (select pg_catalog.count(*)::text from public.pcb_cards) as pcb_cards,
+               (select pg_catalog.count(*)::text from public.pcb_production_runs)
+                 as pcb_production_runs,
+               (select pg_catalog.count(*)::text
+                  from public.project_product_components) as project_components,
+               (select pg_catalog.count(*)::text from public.project_products)
+                 as project_products,
+               (select pg_catalog.count(*)::text from public.products) as products,
+               (select pg_catalog.to_jsonb(project_row)
+                  from (
+                    select name, customer_name, start_date, delivery_date,
+                           status, completed_at, cancelled_at, updated_at
+                    from public.projects
+                    where id = $1::uuid
+                  ) as project_row) as project_state`,
+            [linkedProjectId],
+          )).rows[0];
+
+          await actAs(database, admin);
+          await expect(deleteDraftWorkOrder(
+            database, target.id, target.updatedAt,
+          )).resolves.toEqual({
+            work_order_id: target.id,
+            work_order_number: target.number,
+          });
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [target.id],
+          )).rows).toEqual([]);
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [target.id],
+          )).rows).toEqual([]);
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [unrelated.id],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            "select product_id, quantity::text as quantity from public.work_order_items where work_order_id = $1::uuid",
+            [unrelated.id],
+          )).rows).toEqual([{ product_id: firstProductId, quantity: "11" }]);
+
+          const audits = (await database.query<{
+            action_type: string;
+            actor_user_id: string;
+            after_data: unknown;
+            before_data: Record<string, unknown>;
+            entity_id: string;
+            entity_type: string;
+            summary: string;
+          }>(
+            `select actor_user_id, action_type, entity_type, entity_id,
+                    summary, before_data, after_data
+             from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+            [target.id],
+          )).rows;
+          expect(audits).toHaveLength(1);
+          expect(Number((await database.query<{ count: string }>(
+            "select pg_catalog.count(*)::text as count from public.audit_logs",
+          )).rows[0]!.count)).toBe(auditCountBefore + 1);
+          expect(audits[0]).toMatchObject({
+            action_type: "work_order.deleted",
+            actor_user_id: admin.profileId,
+            after_data: null,
+            entity_id: target.id,
+            entity_type: "work_order",
+            summary: `Deleted Work Order ${target.number}`,
+          });
+          expect(audits[0]!.before_data).toEqual({
+            customer_name_snapshot: "Deletion Snapshot Customer",
+            description: null,
+            materials: [
+              { product_id: firstProductId, quantity: 3 },
+              { product_id: secondProductId, quantity: 7 },
+            ].sort((left, right) => left.product_id.localeCompare(right.product_id)),
+            project_id: linkedProjectId,
+            status: "draft",
+            work_order_id: target.id,
+            work_order_number: target.number,
+          });
+          expect(Object.keys(
+            (audits[0]!.before_data.materials as Record<string, unknown>[])[0]!,
+          ).sort()).toEqual(["product_id", "quantity"]);
+          expect((await database.query<{
+            balances: string;
+            movements: string;
+            pcb_bom_items: string;
+            pcb_bom_versions: string;
+            pcb_cards: string;
+            pcb_production_runs: string;
+            project_components: string;
+            project_products: string;
+            products: string;
+            project_state: unknown;
+          }>(
+            `select
+               (select pg_catalog.count(*)::text from public.inventory_balances)
+                 as balances,
+               (select pg_catalog.count(*)::text from public.inventory_movements)
+                 as movements,
+               (select pg_catalog.count(*)::text from public.pcb_bom_items)
+                 as pcb_bom_items,
+               (select pg_catalog.count(*)::text from public.pcb_bom_versions)
+                 as pcb_bom_versions,
+               (select pg_catalog.count(*)::text from public.pcb_cards) as pcb_cards,
+               (select pg_catalog.count(*)::text from public.pcb_production_runs)
+                 as pcb_production_runs,
+               (select pg_catalog.count(*)::text
+                  from public.project_product_components) as project_components,
+               (select pg_catalog.count(*)::text from public.project_products)
+                 as project_products,
+               (select pg_catalog.count(*)::text from public.products) as products,
+               (select pg_catalog.to_jsonb(project_row)
+                  from (
+                    select name, customer_name, start_date, delivery_date,
+                           status, completed_at, cancelled_at, updated_at
+                    from public.projects
+                    where id = $1::uuid
+                  ) as project_row) as project_state`,
+            [linkedProjectId],
+          )).rows[0]).toEqual(before);
+        });
+      });
+
+      it("never reclaims a deleted Work Order number or changes allocator semantics", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const year = await findUnusedWorkOrderYear(database);
+          const firstNumber = (await database.query<{ number: string }>(
+            `select public.allocate_work_order_number_for_year($1::integer)
+               as number`,
+            [year],
+          )).rows[0]!.number;
+          const id = randomUUID();
+          await database.query(
+            `insert into public.work_orders (
+               id, work_order_number, status,
+               created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::text, 'draft', $3::uuid, $3::uuid)`,
+            [id, firstNumber, admin.profileId],
+          );
+          const updatedAt = (await database.query<{ updated_at: string }>(
+            "select updated_at::text as updated_at from public.work_orders where id = $1::uuid",
+            [id],
+          )).rows[0]!.updated_at;
+          await actAs(database, admin);
+          await deleteDraftWorkOrder(database, id, updatedAt);
+          await database.query("reset role");
+
+          const secondNumber = (await database.query<{ number: string }>(
+            `select public.allocate_work_order_number_for_year($1::integer)
+               as number`,
+            [year],
+          )).rows[0]!.number;
+          expect(firstNumber).toBe(`RN-${year}-0001`);
+          expect(secondNumber).toBe(`RN-${year}-0002`);
+          expect((await database.query(
+            `select business_year, last_value
+             from public.work_order_number_counters where business_year = $1`,
+            [year],
+          )).rows).toEqual([{ business_year: year, last_value: 2 }]);
+        });
+      });
+
+      it("rolls back child and parent deletion when the audit append fails", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const draft = await createDeletionDraft(database, admin.profileId);
+          const productId = await createWorkOrderItemProduct(database, admin.profileId);
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 5, $3::uuid)`,
+            [draft.id, productId, admin.profileId],
+          );
+          await database.query(
+            `create function public.task115a_reject_deletion_audit()
+             returns trigger language plpgsql set search_path = '' as $body$
+             begin
+               if new.action_type = 'work_order.deleted' then
+                 raise exception 'Forced deletion audit failure';
+               end if;
+               return new;
+             end;
+             $body$`,
+          );
+          await database.query(
+            `create trigger task115a_reject_deletion_audit
+             before insert on public.audit_logs
+             for each row execute function public.task115a_reject_deletion_audit()`,
+          );
+          const allocatorBefore = (await database.query(
+            `select business_year, last_value
+             from public.work_order_number_counters
+             order by business_year`,
+          )).rows;
+
+          await actAs(database, admin);
+          await expectRejected(
+            database,
+            () => deleteDraftWorkOrder(database, draft.id, draft.updatedAt),
+            "P0001",
+            "Forced deletion audit failure",
+          );
+          await database.query("reset role");
+
+          expect((await database.query(
+            "select id from public.work_orders where id = $1::uuid",
+            [draft.id],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [draft.id],
+          )).rows).toHaveLength(1);
+          expect((await database.query(
+            `select id from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+            [draft.id],
+          )).rows).toEqual([]);
+          expect((await database.query(
+            `select business_year, last_value
+             from public.work_order_number_counters
+             order by business_year`,
+          )).rows).toEqual(allocatorBefore);
+        });
+      });
+
+      it("serializes a save winner before a stale delete on the parent row lock", async () => {
+        const fixture = requireHarness();
+        const actor = fixture.actors.admin;
+        const workOrderId = randomUUID();
+        const applicationName = `task-115a-delete-${randomUUID()}`;
+        const initialUpdatedAt = "2026-09-29 10:00:00+00";
+        const winnerUpdatedAt = "2026-09-29 10:01:00+00";
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const winner = clients[0];
+          const deleter = clients[1];
+          const observer = clients[2];
+          if (!winner || !deleter || !observer) {
+            throw new Error("Task 115A concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let pending: Promise<
+            | { error: unknown; ok: false }
+            | { ok: true; value: DeletedDraftWorkOrderRow }
+          > | undefined;
+          try {
+            const year = await findUnusedWorkOrderYear(observer);
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, description, status,
+                 created_at, created_by_user_id, updated_at, updated_by_user_id
+               ) values (
+                 $1::uuid, $2::text, 'Original', 'draft',
+                 $3::timestamptz, $4::uuid, $3::timestamptz, $4::uuid
+               )`,
+              [workOrderId, `RN-${year}-0001`, initialUpdatedAt, actor.profileId],
+            );
+            setupCommitted = true;
+
+            await winner.query("begin");
+            await winner.query(
+              "select id from public.work_orders where id = $1::uuid for update",
+              [workOrderId],
+            );
+            await deleter.query("begin");
+            await deleter.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [applicationName],
+            );
+            await actAs(deleter, actor);
+            pending = deleteDraftWorkOrder(
+              deleter, workOrderId, initialUpdatedAt,
+            ).then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ error, ok: false as const }),
+            );
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const row = (await observer.query<{ wait_event_type: string | null }>(
+                `select wait_event_type from pg_catalog.pg_stat_activity
+                 where application_name = $1::text`,
+                [applicationName],
+              )).rows[0];
+              if (row?.wait_event_type === "Lock") break;
+              if (attempt === 99) throw new Error("Expected delete to wait on Work Order lock");
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            await winner.query(
+              `update public.work_orders
+               set description = 'Save winner', updated_at = $2::timestamptz,
+                   updated_by_user_id = $3::uuid
+               where id = $1::uuid`,
+              [workOrderId, winnerUpdatedAt, actor.profileId],
+            );
+            await winner.query("commit");
+            expect(await pending).toMatchObject({
+              error: { code: "WOR05" },
+              ok: false,
+            });
+            pending = undefined;
+            await deleter.query("rollback");
+            expect((await observer.query(
+              `select description, updated_at::text as updated_at
+               from public.work_orders where id = $1::uuid`,
+              [workOrderId],
+            )).rows).toEqual([{
+              description: "Save winner",
+              updated_at: winnerUpdatedAt,
+            }]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+              [workOrderId],
+            )).rows).toEqual([]);
+          } finally {
+            await winner.query("rollback").catch(() => undefined);
+            if (pending) await pending;
+            await deleter.query("rollback").catch(() => undefined);
+            if (setupCommitted) {
+              await observer.query(
+                "delete from public.work_orders where id = $1::uuid",
+                [workOrderId],
+              );
+            }
+          }
+        });
+      });
+
+      it("holds the parent lock so a concurrent Draft save cannot slip through deletion", async () => {
+        const fixture = requireHarness();
+        const actor = fixture.actors.admin;
+        const workOrderId = randomUUID();
+        const applicationName = `task-115a-save-${randomUUID()}`;
+        const initialUpdatedAt = "2026-09-29 11:00:00+00";
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const deleter = clients[0];
+          const saver = clients[1];
+          const observer = clients[2];
+          if (!deleter || !saver || !observer) {
+            throw new Error("Task 115A concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let pending: Promise<
+            | { error: unknown; ok: false }
+            | { ok: true; value: SavedDraftWorkOrderRow }
+          > | undefined;
+          try {
+            const year = await findUnusedWorkOrderYear(observer);
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, description, status,
+                 created_at, created_by_user_id, updated_at, updated_by_user_id
+               ) values (
+                 $1::uuid, $2::text, 'Original', 'draft',
+                 $3::timestamptz, $4::uuid, $3::timestamptz, $4::uuid
+               )`,
+              [workOrderId, `RN-${year}-0001`, initialUpdatedAt, actor.profileId],
+            );
+            setupCommitted = true;
+
+            await deleter.query("begin");
+            await actAs(deleter, actor);
+            await expect(deleteDraftWorkOrder(
+              deleter, workOrderId, initialUpdatedAt,
+            )).resolves.toMatchObject({ work_order_id: workOrderId });
+
+            await saver.query("begin");
+            await saver.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [applicationName],
+            );
+            await actAs(saver, actor);
+            pending = saveDraftWorkOrder(saver, {
+              description: "Waiting save",
+              expectedUpdatedAt: initialUpdatedAt,
+              items: [],
+              projectId: null,
+              workOrderId,
+            }).then(
+              (value) => ({ ok: true as const, value }),
+              (error: unknown) => ({ error, ok: false as const }),
+            );
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const row = (await observer.query<{ wait_event_type: string | null }>(
+                `select wait_event_type from pg_catalog.pg_stat_activity
+                 where application_name = $1::text`,
+                [applicationName],
+              )).rows[0];
+              if (row?.wait_event_type === "Lock") break;
+              if (attempt === 99) {
+                throw new Error("Expected save to wait on Work Order delete lock");
+              }
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            await deleter.query("rollback");
+            expect(await pending).toMatchObject({
+              ok: true,
+              value: { work_order_id: workOrderId },
+            });
+            pending = undefined;
+            await saver.query("rollback");
+
+            expect((await observer.query(
+              `select description, updated_at::text as updated_at
+               from public.work_orders where id = $1::uuid`,
+              [workOrderId],
+            )).rows).toEqual([{
+              description: "Original",
+              updated_at: initialUpdatedAt,
+            }]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = $1::uuid and action_type = 'work_order.deleted'`,
+              [workOrderId],
+            )).rows).toEqual([]);
+          } finally {
+            await deleter.query("rollback").catch(() => undefined);
+            if (pending) await pending;
+            await saver.query("rollback").catch(() => undefined);
+            if (setupCommitted) {
+              await observer.query(
+                "delete from public.work_orders where id = $1::uuid",
+                [workOrderId],
+              );
+            }
+          }
+        });
+      });
+
+      it("hardens the RPC and preserves direct browser deletion denial", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const routine = (await database.query<{
+            anon_execute: boolean;
+            arguments: string;
+            authenticated_execute: boolean;
+            definition: string;
+            language: string;
+            public_execute: boolean;
+            result: string;
+            security_definer: boolean;
+            settings: string[];
+            volatility: string;
+          }>(
+            `select pg_catalog.pg_get_function_arguments(routine.oid) as arguments,
+                    pg_catalog.pg_get_function_result(routine.oid) as result,
+                    pg_catalog.pg_get_functiondef(routine.oid) as definition,
+                    language.lanname as language,
+                    routine.provolatile as volatility,
+                    routine.prosecdef as security_definer,
+                    routine.proconfig as settings,
+                    pg_catalog.has_function_privilege(
+                      'anon', routine.oid, 'execute'
+                    ) as anon_execute,
+                    pg_catalog.has_function_privilege(
+                      'authenticated', routine.oid, 'execute'
+                    ) as authenticated_execute,
+                    exists (
+                      select 1 from pg_catalog.aclexplode(routine.proacl) as privilege
+                      where privilege.grantee = 0
+                        and privilege.privilege_type = 'EXECUTE'
+                    ) as public_execute
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             join pg_catalog.pg_language as language
+               on language.oid = routine.prolang
+             where namespace.nspname = 'public'
+               and routine.proname = 'delete_draft_work_order'`,
+          )).rows[0]!;
+          expect(routine).toMatchObject({
+            anon_execute: false,
+            arguments: "p_work_order_id uuid, p_expected_updated_at timestamp with time zone",
+            authenticated_execute: true,
+            language: "plpgsql",
+            public_execute: false,
+            result: "TABLE(work_order_id uuid, work_order_number text)",
+            security_definer: true,
+            settings: ['search_path=""'],
+            volatility: "v",
+          });
+          const definition = routine.definition.toLowerCase();
+          expect(definition).toContain("for update");
+          expect(definition).toContain("work_orders.delete_draft");
+          expect(definition).toContain("append_audit_log");
+          expect(definition).not.toContain("inventory_balances");
+          expect(definition).not.toContain("inventory_movements");
+          expect(definition).not.toContain("work_order_number_counters");
+
+          const tableDeletePrivileges = (await database.query<{
+            authenticated_delete: boolean;
+            table_name: string;
+          }>(
+            `select relation.relname as table_name,
+                    pg_catalog.has_table_privilege(
+                      'authenticated', relation.oid, 'delete'
+                    ) as authenticated_delete
+             from pg_catalog.pg_class as relation
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = relation.relnamespace
+             where namespace.nspname = 'public'
+               and relation.relname in ('work_orders', 'work_order_items')
+             order by relation.relname`,
+          )).rows;
+          expect(tableDeletePrivileges).toEqual([
+            { authenticated_delete: false, table_name: "work_order_items" },
+            { authenticated_delete: false, table_name: "work_orders" },
+          ]);
+        });
+
+        const directParentDelete = await fixture.actors.admin.client
+          .from("work_orders").delete().eq("id", randomUUID());
+        expectPermissionDenied(directParentDelete.error);
+        const directItemDelete = await fixture.actors.admin.client
+          .from("work_order_items").delete().eq("id", randomUUID());
+        expectPermissionDenied(directItemDelete.error);
+      });
+
+      it.todo(
+        "committed delete winner makes a waiting save fail without leaving immutable shared-dev fixtures; run on the disposable concurrency target",
+      );
     },
   );
 }

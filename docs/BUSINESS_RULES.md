@@ -637,6 +637,14 @@ It does not grant general Product or Inventory access. A persisted item remains
 historically readable if its Product is archived later; adding a new archived Product
 is forbidden. Inventory sufficiency remains a Finish-time decision.
 
+Deleting a Draft is an explicit trusted operation for an active Admin or
+`work_orders.delete_draft` actor. It locks the Draft, rejects a stale expected
+`updated_at`, deletes its WorkOrderItem rows and parent atomically, and records exactly
+one `work_order.deleted` audit containing the deleted header and deterministic
+Product-ID/Quantity material snapshot. The allocated Work Order Number remains
+permanently consumed. Deletion changes no Inventory, Project, Product, PCB, PDF, or
+Storage state. Finished Work Orders remain undeletable.
+
 ### Finish
 
 Finishing:

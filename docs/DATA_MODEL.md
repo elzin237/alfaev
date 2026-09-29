@@ -1053,6 +1053,12 @@ Rules:
   commitments; Finish owns authoritative physical-stock validation.
 - Draft is editable according to permission.
 - Draft does not affect Inventory.
+- Draft deletion is a trusted atomic parent/child operation authorized for active
+  Admin or `work_orders.delete_draft`. It locks the parent, checks the exact expected
+  `updated_at`, deletes its WorkOrderItems before the parent, records one immutable
+  `work_order.deleted` audit, and never reclaims the allocated Work Order Number.
+- Draft deletion does not mutate Inventory, Project, Product, PCB, PDF, or Storage
+  state; direct normal-client WorkOrder/WorkOrderItem deletion remains denied.
 - Finished is immutable.
 - Finished Work Order cannot be reopened or deleted.
 

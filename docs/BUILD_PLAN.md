@@ -2441,15 +2441,31 @@ Do not add Inventory mutation or Finish behavior.
 
 ---
 
-## 115 — Add Delete Draft Work Order
+## 115A — Add Trusted Draft Work Order Deletion Backend
 
 Goal:
-- authorized delete
-- confirmation
+- trusted active Admin / `work_orders.delete_draft` operation
+- parent Draft lock and exact optimistic `updated_at` check
+- atomic WorkOrderItem then Draft deletion
+- exactly one immutable `work_order.deleted` audit
 - Work Order number never reused
-- audit deletion as required
+- no Inventory, Project, Product, PCB, PDF, or Storage mutation
 
 Finished delete remains impossible.
+
+Backend only. Direct browser writes remain denied.
+
+---
+
+## 115B — Add Delete Draft Work Order Confirmation + Frontend Integration
+
+Goal:
+- permission-aware Draft-only Delete action
+- explicit destructive confirmation
+- call only the Task 115A trusted operation
+- safe stale/lifecycle/access feedback and deterministic success navigation
+
+Do not add another deletion authority or reclaim Work Order numbers.
 
 ---
 

@@ -444,9 +444,12 @@ If same Product is scanned again:
 ### Delete Draft
 
 If user has permission:
-1. delete Draft
-2. Work Order Number is never reused
-3. audit deletion where required.
+1. trusted backend locks the Draft and rejects stale or Finished state
+2. Draft WorkOrderItems and the Draft are deleted atomically
+3. exactly one immutable `work_order.deleted` audit records the deleted header and
+   narrow material snapshot
+4. Work Order Number is never reused
+5. Inventory, Project, Product, PCB, PDF, and Storage state remains unchanged.
 
 ---
 
