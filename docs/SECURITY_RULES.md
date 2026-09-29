@@ -435,6 +435,18 @@ Before Finish:
 - re-check Inventory balances
 - reject negative resulting stock
 
+Task 117 exposes this validation through a narrow trusted read-only preflight for an
+active Admin or `work_orders.finish` actor. It locks the Work Order first, verifies
+the exact expected `updated_at`, then locks the active actor authority, selected open
+Project, referenced Products, and physical InventoryBalance rows in deterministic
+order. InventoryBalance rows use `FOR UPDATE` so same-transaction finalization can
+reuse them without a lock upgrade; a standalone preflight releases them when its
+transaction ends and remains advisory only. It revalidates the persisted material set against current Project planning and
+returns per-material physical availability/missing quantities. Insufficient stock is
+a valid preflight result, not a mutation failure. Preflight creates no reservation,
+mutation, InventoryMovement, AuditLog, PDF, or Storage state, and it grants no general
+Project, Product, or Inventory read access.
+
 On success:
 
 - create all Inventory deductions

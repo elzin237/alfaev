@@ -2515,6 +2515,21 @@ Validate:
 
 No mutation yet.
 
+Concrete trusted boundary:
+- `preflight_finish_work_order(work_order_id, expected_updated_at)` requires active
+  Admin or `work_orders.finish`; no view/edit/Inventory/Project permission substitute
+- Work Order, actor authority, Project planning/lifecycle, Product lifecycle, and
+  InventoryBalance rows are locked/rechecked in the canonical order
+- InventoryBalance rows use deterministic `FOR UPDATE`; Task 121 may reuse those
+  held locks only when it calls validation inside the same finalization transaction,
+  while any earlier standalone preflight result remains advisory
+- incomplete Finish content fails with `WOR07`; an unavailable Project fails with
+  `WOR08`; stale allocation continues to fail with `WOR06`
+- insufficient physical stock returns typed per-item available/missing quantities
+  with `inventory_sufficient = false`; it does not reserve or mutate stock
+- the RPC is read-only apart from transient row locks and is reusable by the later
+  finalization transaction
+
 ---
 
 ## 118 — Create Private Work Order PDF Storage + Policies
