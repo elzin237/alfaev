@@ -2555,13 +2555,14 @@ No PDF generation yet.
 
 ---
 
-## MANUAL PRODUCT GATE — Approve PDF Layout
+## MANUAL PRODUCT GATE — PDF Layout Approved
 
-Before Task 119, finalize the visual content/layout of the printable Radni Nalog PDF with the user/CEO.
-
-This is not a Codex implementation task.
-
-Do not let Codex invent the official document layout.
+The printable Radni Nalog layout is approved from the supplied Alfa Proteh document
+reference: A4 portrait, industrial/formal treatment, branded title/header, Work Order
+identity and Project/Customer/date block, work-description/report sections, materials
+table, and completion/signature/stamp area. Only authoritative Work Order data is
+populated; unsupported report, person, unit, price, total, completion, signature, and
+stamp values remain blank.
 
 ---
 
@@ -2573,12 +2574,11 @@ Goal:
 Include approved:
 - Work Order Number
 - Project
-- Customer
-- materials
+- trusted Customer snapshot
+- persisted materials with Product Serial Number, Product Name, and exact Quantity
 - description
-- date
-- signature area
-- other approved document fields
+- authoritative Work Order creation date
+- blank report, completion, signature, and stamp areas
 
 Keep this renderer input independent of React page state.
 
@@ -2590,8 +2590,11 @@ Goal:
 - Supabase Edge Function/server-side PDF bytes from trusted snapshot
 
 Requirements:
+- A4 portrait Alfa Proteh Radni Nalog layout
 - deterministic
 - escaped/safe text
+- repeating material-table headers and clean multi-page flow
+- unsupported price/total fields remain blank
 - no client-generated canonical PDF
 
 Unit/integration test basic PDF generation.

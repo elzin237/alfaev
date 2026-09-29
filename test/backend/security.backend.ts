@@ -11,6 +11,7 @@ import { registerBulkComponentImportTests } from "./bulk-component-import.suite"
 import { registerWorkOrderSchemaTests } from "./work-orders.suite";
 import { registerWorkOrderFinishPreflightTests } from "./work-order-finish-preflight.suite";
 import { registerWorkOrderPdfTests } from "./work-order-pdfs.suite";
+import { registerWorkOrderPdfSnapshotTests } from "./work-order-pdf-snapshot.suite";
 import { registerInventoryLedgerTests } from "./inventory-ledger.suite";
 import { registerInventoryPrimitiveTests, registerManualInventoryAdjustmentTests } from "./inventory-mutation.suite";
 import { registerInventoryReadsTests } from "./inventory-reads.suite";
@@ -35,6 +36,7 @@ describe("Supabase security helpers", () => {
   registerWorkOrderSchemaTests(requireHarness);
   registerWorkOrderFinishPreflightTests(requireHarness);
   registerWorkOrderPdfTests(requireHarness);
+  registerWorkOrderPdfSnapshotTests(requireHarness);
   registerInventoryLedgerTests(requireHarness);
   registerInventoryPrimitiveTests(requireHarness);
   registerProductEditTests(requireHarness);

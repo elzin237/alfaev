@@ -1169,7 +1169,8 @@ No:
 
 # 29. Work Order PDF UI
 
-PDF exact visual layout will be designed later.
+The canonical document is an A4 portrait, formal/industrial digital version of the
+approved Alfa Proteh Radni Nalog reference.
 
 Application-level behavior is locked:
 
@@ -1179,18 +1180,19 @@ Application-level behavior is locked:
 - download may be allowed if desired by implementation
 - no edit/replace action
 
-The PDF itself should include enough document identity to be useful when printed, such as:
+Document layout:
 
-- AlfaEV / company identity
-- Work Order Number
-- Project
-- Customer
-- materials table
-- description
-- date
-- signature area
+- Alfa Proteh branding at top left and `RADNI NALOG` with Broj/Datum at top right
+- `PROJEKAT`, `NARUČILAC`, and `DATUM` identity block
+- `OPIS RADOVA`, `Ovlašteno lice`, and `IZVJEŠTAJ O IZVRŠENIM RADOVIMA` sections
+- `UTROŠAK MATERIJALA` table with `R.BROJ`, `KAT. BROJ`, `OPIS`, `JED. MJERE`,
+  `KOLIČINA`, `JED. CIJENA`, and `UKUPNA CIJENA`
+- footer area for completion date, `M.P.`, and signature/stamp
 
-Exact formatting remains a later document-design task.
+Populate only trusted Work Order Number, Project Name, Customer snapshot, Description,
+Work Order creation date, and persisted Product Serial Number/Name/Quantity. Unit,
+prices, totals, authorized person, report, completion date, signatures, and stamp remain
+blank. Material headers repeat when the table continues onto another page.
 
 ---
 

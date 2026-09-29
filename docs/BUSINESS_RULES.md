@@ -716,6 +716,14 @@ If a mistake must be corrected later:
   `work_orders.view` actor.
 - `WorkOrderPdf` rows cannot be updated or deleted. There is no current replacement,
   re-versioning, or removal workflow.
+- The canonical document is an A4 portrait Alfa Proteh Radni Nalog. It renders only
+  trusted Work Order identity, selected Project name, Customer snapshot, Description,
+  Work Order creation date, and persisted material Product Serial Number, Product Name,
+  and exact Quantity. Report, authorized-person, unit, price, total, completion-date,
+  signature, and stamp fields remain blank until an authoritative domain value exists.
+- The trusted snapshot reuses Finish preflight authorization and validation. The PDF
+  generator consumes that snapshot independently of React/browser state and creates no
+  Inventory, AuditLog, Storage, or Work Order mutation by itself.
 
 ---
 

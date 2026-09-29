@@ -33,7 +33,7 @@ interface PreflightFixture {
   workOrderNumber: string;
 }
 
-async function actAs(
+export async function actAs(
   database: PoolClient,
   actor: SecurityActor,
   role: "authenticated" | "anon" = "authenticated",
@@ -45,7 +45,7 @@ async function actAs(
   await database.query(`set local role ${role}`);
 }
 
-async function expectRejected(
+export async function expectRejected(
   database: PoolClient,
   operation: () => Promise<unknown>,
   code: string,
@@ -58,7 +58,7 @@ async function expectRejected(
   await database.query("rollback to savepoint rejected_finish_preflight");
 }
 
-async function setOnlyRelevantPermission(
+export async function setOnlyRelevantPermission(
   database: PoolClient,
   actor: SecurityActor,
   adminProfileId: string,
@@ -128,7 +128,7 @@ async function addRequirement(
   );
 }
 
-async function createPreflightFixture(
+export async function createPreflightFixture(
   database: PoolClient,
   actorId: string,
   options: {

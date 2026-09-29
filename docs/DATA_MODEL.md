@@ -1191,7 +1191,11 @@ Rules:
   the permanent reference
 - one canonical PDF per Work Order; metadata cannot be updated or deleted
 - normal application workflows do not overwrite/delete the historical PDF or bytes
-- exact PDF visual layout is defined later in UI/document specification
+- canonical PDF layout is A4 portrait Alfa Proteh Radni Nalog. Trusted snapshot data is
+  limited to Work Order Number, Project Name, Customer snapshot, Description, Work Order
+  creation timestamp, and persisted material Product Serial Number, Product Name, and
+  exact Quantity. Unsupported unit/price/total/report/person/completion/signature/stamp
+  values remain blank rather than being inferred.
 
 ---
 
