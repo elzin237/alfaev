@@ -5057,6 +5057,41 @@ export function registerWorkOrderSchemaTests(
         return { id, updatedAt };
       }
 
+      async function addPersistenceRequirement(
+        database: PoolClient,
+        values: {
+          actorId: string;
+          productId: string;
+          projectId: string;
+          quantity?: string;
+        },
+      ): Promise<void> {
+        const projectProductId = randomUUID();
+        await database.query(
+          `insert into public.project_products (
+             id, project_id, name, created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::uuid, $3::text, $4::uuid, $4::uuid)`,
+          [
+            projectProductId,
+            values.projectId,
+            `Task 114A planned materials ${projectProductId}`,
+            values.actorId,
+          ],
+        );
+        await database.query(
+          `insert into public.project_product_components (
+             project_product_id, product_id, required_quantity,
+             created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::uuid, $3::bigint, $4::uuid, $4::uuid)`,
+          [
+            projectProductId,
+            values.productId,
+            values.quantity ?? "100",
+            values.actorId,
+          ],
+        );
+      }
+
       async function grantOnlyPersistencePermission(
         database: PoolClient,
         actor: SecurityActor,
@@ -5099,6 +5134,11 @@ export function registerWorkOrderSchemaTests(
           const product = await createPersistenceProduct(database, {
             actorId: admin.profileId,
             quantity: 12n,
+          });
+          await addPersistenceRequirement(database, {
+            actorId: admin.profileId,
+            productId: product.id,
+            projectId,
           });
 
           await actAs(database, admin);
@@ -5240,6 +5280,11 @@ export function registerWorkOrderSchemaTests(
           });
           const product = await createPersistenceProduct(database, {
             actorId: actor.profileId,
+          });
+          await addPersistenceRequirement(database, {
+            actorId: actor.profileId,
+            productId: product.id,
+            projectId,
           });
           const valid = [{ product_id: product.id, quantity: "1" }];
           await actAs(database, actor);
@@ -5636,6 +5681,11 @@ export function registerWorkOrderSchemaTests(
           });
           const product = await createPersistenceProduct(database, {
             actorId: actor.profileId,
+          });
+          await addPersistenceRequirement(database, {
+            actorId: actor.profileId,
+            productId: product.id,
+            projectId,
           });
           const before = (await database.query(
             "select * from public.work_orders where id = $1::uuid",
@@ -6286,6 +6336,660 @@ export function registerWorkOrderSchemaTests(
              where namespace.nspname = 'public'
                and routine.proname = 'update_draft_work_order'`,
           )).rows).toEqual([{ count: "1" }]);
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.TASK116A_MIGRATION !== "1")(
+    "Draft Work Order Project allocation correction (requires deployed migration)",
+    () => {
+      async function createAllocationDraft(
+        database: PoolClient,
+        actorId: string,
+        projectId: string | null,
+      ): Promise<{ id: string; updatedAt: string }> {
+        const id = randomUUID();
+        const year = await findUnusedWorkOrderYear(database);
+        await database.query(
+          `insert into public.work_orders (
+             id, work_order_number, project_id, customer_name_snapshot,
+             description, created_by_user_id, updated_by_user_id
+           ) values (
+             $1::uuid, $2::text, $3::uuid,
+             case when $3::uuid is null then null else 'Allocation Customer' end,
+             'Allocation Draft', $4::uuid, $4::uuid
+           )`,
+          [id, `RN-${year}-0001`, projectId, actorId],
+        );
+        const updatedAt = (await database.query<{ updated_at: string }>(
+          `select updated_at::text as updated_at
+           from public.work_orders where id = $1::uuid`,
+          [id],
+        )).rows[0]!.updated_at;
+        return { id, updatedAt };
+      }
+
+      async function addPlannedRequirement(
+        database: PoolClient,
+        values: {
+          actorId: string;
+          productId: string;
+          projectId: string;
+          quantity: string;
+        },
+      ): Promise<void> {
+        const projectProductId = randomUUID();
+        await database.query(
+          `insert into public.project_products (
+             id, project_id, name, created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::uuid, $3::text, $4::uuid, $4::uuid)`,
+          [
+            projectProductId,
+            values.projectId,
+            `Allocation group ${projectProductId}`,
+            values.actorId,
+          ],
+        );
+        await database.query(
+          `insert into public.project_product_components (
+             project_product_id, product_id, required_quantity,
+             created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::uuid, $3::bigint, $4::uuid, $4::uuid)`,
+          [
+            projectProductId,
+            values.productId,
+            values.quantity,
+            values.actorId,
+          ],
+        );
+      }
+
+      async function createAllocationProduct(
+        database: PoolClient,
+        actorId: string,
+        physicalQuantity = "0",
+      ): Promise<string> {
+        const productId = await createWorkOrderItemProduct(database, actorId);
+        await database.query(
+          `update public.inventory_balances
+           set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
+           where product_id = $1::uuid`,
+          [productId, physicalQuantity],
+        );
+        return productId;
+      }
+
+      it("enforces aggregate Project requirements, other-Draft allocation, exact limits, and atomic rejection without using physical stock", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectId = await createProject(database, actor.profileId);
+          const productId = await createAllocationProduct(
+            database,
+            actor.profileId,
+            "1",
+          );
+          const unplannedProductId = await createAllocationProduct(
+            database,
+            actor.profileId,
+          );
+          await addPlannedRequirement(database, {
+            actorId: actor.profileId,
+            productId,
+            projectId,
+            quantity: "6",
+          });
+          await addPlannedRequirement(database, {
+            actorId: actor.profileId,
+            productId,
+            projectId,
+            quantity: "4",
+          });
+
+          const first = await createAllocationDraft(
+            database, actor.profileId, projectId,
+          );
+          const second = await createAllocationDraft(
+            database, actor.profileId, projectId,
+          );
+          const rejected = await createAllocationDraft(
+            database, actor.profileId, projectId,
+          );
+          await actAs(database, actor);
+          const firstSaved = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: first.updatedAt,
+            items: [{ product_id: productId, quantity: "6" }],
+            projectId,
+            workOrderId: first.id,
+          });
+          const secondSaved = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: second.updatedAt,
+            items: [{ product_id: productId, quantity: "4" }],
+            projectId,
+            workOrderId: second.id,
+          });
+          await database.query("reset role");
+          const rejectedBefore = (await database.query(
+            `select pg_catalog.to_jsonb(work_order) as work_order,
+                    (select pg_catalog.count(*)::text
+                     from public.audit_logs as audit
+                     where audit.entity_id = work_order.id
+                       and audit.action_type = 'work_order.updated') as audits
+             from public.work_orders as work_order
+             where work_order.id = $1::uuid`,
+            [rejected.id],
+          )).rows[0];
+          const inventoryBefore = (await database.query(
+            `select pg_catalog.to_jsonb(balance) as balance,
+                    (select pg_catalog.count(*)::text
+                     from public.inventory_movements as movement
+                     where movement.product_id = balance.product_id) as movements
+             from public.inventory_balances as balance
+             where balance.product_id = $1::uuid`,
+            [productId],
+          )).rows[0];
+
+          await actAs(database, actor);
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Must fail",
+            expectedUpdatedAt: rejected.updatedAt,
+            items: [{ product_id: productId, quantity: "1" }],
+            projectId,
+            workOrderId: rejected.id,
+          }), "WOR06", "Draft materials exceed the remaining Project requirement");
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Must fail",
+            expectedUpdatedAt: rejected.updatedAt,
+            items: [{ product_id: unplannedProductId, quantity: "1" }],
+            projectId,
+            workOrderId: rejected.id,
+          }), "WOR06", "Draft materials exceed the remaining Project requirement");
+          await database.query("reset role");
+
+          expect((await database.query(
+            `select pg_catalog.to_jsonb(work_order) as work_order,
+                    (select pg_catalog.count(*)::text
+                     from public.audit_logs as audit
+                     where audit.entity_id = work_order.id
+                       and audit.action_type = 'work_order.updated') as audits
+             from public.work_orders as work_order
+             where work_order.id = $1::uuid`,
+            [rejected.id],
+          )).rows[0]).toEqual(rejectedBefore);
+          expect((await database.query(
+            `select pg_catalog.to_jsonb(balance) as balance,
+                    (select pg_catalog.count(*)::text
+                     from public.inventory_movements as movement
+                     where movement.product_id = balance.product_id) as movements
+             from public.inventory_balances as balance
+             where balance.product_id = $1::uuid`,
+            [productId],
+          )).rows[0]).toEqual(inventoryBefore);
+
+          await actAs(database, actor);
+          const firstReduced = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: firstSaved.updated_at,
+            items: [{ product_id: productId, quantity: "5" }],
+            projectId,
+            workOrderId: first.id,
+          });
+          const firstRestored = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: firstReduced.updated_at,
+            items: [{ product_id: productId, quantity: "6" }],
+            projectId,
+            workOrderId: first.id,
+          });
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: firstRestored.updated_at,
+            items: [{ product_id: productId, quantity: "7" }],
+            projectId,
+            workOrderId: first.id,
+          }), "WOR06");
+
+          const secondReleased = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: secondSaved.updated_at,
+            items: [],
+            projectId,
+            workOrderId: second.id,
+          });
+          const rejectedNowFits = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: rejected.updatedAt,
+            items: [{ product_id: productId, quantity: "4" }],
+            projectId,
+            workOrderId: rejected.id,
+          });
+          await deleteDraftWorkOrder(
+            database,
+            rejected.id,
+            rejectedNowFits.updated_at,
+          );
+          await database.query("reset role");
+          const replacement = await createAllocationDraft(
+            database, actor.profileId, projectId,
+          );
+          await actAs(database, actor);
+          await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: replacement.updatedAt,
+            items: [{ product_id: productId, quantity: "4" }],
+            projectId,
+            workOrderId: replacement.id,
+          });
+          expect(secondReleased.updated_at).not.toBe(second.updatedAt);
+          await database.query("reset role");
+        });
+      });
+
+      it("uses authoritative same-Project consumption while excluding other Projects and Finished Work Orders from Draft allocation", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectA = await createProject(database, actor.profileId);
+          const projectB = await createProject(database, actor.profileId);
+          const productId = await createAllocationProduct(
+            database, actor.profileId,
+          );
+          for (const projectId of [projectA, projectB]) {
+            await addPlannedRequirement(database, {
+              actorId: actor.profileId,
+              productId,
+              projectId,
+              quantity: "10",
+            });
+          }
+          await database.query(
+            `insert into public.inventory_movements (
+               product_id, movement_type, quantity_delta, quantity_before,
+               quantity_after, source_type, source_id, project_id, actor_user_id
+             ) values (
+               $1::uuid, 'work_order_finished', -3, 10, 7,
+               'work_order', $2::uuid, $3::uuid, $4::uuid
+             )`,
+            [productId, randomUUID(), projectA, actor.profileId],
+          );
+          const finishedId = await insertWorkOrder(database, {
+            actorId: actor.profileId,
+            number: `RN-${await findUnusedWorkOrderYear(database)}-0001`,
+            projectId: projectA,
+          });
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 100, $3::uuid)`,
+            [finishedId, productId, actor.profileId],
+          );
+          await database.query(
+            `update public.work_orders
+             set status = 'finished', finished_at = pg_catalog.clock_timestamp(),
+                 finished_by_user_id = $2::uuid,
+                 updated_at = pg_catalog.clock_timestamp(),
+                 updated_by_user_id = $2::uuid
+             where id = $1::uuid`,
+            [finishedId, actor.profileId],
+          );
+          const draftA = await createAllocationDraft(
+            database, actor.profileId, projectA,
+          );
+          const draftB = await createAllocationDraft(
+            database, actor.profileId, projectB,
+          );
+          await actAs(database, actor);
+          const savedA = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: draftA.updatedAt,
+            items: [{ product_id: productId, quantity: "7" }],
+            projectId: projectA,
+            workOrderId: draftA.id,
+          });
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: savedA.updated_at,
+            items: [{ product_id: productId, quantity: "8" }],
+            projectId: projectA,
+            workOrderId: draftA.id,
+          }), "WOR06");
+          await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: draftB.updatedAt,
+            items: [{ product_id: productId, quantity: "10" }],
+            projectId: projectB,
+            workOrderId: draftB.id,
+          });
+          await database.query("reset role");
+        });
+      });
+
+      it("handles Project switches, Project-less and empty Drafts, and retained historical Projects without partial changes", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const projectA = await createProject(database, actor.profileId);
+          const projectB = await createProject(database, actor.profileId);
+          const productId = await createAllocationProduct(
+            database, actor.profileId,
+          );
+          for (const [projectId, quantity] of [
+            [projectA, "10"],
+            [projectB, "5"],
+          ] as const) {
+            await addPlannedRequirement(database, {
+              actorId: actor.profileId,
+              productId,
+              projectId,
+              quantity,
+            });
+          }
+          const moving = await createAllocationDraft(
+            database, actor.profileId, projectA,
+          );
+          const stayingA = await createAllocationDraft(
+            database, actor.profileId, projectA,
+          );
+          const blockedSwitch = await createAllocationDraft(
+            database, actor.profileId, projectA,
+          );
+          const projectless = await createAllocationDraft(
+            database, actor.profileId, null,
+          );
+          const empty = await createAllocationDraft(
+            database, actor.profileId, projectA,
+          );
+          await actAs(database, actor);
+          const movingOnA = await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: moving.updatedAt,
+            items: [{ product_id: productId, quantity: "5" }],
+            projectId: projectA,
+            workOrderId: moving.id,
+          });
+          await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: stayingA.updatedAt,
+            items: [{ product_id: productId, quantity: "5" }],
+            projectId: projectA,
+            workOrderId: stayingA.id,
+          });
+          const moved = await saveDraftWorkOrder(database, {
+            description: "Moved to B",
+            expectedUpdatedAt: movingOnA.updated_at,
+            items: [{ product_id: productId, quantity: "5" }],
+            projectId: projectB,
+            workOrderId: moving.id,
+          });
+          await saveDraftWorkOrder(database, {
+            description: "Allocation Draft",
+            expectedUpdatedAt: blockedSwitch.updatedAt,
+            items: [{ product_id: productId, quantity: "5" }],
+            projectId: projectA,
+            workOrderId: blockedSwitch.id,
+          });
+          const blockedBefore = (await database.query(
+            `select pg_catalog.to_jsonb(work_order) as work_order,
+                    (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(item)
+                     order by item.id) from public.work_order_items as item
+                     where item.work_order_id = work_order.id) as items
+             from public.work_orders as work_order where work_order.id = $1::uuid`,
+            [blockedSwitch.id],
+          )).rows[0];
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Rejected B switch",
+            expectedUpdatedAt: (blockedBefore.work_order as { updated_at: string }).updated_at,
+            items: [{ product_id: productId, quantity: "1" }],
+            projectId: projectB,
+            workOrderId: blockedSwitch.id,
+          }), "WOR06");
+          expect((await database.query(
+            `select pg_catalog.to_jsonb(work_order) as work_order,
+                    (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(item)
+                     order by item.id) from public.work_order_items as item
+                     where item.work_order_id = work_order.id) as items
+             from public.work_orders as work_order where work_order.id = $1::uuid`,
+            [blockedSwitch.id],
+          )).rows[0]).toEqual(blockedBefore);
+
+          await saveDraftWorkOrder(database, {
+            description: "Project-less",
+            expectedUpdatedAt: projectless.updatedAt,
+            items: [{ product_id: productId, quantity: "9223372036854775807" }],
+            projectId: null,
+            workOrderId: projectless.id,
+          });
+          await saveDraftWorkOrder(database, {
+            description: "Empty materials",
+            expectedUpdatedAt: empty.updatedAt,
+            items: [],
+            projectId: projectA,
+            workOrderId: empty.id,
+          });
+
+          await database.query("reset role");
+          const completedProject = await createWorkOrderReadProject(database, {
+            actorId: actor.profileId,
+            customerName: "Historical Customer",
+            name: "Historical allocation Project",
+            status: "completed",
+          });
+          const historical = await createAllocationDraft(
+            database, actor.profileId, completedProject,
+          );
+          await database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 2, $3::uuid)`,
+            [historical.id, productId, actor.profileId],
+          );
+          await actAs(database, actor);
+          const retained = await saveDraftWorkOrder(database, {
+            description: "Historical header refresh",
+            expectedUpdatedAt: historical.updatedAt,
+            items: [{ product_id: productId, quantity: "2" }],
+            projectId: completedProject,
+            workOrderId: historical.id,
+          });
+          await expectRejected(database, () => saveDraftWorkOrder(database, {
+            description: "Historical header refresh",
+            expectedUpdatedAt: retained.updated_at,
+            items: [{ product_id: productId, quantity: "1" }],
+            projectId: completedProject,
+            workOrderId: historical.id,
+          }), "WOR06");
+          expect(moved.work_order_id).toBe(moving.id);
+          await database.query("reset role");
+        });
+      });
+
+      it("serializes competing Draft saves on the same Project row without persistent concurrency fixtures", async () => {
+        const fixture = requireHarness();
+        const actor = fixture.actors.admin;
+        const projectId = randomUUID();
+        const productId = randomUUID();
+        const firstWorkOrderId = randomUUID();
+        const secondWorkOrderId = randomUUID();
+        const firstUpdatedAt = "2026-09-29 10:00:00+00";
+        const secondUpdatedAt = "2026-09-29 10:01:00+00";
+        const applicationName = `draft-allocation-lock-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async (clients) => {
+          const first = clients[0];
+          const second = clients[1];
+          const observer = clients[2];
+          if (!first || !second || !observer) {
+            throw new Error("Draft allocation concurrency clients unavailable");
+          }
+          let setupCommitted = false;
+          let waiting: Promise<unknown> | undefined;
+          try {
+            const year = await findUnusedWorkOrderYear(observer);
+            await observer.query("begin");
+            await observer.query(
+              `insert into public.projects (
+                 id, name, customer_name, start_date, delivery_date,
+                 created_by_user_id, updated_by_user_id
+               ) values (
+                 $1::uuid, 'Allocation concurrency Project', 'Customer',
+                 '2026-09-29', '2026-10-10', $2::uuid, $2::uuid
+               )`,
+              [projectId, actor.profileId],
+            );
+            await observer.query(
+              `insert into public.products (
+                 id, serial_number, name, category, product_kind,
+                 created_by_user_id, updated_by_user_id
+               ) values (
+                 $1::uuid, $2::text, 'Allocation concurrency Product',
+                 'Work Order', 'component', $3::uuid, $3::uuid
+               )`,
+              [productId, createTestSerialNumber(), actor.profileId],
+            );
+            const projectProductId = randomUUID();
+            await observer.query(
+              `insert into public.project_products (
+                 id, project_id, name, created_by_user_id, updated_by_user_id
+               ) values ($1::uuid, $2::uuid, 'Concurrency plan', $3::uuid, $3::uuid)`,
+              [projectProductId, projectId, actor.profileId],
+            );
+            await observer.query(
+              `insert into public.project_product_components (
+                 project_product_id, product_id, required_quantity,
+                 created_by_user_id, updated_by_user_id
+               ) values ($1::uuid, $2::uuid, 10, $3::uuid, $3::uuid)`,
+              [projectProductId, productId, actor.profileId],
+            );
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, project_id, customer_name_snapshot,
+                 description, created_at, created_by_user_id,
+                 updated_at, updated_by_user_id
+               ) values
+                 ($1::uuid, $2::text, $3::uuid, 'Customer', 'First',
+                  $4::timestamptz, $6::uuid, $4::timestamptz, $6::uuid),
+                 ($5::uuid, $7::text, $3::uuid, 'Customer', 'Second',
+                  $8::timestamptz, $6::uuid, $8::timestamptz, $6::uuid)`,
+              [
+                firstWorkOrderId,
+                `RN-${year}-0001`,
+                projectId,
+                firstUpdatedAt,
+                secondWorkOrderId,
+                actor.profileId,
+                `RN-${year}-0002`,
+                secondUpdatedAt,
+              ],
+            );
+            await observer.query(
+              `insert into public.work_order_items (
+                 work_order_id, product_id, quantity, added_by_user_id
+               ) values ($1::uuid, $2::uuid, 6, $3::uuid)`,
+              [firstWorkOrderId, productId, actor.profileId],
+            );
+            await observer.query("commit");
+            setupCommitted = true;
+
+            await first.query("begin");
+            await actAs(first, actor);
+            const noOpWinner = await saveDraftWorkOrder(first, {
+              description: "First",
+              expectedUpdatedAt: firstUpdatedAt,
+              items: [{ product_id: productId, quantity: "6" }],
+              projectId,
+              workOrderId: firstWorkOrderId,
+            });
+            expect(noOpWinner.updated_at).toBe(firstUpdatedAt);
+
+            await second.query("begin");
+            await second.query(
+              "select pg_catalog.set_config('application_name', $1, true)",
+              [applicationName],
+            );
+            await actAs(second, actor);
+            waiting = saveDraftWorkOrder(second, {
+              description: "Second",
+              expectedUpdatedAt: secondUpdatedAt,
+              items: [{ product_id: productId, quantity: "5" }],
+              projectId,
+              workOrderId: secondWorkOrderId,
+            });
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              const activity = await observer.query<{ wait_event_type: string | null }>(
+                `select wait_event_type from pg_catalog.pg_stat_activity
+                 where application_name = $1::text`,
+                [applicationName],
+              );
+              if (activity.rows[0]?.wait_event_type === "Lock") break;
+              if (attempt === 99) {
+                throw new Error("Expected competing Draft save to wait on Project lock");
+              }
+              await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+            await first.query("commit");
+            await expect(waiting).rejects.toMatchObject({
+              code: "WOR06",
+              message: "Draft materials exceed the remaining Project requirement",
+            });
+            waiting = undefined;
+            await second.query("rollback");
+            expect((await observer.query(
+              `select work_order_id, quantity::text as quantity
+               from public.work_order_items
+               where work_order_id = any($1::uuid[])
+               order by work_order_id`,
+              [[firstWorkOrderId, secondWorkOrderId]],
+            )).rows).toEqual([{
+              quantity: "6",
+              work_order_id: firstWorkOrderId,
+            }]);
+            expect((await observer.query(
+              `select id from public.audit_logs
+               where entity_id = any($1::uuid[])`,
+              [[firstWorkOrderId, secondWorkOrderId]],
+            )).rows).toEqual([]);
+          } finally {
+            await first.query("rollback").catch(() => undefined);
+            if (waiting) await waiting.catch(() => undefined);
+            await second.query("rollback").catch(() => undefined);
+            if (setupCommitted) {
+              await observer.query(
+                `delete from public.work_order_items
+                 where work_order_id = any($1::uuid[])`,
+                [[firstWorkOrderId, secondWorkOrderId]],
+              );
+              await observer.query(
+                `delete from public.work_orders
+                 where id = any($1::uuid[])`,
+                [[firstWorkOrderId, secondWorkOrderId]],
+              );
+              await observer.query(
+                `delete from public.project_product_components
+                 where product_id = $1::uuid`,
+                [productId],
+              );
+              await observer.query(
+                `delete from public.project_products
+                 where project_id = $1::uuid`,
+                [projectId],
+              );
+              await observer.query(
+                `delete from public.inventory_balances
+                 where product_id = $1::uuid`,
+                [productId],
+              );
+              await observer.query(
+                `delete from public.products where id = $1::uuid`,
+                [productId],
+              );
+              await observer.query(
+                `delete from public.projects where id = $1::uuid`,
+                [projectId],
+              );
+            }
+          }
         });
       });
     },

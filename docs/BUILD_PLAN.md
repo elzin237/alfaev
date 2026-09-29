@@ -2423,7 +2423,13 @@ Rules:
 - normalized full no-op performs no mutation and creates no audit
 - one meaningful save creates one atomic `work_order.updated` audit
 - no Inventory mutation
-- no Inventory sufficiency, reservation, or Project commitment calculation
+- no Inventory sufficiency check or physical reservation
+- derive Draft planning allocation from persisted Draft WorkOrderItems, excluding the
+  current Draft when replacing its complete desired state
+- enforce per-Project/Product allocation within outstanding planned requirement after
+  subtracting other Draft allocations
+- serialize concurrent allocation changes on the Project row; lock old/new Projects
+  in deterministic order when switching
 - preserve normal Product/Inventory RLS and direct WorkOrderItem write denial
 
 Backend only. Keep the existing header-only compatibility RPC unchanged.

@@ -390,7 +390,19 @@ Barcode scan input:
 - persisted Draft materials may be reloaded through a narrow trusted read for an
   active Admin, `work_orders.view`, or `work_orders.edit_draft` actor; this does
   not broaden normal Product or InventoryBalance RLS
-- Draft persistence never checks, reserves, deducts, or otherwise mutates Inventory
+- persisted Draft WorkOrderItems are the derived allocation source for Project
+  planning; no separate reservation/allocation table exists
+- for each Project/Product, the complete desired state of the current Draft must fit
+  within outstanding planned requirement after subtracting allocations from other
+  Draft Work Orders on that same Project; the current Draft, Finished Work Orders,
+  and Work Orders for other Projects are excluded
+- Project row locking serializes concurrent Draft allocation changes; a Project switch
+  locks both old and new Projects in deterministic order
+- an already-selected Completed/Cancelled Project may retain an identical historical
+  material set during a header/customer refresh, but material allocation changes require
+  clearing it or selecting an eligible open Project
+- Draft persistence may reject planned-requirement over-allocation, but never checks,
+  reserves, deducts, or otherwise mutates physical Inventory
 
 New Draft material references may only target valid active Products where business
 rules permit. A previously persisted reference remains historical if its Product is

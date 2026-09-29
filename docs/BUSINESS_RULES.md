@@ -142,6 +142,23 @@ finished-PCB consumption must not be double-counted.
 Availability is not clamped to zero; negative values indicate a shortage. Neither
 commitments nor their release create InventoryMovement rows or directly change stock.
 
+Persisted Draft WorkOrderItems allocate, but do not reserve or consume, the open
+Project's outstanding planned requirement. For Project P and Product X:
+
+`other_draft_allocation(P, X) = sum of WorkOrderItem.quantity for X across other Draft Work Orders linked to P`
+
+The current Draft's complete desired quantity for X may not exceed
+`max(outstanding_commitment(P, X) - other_draft_allocation(P, X), 0)`. The current
+Draft is excluded because its desired state replaces its own persisted allocation.
+Finished Work Orders and Work Orders for another Project do not contribute to this
+Draft allocation. Multiple ProjectProducts containing the same Product contribute to
+the Project-level planned requirement before this allocation check. No allocation row
+is persisted separately, and Draft allocation never changes physical Inventory.
+An already-selected Completed or Cancelled Project may retain its identical historical
+Draft material set while header/customer data is refreshed, but it cannot receive a
+new or changed material allocation. The Draft must instead clear that Project or move
+to an eligible open Project before changing its allocation.
+
 ### Completed Projects
 
 When the final unfinished Work Order is successfully Finished, the trusted Finish

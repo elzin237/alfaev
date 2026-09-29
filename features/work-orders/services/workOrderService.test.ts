@@ -846,6 +846,7 @@ describe("workOrderService", () => {
     ["42501", "access_denied"],
     ["WOR02", "work_order_not_editable"],
     ["WOR05", "stale_work_order"],
+    ["WOR06", "project_requirement_exceeded"],
     ["PRD05", "product_unavailable"],
     ["22023", "invalid_draft"],
     ["P0002", "draft_reference_not_found"],
@@ -860,6 +861,42 @@ describe("workOrderService", () => {
     });
     expect(result).toMatchObject({ ok: false, error: { code } });
     if (!result.ok) expect(result.error.message).not.toContain("raw detail");
+  });
+
+  it("maps Project requirement rejection to the approved safe message and preserves the generic fallback", async () => {
+    serviceMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: {
+        code: "WOR06",
+        message: "Draft materials exceed the remaining Project requirement",
+      },
+    });
+    const input = {
+      projectId: null,
+      description: "",
+      items: [],
+      expectedUpdatedAt: detailRow.updated_at,
+    };
+
+    await expect(saveDraftWorkOrder(detailRow.work_order_id, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "project_requirement_exceeded",
+        message: "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
+      },
+    });
+
+    serviceMocks.rpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: "XX000", message: "raw provider failure" },
+    });
+    await expect(saveDraftWorkOrder(detailRow.work_order_id, input)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "draft_save_failed",
+        message: "The Draft could not be saved. Please try again.",
+      },
+    });
   });
 
   it("deletes through the trusted RPC with the exact microsecond timestamp", async () => {

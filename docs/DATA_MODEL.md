@@ -1116,7 +1116,16 @@ Rules:
 - Persisted Draft material reads use a narrow trusted projection of Product ID,
   Serial Number, Name, persisted Quantity, and physical InventoryBalance Quantity;
   normal Product and InventoryBalance RLS remains unchanged.
-- Draft persistence has no Inventory or commitment side effects.
+- Persisted Draft WorkOrderItems are the derived Project-allocation state; there is no
+  separate reservation table. For each Project/Product, a Draft's complete desired
+  quantity is bounded by the Project's outstanding planned requirement minus quantities
+  on other Draft Work Orders for that same Project/Product. The current Draft is
+  excluded from that other-Draft sum because its desired state replaces its existing
+  rows. Finished and other-Project Work Orders are excluded.
+- The Project row is the concurrency boundary for Draft allocation changes. Switching
+  Projects locks the old and new Project rows in deterministic UUID order.
+- Draft persistence has no physical Inventory side effect and creates no
+  InventoryMovement.
 - On Finish, rows become immutable.
 
 ---
