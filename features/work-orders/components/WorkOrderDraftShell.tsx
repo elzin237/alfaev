@@ -188,6 +188,9 @@ function WorkOrderDraftShell({
     selectedProjectId !== savedProjectId ||
     description !== savedDescription ||
     materialSignature(materials) !== savedMaterialsSignature;
+  const savedDraftIsFinishComplete = Boolean(
+    savedProjectId && savedDescription.trim() && savedMaterialCount > 0,
+  );
   const interactionBlocked = isSaving || isDeleting || isFinishing ||
     isFinishConfirming ||
     deleteDialogOpen || finishDialogOpen;
@@ -337,7 +340,8 @@ function WorkOrderDraftShell({
 
   function openFinishDialog() {
     if (
-      !canFinish || hasUnsavedChanges || interactionBlocked ||
+      !canFinish || !materialsHydrated || !savedDraftIsFinishComplete ||
+      hasUnsavedChanges || interactionBlocked ||
       submissionInFlight.current || deleteSubmissionInFlight.current ||
       finishConfirmationInFlight.current
     ) return;
@@ -350,7 +354,8 @@ function WorkOrderDraftShell({
     if (
       !finishDialogOpenRef.current || finishConfirmationInFlight.current ||
       submissionInFlight.current || deleteSubmissionInFlight.current ||
-      isSaving || isDeleting || isFinishing || hasUnsavedChanges
+      isSaving || isDeleting || isFinishing || !materialsHydrated ||
+      !savedDraftIsFinishComplete || hasUnsavedChanges
     ) return;
     finishConfirmationInFlight.current = true;
     setIsFinishConfirming(true);
@@ -412,11 +417,12 @@ function WorkOrderDraftShell({
         {deleteFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{deleteFeedback.message}</p>{deleteFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || isDeleting} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {finishFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{finishFeedback.message}</p>{finishFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || interactionBlocked} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {canFinish && hasUnsavedChanges && materialsHydrated && <p className="text-sm font-medium text-amber-700">Save Draft changes before finishing.</p>}
+        {canFinish && materialsHydrated && !hasUnsavedChanges && !savedDraftIsFinishComplete && <p className="text-sm font-medium text-amber-700">Add a Project, Description, and at least one material, then save the Draft before finishing.</p>}
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           {canDelete ? <button type="button" disabled={interactionBlocked} onClick={() => { if (finishDialogOpenRef.current || finishConfirmationInFlight.current) return; deleteDialogOpenRef.current = true; setDeleteFeedback(null); setDeleteDialogError(null); setDeleteDialogOpen(true); }} className="rounded-xl border border-red-300 bg-white px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60">Delete Draft</button> : <span />}
           <div className="flex flex-col gap-3 sm:flex-row">
             {canEdit && <button type="submit" form="work-order-draft-form" disabled={interactionBlocked || !materialsHydrated} className="rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Saving..." : "Save for Later"}</button>}
-            {canFinish && <button type="button" disabled={interactionBlocked || hasUnsavedChanges} onClick={openFinishDialog} className="rounded-xl bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60">Finish Work Order</button>}
+            {canFinish && <button type="button" disabled={interactionBlocked || !materialsHydrated || hasUnsavedChanges || !savedDraftIsFinishComplete} onClick={openFinishDialog} className="rounded-xl bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60">Finish Work Order</button>}
           </div>
         </div>
       </section>}

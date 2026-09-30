@@ -70,6 +70,13 @@ const projectChoices = [
     status: "in_progress" as const,
   },
 ];
+const savedMaterial = {
+  productId: "00000000-0000-4000-8000-000000000030",
+  serialNumber: "0000123",
+  productName: "Relay Module",
+  quantity: "2",
+  currentInventory: "17",
+};
 
 function successfulHook(overrides: Record<string, unknown> = {}) {
   return {
@@ -1822,6 +1829,7 @@ describe("WorkOrderDetailPage", () => {
     const finishButton = await screen.findByRole("button", {
       name: "Finish Work Order",
     });
+    expect(finishButton).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Save for Later" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete Draft" }))
@@ -1849,6 +1857,89 @@ describe("WorkOrderDetailPage", () => {
 
     expect(screen.queryByRole("button", { name: "Finish Work Order" }))
       .not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "an empty Draft",
+      { ...draft, projectId: null, projectName: null, customerName: null, description: null },
+      [],
+    ],
+    [
+      "a Draft without a saved Project",
+      { ...draft, projectId: null, projectName: null, customerName: null },
+      [{
+        productId: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        productName: "Relay Module",
+        quantity: "2",
+        currentInventory: "17",
+      }],
+    ],
+    [
+      "a Draft without a saved Description",
+      { ...draft, description: null },
+      [{
+        productId: "00000000-0000-4000-8000-000000000030",
+        serialNumber: "0000123",
+        productName: "Relay Module",
+        quantity: "2",
+        currentInventory: "17",
+      }],
+    ],
+    ["a Draft without saved materials", draft, []],
+  ])("disables Finish for %s", async (_label, workOrder, materials) => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+      detailQuery: {
+        data: { ok: true, value: workOrder },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+      materialsQuery: {
+        data: { ok: true, value: materials },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    expect(finishButton).toBeDisabled();
+    expect(screen.getByText(
+      "Add a Project, Description, and at least one material, then save the Draft before finishing.",
+    )).toBeInTheDocument();
+    fireEvent.click(finishButton);
+    expect(screen.queryByRole("dialog", { name: "Finish Work Order?" }))
+      .not.toBeInTheDocument();
+    expect(pageMocks.finishDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps Finish disabled until saved materials finish loading and hydrating", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+      materialsQuery: {
+        data: undefined,
+        isError: false,
+        isPending: true,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(screen.getByRole("button", { name: "Finish Work Order" }))
+      .toBeDisabled();
+    expect(screen.getByRole("status"))
+      .toHaveTextContent("Loading Draft materials...");
+    expect(screen.queryByText("Save Draft changes before finishing."))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(
+      "Add a Project, Description, and at least one material, then save the Draft before finishing.",
+    )).not.toBeInTheDocument();
   });
 
   it("requires saving Project, Description, and material changes before Finish", async () => {
@@ -1925,7 +2016,7 @@ describe("WorkOrderDetailPage", () => {
       projectChoices={projectChoices}
       projectChoicesError={null}
       projectChoicesLoading={false}
-      persistedMaterials={[]}
+      persistedMaterials={[savedMaterial]}
       materialsLoading={false}
       materialsError={null}
       materialsReady
@@ -1978,6 +2069,12 @@ describe("WorkOrderDetailPage", () => {
     }));
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
       canFinishDraft: true,
+      materialsQuery: {
+        data: { ok: true, value: [savedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
     }));
     renderPage();
     const finishButton = await screen.findByRole("button", {
@@ -2086,6 +2183,12 @@ describe("WorkOrderDetailPage", () => {
     });
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
       canFinishDraft: true,
+      materialsQuery: {
+        data: { ok: true, value: [savedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
     }));
     renderPage();
     const finishButton = await screen.findByRole("button", {
