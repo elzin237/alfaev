@@ -5,6 +5,7 @@ import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
+import FinishedWorkOrderView from "./components/FinishedWorkOrderView";
 import WorkOrderDraftShell from "./components/WorkOrderDraftShell";
 import { useWorkOrderDetail } from "./hooks/useWorkOrderDetail";
 import { isWorkOrderId } from "./services/workOrderService";
@@ -30,6 +31,9 @@ function WorkOrderDetailPage() {
     deleteDraft,
     detailQuery,
     finishDraft,
+    finishedDetailQuery,
+    finishedMaterialsQuery,
+    finishedMovementsQuery,
     isLoadingMaterial,
     isDeleting,
     isFinishing,
@@ -84,6 +88,18 @@ function WorkOrderDetailPage() {
       : materialsQuery.data?.ok === false
       ? materialsQuery.data.error.message
       : null;
+    const finishedReadError = finishedDetailQuery.data?.ok === false
+      ? finishedDetailQuery.data.error.message
+      : finishedMaterialsQuery.data?.ok === false
+      ? finishedMaterialsQuery.data.error.message
+      : finishedMovementsQuery.data?.ok === false
+      ? finishedMovementsQuery.data.error.message
+      : null;
+    const finishedReadPending = finishedDetailQuery.isPending ||
+      finishedMaterialsQuery.isPending || finishedMovementsQuery.isPending;
+    const finishedReadFailed = finishedDetailQuery.isError ||
+      finishedMaterialsQuery.isError || finishedMovementsQuery.isError ||
+      Boolean(finishedReadError);
 
     content = (
       <>
@@ -142,12 +158,37 @@ function WorkOrderDetailPage() {
               expectedUpdatedAt,
             })}
           />
+        ) : finishedReadPending ? (
+          <LoadingState message="Loading Finished Work Order..." />
+        ) : finishedReadFailed ? (
+          <ErrorState
+            title="Unable to load Finished Work Order"
+            message={finishedReadError ??
+              "The Finished Work Order could not be loaded."}
+            onRetry={() => void Promise.all([
+              finishedDetailQuery.refetch(),
+              finishedMaterialsQuery.refetch(),
+              finishedMovementsQuery.refetch(),
+            ])}
+          />
+        ) : finishedDetailQuery.data?.ok &&
+          finishedMaterialsQuery.data?.ok &&
+          finishedMovementsQuery.data?.ok ? (
+          <FinishedWorkOrderView
+            detail={finishedDetailQuery.data.value}
+            materials={finishedMaterialsQuery.data.value}
+            movements={finishedMovementsQuery.data.value}
+          />
         ) : (
-          <section className="rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">
-            <p className="text-sm leading-6 text-zinc-600">
-              The Finished Work Order detail experience is not implemented in this step.
-            </p>
-          </section>
+          <ErrorState
+            title="Unable to load Finished Work Order"
+            message="The Finished Work Order could not be loaded."
+            onRetry={() => void Promise.all([
+              finishedDetailQuery.refetch(),
+              finishedMaterialsQuery.refetch(),
+              finishedMovementsQuery.refetch(),
+            ])}
+          />
         )}
 
         <BackToWorkOrdersLink />

@@ -21,3 +21,24 @@ export function workOrderDraftMaterialsQueryKey(
 ) {
   return ["work-orders", "draft-materials", profileId, workOrderId] as const;
 }
+
+export function finishedWorkOrderDetailQueryKey(
+  profileId: string | undefined,
+  workOrderId: string,
+) {
+  return ["work-orders", "finished-detail", profileId, workOrderId] as const;
+}
+
+export function finishedWorkOrderMaterialsQueryKey(
+  profileId: string | undefined,
+  workOrderId: string,
+) {
+  return ["work-orders", "finished-materials", profileId, workOrderId] as const;
+}
+
+export function finishedWorkOrderMovementsQueryKey(
+  profileId: string | undefined,
+  workOrderId: string,
+) {
+  return ["work-orders", "finished-movements", profileId, workOrderId] as const;
+}

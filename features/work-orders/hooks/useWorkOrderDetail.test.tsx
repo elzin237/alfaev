@@ -6,10 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const detailMocks = vi.hoisted(() => ({
   deleteDraftWorkOrder: vi.fn(),
   finishWorkOrder: vi.fn(),
+  getFinishedWorkOrderDetail: vi.fn(),
   getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
   listDraftWorkOrderMaterials: vi.fn(),
+  listFinishedWorkOrderMaterials: vi.fn(),
+  listFinishedWorkOrderMovements: vi.fn(),
   listWorkOrderProjectChoices: vi.fn(),
   resolveWorkOrderProductBarcode: vi.fn(),
   saveDraftWorkOrder: vi.fn(),
@@ -36,6 +39,11 @@ vi.mock("../services/workOrderService", () => ({
 }));
 vi.mock("../services/workOrderFinishService", () => ({
   finishWorkOrder: detailMocks.finishWorkOrder,
+}));
+vi.mock("../services/finishedWorkOrderService", () => ({
+  getFinishedWorkOrderDetail: detailMocks.getFinishedWorkOrderDetail,
+  listFinishedWorkOrderMaterials: detailMocks.listFinishedWorkOrderMaterials,
+  listFinishedWorkOrderMovements: detailMocks.listFinishedWorkOrderMovements,
 }));
 
 import { useWorkOrderDetail } from "./useWorkOrderDetail";
@@ -100,6 +108,30 @@ beforeEach(() => {
     value: [],
   });
   detailMocks.listDraftWorkOrderMaterials.mockResolvedValue({
+    ok: true,
+    value: [],
+  });
+  detailMocks.getFinishedWorkOrderDetail.mockResolvedValue({
+    ok: true,
+    value: {
+      id: workOrderId,
+      workOrderNumber: draftDetail.workOrderNumber,
+      projectId: "00000000-0000-4000-8000-000000000020",
+      projectName: "Alpha Project",
+      customerName: "Alpha Customer",
+      description: "Finished description",
+      createdAt: draftDetail.createdAt,
+      finishedAt: "2026-09-22T10:00:00.123456+00:00",
+      finishedByUserId: "00000000-0000-4000-8000-000000000021",
+      finishedByFullName: "Ada Lovelace",
+      pdf: null,
+    },
+  });
+  detailMocks.listFinishedWorkOrderMaterials.mockResolvedValue({
+    ok: true,
+    value: [],
+  });
+  detailMocks.listFinishedWorkOrderMovements.mockResolvedValue({
     ok: true,
     value: [],
   });
@@ -266,6 +298,42 @@ describe("useWorkOrderDetail", () => {
     expect(result.current.canFinishDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
     expect(detailMocks.listDraftWorkOrderMaterials).not.toHaveBeenCalled();
+    await waitFor(() => expect(detailMocks.getFinishedWorkOrderDetail)
+      .toHaveBeenCalledExactlyOnceWith(workOrderId));
+    expect(detailMocks.listFinishedWorkOrderMaterials)
+      .toHaveBeenCalledExactlyOnceWith(workOrderId);
+    expect(detailMocks.listFinishedWorkOrderMovements)
+      .toHaveBeenCalledExactlyOnceWith(workOrderId);
+    expect(result.current.finishedDetailQuery.data?.ok).toBe(true);
+  });
+
+  it("uses separate profile/Work Order-scoped Finished read keys", async () => {
+    detailMocks.getWorkOrderDetail.mockResolvedValue({
+      ok: true,
+      value: { ...draftDetail, status: "finished" },
+    });
+    const { result, queryClient } = renderDetailHook();
+
+    await waitFor(() => expect(result.current.finishedMovementsQuery.isSuccess)
+      .toBe(true));
+    expect(queryClient.getQueryState([
+      "work-orders",
+      "finished-detail",
+      "profile-1",
+      workOrderId,
+    ])).toBeDefined();
+    expect(queryClient.getQueryState([
+      "work-orders",
+      "finished-materials",
+      "profile-1",
+      workOrderId,
+    ])).toBeDefined();
+    expect(queryClient.getQueryState([
+      "work-orders",
+      "finished-movements",
+      "profile-1",
+      workOrderId,
+    ])).toBeDefined();
   });
 
   it("does not fetch detail or choices for an invalid ID", () => {

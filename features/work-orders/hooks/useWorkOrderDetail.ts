@@ -25,6 +25,14 @@ import {
   type FinishWorkOrderInput,
 } from "../services/workOrderFinishService";
 import {
+  getFinishedWorkOrderDetail,
+  listFinishedWorkOrderMaterials,
+  listFinishedWorkOrderMovements,
+} from "../services/finishedWorkOrderService";
+import {
+  finishedWorkOrderDetailQueryKey,
+  finishedWorkOrderMaterialsQueryKey,
+  finishedWorkOrderMovementsQueryKey,
   workOrderDetailQueryKey,
   workOrderDraftMaterialsQueryKey,
   workOrderListQueryKey,
@@ -39,6 +47,18 @@ export function useWorkOrderDetail(workOrderId: string) {
   const detailKey = workOrderDetailQueryKey(profile?.id, workOrderId);
   const listKey = workOrderListQueryKey(profile?.id);
   const materialsKey = workOrderDraftMaterialsQueryKey(
+    profile?.id,
+    workOrderId,
+  );
+  const finishedDetailKey = finishedWorkOrderDetailQueryKey(
+    profile?.id,
+    workOrderId,
+  );
+  const finishedMaterialsKey = finishedWorkOrderMaterialsQueryKey(
+    profile?.id,
+    workOrderId,
+  );
+  const finishedMovementsKey = finishedWorkOrderMovementsQueryKey(
     profile?.id,
     workOrderId,
   );
@@ -120,6 +140,33 @@ export function useWorkOrderDetail(workOrderId: string) {
     enabled: Boolean(
       profile?.id && profile.isActive && hasValidWorkOrderId &&
         detail?.status === "draft",
+    ),
+    staleTime: 60_000,
+  });
+  const finishedDetailQuery = useQuery({
+    queryKey: finishedDetailKey,
+    queryFn: () => getFinishedWorkOrderDetail(workOrderId),
+    enabled: Boolean(
+      profile?.id && profile.isActive && hasValidWorkOrderId &&
+        detail?.status === "finished",
+    ),
+    staleTime: 60_000,
+  });
+  const finishedMaterialsQuery = useQuery({
+    queryKey: finishedMaterialsKey,
+    queryFn: () => listFinishedWorkOrderMaterials(workOrderId),
+    enabled: Boolean(
+      profile?.id && profile.isActive && hasValidWorkOrderId &&
+        detail?.status === "finished",
+    ),
+    staleTime: 60_000,
+  });
+  const finishedMovementsQuery = useQuery({
+    queryKey: finishedMovementsKey,
+    queryFn: () => listFinishedWorkOrderMovements(workOrderId),
+    enabled: Boolean(
+      profile?.id && profile.isActive && hasValidWorkOrderId &&
+        detail?.status === "finished",
     ),
     staleTime: 60_000,
   });
@@ -327,6 +374,9 @@ export function useWorkOrderDetail(workOrderId: string) {
     deleteDraft: deleteMutation.mutateAsync,
     detailQuery,
     finishDraft: finishMutation.mutateAsync,
+    finishedDetailQuery,
+    finishedMaterialsQuery,
+    finishedMovementsQuery,
     isDeleting: deleteMutation.isPending,
     isFinishing: finishMutation.isPending,
     isLoadingMaterial: materialLoadMutation.isPending,

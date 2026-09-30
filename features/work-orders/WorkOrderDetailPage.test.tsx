@@ -14,6 +14,9 @@ const pageMocks = vi.hoisted(() => ({
   deleteDraft: vi.fn(),
   detailRefetch: vi.fn(),
   finishDraft: vi.fn(),
+  finishedDetailRefetch: vi.fn(),
+  finishedMaterialsRefetch: vi.fn(),
+  finishedMovementsRefetch: vi.fn(),
   materialsRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
   reloadLatestDraft: vi.fn(),
@@ -90,6 +93,24 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       isError: false,
       isPending: false,
       refetch: pageMocks.materialsRefetch,
+    },
+    finishedDetailQuery: {
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: pageMocks.finishedDetailRefetch,
+    },
+    finishedMaterialsQuery: {
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: pageMocks.finishedMaterialsRefetch,
+    },
+    finishedMovementsQuery: {
+      data: undefined,
+      isError: false,
+      isPending: false,
+      refetch: pageMocks.finishedMovementsRefetch,
     },
     isSaving: false,
     isDeleting: false,
@@ -1577,7 +1598,24 @@ describe("WorkOrderDetailPage", () => {
     expect(pageMocks.projectChoicesRefetch).toHaveBeenCalledOnce();
   });
 
-  it("shows a minimal read-only Finished state without Draft controls", () => {
+  it("shows the complete read-only Finished state without Draft controls", () => {
+    const finishedDetail = {
+      id: workOrderId,
+      workOrderNumber: draft.workOrderNumber,
+      projectId,
+      projectName: "Alpha Project",
+      customerName: "Alpha Customer Snapshot",
+      description: "Build enclosure",
+      createdAt: draft.createdAt,
+      finishedAt: "2026-09-22T10:02:00.123456+00:00",
+      finishedByUserId: "00000000-0000-4000-8000-000000000022",
+      finishedByFullName: "Ada Lovelace",
+      pdf: {
+        id: "00000000-0000-4000-8000-000000000040",
+        documentVersion: 1 as const,
+        generatedAt: "2026-09-22T10:02:00.123456+00:00",
+      },
+    };
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
       canEditDraft: false,
       canFinishDraft: true,
@@ -1587,17 +1625,167 @@ describe("WorkOrderDetailPage", () => {
         isPending: false,
         refetch: pageMocks.detailRefetch,
       },
+      finishedDetailQuery: {
+        data: { ok: true, value: finishedDetail },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedDetailRefetch,
+      },
+      finishedMaterialsQuery: {
+        data: {
+          ok: true,
+          value: [{
+            productId: "00000000-0000-4000-8000-000000000030",
+            serialNumber: "0000123",
+            productName: "Archived Relay Module",
+            quantity: "9223372036854775807",
+          }],
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedMaterialsRefetch,
+      },
+      finishedMovementsQuery: {
+        data: {
+          ok: true,
+          value: [{
+            movementId: "00000000-0000-4000-8000-000000000041",
+            productId: "00000000-0000-4000-8000-000000000030",
+            serialNumber: "0000123",
+            productName: "Archived Relay Module",
+            quantityDelta: "-2",
+            quantityBefore: "17",
+            quantityAfter: "15",
+            createdAt: "2026-09-22T10:02:00.123456+00:00",
+          }],
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedMovementsRefetch,
+      },
     }));
     renderPage();
 
     expect(screen.getByText("Finished")).toBeInTheDocument();
-    expect(screen.getByText(/Finished Work Order detail experience is not implemented/i))
-      .toBeInTheDocument();
+    expect(screen.getByText("Alpha Project")).toBeInTheDocument();
+    expect(screen.getByText("Alpha Customer Snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getAllByText("Archived Relay Module")).toHaveLength(2);
+    expect(screen.getByText("9223372036854775807")).toBeInTheDocument();
+    expect(screen.getByText("-2")).toBeInTheDocument();
+    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByText("15")).toBeInTheDocument();
+    expect(screen.getByText("Document version 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open PDF" })).toBeDisabled();
     expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Short Description")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save|delete|finish/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps Finished loading and read failures distinct from empty history", () => {
+    const finishedWorkOrder = { ...draft, status: "finished" as const };
+    pageMocks.useWorkOrderDetail.mockReturnValueOnce(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: finishedWorkOrder },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+      finishedDetailQuery: {
+        data: undefined,
+        isError: false,
+        isPending: true,
+        refetch: pageMocks.finishedDetailRefetch,
+      },
+    }));
+    const loading = renderPage();
+    expect(screen.getByText("Loading Finished Work Order...")).toBeInTheDocument();
+    loading.unmount();
+
+    pageMocks.useWorkOrderDetail.mockReturnValueOnce(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: finishedWorkOrder },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+      finishedDetailQuery: {
+        data: {
+          ok: false,
+          error: {
+            code: "finished_work_order_read_failed",
+            message: "The Finished Work Order could not be loaded. Please try again.",
+          },
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedDetailRefetch,
+      },
+    }));
+    renderPage();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The Finished Work Order could not be loaded. Please try again.",
+    );
+    expect(screen.queryByText("No materials")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(pageMocks.finishedDetailRefetch).toHaveBeenCalledOnce();
+    expect(pageMocks.finishedMaterialsRefetch).toHaveBeenCalledOnce();
+    expect(pageMocks.finishedMovementsRefetch).toHaveBeenCalledOnce();
+  });
+
+  it("shows honest empty Finished materials and movement states after successful reads", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      detailQuery: {
+        data: { ok: true, value: { ...draft, status: "finished" } },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.detailRefetch,
+      },
+      finishedDetailQuery: {
+        data: {
+          ok: true,
+          value: {
+            id: workOrderId,
+            workOrderNumber: draft.workOrderNumber,
+            projectId,
+            projectName: "Alpha Project",
+            customerName: "Alpha Customer Snapshot",
+            description: "Build enclosure",
+            createdAt: draft.createdAt,
+            finishedAt: "2026-09-22T10:02:00.123456+00:00",
+            finishedByUserId: "00000000-0000-4000-8000-000000000022",
+            finishedByFullName: "Ada Lovelace",
+            pdf: null,
+          },
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedDetailRefetch,
+      },
+      finishedMaterialsQuery: {
+        data: { ok: true, value: [] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedMaterialsRefetch,
+      },
+      finishedMovementsQuery: {
+        data: { ok: true, value: [] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.finishedMovementsRefetch,
+      },
+    }));
+    renderPage();
+
+    expect(screen.getByText("No materials")).toBeInTheDocument();
+    expect(screen.getByText("No linked Inventory movements")).toBeInTheDocument();
+    expect(screen.getByText(
+      "No official PDF metadata is available for this Work Order.",
+    )).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open PDF" }))
       .not.toBeInTheDocument();
   });
 
