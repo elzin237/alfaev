@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { WorkOrderListItem } from "../services/workOrderService";
 
@@ -41,7 +43,12 @@ function WorkOrderList({ workOrders }: WorkOrderListProps) {
                   scope="row"
                   className="whitespace-nowrap px-5 py-4 text-left font-semibold text-zinc-900"
                 >
-                  {workOrder.workOrderNumber}
+                  <Link
+                    to={`/work-orders/${workOrder.id}`}
+                    className="underline-offset-4 transition hover:text-red-600 hover:underline focus:outline-none focus:ring-2 focus:ring-red-200"
+                  >
+                    {workOrder.workOrderNumber}
+                  </Link>
                 </th>
                 <td className="px-5 py-4">
                   {workOrder.projectName ?? "Not selected"}

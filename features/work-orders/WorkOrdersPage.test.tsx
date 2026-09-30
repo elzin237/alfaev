@@ -137,7 +137,36 @@ describe("WorkOrdersPage", () => {
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create work order/i }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /RN-/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /RN-/ })).toHaveLength(3);
+  });
+
+  it("links every Work Order number to its exact detail route", () => {
+    renderPage();
+
+    for (const workOrder of workOrders) {
+      expect(screen.getByRole("link", { name: workOrder.workOrderNumber }))
+        .toHaveAttribute("href", `/work-orders/${workOrder.id}`);
+    }
+  });
+
+  it.each([
+    ["Draft", workOrders[1]],
+    ["Finished", workOrders[0]],
+  ])("navigates a %s Work Order number to the shared detail route", (_status, workOrder) => {
+    if (!workOrder) throw new Error("Expected Work Order fixture is missing");
+
+    render(
+      <MemoryRouter initialEntries={["/work-orders"]}>
+        <Routes>
+          <Route path="/work-orders" element={<WorkOrdersPage />} />
+          <Route path="/work-orders/:workOrderId" element={<NavigationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: workOrder.workOrderNumber }));
+
+    expect(screen.getByText(`/work-orders/${workOrder.id}`)).toBeInTheDocument();
   });
 
   it("searches Work Order number, Project, and Customer", () => {
