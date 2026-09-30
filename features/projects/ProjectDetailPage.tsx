@@ -8,6 +8,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import ProjectEditDialog from "./components/ProjectEditDialog";
+import { ProjectMaterialUsageSection } from "./components/ProjectMaterialUsageSection";
 import { ProjectPlanningSection } from "./components/ProjectPlanningSection";
 import { useProjectDetail } from "./hooks/useProjectDetail";
 import {
@@ -27,10 +28,6 @@ const timestampFormatter = new Intl.DateTimeFormat("en-GB", {
 });
 
 const relatedPlaceholders = [
-  {
-    title: "Material Usage",
-    description: "No material usage data is available in this section yet.",
-  },
   {
     title: "Related Work Orders",
     description: "Project work orders will appear here when that module is connected.",
@@ -262,6 +259,8 @@ function ProjectDetailPage() {
         </div>
 
         <ProjectPlanningSection projectId={project.id} status={project.status} />
+
+        <ProjectMaterialUsageSection projectId={project.id} />
 
         <div className="grid gap-6 xl:grid-cols-2">
           {relatedPlaceholders.map((placeholder) => (

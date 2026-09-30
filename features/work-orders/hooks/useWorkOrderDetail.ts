@@ -7,6 +7,7 @@ import {
   projectDetailQueryKey,
   projectListQueryKey,
 } from "../../projects/projectQueryKeys";
+import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
 import {
   deleteDraftWorkOrder,
   getWorkOrderDetail,
@@ -310,6 +311,13 @@ export function useWorkOrderDetail(workOrderId: string) {
           }),
           queryClient.invalidateQueries({
             queryKey: projectListQueryKey(profile?.id),
+            exact: true,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: projectMaterialUsageQueryKey(
+              profile?.id,
+              result.value.projectId,
+            ),
             exact: true,
           }),
         ]);

@@ -776,6 +776,15 @@ describe("useWorkOrderDetail", () => {
       queryKey: ["projects", "list", "profile-1"],
       exact: true,
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "projects",
+        "material-usage",
+        "profile-1",
+        "00000000-0000-4000-8000-000000000020",
+      ],
+      exact: true,
+    });
     expect(removeQueries).toHaveBeenCalledWith({
       queryKey: ["work-orders", "draft-materials", "profile-1", workOrderId],
       exact: true,

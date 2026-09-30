@@ -16,6 +16,14 @@ vi.mock("./hooks/useProjectDetail", () => ({
 vi.mock("./components/ProjectPlanningSection", () => ({
   ProjectPlanningSection: () => null,
 }));
+vi.mock("./components/ProjectMaterialUsageSection", () => ({
+  ProjectMaterialUsageSection: () => (
+    <section aria-label="Material Usage">
+      <h2>Material Usage</h2>
+      <p>Material usage read</p>
+    </section>
+  ),
+}));
 
 import ProjectDetailPage from "./ProjectDetailPage";
 import type { ProjectDetail } from "./services/projectService";
@@ -113,14 +121,12 @@ describe("ProjectDetailPage", () => {
       .toBeInTheDocument();
   });
 
-  it("shows only honest empty placeholders for canonical related domains", () => {
+  it("shows real Material Usage and honest placeholders for remaining related domains", () => {
     renderDetail();
 
     expect(screen.getByRole("heading", { name: "Material Usage" }))
       .toBeInTheDocument();
-    expect(screen.getByText(
-      "No material usage data is available in this section yet.",
-    )).toBeInTheDocument();
+    expect(screen.getByText("Material usage read")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Related Work Orders" }))
       .toBeInTheDocument();
     expect(screen.getByText(
@@ -130,7 +136,6 @@ describe("ProjectDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Activity" }))
       .toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
