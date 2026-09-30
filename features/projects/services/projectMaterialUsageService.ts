@@ -2,15 +2,18 @@ import { supabase } from "../../../lib/supabase/client";
 import { isWorkOrderId, isWorkOrderNumber } from "../../work-orders/services/workOrderService";
 import { isProjectId } from "./projectService";
 
-export interface ProjectWorkOrderMaterialUsage {
+export type ProjectMaterialUsageSourceType = "work_order" | "pcb_production";
+
+export interface ProjectMaterialUsage {
   movementId: string;
   projectId: string;
   productId: string;
   serialNumber: string;
   productName: string;
   quantity: string;
-  workOrderId: string;
-  workOrderNumber: string;
+  sourceType: ProjectMaterialUsageSourceType;
+  sourceId: string;
+  sourceLabel: string;
   consumedAt: string;
 }
 
@@ -24,7 +27,7 @@ export interface ProjectMaterialUsageError {
 }
 
 export type ProjectMaterialUsageResult =
-  | { ok: true; value: ProjectWorkOrderMaterialUsage[] }
+  | { ok: true; value: ProjectMaterialUsage[] }
   | { ok: false; error: ProjectMaterialUsageError };
 
 const allowedKeys = new Set([
@@ -34,8 +37,9 @@ const allowedKeys = new Set([
   "serial_number",
   "product_name",
   "quantity",
-  "work_order_id",
-  "work_order_number",
+  "source_type",
+  "source_id",
+  "source_label",
   "consumed_at",
 ]);
 const serialNumberPattern = /^[0-9]{7}$/;
@@ -83,7 +87,7 @@ function loadFailure(code?: string): ProjectMaterialUsageError {
 function parseUsageRow(
   value: unknown,
   requestedProjectId: string,
-): ProjectWorkOrderMaterialUsage | null {
+): ProjectMaterialUsage | null {
   if (
     !isRecord(value) ||
     Object.keys(value).length !== allowedKeys.size ||
@@ -96,9 +100,16 @@ function parseUsageRow(
     typeof value.serial_number !== "string" ||
     !serialNumberPattern.test(value.serial_number) ||
     !isTrimmedNonblank(value.product_name) ||
-    !isWorkOrderId(value.work_order_id) ||
-    !isWorkOrderNumber(value.work_order_number) ||
+    (value.source_type !== "work_order" && value.source_type !== "pcb_production") ||
+    typeof value.source_id !== "string" ||
+    !isProjectId(value.source_id) ||
+    !isTrimmedNonblank(value.source_label) ||
     !isTimestamp(value.consumed_at)
+  ) return null;
+
+  if (
+    value.source_type === "work_order" &&
+    (!isWorkOrderId(value.source_id) || !isWorkOrderNumber(value.source_label))
   ) return null;
 
   const quantity = parsePositiveBigintText(value.quantity);
@@ -111,13 +122,14 @@ function parseUsageRow(
     serialNumber: value.serial_number,
     productName: value.product_name,
     quantity,
-    workOrderId: value.work_order_id,
-    workOrderNumber: value.work_order_number,
+    sourceType: value.source_type,
+    sourceId: value.source_id,
+    sourceLabel: value.source_label,
     consumedAt: value.consumed_at,
   };
 }
 
-export async function listProjectWorkOrderMaterialUsage(
+export async function listProjectMaterialUsage(
   projectId: string,
 ): Promise<ProjectMaterialUsageResult> {
   if (!isProjectId(projectId)) {
@@ -126,7 +138,7 @@ export async function listProjectWorkOrderMaterialUsage(
 
   try {
     const { data, error } = await supabase.rpc(
-      "list_project_work_order_material_usage",
+      "list_project_material_usage",
       { p_project_id: projectId },
     );
     if (error) return { ok: false, error: loadFailure(error.code) };
@@ -134,7 +146,7 @@ export async function listProjectWorkOrderMaterialUsage(
       return { ok: false, error: loadFailure() };
     }
 
-    const usage: ProjectWorkOrderMaterialUsage[] = [];
+    const usage: ProjectMaterialUsage[] = [];
     for (const row of data) {
       const parsed = parseUsageRow(row, projectId);
       if (!parsed) return { ok: false, error: loadFailure() };

@@ -4,7 +4,7 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { projectMaterialUsageQueryKey } from "../projectMaterialUsageQueryKeys";
-import { listProjectWorkOrderMaterialUsage } from "../services/projectMaterialUsageService";
+import { listProjectMaterialUsage } from "../services/projectMaterialUsageService";
 import { isProjectId } from "../services/projectService";
 
 export function useProjectMaterialUsage(projectId: string) {
@@ -21,7 +21,7 @@ export function useProjectMaterialUsage(projectId: string) {
   });
   const usageQuery = useQuery({
     queryKey: projectMaterialUsageQueryKey(profile?.id, projectId),
-    queryFn: () => listProjectWorkOrderMaterialUsage(projectId),
+    queryFn: () => listProjectMaterialUsage(projectId),
     enabled: Boolean(profile?.isActive && isProjectId(projectId)),
     staleTime: 60_000,
   });

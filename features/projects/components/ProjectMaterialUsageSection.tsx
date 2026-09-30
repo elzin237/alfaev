@@ -32,8 +32,8 @@ export function ProjectMaterialUsageSection({ projectId }: { projectId: string }
   } else if (usage.length === 0) {
     content = (
       <EmptyState
-        title="No finished Work Order material usage yet."
-        description="Finished Work Order consumption will appear here."
+        title="No Project material usage yet."
+        description="Finished Work Order and Project-linked PCB Production consumption will appear here."
       />
     );
   } else {
@@ -63,19 +63,19 @@ export function ProjectMaterialUsageSection({ projectId }: { projectId: string }
                   {row.quantity}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-zinc-700">
-                  Work Order
+                  {row.sourceType === "work_order" ? "Work Order" : "PCB Production"}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  {canViewWorkOrders
+                  {row.sourceType === "work_order" && canViewWorkOrders
                     ? (
                       <Link
-                        to={`/work-orders/${row.workOrderId}`}
+                        to={`/work-orders/${row.sourceId}`}
                         className="font-semibold text-zinc-900 underline decoration-zinc-300 underline-offset-4 transition hover:decoration-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:ring-offset-2"
                       >
-                        {row.workOrderNumber}
+                        {row.sourceLabel}
                       </Link>
                     )
-                    : <span className="font-medium text-zinc-700">{row.workOrderNumber}</span>}
+                    : <span className="font-medium text-zinc-700">{row.sourceLabel}</span>}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-zinc-700">
                   <time dateTime={row.consumedAt}>
@@ -98,7 +98,7 @@ export function ProjectMaterialUsageSection({ projectId }: { projectId: string }
       <div className="mb-5">
         <h2 className="text-xl font-bold text-zinc-900">Material Usage</h2>
         <p className="mt-1 text-sm text-zinc-500">
-          Physical material consumed by Finished Work Orders for this Project.
+          Physical material consumed by Finished Work Orders and Project-linked PCB Production.
         </p>
       </div>
       {content}

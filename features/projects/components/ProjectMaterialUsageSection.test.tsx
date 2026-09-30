@@ -18,8 +18,9 @@ const usage = {
   serialNumber: "0000042",
   productName: "Archived Control Module",
   quantity: "9007199254740993",
-  workOrderId: "00000000-0000-4000-8000-000000000004",
-  workOrderNumber: "RN-2026-0041",
+  sourceType: "work_order" as const,
+  sourceId: "00000000-0000-4000-8000-000000000004",
+  sourceLabel: "RN-2026-0041",
   consumedAt: "2026-09-30T12:34:56.123456+00:00",
 };
 
@@ -76,7 +77,27 @@ describe("ProjectMaterialUsageSection", () => {
     setState({ canViewWorkOrders: true });
     renderSection();
     expect(screen.getByRole("link", { name: "RN-2026-0041" }))
-      .toHaveAttribute("href", `/work-orders/${usage.workOrderId}`);
+      .toHaveAttribute("href", `/work-orders/${usage.sourceId}`);
+  });
+
+  it("keeps PCB Production sources plain because no individual run route exists", () => {
+    setState({
+      canViewWorkOrders: true,
+      data: {
+        ok: true,
+        value: [{
+          ...usage,
+          sourceType: "pcb_production",
+          sourceId: "00000000-0000-4000-8000-000000000099",
+          sourceLabel: "Controller PCB A",
+        }],
+      },
+    });
+    renderSection();
+    expect(screen.getByText("PCB Production")).toBeInTheDocument();
+    expect(screen.getByText("Controller PCB A")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Controller PCB A" }))
+      .not.toBeInTheDocument();
   });
 
   it("renders loading, retryable error, and honest empty states distinctly", () => {
@@ -94,7 +115,7 @@ describe("ProjectMaterialUsageSection", () => {
 
     setState({ data: { ok: true, value: [] } });
     renderSection();
-    expect(screen.getByText("No finished Work Order material usage yet."))
+    expect(screen.getByText("No Project material usage yet."))
       .toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });

@@ -4,6 +4,7 @@ import { inventoryBalanceQueryKey } from "../../inventory/inventoryBalanceQueryK
 import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
 import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
 import { projectPlanningQueryKey } from "../../projects/projectPlanningQueryKeys";
+import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
 import {
   pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey,
   pcbProductionHistoryQueryKey, pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
@@ -55,6 +56,8 @@ export function usePcbProduction(cardId: string) {
       queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profileId) }),
       ...(submission.projectId ? [queryClient.invalidateQueries({
         queryKey: projectPlanningQueryKey(profileId, submission.projectId), exact: true,
+      }), queryClient.invalidateQueries({
+        queryKey: projectMaterialUsageQueryKey(profileId, submission.projectId), exact: true,
       })] : []),
       ...affectedProductIds.flatMap((productId) => [
         queryClient.invalidateQueries({ queryKey: inventoryBalanceQueryKey(profileId, productId), exact: true }),

@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
 vi.mock("../../../app/auth/permissionService", () => ({ hasPermission: mocks.hasPermission }));
 vi.mock("../services/projectMaterialUsageService", () => ({
-  listProjectWorkOrderMaterialUsage: mocks.listUsage,
+  listProjectMaterialUsage: mocks.listUsage,
 }));
 vi.mock("../services/projectService", () => ({ isProjectId: mocks.isProjectId }));
 

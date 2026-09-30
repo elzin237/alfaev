@@ -11,6 +11,7 @@ import { inventoryBalanceQueryKey } from "../../inventory/inventoryBalanceQueryK
 import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
 import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
 import { projectPlanningQueryKey } from "../../projects/projectPlanningQueryKeys";
+import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
 import {
   pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey, pcbProductionHistoryQueryKey,
   pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
@@ -60,6 +61,7 @@ describe("PCB production mutation and cache", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: productListQueryPrefix("profile-1") });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: inventoryCommitmentsQueryKey("profile-1") });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: projectPlanningQueryKey("profile-1", projectId), exact: true });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: projectMaterialUsageQueryKey("profile-1", projectId), exact: true });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
   });
 
@@ -68,6 +70,7 @@ describe("PCB production mutation and cache", () => {
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await act(async () => { await result.current.submit({ ...submission, projectId }); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: projectPlanningQueryKey("profile-1", projectId), exact: true });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectMaterialUsageQueryKey("profile-1", projectId), exact: true });
   });
 
   it("does not retry a rejected mutation even when the global mutation default enables retry", async () => {
