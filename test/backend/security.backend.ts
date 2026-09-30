@@ -23,6 +23,7 @@ import { registerProjectsTests } from "./projects.suite";
 import { registerProjectPlanningTests } from "./project-planning.suite";
 import { registerProjectMaterialUsageTests } from "./project-material-usage.suite";
 import { registerUnifiedProjectMaterialUsageTests } from "./project-material-usage-unified.suite";
+import { registerCalendarEntryTests } from "./calendar-entries.suite";
 import { registerProcurementReadsTests } from "./procurement-reads.suite";
 import { registerProcurementCreationTests } from "./procurement-creation.suite";
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
@@ -55,6 +56,7 @@ describe("Supabase security helpers", () => {
   registerProjectPlanningTests(requireHarness);
   registerProjectMaterialUsageTests(requireHarness);
   registerUnifiedProjectMaterialUsageTests(requireHarness);
+  registerCalendarEntryTests(requireHarness);
   registerProcurementReadsTests(requireHarness);
   registerProcurementCreationTests(requireHarness);
   registerProcurementLifecycleTests(requireHarness);
