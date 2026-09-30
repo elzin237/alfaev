@@ -15,6 +15,7 @@ import { registerWorkOrderPdfTests } from "./work-order-pdfs.suite";
 import { registerWorkOrderPdfSnapshotTests } from "./work-order-pdf-snapshot.suite";
 import { registerFinishedWorkOrderReadTests } from "./work-order-finished-read.suite";
 import { registerInventoryLedgerTests } from "./inventory-ledger.suite";
+import { registerInventoryReversalFoundationTests } from "./inventory-reversal-foundation.suite";
 import { registerInventoryPrimitiveTests, registerManualInventoryAdjustmentTests } from "./inventory-mutation.suite";
 import { registerInventoryReadsTests } from "./inventory-reads.suite";
 import { registerProductSuppliersTests } from "./product-suppliers.suite";
@@ -42,6 +43,7 @@ describe("Supabase security helpers", () => {
   registerWorkOrderPdfSnapshotTests(requireHarness);
   registerFinishedWorkOrderReadTests(requireHarness);
   registerInventoryLedgerTests(requireHarness);
+  registerInventoryReversalFoundationTests(requireHarness);
   registerInventoryPrimitiveTests(requireHarness);
   registerProductEditTests(requireHarness);
   registerProductSuppliersTests(requireHarness);

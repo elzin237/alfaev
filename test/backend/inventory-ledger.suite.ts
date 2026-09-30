@@ -439,12 +439,12 @@ export function registerInventoryLedgerTests(requireHarness: () => SecurityFixtu
       await database.query(
         `insert into public.inventory_movements (
            id, product_id, movement_type, quantity_delta, quantity_before,
-           quantity_after, source_type, actor_user_id,
+           quantity_after, reason, source_type, actor_user_id,
            reversal_of_movement_id
          )
          values (
            $1::uuid, $2::uuid, 'correction_reversal', -5, 5, 0,
-           'correction_reversal', $3::uuid, $4::uuid
+           'Fixture reversal', 'correction_reversal', $3::uuid, $4::uuid
          )`,
         [reversalMovementId, productId, actorId, firstMovementId],
       );
@@ -484,7 +484,9 @@ export function registerInventoryLedgerTests(requireHarness: () => SecurityFixtu
         }),
         expect.objectContaining({
           id: reversalMovementId,
+          reason: "Fixture reversal",
           reversal_of_movement_id: firstMovementId,
+          source_type: "correction_reversal",
         }),
       ]));
       expect(movements.rows.every((movement) =>
@@ -557,11 +559,12 @@ export function registerInventoryLedgerTests(requireHarness: () => SecurityFixtu
           errorCode: "23514",
           sql: `insert into public.inventory_movements (
                   id, product_id, movement_type, quantity_delta,
-                  quantity_before, quantity_after, actor_user_id,
+                  quantity_before, quantity_after, reason, source_type,
+                  actor_user_id,
                   reversal_of_movement_id
                 ) values (
                   $1::uuid, $2::uuid, 'correction_reversal', 0, 0, 0,
-                  $3::uuid, $1::uuid
+                  'Self reversal', 'correction_reversal', $3::uuid, $1::uuid
                 )`,
           values: [randomUUID(), productId, actorId],
         },

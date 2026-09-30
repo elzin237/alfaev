@@ -242,7 +242,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
           "failed_inventory_movement_insert",
           `select *
            from public.apply_inventory_delta(
-             $1::uuid, 1, 'correction_reversal', null, null, null, null,
+             $1::uuid, 1, 'correction_reversal', 'Missing original',
+             'correction_reversal', null, null,
              $2::uuid
            )`,
           [productId, randomUUID()],
