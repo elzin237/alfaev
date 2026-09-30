@@ -298,6 +298,48 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
     });
   });
 
+  it("Task 128 still reports confirmed Finish success when temp cleanup fails", async () => {
+    const testHarness = harness({ cleanupErrors: true });
+    const response = await handleFinishWorkOrderRequest(
+      request(),
+      testHarness.dependencies,
+    );
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({
+      workOrderId,
+      workOrderNumber: "RN-2026-0042",
+      finishedAt,
+      projectId,
+      projectCompleted: true,
+      workOrderPdfId: pdfId,
+      storageReference: `final/${workOrderId}/${finalId}.pdf`,
+    });
+    expect(testHarness.removals).toEqual([
+      [`_tmp/${workOrderId}/${temporaryId}.pdf`],
+    ]);
+  });
+
+  it("Task 128 removes temp and final candidates after known insufficient Inventory", async () => {
+    const testHarness = harness({ finishErrorCode: "IVB02" });
+    const response = await handleFinishWorkOrderRequest(
+      request(),
+      testHarness.dependencies,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toEqual({
+      code: "insufficient_inventory",
+      message: "There is not enough physical Inventory to finish this Work Order.",
+    });
+    expect(testHarness.removals).toEqual([
+      [`final/${workOrderId}/${finalId}.pdf`],
+      [`_tmp/${workOrderId}/${temporaryId}.pdf`],
+    ]);
+    expect(testHarness.rpcCalls.filter((call) => call.name === "finish_work_order"))
+      .toHaveLength(1);
+  });
+
   it("passes the original timestamp once and cleans both objects after WOR05", async () => {
     const testHarness = harness({ finishErrorCode: "WOR05" });
     const response = await handleFinishWorkOrderRequest(

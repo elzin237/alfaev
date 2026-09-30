@@ -83,6 +83,37 @@ async function deleteDraftWorkOrder(
   return row;
 }
 
+async function saveDraftWorkOrder(
+  database: PoolClient,
+  values: {
+    description: string;
+    expectedUpdatedAt: string;
+    items: Array<{ product_id: string; quantity: string }>;
+    projectId: string;
+    workOrderId: string;
+  },
+): Promise<{ updated_at: string; work_order_id: string }> {
+  const result = await database.query<{
+    updated_at: string;
+    work_order_id: string;
+  }>(
+    `select saved.work_order_id, saved.updated_at::text as updated_at
+     from public.save_draft_work_order(
+       $1::uuid, $2::uuid, $3::text, $4::jsonb, $5::timestamptz
+     ) as saved`,
+    [
+      values.workOrderId,
+      values.projectId,
+      values.description,
+      JSON.stringify(values.items),
+      values.expectedUpdatedAt,
+    ],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Save Draft Work Order returned no row");
+  return row;
+}
+
 async function insertPreparedPdfObject(
   _database: PoolClient,
   workOrderId: string,
@@ -323,6 +354,84 @@ async function cleanupCommittedFixture(
   }
 }
 
+async function cleanupTask128Fixtures(
+  database: PoolClient,
+  values: {
+    productIds: string[];
+    projectIds: string[];
+    workOrderIds: string[];
+  },
+): Promise<void> {
+  const immutableHistory = (await database.query<{
+    audits: string;
+    movements: string;
+    pdfs: string;
+  }>(
+    `select
+       (select pg_catalog.count(*)::text
+        from public.audit_logs as audit
+        where audit.entity_id = any($1::uuid[])
+           or audit.entity_id = any($2::uuid[])) as audits,
+       (select pg_catalog.count(*)::text
+        from public.inventory_movements as movement
+        where movement.source_type = 'work_order'
+          and movement.source_id = any($1::uuid[])) as movements,
+       (select pg_catalog.count(*)::text
+        from public.work_order_pdfs as pdf
+        where pdf.work_order_id = any($1::uuid[])) as pdfs`,
+    [values.workOrderIds, values.projectIds],
+  )).rows[0];
+  if (
+    !immutableHistory
+    || immutableHistory.audits !== "0"
+    || immutableHistory.movements !== "0"
+    || immutableHistory.pdfs !== "0"
+  ) {
+    throw new Error("Task 128 concurrency fixture created immutable history");
+  }
+
+  await database.query("begin");
+  try {
+    await database.query(
+      "delete from public.work_order_items where work_order_id = any($1::uuid[])",
+      [values.workOrderIds],
+    );
+    await database.query(
+      "delete from public.work_orders where id = any($1::uuid[])",
+      [values.workOrderIds],
+    );
+    await database.query(
+      `delete from public.project_product_components
+       where project_product_id in (
+         select project_product.id
+         from public.project_products as project_product
+         where project_product.project_id = any($1::uuid[])
+       )`,
+      [values.projectIds],
+    );
+    await database.query(
+      "delete from public.project_products where project_id = any($1::uuid[])",
+      [values.projectIds],
+    );
+    await database.query(
+      "delete from public.inventory_balances where product_id = any($1::uuid[])",
+      [values.productIds],
+    );
+    await database.query(
+      "delete from public.products where id = any($1::uuid[])",
+      [values.productIds],
+    );
+    await database.query(
+      "delete from public.projects where id = any($1::uuid[])",
+      [values.projectIds],
+    );
+    await database.query("commit");
+  } catch (error) {
+    await database.query("rollback");
+    throw error;
+  }
+}
+
 export function registerWorkOrderFinishTests(
   requireHarness: () => SecurityFixtureHarness,
 ): void {
@@ -507,18 +616,35 @@ export function registerWorkOrderFinishTests(
             { product_id: state.productId, quantity: "6" },
             { product_id: secondProductId, quantity: "6" },
           ].sort((left, right) => left.product_id.localeCompare(right.product_id)));
-          expect((await database.query(
+          const movements = (await database.query<{
+            actor_user_id: string;
+            created_at: string;
+            id: string;
+            movement_type: string;
+            product_id: string;
+            project_id: string;
+            quantity_after: string;
+            quantity_before: string;
+            quantity_delta: string;
+            reason: string | null;
+            source_id: string;
+            source_type: string;
+          }>(
             `select
-               product_id, movement_type, quantity_delta::text, quantity_before::text,
-               quantity_after::text, reason, source_type, source_id,
-               project_id, actor_user_id
+               id, product_id, movement_type, quantity_delta::text,
+               quantity_before::text, quantity_after::text, reason,
+               source_type, source_id, project_id, actor_user_id,
+               created_at::text
              from public.inventory_movements
              where source_type = 'work_order' and source_id = $1::uuid
              order by product_id`,
             [state.workOrderId],
-          )).rows).toEqual([
+          )).rows;
+          expect(movements).toEqual([
             {
               actor_user_id: admin.profileId,
+              created_at: expect.any(String),
+              id: expect.any(String),
               movement_type: "work_order",
               product_id: state.productId,
               project_id: state.projectId,
@@ -531,6 +657,8 @@ export function registerWorkOrderFinishTests(
             },
             {
               actor_user_id: admin.profileId,
+              created_at: expect.any(String),
+              id: expect.any(String),
               movement_type: "work_order",
               product_id: secondProductId,
               project_id: state.projectId,
@@ -542,6 +670,8 @@ export function registerWorkOrderFinishTests(
               source_type: "work_order",
             },
           ].sort((left, right) => left.product_id.localeCompare(right.product_id)));
+          expect(movements.every((movement) =>
+            Date.parse(movement.created_at) <= Date.parse(result.finished_at))).toBe(true);
 
           expect((await database.query(
             `select id, storage_reference, generated_at::text,
@@ -588,6 +718,40 @@ export function registerWorkOrderFinishTests(
               entity_id: state.workOrderId,
             },
           ]);
+          const finishAudit = (await database.query<{
+            actor_user_id: string;
+            after_data: {
+              finished_at: string;
+              finished_by_user_id: string;
+              inventory_movement_ids: string[];
+              project_id: string;
+              status: string;
+              storage_reference: string;
+              work_order_pdf_id: string;
+            };
+            entity_id: string;
+          }>(
+            `select actor_user_id, entity_id, after_data
+             from public.audit_logs
+             where entity_id = $1::uuid
+               and action_type = 'work_order.finished'`,
+            [state.workOrderId],
+          )).rows;
+          expect(finishAudit).toEqual([{
+            actor_user_id: admin.profileId,
+            after_data: {
+              finished_at: result.finished_at
+                .replace(" ", "T")
+                .replace(/\+00$/, "+00:00"),
+              finished_by_user_id: admin.profileId,
+              inventory_movement_ids: movements.map((movement) => movement.id),
+              project_id: state.projectId,
+              status: "finished",
+              storage_reference: reference,
+              work_order_pdf_id: result.work_order_pdf_id,
+            },
+            entity_id: state.workOrderId,
+          }]);
           expect((await database.query(
             `select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(component)
                      order by component.id) as rows
@@ -716,6 +880,33 @@ export function registerWorkOrderFinishTests(
             ),
             "IVB02",
           );
+          await database.query("reset role");
+          expect((await database.query(
+            `select
+               (select status from public.work_orders
+                where id = $1::uuid) as work_order_status,
+               (select quantity::text from public.inventory_balances
+                where product_id = $2::uuid) as quantity,
+               (select status from public.projects
+                where id = $3::uuid) as project_status,
+               (select pg_catalog.count(*)::text from public.inventory_movements
+                where source_type = 'work_order'
+                  and source_id = $1::uuid) as movements,
+               (select pg_catalog.count(*)::text from public.work_order_pdfs
+                where work_order_id = $1::uuid) as pdfs,
+               (select pg_catalog.count(*)::text from public.audit_logs
+                where (entity_id = $1::uuid and action_type = 'work_order.finished')
+                   or (entity_id = $3::uuid and action_type = 'project.completed'))
+                 as audits`,
+            [shortage.workOrderId, shortage.productId, shortage.projectId],
+          )).rows).toEqual([{
+            audits: "0",
+            movements: "0",
+            pdfs: "0",
+            project_status: "planned",
+            quantity: "3",
+            work_order_status: "draft",
+          }]);
 
           await database.query("reset role");
           const incomplete = await createPreflightFixture(database, admin.profileId, {
@@ -1052,6 +1243,527 @@ export function registerWorkOrderFinishTests(
               });
             }
           }
+        });
+      });
+
+      it("Task 128 serializes Finish and Draft Save on the Work Order parent lock", async () => {
+        const fixture = requireHarness();
+        const admin = fixture.actors.admin;
+        const applicationName = `task128-finish-save-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async ([finisher, saver, observer]) => {
+          if (!finisher || !saver || !observer) {
+            throw new Error("Task 128 Finish/save clients unavailable");
+          }
+          let state: Awaited<ReturnType<typeof createPreflightFixture>> | undefined;
+          let storageReference: string | undefined;
+          let waitingSave: Promise<{
+            updated_at: string;
+            work_order_id: string;
+          }> | undefined;
+          try {
+            await observer.query("begin");
+            state = await createPreflightFixture(observer, admin.profileId);
+            storageReference = await insertPreparedPdfObject(
+              observer, state.workOrderId,
+            );
+            await observer.query("commit");
+
+            await finisher.query("begin");
+            await actAs(finisher, admin);
+            expect((await finishWorkOrder(
+              finisher,
+              state.workOrderId,
+              state.updatedAt,
+              storageReference,
+            )).work_order_id).toBe(state.workOrderId);
+
+            await saver.query("begin");
+            await saver.query(
+              "select pg_catalog.set_config('application_name', $1::text, true)",
+              [applicationName],
+            );
+            await actAs(saver, admin);
+            waitingSave = saveDraftWorkOrder(saver, {
+              description: "Saved after Finish lock release",
+              expectedUpdatedAt: state.updatedAt,
+              items: [{ product_id: state.productId, quantity: "4" }],
+              projectId: state.projectId!,
+              workOrderId: state.workOrderId,
+            });
+            await waitForLockWait(observer, applicationName);
+
+            await finisher.query("rollback");
+            expect((await waitingSave).work_order_id).toBe(state.workOrderId);
+            waitingSave = undefined;
+            await saver.query("rollback");
+
+            expect((await observer.query(
+              `select
+                 (select status from public.work_orders
+                  where id = $1::uuid) as status,
+                 (select description from public.work_orders
+                  where id = $1::uuid) as description,
+                 (select quantity::text from public.inventory_balances
+                  where product_id = $2::uuid) as quantity,
+                 (select pg_catalog.count(*)::text from public.inventory_movements
+                  where source_id = $1::uuid) as movements,
+                 (select pg_catalog.count(*)::text from public.work_order_pdfs
+                  where work_order_id = $1::uuid) as pdfs,
+                 (select pg_catalog.count(*)::text from public.audit_logs
+                  where entity_id = $1::uuid) as audits`,
+              [state.workOrderId, state.productId],
+            )).rows).toEqual([{
+              audits: "0",
+              description: "Preflight assembly",
+              movements: "0",
+              pdfs: "0",
+              quantity: "10",
+              status: "draft",
+            }]);
+          } finally {
+            await finisher.query("rollback").catch(() => undefined);
+            await saver.query("rollback").catch(() => undefined);
+            await waitingSave?.catch(() => undefined);
+            if (state?.projectId && storageReference) {
+              await cleanupTask128Fixtures(observer, {
+                productIds: [state.productId],
+                projectIds: [state.projectId],
+                workOrderIds: [state.workOrderId],
+              });
+            }
+          }
+        });
+      });
+
+      it("Task 128 serializes Finish and competing Inventory mutation on the Product balance", async () => {
+        const fixture = requireHarness();
+        const admin = fixture.actors.admin;
+        const applicationName = `task128-finish-inventory-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async ([finisher, mutation, observer]) => {
+          if (!finisher || !mutation || !observer) {
+            throw new Error("Task 128 Finish/Inventory clients unavailable");
+          }
+          let state: Awaited<ReturnType<typeof createPreflightFixture>> | undefined;
+          let storageReference: string | undefined;
+          let waitingMutation: Promise<unknown> | undefined;
+          try {
+            await observer.query("begin");
+            state = await createPreflightFixture(observer, admin.profileId);
+            storageReference = await insertPreparedPdfObject(
+              observer, state.workOrderId,
+            );
+            await observer.query("commit");
+
+            await finisher.query("begin");
+            await actAs(finisher, admin);
+            expect((await finishWorkOrder(
+              finisher,
+              state.workOrderId,
+              state.updatedAt,
+              storageReference,
+            )).work_order_id).toBe(state.workOrderId);
+
+            await mutation.query("begin");
+            await mutation.query(
+              "select pg_catalog.set_config('application_name', $1::text, true)",
+              [applicationName],
+            );
+            await mutation.query(
+              "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+              [admin.authUserId],
+            );
+            waitingMutation = mutation.query(
+              `select movement_id, quantity_before::text, quantity_after::text
+               from public.apply_inventory_delta(
+                 $1::uuid, -7, 'task128_competing_remove', null,
+                 'task128_competing_remove', $2::uuid, $3::uuid, null
+               )`,
+              [state.productId, state.workOrderId, state.projectId],
+            );
+            await waitForLockWait(observer, applicationName);
+
+            await finisher.query("rollback");
+            await expect(waitingMutation).resolves.toMatchObject({
+              rows: [{ quantity_after: "3", quantity_before: "10" }],
+            });
+            waitingMutation = undefined;
+            await mutation.query("rollback");
+
+            expect((await observer.query(
+              `select
+                 (select quantity::text from public.inventory_balances
+                  where product_id = $1::uuid) as quantity,
+                 (select pg_catalog.count(*)::text from public.inventory_movements
+                  where product_id = $1::uuid) as movements,
+                 (select status from public.work_orders
+                  where id = $2::uuid) as status`,
+              [state.productId, state.workOrderId],
+            )).rows).toEqual([{
+              movements: "0",
+              quantity: "10",
+              status: "draft",
+            }]);
+          } finally {
+            await finisher.query("rollback").catch(() => undefined);
+            await mutation.query("rollback").catch(() => undefined);
+            await waitingMutation?.catch(() => undefined);
+            if (state?.projectId && storageReference) {
+              await cleanupTask128Fixtures(observer, {
+                productIds: [state.productId],
+                projectIds: [state.projectId],
+                workOrderIds: [state.workOrderId],
+              });
+            }
+          }
+        });
+      });
+
+      it("Task 128 serializes two different Finish operations through their shared Project", async () => {
+        const fixture = requireHarness();
+        const admin = fixture.actors.admin;
+        const applicationName = `task128-shared-project-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
+          if (!first || !second || !observer) {
+            throw new Error("Task 128 shared-Project clients unavailable");
+          }
+          let firstState: Awaited<ReturnType<typeof createPreflightFixture>> | undefined;
+          let secondState: Awaited<ReturnType<typeof addSiblingDraft>> | undefined;
+          let secondProductId: string | undefined;
+          let firstReference: string | undefined;
+          let secondReference: string | undefined;
+          let waitingSecond: Promise<FinishResult> | undefined;
+          try {
+            await observer.query("begin");
+            firstState = await createPreflightFixture(observer, admin.profileId);
+            secondState = await addSiblingDraft(
+              observer, firstState.projectId!, admin.profileId,
+            );
+            secondProductId = await addFinishMaterial(observer, {
+              actorId: admin.profileId,
+              physicalQuantity: "10",
+              projectId: firstState.projectId!,
+              quantity: "3",
+              requiredQuantity: "3",
+              workOrderId: secondState.id,
+            });
+            firstReference = await insertPreparedPdfObject(
+              observer, firstState.workOrderId,
+            );
+            secondReference = await insertPreparedPdfObject(
+              observer, secondState.id,
+            );
+            await observer.query("commit");
+
+            await first.query("begin");
+            await actAs(first, admin);
+            expect((await finishWorkOrder(
+              first,
+              firstState.workOrderId,
+              firstState.updatedAt,
+              firstReference,
+            )).project_completed).toBe(false);
+
+            await second.query("begin");
+            await second.query(
+              "select pg_catalog.set_config('application_name', $1::text, true)",
+              [applicationName],
+            );
+            await actAs(second, admin);
+            waitingSecond = finishWorkOrder(
+              second,
+              secondState.id,
+              secondState.updatedAt,
+              secondReference,
+            );
+            await waitForLockWait(observer, applicationName);
+
+            await first.query("rollback");
+            expect((await waitingSecond).project_completed).toBe(false);
+            waitingSecond = undefined;
+            await second.query("rollback");
+
+            expect((await observer.query(
+              `select
+                 (select status from public.projects where id = $1::uuid)
+                   as project_status,
+                 (select pg_catalog.count(*)::text from public.inventory_movements
+                  where source_id = any($2::uuid[])) as movements,
+                 (select pg_catalog.count(*)::text from public.audit_logs
+                  where entity_id = $1::uuid
+                    and action_type = 'project.completed') as completion_audits`,
+              [
+                firstState.projectId,
+                [firstState.workOrderId, secondState.id],
+              ],
+            )).rows).toEqual([{
+              completion_audits: "0",
+              movements: "0",
+              project_status: "planned",
+            }]);
+          } finally {
+            await first.query("rollback").catch(() => undefined);
+            await second.query("rollback").catch(() => undefined);
+            await waitingSecond?.catch(() => undefined);
+            if (
+              firstState?.projectId
+              && secondState
+              && secondProductId
+              && firstReference
+              && secondReference
+            ) {
+              await cleanupTask128Fixtures(observer, {
+                productIds: [firstState.productId, secondProductId],
+                projectIds: [firstState.projectId],
+                workOrderIds: [firstState.workOrderId, secondState.id],
+              });
+            }
+          }
+        });
+      });
+
+      it("Task 128 serializes different-Project Finish operations sharing one Product", async () => {
+        const fixture = requireHarness();
+        const admin = fixture.actors.admin;
+        const applicationName = `task128-shared-product-${randomUUID()}`;
+        await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
+          if (!first || !second || !observer) {
+            throw new Error("Task 128 shared-Product clients unavailable");
+          }
+          let firstState: Awaited<ReturnType<typeof createPreflightFixture>> | undefined;
+          let secondProjectId: string | undefined;
+          let secondWorkOrderId: string | undefined;
+          let secondUpdatedAt: string | undefined;
+          let firstReference: string | undefined;
+          let secondReference: string | undefined;
+          let waitingSecond: Promise<FinishResult> | undefined;
+          try {
+            await observer.query("begin");
+            firstState = await createPreflightFixture(observer, admin.profileId, {
+              physicalQuantity: "10",
+            });
+            secondProjectId = randomUUID();
+            const secondProjectProductId = randomUUID();
+            secondWorkOrderId = randomUUID();
+            secondUpdatedAt = "2026-09-29 12:34:57.123456+00";
+            await observer.query(
+              `insert into public.projects (
+                 id, name, customer_name, start_date, delivery_date,
+                 created_by_user_id, updated_by_user_id
+               ) values (
+                 $1::uuid, 'Task 128 Shared Product Project',
+                 'Task 128 Customer', '2026-09-29', '2026-10-29',
+                 $2::uuid, $2::uuid
+               )`,
+              [secondProjectId, admin.profileId],
+            );
+            await observer.query(
+              `insert into public.project_products (
+                 id, project_id, name, created_by_user_id, updated_by_user_id
+               ) values ($1::uuid, $2::uuid, 'Task 128 Group', $3::uuid, $3::uuid)`,
+              [secondProjectProductId, secondProjectId, admin.profileId],
+            );
+            await observer.query(
+              `insert into public.project_product_components (
+                 project_product_id, product_id, required_quantity,
+                 created_by_user_id, updated_by_user_id
+               ) values ($1::uuid, $2::uuid, 4, $3::uuid, $3::uuid)`,
+              [secondProjectProductId, firstState.productId, admin.profileId],
+            );
+            await observer.query(
+              `insert into public.work_orders (
+                 id, work_order_number, project_id, customer_name_snapshot,
+                 description, created_at, created_by_user_id,
+                 updated_at, updated_by_user_id
+               ) values (
+                 $1::uuid, $2::text, $3::uuid, 'Task 128 Customer',
+                 'Task 128 shared Product work', $4::timestamptz, $5::uuid,
+                 $4::timestamptz, $5::uuid
+               )`,
+              [
+                secondWorkOrderId,
+                await nextIsolatedWorkOrderNumber(observer),
+                secondProjectId,
+                secondUpdatedAt,
+                admin.profileId,
+              ],
+            );
+            await observer.query(
+              `insert into public.work_order_items (
+                 work_order_id, product_id, quantity, added_by_user_id
+               ) values ($1::uuid, $2::uuid, 4, $3::uuid)`,
+              [secondWorkOrderId, firstState.productId, admin.profileId],
+            );
+            firstReference = await insertPreparedPdfObject(
+              observer, firstState.workOrderId,
+            );
+            secondReference = await insertPreparedPdfObject(
+              observer, secondWorkOrderId,
+            );
+            await observer.query("commit");
+
+            await first.query("begin");
+            await actAs(first, admin);
+            expect((await finishWorkOrder(
+              first,
+              firstState.workOrderId,
+              firstState.updatedAt,
+              firstReference,
+            )).work_order_id).toBe(firstState.workOrderId);
+            expect((await first.query(
+              `select source_id, project_id, quantity_delta::text
+               from public.inventory_movements
+               where source_type = 'work_order' and source_id = $1::uuid`,
+              [firstState.workOrderId],
+            )).rows).toEqual([{
+              project_id: firstState.projectId,
+              quantity_delta: "-4",
+              source_id: firstState.workOrderId,
+            }]);
+
+            await second.query("begin");
+            await second.query(
+              "select pg_catalog.set_config('application_name', $1::text, true)",
+              [applicationName],
+            );
+            await actAs(second, admin);
+            waitingSecond = finishWorkOrder(
+              second,
+              secondWorkOrderId,
+              secondUpdatedAt,
+              secondReference,
+            );
+            await waitForLockWait(observer, applicationName);
+
+            await first.query("rollback");
+            expect((await waitingSecond).work_order_id).toBe(secondWorkOrderId);
+            waitingSecond = undefined;
+            expect((await second.query(
+              `select source_id, project_id, quantity_delta::text
+               from public.inventory_movements
+               where source_type = 'work_order' and source_id = $1::uuid`,
+              [secondWorkOrderId],
+            )).rows).toEqual([{
+              project_id: secondProjectId,
+              quantity_delta: "-4",
+              source_id: secondWorkOrderId,
+            }]);
+            await second.query("rollback");
+
+            expect((await observer.query(
+              `select
+                 (select quantity::text from public.inventory_balances
+                  where product_id = $1::uuid) as quantity,
+                 (select pg_catalog.count(*)::text from public.inventory_movements
+                  where source_id = any($2::uuid[])) as movements`,
+              [
+                firstState.productId,
+                [firstState.workOrderId, secondWorkOrderId],
+              ],
+            )).rows).toEqual([{ movements: "0", quantity: "10" }]);
+          } finally {
+            await first.query("rollback").catch(() => undefined);
+            await second.query("rollback").catch(() => undefined);
+            await waitingSecond?.catch(() => undefined);
+            if (
+              firstState?.projectId
+              && secondProjectId
+              && secondWorkOrderId
+              && firstReference
+              && secondReference
+            ) {
+              await cleanupTask128Fixtures(observer, {
+                productIds: [firstState.productId],
+                projectIds: [firstState.projectId, secondProjectId],
+                workOrderIds: [firstState.workOrderId, secondWorkOrderId],
+              });
+            }
+          }
+        });
+      });
+
+      it("Task 128 enforces every Finished Work Order artifact at the database boundary", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const state = await createPreflightFixture(database, admin.profileId);
+          const reference = await insertPreparedPdfObject(database, state.workOrderId);
+          await actAs(database, admin);
+          const finished = await finishWorkOrder(
+            database, state.workOrderId, state.updatedAt, reference,
+          );
+          await database.query("reset role");
+          const itemId = (await database.query<{ id: string }>(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [state.workOrderId],
+          )).rows[0]!.id;
+          const movementId = (await database.query<{ id: string }>(
+            `select id from public.inventory_movements
+             where source_type = 'work_order' and source_id = $1::uuid`,
+            [state.workOrderId],
+          )).rows[0]!.id;
+
+          for (const [name, code, operation] of [
+            ["finished_work_order_update", "WOR02", () => database.query(
+              "update public.work_orders set description = description where id = $1::uuid",
+              [state.workOrderId],
+            )],
+            ["finished_work_order_delete", "WOR02", () => database.query(
+              "delete from public.work_orders where id = $1::uuid",
+              [state.workOrderId],
+            )],
+            ["finished_item_insert", "WOR04", () => database.query(
+              `insert into public.work_order_items (
+                 work_order_id, product_id, quantity, added_by_user_id
+               ) values ($1::uuid, $2::uuid, 1, $3::uuid)`,
+              [state.workOrderId, state.productId, admin.profileId],
+            )],
+            ["finished_item_update", "WOR04", () => database.query(
+              "update public.work_order_items set quantity = quantity where id = $1::uuid",
+              [itemId],
+            )],
+            ["finished_item_delete", "WOR04", () => database.query(
+              "delete from public.work_order_items where id = $1::uuid",
+              [itemId],
+            )],
+            ["finished_pdf_update", "WOR09", () => database.query(
+              "update public.work_order_pdfs set content_hash = null where id = $1::uuid",
+              [finished.work_order_pdf_id],
+            )],
+            ["finished_pdf_delete", "WOR09", () => database.query(
+              "delete from public.work_order_pdfs where id = $1::uuid",
+              [finished.work_order_pdf_id],
+            )],
+            ["finished_movement_update", "55000", () => database.query(
+              "update public.inventory_movements set reason = reason where id = $1::uuid",
+              [movementId],
+            )],
+            ["finished_movement_delete", "55000", () => database.query(
+              "delete from public.inventory_movements where id = $1::uuid",
+              [movementId],
+            )],
+          ] as const) {
+            await database.query(`savepoint ${name}`);
+            await expect(operation()).rejects.toMatchObject({ code });
+            await database.query(`rollback to savepoint ${name}`);
+          }
+
+          expect((await database.query(
+            `select
+               (select status from public.work_orders where id = $1::uuid)
+                 as status,
+               (select pg_catalog.count(*)::text from public.work_order_items
+                where work_order_id = $1::uuid) as items,
+               (select pg_catalog.count(*)::text from public.work_order_pdfs
+                where work_order_id = $1::uuid) as pdfs,
+               (select pg_catalog.count(*)::text from public.inventory_movements
+                where source_id = $1::uuid) as movements`,
+            [state.workOrderId],
+          )).rows).toEqual([{
+            items: "1",
+            movements: "1",
+            pdfs: "1",
+            status: "finished",
+          }]);
         });
       });
 
