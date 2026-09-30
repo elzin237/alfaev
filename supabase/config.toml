@@ -405,6 +405,12 @@ verify_jwt = true
 import_map = "./functions/admin-documentation-pdf/deno.json"
 entrypoint = "./functions/admin-documentation-pdf/index.ts"
 
+[functions.finish-work-order]
+enabled = true
+verify_jwt = true
+import_map = "./functions/finish-work-order/deno.json"
+entrypoint = "./functions/finish-work-order/index.ts"
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

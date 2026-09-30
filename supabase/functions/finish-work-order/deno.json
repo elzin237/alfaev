@@ -1,0 +1,11 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.115.0",
+    "pdfmake/build/pdfmake.js": "npm:pdfmake@0.2.20/build/pdfmake.js",
+    "pdfmake/build/vfs_fonts.js": "npm:pdfmake@0.2.20/build/vfs_fonts.js",
+    "pdfmake/interfaces": "npm:@types/pdfmake@0.2.12/interfaces.d.ts",
+    "./handler": "./handler.ts",
+    "../_shared/work-order-pdf/generator": "../_shared/work-order-pdf/generator.ts",
+    "../_shared/work-order-pdf/model": "../_shared/work-order-pdf/model.ts"
+  }
+}
