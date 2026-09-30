@@ -1,3 +1,5 @@
+import { Link } from "react-router";
+
 import EmptyState from "../../../shared/components/EmptyState";
 import type {
   FinishedWorkOrderDetail,
@@ -174,17 +176,18 @@ function FinishedWorkOrderView({
                 Document version {detail.pdf.documentVersion}
               </p>
               <p id="official-pdf-action-help" className="mt-1 text-sm text-zinc-500">
-                PDF opening will be available when authorized document access is connected.
+                Opens the authorized PDF viewer in a new browser tab.
               </p>
             </div>
-            <button
-              type="button"
-              disabled
+            <Link
+              to={`/work-orders/${detail.id}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
               aria-describedby="official-pdf-action-help"
-              className="rounded-xl border border-zinc-300 bg-zinc-100 px-5 py-3 text-sm font-semibold text-zinc-500 disabled:cursor-not-allowed"
+              className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-700 focus:outline-none focus:ring-2 focus:ring-zinc-400"
             >
               Open PDF
-            </button>
+            </Link>
           </div>
         ) : (
           <p className="mt-4 text-sm text-zinc-600">

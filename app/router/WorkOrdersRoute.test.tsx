@@ -21,6 +21,9 @@ vi.mock("../../pages/work-orders/NewWorkOrderPage", () => ({
 vi.mock("../../pages/work-orders/WorkOrderDetailPage", () => ({
   default: () => <h1>Work Order detail route content</h1>,
 }));
+vi.mock("../../pages/work-orders/WorkOrderPdfViewerPage", () => ({
+  default: () => <h1>Work Order PDF route content</h1>,
+}));
 
 import AppRouter from "./AppRouter";
 
@@ -104,6 +107,32 @@ describe("Work Orders route", () => {
     await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
       "work_orders.view",
     ));
+    expect(routeMocks.hasPermission).not.toHaveBeenCalledWith("projects.view");
+  });
+
+  it("keeps the Work Order PDF route behind work_orders.view", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[
+          "/work-orders/00000000-0000-4000-8000-000000000010/pdf",
+        ]}>
+          <AppRouter />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", {
+      name: "Work Order PDF route content",
+    })).toBeInTheDocument();
+    await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
+      "work_orders.view",
+    ));
+    expect(routeMocks.hasPermission).not.toHaveBeenCalledWith(
+      "work_orders.finish",
+    );
     expect(routeMocks.hasPermission).not.toHaveBeenCalledWith("projects.view");
   });
 });

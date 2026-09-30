@@ -1676,7 +1676,14 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.getByText("17")).toBeInTheDocument();
     expect(screen.getByText("15")).toBeInTheDocument();
     expect(screen.getByText("Document version 1")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open PDF" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Open PDF" })).toHaveAttribute(
+      "href",
+      `/work-orders/${workOrderId}/pdf`,
+    );
+    expect(screen.getByRole("link", { name: "Open PDF" }))
+      .toHaveAttribute("target", "_blank");
+    expect(screen.getByRole("link", { name: "Open PDF" }))
+      .toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.queryByLabelText("Project")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Short Description")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
