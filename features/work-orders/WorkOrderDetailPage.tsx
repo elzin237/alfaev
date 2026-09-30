@@ -26,6 +26,7 @@ function WorkOrderDetailPage() {
   const {
     canDeleteDraft,
     canEditDraft,
+    canFinishDraft,
     deleteDraft,
     detailQuery,
     isLoadingMaterial,
@@ -102,6 +103,7 @@ function WorkOrderDetailPage() {
             workOrder={workOrder}
             canEdit={canEditDraft}
             canDelete={canDeleteDraft}
+            canFinish={canFinishDraft}
             projectChoices={projectChoices}
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
@@ -133,6 +135,7 @@ function WorkOrderDetailPage() {
               }
               return result;
             }}
+            onFinishConfirm={() => undefined}
           />
         ) : (
           <section className="rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">

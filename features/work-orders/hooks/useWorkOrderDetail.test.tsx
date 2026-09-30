@@ -66,13 +66,16 @@ function renderDetailHook(id = workOrderId) {
 function allowPermissions({
   deleteDraft = false,
   editDraft = false,
-}: { deleteDraft?: boolean; editDraft?: boolean }) {
+  finish = false,
+}: { deleteDraft?: boolean; editDraft?: boolean; finish?: boolean }) {
   detailMocks.hasPermission.mockImplementation(async (permission: string) => ({
     ok: true,
     value: permission === "work_orders.delete_draft"
       ? deleteDraft
       : permission === "work_orders.edit_draft"
       ? editDraft
+      : permission === "work_orders.finish"
+      ? finish
       : false,
   }));
 }
@@ -171,6 +174,7 @@ describe("useWorkOrderDetail", () => {
     ).toHaveBeenCalledOnce());
     expect(detailMocks.hasPermission).not.toHaveBeenCalled();
     expect(result.current.canDeleteDraft).toBe(true);
+    expect(result.current.canFinishDraft).toBe(true);
   });
 
   it("derives delete authority independently from edit and fails closed for other permissions", async () => {
@@ -193,8 +197,21 @@ describe("useWorkOrderDetail", () => {
     detailMocks.hasPermission.mockClear();
     allowPermissions({});
     const viewer = renderDetailHook();
-    await waitFor(() => expect(detailMocks.hasPermission).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(detailMocks.hasPermission).toHaveBeenCalledTimes(3));
     expect(viewer.result.current.canDeleteDraft).toBe(false);
+    expect(viewer.result.current.canFinishDraft).toBe(false);
+  });
+
+  it("derives Finish authority independently from edit and delete permissions", async () => {
+    allowPermissions({ finish: true });
+    const finisher = renderDetailHook();
+
+    await waitFor(() => expect(finisher.result.current.canFinishDraft).toBe(true));
+    expect(finisher.result.current.canEditDraft).toBe(false);
+    expect(finisher.result.current.canDeleteDraft).toBe(false);
+    expect(detailMocks.hasPermission).toHaveBeenCalledWith(
+      "work_orders.finish",
+    );
   });
 
   it("allows work_orders.edit_draft and fails closed for view-only permission", async () => {
@@ -229,6 +246,7 @@ describe("useWorkOrderDetail", () => {
     await waitFor(() => expect(result.current.detailQuery.isSuccess).toBe(true));
     expect(result.current.canEditDraft).toBe(false);
     expect(result.current.canDeleteDraft).toBe(false);
+    expect(result.current.canFinishDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
     expect(detailMocks.listDraftWorkOrderMaterials).not.toHaveBeenCalled();
   });
@@ -294,6 +312,7 @@ describe("useWorkOrderDetail", () => {
     const inactive = renderDetailHook();
     expect(inactive.result.current.canEditDraft).toBe(false);
     expect(inactive.result.current.canDeleteDraft).toBe(false);
+    expect(inactive.result.current.canFinishDraft).toBe(false);
     inactive.unmount();
 
     detailMocks.useAuth.mockReturnValueOnce({
@@ -304,6 +323,7 @@ describe("useWorkOrderDetail", () => {
     const missing = renderDetailHook();
     expect(missing.result.current.canEditDraft).toBe(false);
     expect(missing.result.current.canDeleteDraft).toBe(false);
+    expect(missing.result.current.canFinishDraft).toBe(false);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
   });
 

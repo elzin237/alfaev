@@ -61,6 +61,7 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
   return {
     canDeleteDraft: false,
     canEditDraft: true,
+    canFinishDraft: false,
     detailQuery: {
       data: { ok: true, value: draft },
       isError: false,
@@ -156,6 +157,7 @@ describe("WorkOrderDetailPage", () => {
       workOrder: draft,
       canEdit: true,
       canDelete: true,
+      canFinish: false,
       projectChoices,
       projectChoicesError: null,
       projectChoicesLoading: false,
@@ -203,6 +205,7 @@ describe("WorkOrderDetailPage", () => {
       workOrder: draft,
       canEdit: true,
       canDelete: true,
+      canFinish: false,
       projectChoices,
       projectChoicesError: null,
       projectChoicesLoading: false,
@@ -1556,6 +1559,7 @@ describe("WorkOrderDetailPage", () => {
   it("shows a minimal read-only Finished state without Draft controls", () => {
     pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
       canEditDraft: false,
+      canFinishDraft: true,
       detailQuery: {
         data: { ok: true, value: { ...draft, status: "finished" } },
         isError: false,
@@ -1573,6 +1577,180 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /save|delete|finish/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows Finish independently of edit/delete authority and explains the saved Draft", async () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canEditDraft: false,
+      canDeleteDraft: false,
+      canFinishDraft: true,
+      materialsQuery: {
+        data: {
+          ok: true,
+          value: [{
+            productId: "00000000-0000-4000-8000-000000000030",
+            serialNumber: "0000123",
+            productName: "Relay Module",
+            quantity: "2",
+            currentInventory: "17",
+          }],
+        },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    expect(screen.queryByRole("button", { name: "Save for Later" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete Draft" }))
+      .not.toBeInTheDocument();
+    fireEvent.click(finishButton);
+
+    const dialog = screen.getByRole("dialog", { name: "Finish Work Order?" });
+    expect(dialog).toHaveTextContent("RN-2026-0042");
+    expect(dialog).toHaveTextContent("Alpha Project");
+    expect(dialog).toHaveTextContent("1 saved material");
+    expect(dialog).toHaveTextContent("deduct the saved material quantities from Inventory");
+    expect(dialog).toHaveTextContent("generate and finalize the official PDF");
+    expect(dialog).toHaveTextContent("permanently lock the Work Order as read-only");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Finish Work Order?" }))
+      .not.toBeInTheDocument();
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+    expect(pageMocks.deleteDraft).not.toHaveBeenCalled();
+  });
+
+  it("hides Finish without authority", async () => {
+    renderPage();
+    await screen.findByText("No materials added yet.");
+
+    expect(screen.queryByRole("button", { name: "Finish Work Order" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("requires saving Project, Description, and material changes before Finish", async () => {
+    const persistedMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+      materialsQuery: {
+        data: { ok: true, value: [persistedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    expect(finishButton).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: replacementProjectId },
+    });
+    expect(finishButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Project"), {
+      target: { value: projectId },
+    });
+    expect(finishButton).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: "Unsaved description" },
+    });
+    expect(finishButton).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Short Description"), {
+      target: { value: draft.description },
+    });
+    expect(finishButton).toBeEnabled();
+
+    fireEvent.change(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    }), { target: { value: "3" } });
+    expect(finishButton).toBeDisabled();
+    expect(screen.getByText("Save Draft changes before finishing."))
+      .toBeInTheDocument();
+    fireEvent.click(finishButton);
+    expect(screen.queryByRole("dialog", { name: "Finish Work Order?" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("guards Save, Delete, and editing while local Finish confirmation is active", async () => {
+    let resolveFinish: (() => void) | undefined;
+    const onFinishConfirm = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
+      resolveFinish = resolve;
+    }));
+    const onSave = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { workOrderId, updatedAt: draft.updatedAt },
+    });
+    const onDelete = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { workOrderId, workOrderNumber: draft.workOrderNumber },
+    });
+    render(<WorkOrderDraftShell
+      workOrder={draft}
+      canEdit
+      canDelete
+      canFinish
+      projectChoices={projectChoices}
+      projectChoicesError={null}
+      projectChoicesLoading={false}
+      persistedMaterials={[]}
+      materialsLoading={false}
+      materialsError={null}
+      materialsReady
+      isSaving={false}
+      isDeleting={false}
+      isLoadingMaterial={false}
+      onReloadLatest={vi.fn().mockResolvedValue({ ok: false })}
+      onRetryMaterials={vi.fn()}
+      onRetryProjectChoices={vi.fn()}
+      onLoadMaterial={vi.fn()}
+      onSave={onSave}
+      onDelete={onDelete}
+      onFinishConfirm={onFinishConfirm}
+    />);
+
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    fireEvent.click(finishButton);
+    const dialog = screen.getByRole("dialog", { name: "Finish Work Order?" });
+    expect(screen.getByRole("button", { name: "Save for Later" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete Draft" })).toBeDisabled();
+    expect(screen.getByLabelText("Project")).toBeDisabled();
+    expect(screen.getByLabelText("Short Description")).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .toBeDisabled();
+
+    const confirm = within(dialog).getByRole("button", {
+      name: "Finish Work Order",
+    });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(onFinishConfirm).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    resolveFinish?.();
+    await waitFor(() => expect(screen.queryByRole("dialog", {
+      name: "Finish Work Order?",
+    })).not.toBeInTheDocument());
+    expect(screen.queryByRole("status", { name: /finished/i }))
       .not.toBeInTheDocument();
   });
 });

@@ -44,6 +44,11 @@ export function useWorkOrderDetail(workOrderId: string) {
     profile?.id,
     "work_orders.delete_draft",
   );
+  const finishPermissionKey = permissionQueryKey(
+    session?.user.id,
+    profile?.id,
+    "work_orders.finish",
+  );
   const detailQuery = useQuery({
     queryKey: detailKey,
     queryFn: () => getWorkOrderDetail(workOrderId),
@@ -59,6 +64,12 @@ export function useWorkOrderDetail(workOrderId: string) {
   const deletePermissionQuery = useQuery({
     queryKey: deletePermissionKey,
     queryFn: () => hasPermission("work_orders.delete_draft"),
+    enabled: Boolean(hasActiveIdentity && !isAdmin),
+    staleTime: 60_000,
+  });
+  const finishPermissionQuery = useQuery({
+    queryKey: finishPermissionKey,
+    queryFn: () => hasPermission("work_orders.finish"),
     enabled: Boolean(hasActiveIdentity && !isAdmin),
     staleTime: 60_000,
   });
@@ -79,6 +90,15 @@ export function useWorkOrderDetail(workOrderId: string) {
   );
   const canDeleteDraft = Boolean(
     hasDeletePermission && detail?.status === "draft",
+  );
+  const hasFinishPermission = hasActiveIdentity && (
+    isAdmin || (
+      finishPermissionQuery.data?.ok === true &&
+      finishPermissionQuery.data.value
+    )
+  );
+  const canFinishDraft = Boolean(
+    hasFinishPermission && detail?.status === "draft",
   );
   const projectChoicesQuery = useQuery({
     queryKey: workOrderProjectChoicesQueryKey(profile?.id),
@@ -240,6 +260,7 @@ export function useWorkOrderDetail(workOrderId: string) {
   return {
     canDeleteDraft,
     canEditDraft,
+    canFinishDraft,
     deleteDraft: deleteMutation.mutateAsync,
     detailQuery,
     isDeleting: deleteMutation.isPending,
