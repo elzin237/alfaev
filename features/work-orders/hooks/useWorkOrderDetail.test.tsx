@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const detailMocks = vi.hoisted(() => ({
   deleteDraftWorkOrder: vi.fn(),
+  finishWorkOrder: vi.fn(),
   getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
   hasPermission: vi.fn(),
@@ -32,6 +33,9 @@ vi.mock("../services/workOrderService", () => ({
   listDraftWorkOrderMaterials: detailMocks.listDraftWorkOrderMaterials,
   resolveWorkOrderProductBarcode: detailMocks.resolveWorkOrderProductBarcode,
   saveDraftWorkOrder: detailMocks.saveDraftWorkOrder,
+}));
+vi.mock("../services/workOrderFinishService", () => ({
+  finishWorkOrder: detailMocks.finishWorkOrder,
 }));
 
 import { useWorkOrderDetail } from "./useWorkOrderDetail";
@@ -124,6 +128,19 @@ beforeEach(() => {
   detailMocks.deleteDraftWorkOrder.mockResolvedValue({
     ok: true,
     value: { workOrderId, workOrderNumber: draftDetail.workOrderNumber },
+  });
+  detailMocks.finishWorkOrder.mockResolvedValue({
+    ok: true,
+    value: {
+      workOrderId,
+      workOrderNumber: draftDetail.workOrderNumber,
+      finishedAt: "2026-09-22T09:02:00.123456+00:00",
+      projectId: "00000000-0000-4000-8000-000000000020",
+      projectCompleted: false,
+      workOrderPdfId: "00000000-0000-4000-8000-000000000040",
+      storageReference:
+        `final/${workOrderId}/00000000-0000-4000-8000-000000000050.pdf`,
+    },
   });
 });
 
@@ -652,5 +669,131 @@ describe("useWorkOrderDetail", () => {
     });
     expect(invalidateQueries).not.toHaveBeenCalled();
     expect(detailMocks.deleteDraftWorkOrder).toHaveBeenCalledOnce();
+  });
+
+  it("finishes with the exact saved timestamp and refreshes authoritative caches", async () => {
+    allowPermissions({ finish: true });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const removeQueries = vi.spyOn(queryClient, "removeQueries");
+    const exactVersion = "2026-09-22T10:00:00.123456+00:00";
+
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
+    await act(async () => {
+      await result.current.finishDraft({ expectedUpdatedAt: exactVersion });
+    });
+
+    expect(detailMocks.finishWorkOrder).toHaveBeenCalledExactlyOnceWith({
+      workOrderId,
+      expectedUpdatedAt: exactVersion,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "list", "profile-1"],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "projects",
+        "detail",
+        "profile-1",
+        "00000000-0000-4000-8000-000000000020",
+      ],
+      exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["projects", "list", "profile-1"],
+      exact: true,
+    });
+    expect(removeQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "draft-materials", "profile-1", workOrderId],
+      exact: true,
+    });
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(false));
+    expect(result.current.canEditDraft).toBe(false);
+    expect(result.current.canDeleteDraft).toBe(false);
+  });
+
+  it("does not auto-refresh or retry a stale Finish", async () => {
+    allowPermissions({ finish: true });
+    detailMocks.finishWorkOrder.mockResolvedValue({
+      ok: false,
+      error: { code: "stale_work_order", message: "safe stale message" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
+
+    await act(async () => {
+      await result.current.finishDraft({
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+
+    expect(detailMocks.finishWorkOrder).toHaveBeenCalledOnce();
+    expect(invalidateQueries).not.toHaveBeenCalled();
+    expect(result.current.canFinishDraft).toBe(true);
+  });
+
+  it("refreshes Finish permission after access loss", async () => {
+    allowPermissions({ finish: true });
+    detailMocks.finishWorkOrder.mockResolvedValue({
+      ok: false,
+      error: { code: "access_denied", message: "safe access message" },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
+
+    await act(async () => {
+      await result.current.finishDraft({
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: [
+        "permission",
+        "auth-user-1",
+        "profile-1",
+        "work_orders.finish",
+      ],
+      exact: true,
+    }));
+  });
+
+  it("refreshes authoritative Work Order state when the server says it is Finished", async () => {
+    allowPermissions({ finish: true });
+    detailMocks.finishWorkOrder.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "work_order_already_finished",
+        message: "safe lifecycle message",
+      },
+    });
+    const { result, queryClient } = renderDetailHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
+
+    await act(async () => {
+      await result.current.finishDraft({
+        expectedUpdatedAt: draftDetail.updatedAt,
+      });
+    });
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "detail", "profile-1", workOrderId],
+      exact: true,
+    }));
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["work-orders", "list", "profile-1"],
+      exact: true,
+    });
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(false));
+    expect(result.current.canEditDraft).toBe(false);
+    expect(result.current.canDeleteDraft).toBe(false);
   });
 });

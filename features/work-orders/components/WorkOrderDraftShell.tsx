@@ -15,6 +15,7 @@ import type {
   WorkOrderMaterialLoadResult,
   WorkOrderProjectChoice,
 } from "../services/workOrderService";
+import type { FinishWorkOrderResult } from "../services/workOrderFinishService";
 import { isValidWorkOrderMaterialQuantity } from "../workOrderMaterialQuantity";
 
 export interface WorkOrderDraftSubmission {
@@ -44,6 +45,7 @@ interface WorkOrderDraftShellProps {
   materialsReady: boolean;
   isSaving: boolean;
   isDeleting: boolean;
+  isFinishing: boolean;
   isLoadingMaterial: boolean;
   onReloadLatest: () => Promise<ReloadedWorkOrderDraft | { ok: false }>;
   onRetryMaterials: () => void;
@@ -51,7 +53,7 @@ interface WorkOrderDraftShellProps {
   onLoadMaterial: (serialNumber: string) => Promise<WorkOrderMaterialLoadResult>;
   onSave: (submission: WorkOrderDraftSubmission) => Promise<DraftWorkOrderSaveResult>;
   onDelete: (expectedUpdatedAt: string) => Promise<DraftWorkOrderDeleteResult>;
-  onFinishConfirm?: () => void | Promise<void>;
+  onFinishConfirm: (expectedUpdatedAt: string) => Promise<FinishWorkOrderResult>;
 }
 
 function materialSignature(materials: DraftWorkOrderMaterial[]): string {
@@ -84,6 +86,7 @@ function WorkOrderDraftShell({
   materialsReady,
   isSaving,
   isDeleting,
+  isFinishing,
   isLoadingMaterial,
   onReloadLatest,
   onRetryMaterials,
@@ -118,6 +121,9 @@ function WorkOrderDraftShell({
   >(null);
   const [finishDialogOpen, setFinishDialogOpen] = useState(false);
   const [isFinishConfirming, setIsFinishConfirming] = useState(false);
+  const [finishFeedback, setFinishFeedback] = useState<
+    { code: string; message: string } | null
+  >(null);
   const [materialFocusRequest, setMaterialFocusRequest] = useState<{ productId: string; requestId: number } | null>(null);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const barcodeResolutionInFlight = useRef(false);
@@ -152,6 +158,7 @@ function WorkOrderDraftShell({
     finishDialogOpenRef.current = false;
     finishConfirmationInFlight.current = false;
     setIsFinishConfirming(false);
+    setFinishFeedback(null);
   }, [workOrder.id]);
 
   useEffect(() => {
@@ -181,7 +188,8 @@ function WorkOrderDraftShell({
     selectedProjectId !== savedProjectId ||
     description !== savedDescription ||
     materialSignature(materials) !== savedMaterialsSignature;
-  const interactionBlocked = isSaving || isDeleting || isFinishConfirming ||
+  const interactionBlocked = isSaving || isDeleting || isFinishing ||
+    isFinishConfirming ||
     deleteDialogOpen || finishDialogOpen;
   const editingDisabled = interactionBlocked || !materialsHydrated;
 
@@ -190,7 +198,7 @@ function WorkOrderDraftShell({
       submissionInFlight.current || deleteSubmissionInFlight.current ||
       finishConfirmationInFlight.current || deleteDialogOpenRef.current ||
       finishDialogOpenRef.current || isSaving || isDeleting ||
-      isFinishConfirming || !canEdit ||
+      isFinishing || isFinishConfirming || !canEdit ||
       !materialsHydrated
     ) return;
     if (materials.some((material) => !isValidWorkOrderMaterialQuantity(material.quantity))) {
@@ -227,6 +235,7 @@ function WorkOrderDraftShell({
         setExpectedUpdatedAt(result.value.updatedAt);
         setShowRequiredErrors(false);
         setSaveFeedback({ kind: "success", message: "Draft saved." });
+        setFinishFeedback(null);
       } else {
         setSaveFeedback({ kind: "error", code: result.error.code, message: result.error.message });
       }
@@ -239,7 +248,8 @@ function WorkOrderDraftShell({
 
   async function handleReloadLatest() {
     if (
-      isReloading || isDeleting || isSaving || isFinishConfirming ||
+      isReloading || isDeleting || isSaving || isFinishing ||
+      isFinishConfirming ||
       deleteDialogOpenRef.current || finishDialogOpenRef.current
     ) return;
     setIsReloading(true);
@@ -260,6 +270,7 @@ function WorkOrderDraftShell({
         setHydratedWorkOrderId(result.detail.id);
         setSaveFeedback(null);
         setDeleteFeedback(null);
+        setFinishFeedback(null);
         setDeleteDialogOpen(false);
         deleteDialogOpenRef.current = false;
         setDeleteDialogError(null);
@@ -294,7 +305,7 @@ function WorkOrderDraftShell({
     if (
       deleteSubmissionInFlight.current || submissionInFlight.current ||
       finishConfirmationInFlight.current || finishDialogOpenRef.current ||
-      isDeleting || isSaving || isFinishConfirming
+      isDeleting || isSaving || isFinishing || isFinishConfirming
     ) return;
     deleteSubmissionInFlight.current = true;
     setDeleteDialogError(null);
@@ -330,6 +341,7 @@ function WorkOrderDraftShell({
       submissionInFlight.current || deleteSubmissionInFlight.current ||
       finishConfirmationInFlight.current
     ) return;
+    setFinishFeedback(null);
     finishDialogOpenRef.current = true;
     setFinishDialogOpen(true);
   }
@@ -338,12 +350,18 @@ function WorkOrderDraftShell({
     if (
       !finishDialogOpenRef.current || finishConfirmationInFlight.current ||
       submissionInFlight.current || deleteSubmissionInFlight.current ||
-      isSaving || isDeleting || hasUnsavedChanges
+      isSaving || isDeleting || isFinishing || hasUnsavedChanges
     ) return;
     finishConfirmationInFlight.current = true;
     setIsFinishConfirming(true);
     try {
-      await onFinishConfirm?.();
+      const result = await onFinishConfirm(expectedUpdatedAt);
+      if (!result.ok) setFinishFeedback(result.error);
+    } catch {
+      setFinishFeedback({
+        code: "finish_failed",
+        message: "The Work Order could not be finished. Please try again.",
+      });
     } finally {
       finishConfirmationInFlight.current = false;
       finishDialogOpenRef.current = false;
@@ -388,10 +406,11 @@ function WorkOrderDraftShell({
         ) : materialsReady ? <div className="mt-6"><LoadingState message="Preparing Draft materials..." /></div> : null}
       </section>
 
-      {(canEdit || canDelete || canFinish || saveFeedback || deleteFeedback) && <section aria-label="Draft actions" className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
+      {(canEdit || canDelete || canFinish || saveFeedback || deleteFeedback || finishFeedback) && <section aria-label="Draft actions" className="space-y-4 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         {saveFeedback?.kind === "success" && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800">{saveFeedback.message}</p>}
         {saveFeedback?.kind === "error" && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{saveFeedback.message}</p>{saveFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {deleteFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{deleteFeedback.message}</p>{deleteFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || isDeleting} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
+        {finishFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{finishFeedback.message}</p>{finishFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || interactionBlocked} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {canFinish && hasUnsavedChanges && materialsHydrated && <p className="text-sm font-medium text-amber-700">Save Draft changes before finishing.</p>}
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           {canDelete ? <button type="button" disabled={interactionBlocked} onClick={() => { if (finishDialogOpenRef.current || finishConfirmationInFlight.current) return; deleteDialogOpenRef.current = true; setDeleteFeedback(null); setDeleteDialogError(null); setDeleteDialogOpen(true); }} className="rounded-xl border border-red-300 bg-white px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60">Delete Draft</button> : <span />}
@@ -421,9 +440,9 @@ function WorkOrderDraftShell({
         workOrderNumber={workOrder.workOrderNumber}
         projectName={savedProjectName ?? "Not selected"}
         materialCount={savedMaterialCount}
-        isConfirming={isFinishConfirming}
+        isConfirming={isFinishConfirming || isFinishing}
         onCancel={() => {
-          if (isFinishConfirming) return;
+          if (isFinishConfirming || isFinishing) return;
           finishDialogOpenRef.current = false;
           setFinishDialogOpen(false);
         }}

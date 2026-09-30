@@ -13,6 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 const pageMocks = vi.hoisted(() => ({
   deleteDraft: vi.fn(),
   detailRefetch: vi.fn(),
+  finishDraft: vi.fn(),
   materialsRefetch: vi.fn(),
   projectChoicesRefetch: vi.fn(),
   reloadLatestDraft: vi.fn(),
@@ -41,6 +42,16 @@ const draft = {
   description: "Build enclosure",
   createdAt: "2026-09-22T09:00:00.000Z",
   updatedAt: "2026-09-22T10:00:00.000Z",
+};
+const finishSuccess = {
+  workOrderId,
+  workOrderNumber: draft.workOrderNumber,
+  finishedAt: "2026-09-22T10:02:00.123456+00:00",
+  projectId,
+  projectCompleted: false,
+  workOrderPdfId: "00000000-0000-4000-8000-000000000040",
+  storageReference:
+    `final/${workOrderId}/00000000-0000-4000-8000-000000000050.pdf`,
 };
 const projectChoices = [
   {
@@ -82,11 +93,13 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
     },
     isSaving: false,
     isDeleting: false,
+    isFinishing: false,
     isLoadingMaterial: false,
     reloadLatestDraft: pageMocks.reloadLatestDraft,
     loadMaterial: pageMocks.loadMaterial,
     saveDraft: pageMocks.saveDraft,
     deleteDraft: pageMocks.deleteDraft,
+    finishDraft: pageMocks.finishDraft,
     ...overrides,
   };
 }
@@ -122,6 +135,10 @@ beforeEach(() => {
   pageMocks.deleteDraft.mockResolvedValue({
     ok: true,
     value: { workOrderId, workOrderNumber: draft.workOrderNumber },
+  });
+  pageMocks.finishDraft.mockResolvedValue({
+    ok: true,
+    value: finishSuccess,
   });
   pageMocks.loadMaterial.mockResolvedValue({
     ok: true,
@@ -167,6 +184,7 @@ describe("WorkOrderDetailPage", () => {
       materialsReady: true,
       isSaving: false,
       isDeleting: false,
+      isFinishing: false,
       isLoadingMaterial: false,
       onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
       onRetryMaterials: vi.fn(),
@@ -174,6 +192,7 @@ describe("WorkOrderDetailPage", () => {
       onLoadMaterial: vi.fn(),
       onSave,
       onDelete: pageMocks.deleteDraft,
+      onFinishConfirm: pageMocks.finishDraft,
     };
 
     const beforeHydration = document.createElement("div");
@@ -215,6 +234,7 @@ describe("WorkOrderDetailPage", () => {
       materialsReady: true,
       isSaving: false,
       isDeleting: false,
+      isFinishing: false,
       isLoadingMaterial: false,
       onReloadLatest: vi.fn().mockResolvedValue({ ok: false }),
       onRetryMaterials: vi.fn(),
@@ -222,6 +242,7 @@ describe("WorkOrderDetailPage", () => {
       onLoadMaterial: vi.fn(),
       onSave: vi.fn(),
       onDelete: pageMocks.deleteDraft,
+      onFinishConfirm: pageMocks.finishDraft,
     };
     const beforeHydration = document.createElement("div");
     beforeHydration.innerHTML = renderToStaticMarkup(
@@ -1689,8 +1710,8 @@ describe("WorkOrderDetailPage", () => {
   });
 
   it("guards Save, Delete, and editing while local Finish confirmation is active", async () => {
-    let resolveFinish: (() => void) | undefined;
-    const onFinishConfirm = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
+    let resolveFinish: ((result: { ok: true; value: typeof finishSuccess }) => void) | undefined;
+    const onFinishConfirm = vi.fn().mockReturnValue(new Promise((resolve) => {
       resolveFinish = resolve;
     }));
     const onSave = vi.fn().mockResolvedValue({
@@ -1715,6 +1736,7 @@ describe("WorkOrderDetailPage", () => {
       materialsReady
       isSaving={false}
       isDeleting={false}
+      isFinishing={false}
       isLoadingMaterial={false}
       onReloadLatest={vi.fn().mockResolvedValue({ ok: false })}
       onRetryMaterials={vi.fn()}
@@ -1742,15 +1764,150 @@ describe("WorkOrderDetailPage", () => {
     });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
-    expect(onFinishConfirm).toHaveBeenCalledOnce();
+    expect(onFinishConfirm).toHaveBeenCalledExactlyOnceWith(draft.updatedAt);
     expect(onSave).not.toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalled();
 
-    resolveFinish?.();
+    resolveFinish?.({ ok: true, value: finishSuccess });
     await waitFor(() => expect(screen.queryByRole("dialog", {
       name: "Finish Work Order?",
     })).not.toBeInTheDocument());
     expect(screen.queryByRole("status", { name: /finished/i }))
       .not.toBeInTheDocument();
+  });
+
+  it("submits Finish once with the exact saved timestamp and no Draft payload", async () => {
+    let resolveFinish: ((result: { ok: true; value: typeof finishSuccess }) => void) | undefined;
+    pageMocks.finishDraft.mockReturnValue(new Promise((resolve) => {
+      resolveFinish = resolve;
+    }));
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+    }));
+    renderPage();
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    fireEvent.click(finishButton);
+    const dialog = screen.getByRole("dialog", { name: "Finish Work Order?" });
+    const confirm = within(dialog).getByRole("button", {
+      name: "Finish Work Order",
+    });
+
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(pageMocks.finishDraft).toHaveBeenCalledExactlyOnceWith({
+      expectedUpdatedAt: draft.updatedAt,
+    });
+    expect(pageMocks.finishDraft.mock.calls[0]?.[0]).not.toHaveProperty(
+      "materials",
+    );
+    expect(pageMocks.finishDraft.mock.calls[0]?.[0]).not.toHaveProperty(
+      "projectId",
+    );
+    expect(pageMocks.finishDraft.mock.calls[0]?.[0]).not.toHaveProperty(
+      "storageReference",
+    );
+    expect(confirm).toBeDisabled();
+
+    resolveFinish?.({ ok: true, value: finishSuccess });
+    await waitFor(() => expect(screen.queryByRole("dialog", {
+      name: "Finish Work Order?",
+    })).not.toBeInTheDocument());
+    expect(screen.queryByText(/finished successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("preserves the Draft and offers an explicit reload after a stale Finish", async () => {
+    const persistedMaterial = {
+      productId: "00000000-0000-4000-8000-000000000030",
+      serialNumber: "0000123",
+      productName: "Relay Module",
+      quantity: "2",
+      currentInventory: "17",
+    };
+    pageMocks.finishDraft.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "stale_work_order",
+        message:
+          "This Draft changed since you loaded it. Reload the latest Draft before finishing.",
+      },
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+      materialsQuery: {
+        data: { ok: true, value: [persistedMaterial] },
+        isError: false,
+        isPending: false,
+        refetch: pageMocks.materialsRefetch,
+      },
+    }));
+    renderPage();
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    fireEvent.click(finishButton);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Finish Work Order",
+    }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("This Draft changed since you loaded it");
+    expect(screen.getByLabelText("Project")).toHaveValue(projectId);
+    expect(screen.getByLabelText("Short Description"))
+      .toHaveValue(draft.description);
+    expect(screen.getByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).toHaveValue("2");
+    expect(screen.getByRole("button", { name: "Reload latest Draft" }))
+      .toBeInTheDocument();
+    expect(pageMocks.reloadLatestDraft).not.toHaveBeenCalled();
+    expect(pageMocks.finishDraft).toHaveBeenCalledExactlyOnceWith({
+      expectedUpdatedAt: draft.updatedAt,
+    });
+    expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "insufficient Inventory",
+      "insufficient_inventory",
+      "Current physical Inventory is insufficient to finish this Work Order.",
+    ],
+    [
+      "PDF finalization failure",
+      "pdf_finalization_failed",
+      "The official Work Order PDF could not be finalized. Please try again.",
+    ],
+    [
+      "permission loss",
+      "access_denied",
+      "You no longer have permission to finish this Work Order.",
+    ],
+  ])("preserves editable Draft state after %s", async (_label, code, message) => {
+    pageMocks.finishDraft.mockResolvedValue({
+      ok: false,
+      error: { code, message },
+    });
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      canFinishDraft: true,
+    }));
+    renderPage();
+    const finishButton = await screen.findByRole("button", {
+      name: "Finish Work Order",
+    });
+    fireEvent.click(finishButton);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Finish Work Order",
+    }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByLabelText("Project")).toHaveValue(projectId);
+    expect(screen.getByLabelText("Short Description"))
+      .toHaveValue(draft.description);
+    expect(screen.getByRole("button", { name: "Save for Later" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Finish Work Order" })).toBeEnabled();
+    expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
+    expect(pageMocks.detailRefetch).not.toHaveBeenCalled();
   });
 });

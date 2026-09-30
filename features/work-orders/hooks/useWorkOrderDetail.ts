@@ -4,6 +4,10 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import {
+  projectDetailQueryKey,
+  projectListQueryKey,
+} from "../../projects/projectQueryKeys";
+import {
   deleteDraftWorkOrder,
   getWorkOrderDetail,
   getWorkOrderMaterialInventory,
@@ -16,6 +20,10 @@ import {
   type SaveDraftWorkOrderInput,
   type WorkOrderMaterialLoadResult,
 } from "../services/workOrderService";
+import {
+  finishWorkOrder,
+  type FinishWorkOrderInput,
+} from "../services/workOrderFinishService";
 import {
   workOrderDetailQueryKey,
   workOrderDraftMaterialsQueryKey,
@@ -237,6 +245,53 @@ export function useWorkOrderDetail(workOrderId: string) {
       }
     },
   });
+  const finishMutation = useMutation({
+    mutationFn: (input: Omit<FinishWorkOrderInput, "workOrderId">) =>
+      finishWorkOrder({ workOrderId, ...input }),
+    retry: false,
+    onSuccess: async (result) => {
+      if (result.ok) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
+          queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
+          queryClient.invalidateQueries({
+            queryKey: projectDetailQueryKey(
+              profile?.id,
+              result.value.projectId,
+            ),
+            exact: true,
+          }),
+          queryClient.invalidateQueries({
+            queryKey: projectListQueryKey(profile?.id),
+            exact: true,
+          }),
+        ]);
+        await queryClient.cancelQueries({
+          queryKey: materialsKey,
+          exact: true,
+        });
+        queryClient.removeQueries({ queryKey: materialsKey, exact: true });
+        return;
+      }
+
+      if (result.error.code === "access_denied") {
+        void queryClient.invalidateQueries({
+          queryKey: finishPermissionKey,
+          exact: true,
+        }).catch(() => undefined);
+      } else if (
+        result.error.code === "work_order_already_finished" ||
+        result.error.code === "finish_outcome_unknown" ||
+        result.error.code === "finish_response_invalid" ||
+        result.error.code === "work_order_not_found"
+      ) {
+        void Promise.all([
+          queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
+          queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
+        ]).catch(() => undefined);
+      }
+    },
+  });
 
   async function reloadLatestDraft() {
     const [latestDetail, latestMaterials] = await Promise.all([
@@ -257,13 +312,23 @@ export function useWorkOrderDetail(workOrderId: string) {
     return { ok: false as const };
   }
 
+  const finishStoppedDraft = finishMutation.data?.ok === true || (
+    finishMutation.data?.ok === false && (
+      finishMutation.data.error.code === "work_order_already_finished" ||
+      finishMutation.data.error.code === "finish_response_invalid" ||
+      finishMutation.data.error.code === "work_order_not_found"
+    )
+  );
+
   return {
-    canDeleteDraft,
-    canEditDraft,
-    canFinishDraft,
+    canDeleteDraft: canDeleteDraft && !finishStoppedDraft,
+    canEditDraft: canEditDraft && !finishStoppedDraft,
+    canFinishDraft: canFinishDraft && !finishStoppedDraft,
     deleteDraft: deleteMutation.mutateAsync,
     detailQuery,
+    finishDraft: finishMutation.mutateAsync,
     isDeleting: deleteMutation.isPending,
+    isFinishing: finishMutation.isPending,
     isLoadingMaterial: materialLoadMutation.isPending,
     isSaving: saveMutation.isPending,
     materialsQuery,

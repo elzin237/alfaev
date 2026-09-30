@@ -29,8 +29,10 @@ function WorkOrderDetailPage() {
     canFinishDraft,
     deleteDraft,
     detailQuery,
+    finishDraft,
     isLoadingMaterial,
     isDeleting,
+    isFinishing,
     isSaving,
     materialsQuery,
     projectChoicesQuery,
@@ -113,6 +115,7 @@ function WorkOrderDetailPage() {
             materialsReady={materialsQuery.data?.ok === true}
             isSaving={isSaving}
             isDeleting={isDeleting}
+            isFinishing={isFinishing}
             isLoadingMaterial={isLoadingMaterial}
             onReloadLatest={reloadLatestDraft}
             onRetryMaterials={() => void materialsQuery.refetch()}
@@ -135,7 +138,9 @@ function WorkOrderDetailPage() {
               }
               return result;
             }}
-            onFinishConfirm={() => undefined}
+            onFinishConfirm={(expectedUpdatedAt) => finishDraft({
+              expectedUpdatedAt,
+            })}
           />
         ) : (
           <section className="rounded-3xl border border-zinc-200 bg-white p-8 shadow-sm">
