@@ -1,6 +1,8 @@
 import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
+import DashboardInventory from "./components/DashboardInventory";
+import DashboardProcurement from "./components/DashboardProcurement";
 import DashboardProjects from "./components/DashboardProjects";
 import DashboardWorkOrders from "./components/DashboardWorkOrders";
 import { useDashboard } from "./hooks/useDashboard";
@@ -22,13 +24,25 @@ function DashboardPage() {
       />
     );
   } else {
-    const { projects, workOrders } = dashboardQuery.data.value;
-    content = projects === null && workOrders === null ? (
-      <EmptyState title="No Project or Work Order overview is available for your account." />
+    const { projects, workOrders, procurement, inventory } = dashboardQuery.data.value;
+    const task141Visible = projects !== null || workOrders !== null;
+    const task142Visible = procurement !== null || inventory !== null;
+    content = !task141Visible && !task142Visible ? (
+      <EmptyState title="No operational overview is available for your account." />
     ) : (
-      <div className="grid items-start gap-5 xl:grid-cols-2">
-        <DashboardProjects section={projects} />
-        <DashboardWorkOrders section={workOrders} />
+      <div className="space-y-5">
+        {task141Visible && (
+          <div className="grid items-start gap-5 xl:grid-cols-2">
+            <DashboardProjects section={projects} />
+            <DashboardWorkOrders section={workOrders} />
+          </div>
+        )}
+        {task142Visible && (
+          <div className="grid items-start gap-5 xl:grid-cols-2">
+            <DashboardProcurement section={procurement} />
+            <DashboardInventory section={inventory} />
+          </div>
+        )}
       </div>
     );
   }
