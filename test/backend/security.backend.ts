@@ -29,6 +29,7 @@ import { registerCalendarManagementTests } from "./calendar-management.suite";
 import { registerAuditLogPageTests } from "./audit-log-page.suite";
 import { registerAuditLogFilterTests } from "./audit-log-filters.suite";
 import { registerAuditLogDetailTests } from "./audit-log-detail.suite";
+import { registerAuditCoverageTests } from "./audit-coverage.suite";
 import { registerProcurementReadsTests } from "./procurement-reads.suite";
 import { registerProcurementCreationTests } from "./procurement-creation.suite";
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
@@ -67,6 +68,7 @@ describe("Supabase security helpers", () => {
   registerAuditLogPageTests(requireHarness);
   registerAuditLogFilterTests(requireHarness);
   registerAuditLogDetailTests(requireHarness);
+  registerAuditCoverageTests(requireHarness);
   registerProcurementReadsTests(requireHarness);
   registerProcurementCreationTests(requireHarness);
   registerProcurementLifecycleTests(requireHarness);
