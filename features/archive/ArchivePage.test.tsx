@@ -9,9 +9,11 @@ import {
   within,
 } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getAuditLogDetail: vi.fn(),
   getAuditLogFilterOptions: vi.fn(),
   listAuditLogPage: vi.fn(),
   useAuth: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock("./archiveService", async (importOriginal) => {
   const original = await importOriginal<typeof import("./archiveService")>();
   return {
     ...original,
+    getAuditLogDetail: mocks.getAuditLogDetail,
     getAuditLogFilterOptions: mocks.getAuditLogFilterOptions,
     listAuditLogPage: mocks.listAuditLogPage,
   };
@@ -49,7 +52,9 @@ function renderArchive() {
     defaultOptions: { queries: { retry: false } },
   });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    <QueryClientProvider client={client}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>
   );
   return { ...render(<ArchivePage />, { wrapper }), client };
 }
@@ -67,6 +72,10 @@ beforeEach(() => {
       entityTypes: ["calendar_entry", "future_quality_gate"],
       actionTypes: ["calendar.created", "future.bulk_reconciled"],
     },
+  });
+  mocks.getAuditLogDetail.mockResolvedValue({
+    ok: false,
+    error: { code: "archive_detail_failed", message: "Safe" },
   });
 });
 
@@ -311,5 +320,101 @@ describe("ArchivePage", () => {
     });
     expect(screen.getByText("Exact summary 0")).toBeInTheDocument();
     expect(mocks.listAuditLogPage).toHaveBeenCalledTimes(3);
+  });
+
+  it("fetches detail lazily, renders safe JSON, and links only server-approved context", async () => {
+    const row = item(1, { entityType: "project", actionType: "project.updated" });
+    mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [row] });
+    let resolveDetail: ((value: unknown) => void) | undefined;
+    mocks.getAuditLogDetail.mockReturnValue(new Promise((resolve) => {
+      resolveDetail = resolve;
+    }));
+    renderArchive();
+    expect(await screen.findByText(row.summary)).toBeInTheDocument();
+    expect(mocks.getAuditLogDetail).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("row", { name: `Open Archive detail: ${row.summary}` }));
+    expect(screen.getByRole("dialog", { name: "Archive detail" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Archive detail...");
+    expect(mocks.getAuditLogDetail).toHaveBeenCalledExactlyOnceWith(row.auditLogId);
+
+    resolveDetail?.({ ok: true, value: {
+      ...row,
+      beforeData: { customer_name: "Old customer" },
+      afterData: { customer_name: "New customer" },
+      metadata: { source: "trusted" },
+      detailAuthorized: true,
+      targetViewAuthorized: true,
+      contextKind: "project",
+      contextId: row.entityId,
+    } });
+    expect(await screen.findByText("Before")).toBeInTheDocument();
+    expect(screen.getByText("After")).toBeInTheDocument();
+    expect(screen.getByText("Metadata")).toBeInTheDocument();
+    expect(screen.getAllByText("Customer Name")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Open record" }))
+      .toHaveAttribute("href", `/projects/${row.entityId}`);
+    expect(screen.queryByRole("button", { name: /edit|delete|restore/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows restricted detail without JSON or context navigation", async () => {
+    const row = item(2, { entityType: "user_profile" });
+    mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [row] });
+    mocks.getAuditLogDetail.mockResolvedValue({ ok: true, value: {
+      ...row,
+      beforeData: null,
+      afterData: null,
+      metadata: null,
+      detailAuthorized: false,
+      targetViewAuthorized: false,
+      contextKind: null,
+      contextId: null,
+    } });
+    renderArchive();
+    fireEvent.keyDown(await screen.findByRole("row", {
+      name: `Open Archive detail: ${row.summary}`,
+    }), { key: "Enter" });
+    expect(await screen.findByText("Additional details are restricted for this record."))
+      .toBeInTheDocument();
+    expect(screen.queryByText("Before")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open record" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the list and filters intact when detail closes and retries detail separately", async () => {
+    const row = item(3);
+    mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [row] });
+    mocks.getAuditLogDetail
+      .mockResolvedValueOnce({ ok: false, error: {
+        code: "archive_detail_failed", message: "Safe",
+      } })
+      .mockResolvedValueOnce({ ok: true, value: {
+        ...row,
+        beforeData: null,
+        afterData: null,
+        metadata: null,
+        detailAuthorized: true,
+        targetViewAuthorized: false,
+        contextKind: null,
+        contextId: null,
+      } });
+    renderArchive();
+    await waitFor(() => expect(screen.getByLabelText("User")).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("User"), {
+      target: { value: "00000000-0000-4000-8000-000000000099" },
+    });
+    fireEvent.click(await screen.findByRole("row", {
+      name: `Open Archive detail: ${row.summary}`,
+    }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Archive detail could not be loaded.");
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("No additional audit detail was recorded."))
+      .toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("User"))
+      .toHaveValue("00000000-0000-4000-8000-000000000099");
+    expect(screen.getByText(row.summary)).toBeInTheDocument();
   });
 });

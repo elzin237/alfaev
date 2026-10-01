@@ -4,6 +4,7 @@ import { useAuth } from "../../app/auth/AuthProvider";
 import {
   ARCHIVE_PAGE_SIZE,
   getAuditLogFilterOptions,
+  getAuditLogDetail,
   listAuditLogPage,
   type ArchiveAuditLogItem,
   type ArchiveCursor,
@@ -30,6 +31,13 @@ export function archiveQueryKey(
 
 export function archiveFilterOptionsQueryKey(profileId: string | undefined) {
   return ["archive", "filter-options", profileId] as const;
+}
+
+export function archiveDetailQueryKey(
+  profileId: string | undefined,
+  auditLogId: string | null,
+) {
+  return ["archive", "detail", profileId, auditLogId] as const;
 }
 
 export function getNextArchivePageParam(
@@ -67,6 +75,21 @@ export function useArchiveFilterOptions() {
     queryKey: archiveFilterOptionsQueryKey(profile?.id),
     queryFn: getAuditLogFilterOptions,
     enabled: Boolean(profile?.id),
+    staleTime: 60_000,
+  });
+}
+
+export function useArchiveAuditDetail(auditLogId: string | null) {
+  const { profile } = useAuth();
+  return useQuery({
+    queryKey: archiveDetailQueryKey(profile?.id, auditLogId),
+    queryFn: async () => {
+      if (!auditLogId) throw new Error("Archive detail ID is unavailable.");
+      const result = await getAuditLogDetail(auditLogId);
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    },
+    enabled: Boolean(profile?.id && auditLogId),
     staleTime: 60_000,
   });
 }

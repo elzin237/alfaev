@@ -52,6 +52,41 @@ export type ArchiveFilterOptionsResult =
   | { ok: true; value: ArchiveFilterOptions }
   | { ok: false; error: ArchiveFilterOptionsError };
 
+export type ArchiveContextKind =
+  | "project"
+  | "supplier"
+  | "product"
+  | "pcb_card"
+  | "work_order"
+  | "user_profile";
+
+export type ArchiveJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | ArchiveJsonValue[]
+  | { [key: string]: ArchiveJsonValue };
+
+export interface ArchiveAuditLogDetail extends ArchiveAuditLogItem {
+  beforeData: ArchiveJsonValue;
+  afterData: ArchiveJsonValue;
+  metadata: ArchiveJsonValue;
+  detailAuthorized: boolean;
+  targetViewAuthorized: boolean;
+  contextKind: ArchiveContextKind | null;
+  contextId: string | null;
+}
+
+export interface ArchiveDetailError {
+  code: "archive_detail_failed";
+  message: string;
+}
+
+export type ArchiveDetailResult =
+  | { ok: true; value: ArchiveAuditLogDetail }
+  | { ok: false; error: ArchiveDetailError };
+
 const rowKeys = [
   "action_type",
   "actor_full_name",
@@ -66,6 +101,14 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+const contextKinds = new Set<ArchiveContextKind>([
+  "project",
+  "supplier",
+  "product",
+  "pcb_card",
+  "work_order",
+  "user_profile",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -83,6 +126,18 @@ function isTimestamp(value: unknown): value is string {
   return typeof value === "string" &&
     timestampPattern.test(value) &&
     !Number.isNaN(Date.parse(value));
+}
+
+function isArchiveJsonValue(value: unknown): value is ArchiveJsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isArchiveJsonValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(isArchiveJsonValue);
 }
 
 function parseArchiveRow(value: unknown): ArchiveAuditLogItem | null {
@@ -132,6 +187,70 @@ function optionsFailure(): ArchiveFilterOptionsResult {
       code: "archive_filter_options_failed",
       message: "Archive filter options could not be loaded.",
     },
+  };
+}
+
+function detailFailure(): ArchiveDetailResult {
+  return {
+    ok: false,
+    error: {
+      code: "archive_detail_failed",
+      message: "Archive detail could not be loaded.",
+    },
+  };
+}
+
+function parseArchiveDetail(value: unknown): ArchiveAuditLogDetail | null {
+  if (!isRecord(value)) return null;
+  const expectedKeys = [
+    ...rowKeys,
+    "after_data",
+    "before_data",
+    "context_id",
+    "context_kind",
+    "detail_authorized",
+    "metadata",
+    "target_view_authorized",
+  ].sort();
+  const actualKeys = Object.keys(value).sort();
+  const listRow = parseArchiveRow(Object.fromEntries(
+    rowKeys.map((key) => [key, value[key]]),
+  ));
+  const contextKind = value.context_kind;
+  const contextId = value.context_id;
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    actualKeys.some((key, index) => key !== expectedKeys[index]) ||
+    !listRow ||
+    typeof value.detail_authorized !== "boolean" ||
+    typeof value.target_view_authorized !== "boolean" ||
+    !isArchiveJsonValue(value.before_data) ||
+    !isArchiveJsonValue(value.after_data) ||
+    !isArchiveJsonValue(value.metadata) ||
+    (contextKind !== null && (
+      typeof contextKind !== "string" ||
+      !contextKinds.has(contextKind as ArchiveContextKind)
+    )) ||
+    (contextId !== null && !isUuid(contextId)) ||
+    ((contextKind === null) !== (contextId === null)) ||
+    (value.target_view_authorized !== (contextKind !== null)) ||
+    (!value.detail_authorized && (
+      value.before_data !== null ||
+      value.after_data !== null ||
+      value.metadata !== null ||
+      value.target_view_authorized
+    ))
+  ) return null;
+
+  return {
+    ...listRow,
+    beforeData: value.before_data,
+    afterData: value.after_data,
+    metadata: value.metadata,
+    detailAuthorized: value.detail_authorized,
+    targetViewAuthorized: value.target_view_authorized,
+    contextKind: contextKind as ArchiveContextKind | null,
+    contextId,
   };
 }
 
@@ -212,5 +331,20 @@ export async function getAuditLogFilterOptions(): Promise<ArchiveFilterOptionsRe
     return options ? { ok: true, value: options } : optionsFailure();
   } catch {
     return optionsFailure();
+  }
+}
+
+export async function getAuditLogDetail(
+  auditLogId: string,
+): Promise<ArchiveDetailResult> {
+  try {
+    const { data, error } = await supabase.rpc("get_audit_log_detail", {
+      p_audit_log_id: auditLogId,
+    });
+    if (error || !Array.isArray(data) || data.length !== 1) return detailFailure();
+    const detail = parseArchiveDetail(data[0]);
+    return detail ? { ok: true, value: detail } : detailFailure();
+  } catch {
+    return detailFailure();
   }
 }

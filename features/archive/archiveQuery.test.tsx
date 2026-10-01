@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getAuditLogDetail: vi.fn(),
   listAuditLogPage: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -11,14 +12,20 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
 vi.mock("./archiveService", async (importOriginal) => {
   const original = await importOriginal<typeof import("./archiveService")>();
-  return { ...original, listAuditLogPage: mocks.listAuditLogPage };
+  return {
+    ...original,
+    getAuditLogDetail: mocks.getAuditLogDetail,
+    listAuditLogPage: mocks.listAuditLogPage,
+  };
 });
 
 import {
   archiveFilterOptionsQueryKey,
+  archiveDetailQueryKey,
   archiveQueryKey,
   getNextArchivePageParam,
   useArchiveAuditLog,
+  useArchiveAuditDetail,
 } from "./archiveQuery";
 import type { ArchiveAuditLogItem } from "./archiveService";
 import { EMPTY_ARCHIVE_FILTERS } from "./archiveFilters";
@@ -53,6 +60,9 @@ function setup() {
 beforeEach(() => {
   mocks.useAuth.mockReturnValue({ profile: { id: "profile-1" } });
   mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [] });
+  mocks.getAuditLogDetail.mockResolvedValue({ ok: false, error: {
+    code: "archive_detail_failed", message: "Safe",
+  } });
 });
 
 afterEach(() => {
@@ -72,6 +82,12 @@ describe("Archive infinite query", () => {
     expect(archiveFilterOptionsQueryKey("profile-1")).toEqual([
       "archive", "filter-options", "profile-1",
     ]);
+    expect(archiveDetailQueryKey("profile-1", item(1).auditLogId)).toEqual([
+      "archive", "detail", "profile-1", item(1).auditLogId,
+    ]);
+    expect(archiveDetailQueryKey("profile-1", item(1).auditLogId)).not.toEqual(
+      archiveDetailQueryKey("profile-2", item(1).auditLogId),
+    );
     expect(getNextArchivePageParam(Array.from({ length: 49 }, (_, index) => item(index))))
       .toBeUndefined();
     const full = Array.from({ length: 50 }, (_, index) => item(index));
@@ -80,6 +96,34 @@ describe("Archive infinite query", () => {
       auditLogId: full[49]!.auditLogId,
     });
     expect(getNextArchivePageParam([])).toBeUndefined();
+  });
+
+  it("loads detail lazily and scopes it to profile plus audit ID", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(
+      ({ id }: { id: string | null }) => useArchiveAuditDetail(id),
+      { wrapper, initialProps: { id: null as string | null } },
+    );
+    expect(mocks.getAuditLogDetail).not.toHaveBeenCalled();
+
+    const auditLogId = item(1).auditLogId;
+    mocks.getAuditLogDetail.mockResolvedValueOnce({ ok: true, value: {
+      ...item(1),
+      beforeData: null,
+      afterData: null,
+      metadata: null,
+      detailAuthorized: true,
+      targetViewAuthorized: false,
+      contextKind: null,
+      contextId: null,
+    } });
+    hook.rerender({ id: auditLogId });
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true));
+    expect(mocks.getAuditLogDetail).toHaveBeenCalledExactlyOnceWith(auditLogId);
+    expect(hook.result.current.data?.auditLogId).toBe(auditLogId);
   });
 
   it("includes normalized filters in the identity and sends them on every page", async () => {

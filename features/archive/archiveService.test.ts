@@ -7,7 +7,11 @@ vi.mock("../../lib/supabase/client", () => ({
 }));
 
 import { EMPTY_ARCHIVE_FILTERS } from "./archiveFilters";
-import { getAuditLogFilterOptions, listAuditLogPage } from "./archiveService";
+import {
+  getAuditLogDetail,
+  getAuditLogFilterOptions,
+  listAuditLogPage,
+} from "./archiveService";
 
 const row = {
   audit_log_id: "00000000-0000-4000-8000-000000000001",
@@ -193,6 +197,106 @@ describe("archiveService", () => {
         code: "archive_filter_options_failed",
         message: "Archive filter options could not be loaded.",
       },
+    });
+  });
+
+  it("strictly parses one authorized Archive detail and its safe context", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...row,
+        before_data: { customer_name: "Old", nested: [1, true, null] },
+        after_data: { customer_name: "New" },
+        metadata: null,
+        detail_authorized: true,
+        target_view_authorized: true,
+        context_kind: "project",
+        context_id: row.entity_id,
+      }],
+      error: null,
+    });
+    await expect(getAuditLogDetail(row.audit_log_id)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        auditLogId: row.audit_log_id,
+        beforeData: { customer_name: "Old", nested: [1, true, null] },
+        afterData: { customer_name: "New" },
+        metadata: null,
+        detailAuthorized: true,
+        targetViewAuthorized: true,
+        contextKind: "project",
+        contextId: row.entity_id,
+      },
+    });
+    expect(mocks.rpc).toHaveBeenCalledWith("get_audit_log_detail", {
+      p_audit_log_id: row.audit_log_id,
+    });
+  });
+
+  it("accepts a correctly redacted restricted detail", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...row,
+        before_data: null,
+        after_data: null,
+        metadata: null,
+        detail_authorized: false,
+        target_view_authorized: false,
+        context_kind: null,
+        context_id: null,
+      }],
+      error: null,
+    });
+    await expect(getAuditLogDetail(row.audit_log_id)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        detailAuthorized: false,
+        targetViewAuthorized: false,
+        contextKind: null,
+        contextId: null,
+      },
+    });
+  });
+
+  it.each([
+    ["extra sensitive field", { email: "hidden@example.com" }],
+    ["restricted leaked JSON", { detail_authorized: false, before_data: { hidden: true } }],
+    ["unpaired context", { context_kind: "project", context_id: null }],
+    ["unknown context", { context_kind: "invented", context_id: row.entity_id }],
+    ["false target flag with context", { target_view_authorized: false }],
+  ])("fails safely for malformed Archive detail: %s", async (_label, override) => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...row,
+        before_data: null,
+        after_data: null,
+        metadata: null,
+        detail_authorized: true,
+        target_view_authorized: true,
+        context_kind: "project",
+        context_id: row.entity_id,
+        ...override,
+      }],
+      error: null,
+    });
+    await expect(getAuditLogDetail(row.audit_log_id)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "archive_detail_failed",
+        message: "Archive detail could not be loaded.",
+      },
+    });
+  });
+
+  it("hides provider and transport failures for Archive detail", async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { message: "raw SQL" } });
+    await expect(getAuditLogDetail(row.audit_log_id)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "archive_detail_failed" },
+    });
+    mocks.rpc.mockRejectedValueOnce(new Error("raw transport"));
+    await expect(getAuditLogDetail(row.audit_log_id)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "archive_detail_failed" },
     });
   });
 });

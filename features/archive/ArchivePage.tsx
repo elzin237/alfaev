@@ -10,6 +10,7 @@ import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import ArchiveDetailDialog from "./ArchiveDetailDialog";
 import {
   compactArchiveRecordId,
   formatArchiveAction,
@@ -25,6 +26,7 @@ import {
   useArchiveAuditLog,
   useArchiveFilterOptions,
 } from "./archiveQuery";
+import type { ArchiveAuditLogItem } from "./archiveService";
 
 const controlClassName =
   "mt-2 w-full rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-500";
@@ -37,6 +39,7 @@ function ArchivePage() {
   const [actorUserId, setActorUserId] = useState("");
   const [entityType, setEntityType] = useState("");
   const [actionType, setActionType] = useState("");
+  const [selectedAudit, setSelectedAudit] = useState<ArchiveAuditLogItem | null>(null);
   const searchTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -140,7 +143,19 @@ function ArchivePage() {
             </thead>
             <tbody className="divide-y divide-zinc-100 bg-white">
               {rows.map((row) => (
-                <tr key={row.auditLogId} className="align-top text-zinc-700">
+                <tr
+                  key={row.auditLogId}
+                  tabIndex={0}
+                  aria-label={`Open Archive detail: ${row.summary}`}
+                  onClick={() => setSelectedAudit(row)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedAudit(row);
+                    }
+                  }}
+                  className="cursor-pointer align-top text-zinc-700 transition hover:bg-zinc-50 focus-visible:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-red-600"
+                >
                   <td className="whitespace-nowrap px-5 py-4">
                     <time dateTime={row.createdAt}>
                       {formatArchiveDateTime(row.createdAt)}
@@ -323,6 +338,10 @@ function ArchivePage() {
       </section>
 
       {content}
+      <ArchiveDetailDialog
+        selected={selectedAudit}
+        onClose={() => setSelectedAudit(null)}
+      />
     </section>
   );
 }
