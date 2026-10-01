@@ -1,4 +1,9 @@
 import { supabase } from "../../lib/supabase/client";
+import {
+  EMPTY_ARCHIVE_FILTERS,
+  normalizeArchiveFilters,
+  type ArchiveFilters,
+} from "./archiveFilters";
 
 export const ARCHIVE_PAGE_SIZE = 50;
 
@@ -26,6 +31,26 @@ export interface ArchivePageError {
 export type ArchivePageResult =
   | { ok: true; value: ArchiveAuditLogItem[] }
   | { ok: false; error: ArchivePageError };
+
+export interface ArchiveActorOption {
+  userId: string;
+  fullName: string;
+}
+
+export interface ArchiveFilterOptions {
+  actors: ArchiveActorOption[];
+  entityTypes: string[];
+  actionTypes: string[];
+}
+
+export interface ArchiveFilterOptionsError {
+  code: "archive_filter_options_failed";
+  message: string;
+}
+
+export type ArchiveFilterOptionsResult =
+  | { ok: true; value: ArchiveFilterOptions }
+  | { ok: false; error: ArchiveFilterOptionsError };
 
 const rowKeys = [
   "action_type",
@@ -100,14 +125,68 @@ function failure(): ArchivePageResult {
   };
 }
 
+function optionsFailure(): ArchiveFilterOptionsResult {
+  return {
+    ok: false,
+    error: {
+      code: "archive_filter_options_failed",
+      message: "Archive filter options could not be loaded.",
+    },
+  };
+}
+
+function parseUniqueTextArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const values: string[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!isTrimmedNonblank(item) || seen.has(item)) return null;
+    seen.add(item);
+    values.push(item);
+  }
+  return values;
+}
+
+function parseArchiveFilterOptions(value: unknown): ArchiveFilterOptions | null {
+  if (!isRecord(value)) return null;
+  const keys = Object.keys(value).sort();
+  if (keys.join(",") !== "action_types,actors,entity_types" || !Array.isArray(value.actors)) {
+    return null;
+  }
+  const actors: ArchiveActorOption[] = [];
+  const actorIds = new Set<string>();
+  for (const actorValue of value.actors) {
+    if (
+      !isRecord(actorValue) ||
+      Object.keys(actorValue).sort().join(",") !== "full_name,user_id" ||
+      !isUuid(actorValue.user_id) ||
+      !isTrimmedNonblank(actorValue.full_name) ||
+      actorIds.has(actorValue.user_id)
+    ) return null;
+    actorIds.add(actorValue.user_id);
+    actors.push({ userId: actorValue.user_id, fullName: actorValue.full_name });
+  }
+  const entityTypes = parseUniqueTextArray(value.entity_types);
+  const actionTypes = parseUniqueTextArray(value.action_types);
+  return entityTypes && actionTypes ? { actors, entityTypes, actionTypes } : null;
+}
+
 export async function listAuditLogPage(
+  filters: ArchiveFilters = EMPTY_ARCHIVE_FILTERS,
   cursor: ArchiveCursor | null = null,
 ): Promise<ArchivePageResult> {
   try {
+    const normalized = normalizeArchiveFilters(filters);
     const { data, error } = await supabase.rpc("list_audit_log_page", {
       p_limit: ARCHIVE_PAGE_SIZE,
       p_before_created_at: cursor?.createdAt ?? null,
       p_before_id: cursor?.auditLogId ?? null,
+      p_created_from: normalized.createdFrom,
+      p_created_before: normalized.createdBefore,
+      p_actor_user_id: normalized.actorUserId,
+      p_entity_type: normalized.entityType,
+      p_action_type: normalized.actionType,
+      p_search_text: normalized.searchText,
     });
 
     if (error || !Array.isArray(data)) return failure();
@@ -122,5 +201,16 @@ export async function listAuditLogPage(
     return { ok: true, value: rows };
   } catch {
     return failure();
+  }
+}
+
+export async function getAuditLogFilterOptions(): Promise<ArchiveFilterOptionsResult> {
+  try {
+    const { data, error } = await supabase.rpc("get_audit_log_filter_options");
+    if (error) return optionsFailure();
+    const options = parseArchiveFilterOptions(data);
+    return options ? { ok: true, value: options } : optionsFailure();
+  } catch {
+    return optionsFailure();
   }
 }

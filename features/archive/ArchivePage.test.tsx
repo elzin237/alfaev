@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,6 +12,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  getAuditLogFilterOptions: vi.fn(),
   listAuditLogPage: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -18,7 +20,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
 vi.mock("./archiveService", async (importOriginal) => {
   const original = await importOriginal<typeof import("./archiveService")>();
-  return { ...original, listAuditLogPage: mocks.listAuditLogPage };
+  return {
+    ...original,
+    getAuditLogFilterOptions: mocks.getAuditLogFilterOptions,
+    listAuditLogPage: mocks.listAuditLogPage,
+  };
 });
 
 import ArchivePage from "./ArchivePage";
@@ -51,10 +57,22 @@ function renderArchive() {
 beforeEach(() => {
   mocks.useAuth.mockReturnValue({ profile: { id: "profile-1" } });
   mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [] });
+  mocks.getAuditLogFilterOptions.mockResolvedValue({
+    ok: true,
+    value: {
+      actors: [{
+        userId: "00000000-0000-4000-8000-000000000099",
+        fullName: "Historical Actor",
+      }],
+      entityTypes: ["calendar_entry", "future_quality_gate"],
+      actionTypes: ["calendar.created", "future.bulk_reconciled"],
+    },
+  });
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.resetAllMocks();
 });
 
@@ -125,8 +143,128 @@ describe("ArchivePage", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /create|edit|delete|restore/i }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search" })).toBeInTheDocument();
     expect(screen.queryByText(/before_data|after_data|metadata/i)).not.toBeInTheDocument();
+  });
+
+  it("renders accessible filters, friendly options, clear state, and active count", async () => {
+    renderArchive();
+    await waitFor(() => expect(screen.getByLabelText("User")).toBeEnabled());
+    expect(screen.getByLabelText("Search")).toBeInTheDocument();
+    expect(screen.getByLabelText("From")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("To")).toHaveAttribute("type", "date");
+    expect(screen.getByLabelText("Module")).toContainHTML("Calendar");
+    expect(screen.getByLabelText("Module")).toContainHTML("Future Quality Gate");
+    expect(screen.getByLabelText("Action")).toContainHTML("Created");
+    expect(screen.getByLabelText("Action")).toContainHTML("Bulk Reconciled");
+    expect(screen.getByText("No active filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText("User"), {
+      target: { value: "00000000-0000-4000-8000-000000000099" },
+    });
+    fireEvent.change(screen.getByLabelText("Module"), {
+      target: { value: "calendar_entry" },
+    });
+    expect(screen.getByText("3 active filters")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear filters" })).toBeEnabled();
+  });
+
+  it("debounces search, hides stale rows while settling, and clear neutralizes stale timers", async () => {
+    mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [item(1)] });
+    renderArchive();
+    expect(await screen.findByText("Exact summary 1")).toBeInTheDocument();
+    vi.useFakeTimers();
+
+    fireEvent.change(screen.getByLabelText("Search"), {
+      target: { value: "  calendar  " },
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Applying Archive filters...");
+    expect(screen.queryByText("Exact summary 1")).not.toBeInTheDocument();
+    expect(mocks.listAuditLogPage).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(299));
+    expect(mocks.listAuditLogPage).toHaveBeenCalledTimes(1);
+    await act(async () => { vi.advanceTimersByTime(1); await Promise.resolve(); });
+    expect(mocks.listAuditLogPage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ searchText: "calendar" }),
+      null,
+    );
+
+    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "stale" } });
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.getByLabelText("Search")).toHaveValue("");
+    expect(mocks.listAuditLogPage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ searchText: "stale" }),
+      expect.anything(),
+    );
+    vi.useRealTimers();
+  });
+
+  it("composes selects and dates into a new first-page request and shows filtered empty state", async () => {
+    renderArchive();
+    await waitFor(() => expect(screen.getByLabelText("User")).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-01-15" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-01-16" } });
+    fireEvent.change(screen.getByLabelText("User"), {
+      target: { value: "00000000-0000-4000-8000-000000000099" },
+    });
+    fireEvent.change(screen.getByLabelText("Module"), {
+      target: { value: "calendar_entry" },
+    });
+    fireEvent.change(screen.getByLabelText("Action"), {
+      target: { value: "calendar.created" },
+    });
+    expect(await screen.findByRole("heading", {
+      name: "No audit activity matches these filters.",
+    })).toBeInTheDocument();
+    expect(mocks.listAuditLogPage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        createdFrom: expect.stringMatching(/^2026-01-1[45]T/),
+        createdBefore: expect.stringMatching(/^2026-01-1[67]T/),
+        actorUserId: "00000000-0000-4000-8000-000000000099",
+        entityType: "calendar_entry",
+        actionType: "calendar.created",
+      }),
+      null,
+    );
+    const callsBeforeClear = mocks.listAuditLogPage.mock.calls.length;
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]!);
+    expect(screen.getByText("No active filters")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mocks.listAuditLogPage.mock.calls.length).toBeGreaterThan(callsBeforeClear);
+      expect(mocks.listAuditLogPage).toHaveBeenLastCalledWith(
+        {
+          createdFrom: null,
+          createdBefore: null,
+          actorUserId: null,
+          entityType: null,
+          actionType: null,
+          searchText: null,
+        },
+        null,
+      );
+    });
+  });
+
+  it("keeps list loading separate from a retryable filter-options failure", async () => {
+    mocks.getAuditLogFilterOptions
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "archive_filter_options_failed", message: "Safe" },
+      })
+      .mockResolvedValueOnce({ ok: true, value: {
+        actors: [], entityTypes: [], actionTypes: [],
+      } });
+    renderArchive();
+    expect(await screen.findByRole("heading", { name: "No audit activity yet." }))
+      .toBeInTheDocument();
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Archive filter options could not be loaded.");
+    expect(screen.getByLabelText("User")).toBeDisabled();
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry filter options" }));
+    await waitFor(() => expect(screen.getByLabelText("User")).toBeEnabled());
   });
 
   it("loads and appends a continuation while preserving the first page", async () => {

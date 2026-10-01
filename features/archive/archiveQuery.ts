@@ -1,15 +1,35 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import {
   ARCHIVE_PAGE_SIZE,
+  getAuditLogFilterOptions,
   listAuditLogPage,
   type ArchiveAuditLogItem,
   type ArchiveCursor,
 } from "./archiveService";
+import { normalizeArchiveFilters, type ArchiveFilters } from "./archiveFilters";
 
-export function archiveQueryKey(profileId: string | undefined) {
-  return ["archive", "audit-log", profileId] as const;
+export function archiveQueryKey(
+  profileId: string | undefined,
+  filters: ArchiveFilters,
+) {
+  const normalized = normalizeArchiveFilters(filters);
+  return [
+    "archive",
+    "audit-log",
+    profileId,
+    normalized.createdFrom,
+    normalized.createdBefore,
+    normalized.actorUserId,
+    normalized.entityType,
+    normalized.actionType,
+    normalized.searchText,
+  ] as const;
+}
+
+export function archiveFilterOptionsQueryKey(profileId: string | undefined) {
+  return ["archive", "filter-options", profileId] as const;
 }
 
 export function getNextArchivePageParam(
@@ -22,18 +42,30 @@ export function getNextArchivePageParam(
     : undefined;
 }
 
-export function useArchiveAuditLog() {
+export function useArchiveAuditLog(filters: ArchiveFilters) {
   const { profile } = useAuth();
+  const normalized = normalizeArchiveFilters(filters);
 
   return useInfiniteQuery({
-    queryKey: archiveQueryKey(profile?.id),
+    queryKey: archiveQueryKey(profile?.id, normalized),
     queryFn: async ({ pageParam }) => {
-      const result = await listAuditLogPage(pageParam);
+      const result = await listAuditLogPage(normalized, pageParam);
       if (!result.ok) throw new Error(result.error.message);
       return result.value;
     },
     initialPageParam: null as ArchiveCursor | null,
     getNextPageParam: getNextArchivePageParam,
+    enabled: Boolean(profile?.id),
+    staleTime: 60_000,
+    gcTime: 0,
+  });
+}
+
+export function useArchiveFilterOptions() {
+  const { profile } = useAuth();
+  return useQuery({
+    queryKey: archiveFilterOptionsQueryKey(profile?.id),
+    queryFn: getAuditLogFilterOptions,
     enabled: Boolean(profile?.id),
     staleTime: 60_000,
   });
