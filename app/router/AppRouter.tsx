@@ -25,6 +25,7 @@ import UsersPage from "../../features/users/UsersPage";
 import UserDetailPage from "../../features/users/UserDetailPage";
 import DocumentationPage from "../../features/documentation/DocumentationPage";
 import FixedAssetsPage from "../../features/fixed-assets/FixedAssetsPage";
+import CalendarPage from "../../features/calendar/CalendarPage";
 
 function AppRouter() {
   return (
@@ -83,6 +84,7 @@ function AppRouter() {
           <Route path="/users" element={<UsersPage />} />
           <Route path="/users/:userId" element={<UserDetailPage />} />
         </Route>
+        <Route path="/calendar" element={<CalendarPage />} />
       </Route>
     </Routes>
   );
