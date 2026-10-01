@@ -5,3 +5,7 @@ export function calendarEntriesQueryKey(profileId: string | undefined) {
 export function calendarBirthdaysQueryKey(profileId: string | undefined) {
   return ["calendar", profileId, "birthdays"] as const;
 }
+
+export function calendarEmployeeChoicesQueryKey(profileId: string | undefined) {
+  return ["calendar", profileId, "employee-choices"] as const;
+}

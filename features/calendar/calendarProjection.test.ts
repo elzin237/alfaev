@@ -24,6 +24,7 @@ const entries: CalendarEntry[] = [
     endDate: "2026-09-15",
     description: null,
     relatedUserId: null,
+    updatedAt: "2026-01-01T00:00:00+00:00",
   },
   {
     id: "00000000-0000-4000-8000-000000000002",
@@ -33,6 +34,7 @@ const entries: CalendarEntry[] = [
     endDate: "2026-10-02",
     description: null,
     relatedUserId: null,
+    updatedAt: "2026-01-01T00:00:00+00:00",
   },
   {
     id: "00000000-0000-4000-8000-000000000003",
@@ -42,6 +44,7 @@ const entries: CalendarEntry[] = [
     endDate: "2027-01-02",
     description: null,
     relatedUserId: null,
+    updatedAt: "2026-01-01T00:00:00+00:00",
   },
 ];
 const allCategories = new Set<CalendarCategory>([
@@ -99,12 +102,15 @@ describe("Calendar date-only projection", () => {
 
     expect(leapEvents).toEqual([{
       id: "birthday:00000000-0000-4000-8000-000000000010:2028-02-29",
+      entryId: null,
       category: "birthday",
       title: "Leap User",
       label: "Birthday: Leap User",
       startDate: "2028-02-29",
       endDate: "2028-02-29",
       description: null,
+      relatedUserId: "00000000-0000-4000-8000-000000000010",
+      updatedAt: null,
     }]);
     expect(JSON.stringify(leapEvents)).not.toContain("1992");
     expect(JSON.stringify(leapEvents)).not.toMatch(/age/i);

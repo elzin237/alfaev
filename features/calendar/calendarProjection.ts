@@ -19,12 +19,15 @@ export function buildCalendarEventsForYear(
 ): CalendarDisplayEvent[] {
   const entryEvents = entries.map<CalendarDisplayEvent>((entry) => ({
     id: `entry:${entry.id}`,
+    entryId: entry.id,
     category: entry.entryType,
     title: entry.title,
     label: `${calendarCategoryLabels[entry.entryType]}: ${entry.title}`,
     startDate: entry.startDate,
     endDate: entry.endDate,
     description: entry.description,
+    relatedUserId: entry.relatedUserId,
+    updatedAt: entry.updatedAt,
   }));
   const birthdayEvents = birthdays.flatMap<CalendarDisplayEvent>((birthday) => {
     const parsed = parseDateOnly(birthday.birthday);
@@ -43,12 +46,15 @@ export function buildCalendarEventsForYear(
 
     return [{
       id: `birthday:${birthday.userId}:${occurrenceDate}`,
+      entryId: null,
       category: "birthday",
       title: birthday.fullName,
       label: `Birthday: ${birthday.fullName}`,
       startDate: occurrenceDate,
       endDate: occurrenceDate,
       description: null,
+      relatedUserId: birthday.userId,
+      updatedAt: null,
     }];
   });
 

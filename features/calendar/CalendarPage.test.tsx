@@ -3,18 +3,26 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calendarPageMocks = vi.hoisted(() => ({
+  createMutateAsync: vi.fn(),
+  deleteMutateAsync: vi.fn(),
   refetchBirthdays: vi.fn(),
   refetchEntries: vi.fn(),
+  updateMutateAsync: vi.fn(),
   useCalendarData: vi.fn(),
+  useCalendarManagement: vi.fn(),
 }));
 
 vi.mock("./useCalendarData", () => ({
   useCalendarData: calendarPageMocks.useCalendarData,
+}));
+vi.mock("./useCalendarManagement", () => ({
+  useCalendarManagement: calendarPageMocks.useCalendarManagement,
 }));
 
 import CalendarPage from "./CalendarPage";
@@ -29,6 +37,7 @@ const entries: CalendarEntry[] = [
     endDate: "2026-09-15",
     description: "Quarterly safety review",
     relatedUserId: null,
+    updatedAt: "2026-09-01T10:00:00.123456+00:00",
   },
   {
     id: "00000000-0000-4000-8000-000000000002",
@@ -38,6 +47,7 @@ const entries: CalendarEntry[] = [
     endDate: "2026-09-16",
     description: null,
     relatedUserId: null,
+    updatedAt: "2026-09-02T10:00:00.123456+00:00",
   },
   {
     id: "00000000-0000-4000-8000-000000000003",
@@ -47,6 +57,7 @@ const entries: CalendarEntry[] = [
     endDate: "2026-09-01",
     description: null,
     relatedUserId: "00000000-0000-4000-8000-000000000030",
+    updatedAt: "2026-09-03T10:00:00.123456+00:00",
   },
 ];
 const birthdays: CalendarBirthday[] = [{
@@ -79,13 +90,58 @@ function renderCalendar() {
   return render(<CalendarPage initialMonth="2026-09" today="2026-09-15" />);
 }
 
+function setAdminManagement() {
+  calendarPageMocks.useCalendarManagement.mockReturnValue({
+    canManage: true,
+    employeesQuery: {
+      data: {
+        ok: true,
+        value: [{
+          userId: "00000000-0000-4000-8000-000000000030",
+          fullName: "Related Employee",
+        }],
+      },
+      isError: false,
+      isPending: false,
+    },
+    createMutation: { mutateAsync: calendarPageMocks.createMutateAsync, isPending: false },
+    updateMutation: { mutateAsync: calendarPageMocks.updateMutateAsync, isPending: false },
+    deleteMutation: { mutateAsync: calendarPageMocks.deleteMutateAsync, isPending: false },
+  });
+}
+
 function dayCell(container: HTMLElement, date: string): HTMLElement {
   const cell = container.querySelector<HTMLElement>(`[data-calendar-date="${date}"]`);
   if (!cell) throw new Error(`Calendar cell ${date} was not rendered`);
   return cell;
 }
 
-beforeEach(() => setLoadedData());
+beforeEach(() => {
+  setLoadedData();
+  calendarPageMocks.createMutateAsync.mockResolvedValue({
+    ok: true,
+    value: { id: entries[0]!.id, updatedAt: entries[0]!.updatedAt },
+  });
+  calendarPageMocks.updateMutateAsync.mockResolvedValue({
+    ok: true,
+    value: { id: entries[0]!.id, updatedAt: entries[0]!.updatedAt },
+  });
+  calendarPageMocks.deleteMutateAsync.mockResolvedValue({
+    ok: true,
+    value: { id: entries[0]!.id, updatedAt: entries[0]!.updatedAt },
+  });
+  calendarPageMocks.useCalendarManagement.mockReturnValue({
+    canManage: false,
+    employeesQuery: {
+      data: undefined,
+      isError: false,
+      isPending: false,
+    },
+    createMutation: { mutateAsync: calendarPageMocks.createMutateAsync, isPending: false },
+    updateMutation: { mutateAsync: calendarPageMocks.updateMutateAsync, isPending: false },
+    deleteMutation: { mutateAsync: calendarPageMocks.deleteMutateAsync, isPending: false },
+  });
+});
 
 afterEach(() => {
   cleanup();
@@ -240,12 +296,140 @@ describe("CalendarPage", () => {
     expect(calendarPageMocks.refetchBirthdays).toHaveBeenCalledOnce();
   });
 
-  it("remains read-only for every viewer, including Admin", () => {
+  it("keeps non-admin Calendar viewing usable without management controls", () => {
     renderCalendar();
 
-    expect(screen.queryByRole("button", { name: /add event|edit|delete|archive/i }))
+    expect(screen.queryByRole("button", { name: /add calendar entry|edit|remove|archive/i }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /add event|edit|delete|archive/i }))
-      .not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Event: Safety review" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Quarterly safety review");
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
+  it("shows Admin management and submits an exact normalized create payload without losing view state", async () => {
+    setAdminManagement();
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Next month" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Birthdays" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add Calendar Entry" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Add Calendar Entry" });
+    expect(within(dialog).getByLabelText("Category")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Title")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Start Date")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("End Date")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Description/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Related employee/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("option", { name: "Business Trip" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: "Birthday" })).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("Category"), { target: { value: "business_trip" } });
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: " Supplier visit " } });
+    fireEvent.change(within(dialog).getByLabelText("Start Date"), { target: { value: "2026-10-20" } });
+    fireEvent.change(within(dialog).getByLabelText("End Date"), { target: { value: "2026-10-21" } });
+    fireEvent.change(within(dialog).getByLabelText(/Description/), { target: { value: " Visit " } });
+    fireEvent.change(within(dialog).getByLabelText(/Related employee/), {
+      target: { value: "00000000-0000-4000-8000-000000000030" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Calendar Entry" }));
+
+    await waitFor(() => expect(calendarPageMocks.createMutateAsync).toHaveBeenCalledWith({
+      entryType: "business_trip",
+      title: "Supplier visit",
+      startDate: "2026-10-20",
+      endDate: "2026-10-21",
+      description: "Visit",
+      relatedUserId: "00000000-0000-4000-8000-000000000030",
+    }));
+    expect(screen.getByRole("heading", { name: "October 2026" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Birthdays" })).not.toBeChecked();
+    expect(screen.getByText("Calendar entry added.")).toBeInTheDocument();
+  });
+
+  it("preloads and updates an Admin-opened non-Birthday entry", async () => {
+    setAdminManagement();
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Event: Safety review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Edit Calendar Entry" });
+    expect(within(dialog).getByLabelText("Title")).toHaveValue("Safety review");
+    expect(within(dialog).getByLabelText("Start Date")).toHaveValue("2026-09-15");
+    expect(within(dialog).getByLabelText(/Description/)).toHaveValue("Quarterly safety review");
+    fireEvent.change(within(dialog).getByLabelText("Title"), { target: { value: "Updated review" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Calendar Entry" }));
+
+    await waitFor(() => expect(calendarPageMocks.updateMutateAsync).toHaveBeenCalledWith({
+      entry: entries[0],
+      input: expect.objectContaining({ title: "Updated review" }),
+    }));
+    expect(screen.getByRole("status")).toHaveTextContent("Calendar entry updated.");
+  });
+
+  it("requires confirmation for Remove and keeps stale failure visible", async () => {
+    setAdminManagement();
+    calendarPageMocks.deleteMutateAsync.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "stale_entry",
+        message: "This Calendar entry changed. Review the latest version and try again.",
+      },
+    });
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Event: Safety review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    const confirmation = screen.getByRole("dialog", { name: "Remove Calendar Entry?" });
+    expect(confirmation).toHaveTextContent("Safety review");
+    expect(confirmation).toHaveTextContent("Event");
+    expect(confirmation).toHaveTextContent("permanently removed");
+    expect(calendarPageMocks.deleteMutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(calendarPageMocks.deleteMutateAsync).toHaveBeenCalledWith(entries[0]));
+    expect(screen.getByRole("alert")).toHaveTextContent("changed");
+    expect(screen.queryByText("Calendar entry removed.")).not.toBeInTheDocument();
+  });
+
+  it("completes confirmed Remove without approval workflow controls", async () => {
+    setAdminManagement();
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Event: Safety review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+    expect(calendarPageMocks.deleteMutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Remove Calendar Entry?" }))
+      .getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(calendarPageMocks.deleteMutateAsync).toHaveBeenCalledWith(entries[0]));
+    expect(screen.getByText("Calendar entry removed.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /approve|reject/i })).not.toBeInTheDocument();
+  });
+
+  it("never exposes Edit or Remove for a derived Birthday, even to Admin", () => {
+    setAdminManagement();
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Birthday: Birthday Person" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Birthday Person");
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+  });
+
+  it("shows stale edit safely without closing the form or claiming success", async () => {
+    setAdminManagement();
+    calendarPageMocks.updateMutateAsync.mockResolvedValue({
+      ok: false,
+      error: {
+        code: "stale_entry",
+        message: "This Calendar entry changed. Review the latest version and try again.",
+      },
+    });
+    renderCalendar();
+    fireEvent.click(screen.getByRole("button", { name: "Event: Safety review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const title = screen.getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "My unsaved edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Calendar Entry" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("changed"));
+    expect(screen.getByLabelText("Title")).toHaveValue("My unsaved edit");
+    expect(screen.queryByText("Calendar entry updated.")).not.toBeInTheDocument();
   });
 });

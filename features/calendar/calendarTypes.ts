@@ -16,6 +16,21 @@ export interface CalendarEntry {
   endDate: string;
   description: string | null;
   relatedUserId: string | null;
+  updatedAt: string;
+}
+
+export interface CalendarEntryInput {
+  entryType: CalendarEntryType;
+  title: string;
+  startDate: string;
+  endDate: string;
+  description: string | null;
+  relatedUserId: string | null;
+}
+
+export interface CalendarEmployeeChoice {
+  userId: string;
+  fullName: string;
 }
 
 export interface CalendarBirthday {
@@ -26,12 +41,15 @@ export interface CalendarBirthday {
 
 export interface CalendarDisplayEvent {
   id: string;
+  entryId: string | null;
   category: CalendarCategory;
   title: string;
   label: string;
   startDate: string;
   endDate: string;
   description: string | null;
+  relatedUserId: string | null;
+  updatedAt: string | null;
 }
 
 export const calendarCategoryLabels: Record<CalendarCategory, string> = {

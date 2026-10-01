@@ -14,8 +14,12 @@ vi.mock("../../lib/supabase/client", () => ({
 }));
 
 import {
+  createCalendarEntry,
+  deleteCalendarEntry,
   listCalendarBirthdays,
+  listCalendarEmployeeChoices,
   listCalendarEntries,
+  updateCalendarEntry,
 } from "./calendarService";
 
 const entryRow = {
@@ -26,11 +30,24 @@ const entryRow = {
   end_date: "2026-10-02",
   description: "Factory acceptance visit",
   related_user_id: "00000000-0000-4000-8000-000000000002",
+  updated_at: "2026-09-20T12:34:56.123456+00:00",
 };
 const birthdayRow = {
   user_id: "00000000-0000-4000-8000-000000000003",
   full_name: "Alfa User",
   birthday: "1992-02-29",
+};
+const mutationRow = {
+  calendar_entry_id: entryRow.id,
+  calendar_entry_updated_at: "2026-10-01T08:00:00.654321+00:00",
+};
+const input = {
+  entryType: "event" as const,
+  title: "  Safety review  ",
+  startDate: "2026-10-02",
+  endDate: "2026-10-03",
+  description: "  Review safely  ",
+  relatedUserId: entryRow.related_user_id,
 };
 
 beforeEach(() => {
@@ -54,11 +71,12 @@ describe("calendarService", () => {
         endDate: "2026-10-02",
         description: "Factory acceptance visit",
         relatedUserId: entryRow.related_user_id,
+        updatedAt: entryRow.updated_at,
       }],
     });
     expect(calendarServiceMocks.from).toHaveBeenCalledWith("calendar_entries");
     expect(calendarServiceMocks.select).toHaveBeenCalledWith(
-      "id,entry_type,title,start_date,end_date,description,related_user_id",
+      "id,entry_type,title,start_date,end_date,description,related_user_id,updated_at",
     );
   });
 
@@ -70,6 +88,7 @@ describe("calendarService", () => {
     { ...entryRow, start_date: "2026-10-03", end_date: "2026-10-02" },
     { ...entryRow, description: " " },
     { ...entryRow, related_user_id: "bad-id" },
+    { ...entryRow, updated_at: "2026-02-30T12:00:00+00:00" },
     { ...entryRow, created_at: "2026-09-01T00:00:00Z" },
   ])("fails safely for malformed or over-broad CalendarEntry rows", async (row) => {
     calendarServiceMocks.select.mockResolvedValue({ data: [row], error: null });
@@ -98,6 +117,101 @@ describe("calendarService", () => {
       "list_calendar_birthdays",
     );
     expect(calendarServiceMocks.from).not.toHaveBeenCalledWith("user_profiles");
+  });
+
+  it("reads narrow Admin employee choices without exposing user security fields", async () => {
+    calendarServiceMocks.rpc.mockResolvedValue({
+      data: [{ user_id: entryRow.related_user_id, full_name: "Related Person" }],
+      error: null,
+    });
+
+    await expect(listCalendarEmployeeChoices()).resolves.toEqual({
+      ok: true,
+      value: [{ userId: entryRow.related_user_id, fullName: "Related Person" }],
+    });
+    expect(calendarServiceMocks.rpc).toHaveBeenCalledWith(
+      "list_calendar_employee_choices",
+    );
+
+    calendarServiceMocks.rpc.mockResolvedValue({
+      data: [{ user_id: entryRow.related_user_id, full_name: "Related Person", email: "hidden@example.com" }],
+      error: null,
+    });
+    await expect(listCalendarEmployeeChoices()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "calendar_employees_failed" },
+    });
+  });
+
+  it("normalizes and sends the exact trusted create/update/delete payloads", async () => {
+    calendarServiceMocks.rpc.mockResolvedValue({ data: [mutationRow], error: null });
+
+    await expect(createCalendarEntry(input)).resolves.toEqual({
+      ok: true,
+      value: { id: mutationRow.calendar_entry_id, updatedAt: mutationRow.calendar_entry_updated_at },
+    });
+    expect(calendarServiceMocks.rpc).toHaveBeenLastCalledWith("create_calendar_entry", {
+      p_entry_type: "event",
+      p_title: "Safety review",
+      p_start_date: "2026-10-02",
+      p_end_date: "2026-10-03",
+      p_description: "Review safely",
+      p_related_user_id: entryRow.related_user_id,
+    });
+
+    await updateCalendarEntry(entryRow.id, entryRow.updated_at, {
+      ...input,
+      description: "   ",
+    });
+    expect(calendarServiceMocks.rpc).toHaveBeenLastCalledWith("update_calendar_entry", {
+      p_calendar_entry_id: entryRow.id,
+      p_entry_type: "event",
+      p_title: "Safety review",
+      p_start_date: "2026-10-02",
+      p_end_date: "2026-10-03",
+      p_description: null,
+      p_related_user_id: entryRow.related_user_id,
+      p_expected_updated_at: entryRow.updated_at,
+    });
+
+    await deleteCalendarEntry(entryRow.id, entryRow.updated_at);
+    expect(calendarServiceMocks.rpc).toHaveBeenLastCalledWith("delete_calendar_entry", {
+      p_calendar_entry_id: entryRow.id,
+      p_expected_updated_at: entryRow.updated_at,
+    });
+  });
+
+  it.each([
+    ["42501", "access_denied"],
+    ["P0002", "not_found"],
+    ["CAL01", "stale_entry"],
+    ["22023", "invalid_input"],
+    ["XX000", "calendar_mutation_failed"],
+  ])("maps backend %s safely to %s", async (providerCode, expectedCode) => {
+    calendarServiceMocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: providerCode, message: "raw provider secret" },
+    });
+    const result = await createCalendarEntry(input);
+    expect(result).toMatchObject({ ok: false, error: { code: expectedCode } });
+    expect(JSON.stringify(result)).not.toContain("raw provider secret");
+  });
+
+  it("rejects Birthday, malformed dates, bad UUIDs, and malformed mutation responses before trusting them", async () => {
+    await expect(createCalendarEntry({ ...input, entryType: "birthday" as never }))
+      .resolves.toMatchObject({ ok: false, error: { code: "invalid_input" } });
+    await expect(createCalendarEntry({ ...input, endDate: "2026-09-30" }))
+      .resolves.toMatchObject({ ok: false, error: { code: "invalid_input" } });
+    await expect(updateCalendarEntry("bad-id", entryRow.updated_at, input))
+      .resolves.toMatchObject({ ok: false, error: { code: "invalid_input" } });
+    expect(calendarServiceMocks.rpc).not.toHaveBeenCalled();
+
+    calendarServiceMocks.rpc.mockResolvedValue({
+      data: [{ ...mutationRow, email: "not allowed" }],
+      error: null,
+    });
+    await expect(deleteCalendarEntry(entryRow.id, entryRow.updated_at))
+      .resolves.toMatchObject({ ok: false, error: { code: "calendar_mutation_failed" } });
   });
 
   it.each([

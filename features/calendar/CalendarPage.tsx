@@ -1,10 +1,13 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import EmptyState from "../../shared/components/EmptyState";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
+import ConfirmDialog from "../../shared/components/ConfirmDialog";
+import CalendarEntryDetailDialog from "./CalendarEntryDetailDialog";
+import CalendarEntryFormDialog from "./CalendarEntryFormDialog";
 import {
   addCalendarMonths,
   buildMonthGrid,
@@ -22,9 +25,14 @@ import {
 import {
   calendarCategories,
   calendarCategoryFilterLabels,
+  calendarCategoryLabels,
   type CalendarCategory,
+  type CalendarDisplayEvent,
+  type CalendarEntry,
+  type CalendarEntryInput,
 } from "./calendarTypes";
 import { useCalendarData } from "./useCalendarData";
+import { useCalendarManagement } from "./useCalendarManagement";
 
 const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const categoryStyles: Record<CalendarCategory, string> = {
@@ -65,7 +73,15 @@ function CalendarPage({ initialMonth, today: todayOverride }: CalendarPageProps)
   const [selectedCategories, setSelectedCategories] = useState<Set<CalendarCategory>>(
     () => new Set(calendarCategories),
   );
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editingEntry, setEditingEntry] = useState<CalendarEntry | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<CalendarEntry | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const removingRef = useRef(false);
   const { entriesQuery, birthdaysQuery } = useCalendarData();
+  const management = useCalendarManagement();
   const isLoading = entriesQuery.isPending || birthdaysQuery.isPending;
   const entriesResult = entriesQuery.data;
   const birthdaysResult = birthdaysQuery.data;
@@ -89,6 +105,23 @@ function CalendarPage({ initialMonth, today: todayOverride }: CalendarPageProps)
     .reduce((count, day) =>
       count + calendarEventsOnDate(allEvents, day.date, selectedCategories).length,
     0);
+  const selectedEvent = selectedEventId
+    ? allEvents.find((event) => event.id === selectedEventId) ?? null
+    : null;
+  const employeesResult = management.employeesQuery.data;
+  const employees = employeesResult?.ok ? employeesResult.value : [];
+  const employeesError = management.employeesQuery.isError ||
+      (employeesResult !== undefined && !employeesResult.ok)
+    ? "Related employees could not be loaded."
+    : null;
+  const selectedRelatedEmployeeName = selectedEvent?.relatedUserId
+    ? employees.find((employee) => employee.userId === selectedEvent.relatedUserId)?.fullName ?? null
+    : null;
+
+  const entryForEvent = (event: CalendarDisplayEvent | null): CalendarEntry | null => {
+    if (!event?.entryId || !entriesResult?.ok) return null;
+    return entriesResult.value.find((entry) => entry.id === event.entryId) ?? null;
+  };
 
   const toggleCategory = (category: CalendarCategory) => {
     setSelectedCategories((current) => {
@@ -102,6 +135,46 @@ function CalendarPage({ initialMonth, today: todayOverride }: CalendarPageProps)
   const retry = () => {
     void entriesQuery.refetch();
     void birthdaysQuery.refetch();
+  };
+
+  const openCreate = () => {
+    setEditingEntry(null);
+    setNotice(null);
+    setFormOpen(true);
+  };
+  const openEdit = () => {
+    const entry = entryForEvent(selectedEvent);
+    if (!entry) return;
+    setEditingEntry(entry);
+    setSelectedEventId(null);
+    setNotice(null);
+    setFormOpen(true);
+  };
+  const openRemove = () => {
+    const entry = entryForEvent(selectedEvent);
+    if (!entry) return;
+    setRemoveError(null);
+    setRemoveTarget(entry);
+    setSelectedEventId(null);
+  };
+  const saveEntry = (input: CalendarEntryInput) => editingEntry
+    ? management.updateMutation.mutateAsync({ entry: editingEntry, input })
+    : management.createMutation.mutateAsync(input);
+  const removeEntry = async () => {
+    if (!removeTarget || removingRef.current) return;
+    removingRef.current = true;
+    setRemoveError(null);
+    try {
+      const result = await management.deleteMutation.mutateAsync(removeTarget);
+      if (!result.ok) {
+        setRemoveError(result.error.message);
+        return;
+      }
+      setRemoveTarget(null);
+      setNotice("Calendar entry removed.");
+    } finally {
+      removingRef.current = false;
+    }
   };
 
   let content;
@@ -236,13 +309,16 @@ function CalendarPage({ initialMonth, today: todayOverride }: CalendarPageProps)
                     {dayEvents.map((event) => (
                       <li
                         key={event.id}
-                        className={`rounded-lg border px-2 py-1 text-xs font-medium leading-4 ${categoryStyles[event.category]}`}
-                        title={event.description ?? event.label}
+                        className={`rounded-lg border text-xs font-medium leading-4 ${categoryStyles[event.category]}`}
                       >
-                        <span aria-hidden="true" className="mr-1 font-bold">
-                          {categoryMarker(event.category)}
-                        </span>
-                        <span>{event.label}</span>
+                        <button type="button" onClick={() => setSelectedEventId(event.id)}
+                          title={event.description ?? event.label}
+                          className="w-full rounded-lg px-2 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600">
+                          <span aria-hidden="true" className="mr-1 font-bold">
+                            {categoryMarker(event.category)}
+                          </span>
+                          <span>{event.label}</span>
+                        </button>
                       </li>
                     ))}
                   </ul>
@@ -260,8 +336,31 @@ function CalendarPage({ initialMonth, today: todayOverride }: CalendarPageProps)
       <PageHeader
         title="Calendar"
         description="Company birthdays, business trips, events, and vacations."
+        actions={management.canManage ? (
+          <button type="button" onClick={openCreate}
+            className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600">
+            Add Calendar Entry
+          </button>
+        ) : undefined}
       />
+      {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>}
       {content}
+      <CalendarEntryDetailDialog event={selectedEvent} canManage={management.canManage}
+        relatedEmployeeName={selectedRelatedEmployeeName}
+        onClose={() => setSelectedEventId(null)} onEdit={openEdit} onRemove={openRemove} />
+      {management.canManage && <CalendarEntryFormDialog
+        open={formOpen} entry={editingEntry} employees={employees}
+        employeesLoading={management.employeesQuery.isPending}
+        employeesError={employeesError}
+        onClose={() => setFormOpen(false)} onSubmit={saveEntry}
+        onSuccess={() => setNotice(editingEntry ? "Calendar entry updated." : "Calendar entry added.")} />}
+      <ConfirmDialog open={removeTarget !== null} title="Remove Calendar Entry?"
+        description={removeTarget
+          ? `${removeTarget.title} (${calendarCategoryLabels[removeTarget.entryType]}, ${removeTarget.startDate}${removeTarget.endDate === removeTarget.startDate ? "" : ` – ${removeTarget.endDate}`}) will be permanently removed from Calendar.`
+          : "This Calendar entry will be permanently removed."}
+        confirmLabel="Remove" confirmVariant="danger" onConfirm={() => void removeEntry()}
+        onCancel={() => { if (!management.deleteMutation.isPending) { setRemoveTarget(null); setRemoveError(null); } }}
+        isSubmitting={management.deleteMutation.isPending} errorMessage={removeError} />
     </div>
   );
 }
