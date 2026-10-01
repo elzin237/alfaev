@@ -26,6 +26,7 @@ import UserDetailPage from "../../features/users/UserDetailPage";
 import DocumentationPage from "../../features/documentation/DocumentationPage";
 import FixedAssetsPage from "../../features/fixed-assets/FixedAssetsPage";
 import CalendarPage from "../../features/calendar/CalendarPage";
+import ArchivePage from "../../features/archive/ArchivePage";
 
 function AppRouter() {
   return (
@@ -85,6 +86,9 @@ function AppRouter() {
           <Route path="/users/:userId" element={<UserDetailPage />} />
         </Route>
         <Route path="/calendar" element={<CalendarPage />} />
+        <Route element={<PermissionRoute permission="archive.view" />}>
+          <Route path="/archive" element={<ArchivePage />} />
+        </Route>
       </Route>
     </Routes>
   );

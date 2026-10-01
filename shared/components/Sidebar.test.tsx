@@ -180,6 +180,22 @@ describe("Sidebar permission visibility", () => {
       .not.toBeInTheDocument();
   });
 
+  it("shows Archive only to an active non-admin with archive.view", async () => {
+    sidebarMocks.hasPermission.mockImplementation(
+      async (permission: string): Promise<PermissionServiceResult> => ({
+        ok: true,
+        value: permission === "archive.view",
+      }),
+    );
+
+    renderSidebar();
+
+    expect(await screen.findByRole("link", { name: "Archive" }))
+      .toHaveAttribute("href", "/archive");
+    expect(screen.getByRole("link", { name: "Calendar" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument();
+  });
+
   it("does not expose ungranted links after permission checks resolve", async () => {
     sidebarMocks.hasPermission.mockResolvedValue({ ok: true, value: false });
 
