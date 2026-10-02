@@ -1,6 +1,8 @@
+import { Package } from "lucide-react";
 import { Link } from "react-router";
 
 import type { DashboardInventorySection } from "../services/dashboardService";
+import DashboardSectionHeader from "./DashboardSectionHeader";
 
 export interface DashboardInventoryProps {
   section: DashboardInventorySection | null;
@@ -17,44 +19,41 @@ function DashboardInventory({ section }: DashboardInventoryProps) {
   return (
     <section
       aria-labelledby="dashboard-inventory-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="dashboard-inventory-title" className="text-lg font-bold text-zinc-900">
-            Inventory
-          </h2>
-          <dl className="flex items-baseline gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5">
-            <dt className="text-[0.68rem] font-bold uppercase tracking-wide text-zinc-500">
-              Active Products
-            </dt>
-            <dd className="text-lg font-bold tabular-nums text-zinc-950">
-              {section.activeProductCount}
-            </dd>
-          </dl>
-        </div>
-        <Link
-          to="/inventory"
-          className="rounded-lg text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
-        >
-          View all inventory
-        </Link>
+      <DashboardSectionHeader
+        actionLabel="View all inventory"
+        actionTo="/inventory"
+        icon={Package}
+        title="Inventory"
+        titleId="dashboard-inventory-title"
+      />
+
+      <div className="border-b border-zinc-100 bg-zinc-50/60 px-5 py-3">
+        <dl className="inline-flex items-baseline gap-2.5 rounded-full border border-zinc-200 bg-white px-3 py-1.5 shadow-sm">
+          <dt className="text-[0.68rem] font-bold uppercase tracking-[0.08em] text-zinc-500">
+            Active Products
+          </dt>
+          <dd className="text-lg font-bold leading-none tabular-nums text-zinc-950">
+            {section.activeProductCount}
+          </dd>
+        </dl>
       </div>
 
       <div className="px-5 py-4">
         {section.recent.length === 0 ? (
           <p className="text-sm text-zinc-500">No active products yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-200">
+          <ul className="divide-y divide-zinc-100">
             {section.recent.map((product) => (
               <li
                 key={product.productId}
-                className="grid gap-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+                className="grid gap-3 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
               >
                 <div className="min-w-0">
                   <Link
                     to={`/inventory/${product.productId}`}
-                    className="font-semibold text-zinc-900 underline-offset-4 transition hover:text-red-700 hover:underline focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                    className="rounded-sm font-semibold text-zinc-900 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
                   >
                     {product.name}
                   </Link>

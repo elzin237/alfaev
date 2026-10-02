@@ -54,12 +54,14 @@ describe("DashboardProjects", () => {
       ["Completed", "4"],
       ["Cancelled", "5"],
     ] as const) {
-      const term = within(widget).getByText(label, { selector: "dt" });
-      expect(term.nextElementSibling).toHaveTextContent(count);
+      const term = within(widget).getByText(label, { selector: "dt span:last-child" })
+        .closest("dt");
+      expect(term).not.toBeNull();
+      expect(term!.nextElementSibling).toHaveTextContent(count);
     }
-    expect(within(widget).getByText("In Progress", { selector: "span" }))
+    expect(within(widget).getByText("In Progress", { selector: "span.inline-flex" }))
       .toBeInTheDocument();
-    expect(within(widget).getByText("On Hold", { selector: "span" }))
+    expect(within(widget).getByText("On Hold", { selector: "span.inline-flex" }))
       .toBeInTheDocument();
   });
 
@@ -86,8 +88,32 @@ describe("DashboardProjects", () => {
       wrapper: MemoryRouter,
     });
     expect(screen.getByText("No projects yet.")).toBeInTheDocument();
-    expect(screen.getByText("Planned", { selector: "dt" })).toBeInTheDocument();
+    expect(screen.getByText("Planned", { selector: "dt span:last-child" }))
+      .toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(screen.queryByText(/planning|material|create|archive/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a real-count distribution and handles a zero total without fake segments", () => {
+    const { rerender } = render(<DashboardProjects section={section} />, {
+      wrapper: MemoryRouter,
+    });
+    expect(screen.getByRole("img", {
+      name: "Project status distribution based on 15 projects",
+    }).children).toHaveLength(5);
+
+    rerender(<DashboardProjects section={{
+      statusCounts: {
+        planned: 0,
+        inProgress: 0,
+        onHold: 0,
+        completed: 0,
+        cancelled: 0,
+      },
+      recent: [],
+    }} />);
+    expect(screen.getByRole("img", {
+      name: "Project status distribution based on 0 projects",
+    }).children).toHaveLength(0);
   });
 });

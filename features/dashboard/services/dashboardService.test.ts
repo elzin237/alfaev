@@ -247,8 +247,14 @@ describe("dashboardService", () => {
     ["later-section extra field", (value: ReturnType<typeof validResponse>) => {
       Object.assign(value.inventory.recent[0]!, { cost: "secret" });
     }],
+    ["protected Activity field", (value: ReturnType<typeof validResponse>) => {
+      Object.assign(value.activity.recent[0]!, { metadata: { hidden: true } });
+    }],
     ["malformed exact quantity", (value: ReturnType<typeof validResponse>) => {
       value.procurement.unresolved[0]!.requested_quantity = "1e3";
+    }],
+    ["unknown Calendar kind", (value: ReturnType<typeof validResponse>) => {
+      value.calendar.upcoming[0]!.kind = "holiday";
     }],
     ["invalid Calendar range", (value: ReturnType<typeof validResponse>) => {
       value.calendar.upcoming[0]!.end_date = "2026-10-09";

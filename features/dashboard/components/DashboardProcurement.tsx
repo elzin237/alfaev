@@ -1,8 +1,9 @@
-import { Link } from "react-router";
+import { CheckCircle2, ShoppingCart } from "lucide-react";
 
 import StatusBadge from "../../../shared/components/StatusBadge";
 import { getProcurementStatusDisplay } from "../../procurement/procurementStatus";
 import type { DashboardProcurementSection } from "../services/dashboardService";
+import DashboardSectionHeader from "./DashboardSectionHeader";
 
 export interface DashboardProcurementProps {
   section: DashboardProcurementSection | null;
@@ -19,28 +20,35 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
   return (
     <section
       aria-labelledby="dashboard-procurement-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 px-5 py-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 id="dashboard-procurement-title" className="text-lg font-bold text-zinc-900">
-            Nabavka
-          </h2>
-          <dl className="flex items-baseline gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5">
-            <dt className="text-[0.68rem] font-bold uppercase tracking-wide text-zinc-500">
+      <DashboardSectionHeader
+        actionLabel="View all"
+        actionTo="/procurement"
+        icon={ShoppingCart}
+        title="Nabavka"
+        titleId="dashboard-procurement-title"
+      />
+
+      <div className="border-b border-zinc-100 bg-zinc-50/60 px-5 py-4">
+        <dl className="flex items-center justify-between gap-4">
+          <div>
+            <dt className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">
               Unresolved
             </dt>
-            <dd className="text-lg font-bold tabular-nums text-zinc-950">
+            <dd className="mt-1 text-3xl font-bold leading-none tabular-nums text-zinc-950">
               {section.unresolvedCount}
             </dd>
-          </dl>
-        </div>
-        <Link
-          to="/procurement"
-          className="rounded-lg text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
-        >
-          View all
-        </Link>
+          </div>
+          {section.unresolvedCount === 0 && (
+            <span
+              aria-hidden="true"
+              className="flex size-10 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100"
+            >
+              <CheckCircle2 className="size-5" strokeWidth={1.8} />
+            </span>
+          )}
+        </dl>
       </div>
 
       <div className="px-5 py-4">
@@ -49,13 +57,13 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
             No unresolved procurement requests.
           </p>
         ) : (
-          <ul className="divide-y divide-zinc-200">
+          <ul className="divide-y divide-zinc-100">
             {section.unresolved.map((request) => {
               const status = getProcurementStatusDisplay(request.status);
               return (
                 <li
                   key={request.id}
-                  className="grid gap-3 py-3 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-4"
+                  className="grid gap-3 py-3.5 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-4"
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-zinc-900">

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
@@ -67,19 +67,45 @@ const inventory: NonNullable<DashboardReadModel["inventory"]> = {
   }],
 };
 
+const activity: NonNullable<DashboardReadModel["activity"]> = {
+  recent: [{
+    auditLogId: "00000000-0000-4000-8000-000000000005",
+    actorUserId: "00000000-0000-4000-8000-000000000010",
+    actorFullName: "Dashboard Actor",
+    actionType: "project.updated",
+    entityType: "project",
+    entityId: "00000000-0000-4000-8000-000000000001",
+    summary: "Updated Dashboard Project",
+    createdAt: "2026-10-01T10:00:00Z",
+  }],
+};
+
+const calendar: DashboardReadModel["calendar"] = {
+  upcoming: [{
+    kind: "event",
+    id: "00000000-0000-4000-8000-000000000006",
+    title: "Dashboard Event",
+    startDate: "2026-10-20",
+    endDate: "2026-10-20",
+    relatedUserId: null,
+  }],
+};
+
 function model(
   projectSection: DashboardReadModel["projects"],
   workOrderSection: DashboardReadModel["workOrders"],
   procurementSection: DashboardReadModel["procurement"],
   inventorySection: DashboardReadModel["inventory"],
+  activitySection: DashboardReadModel["activity"],
+  calendarSection: DashboardReadModel["calendar"],
 ): DashboardReadModel {
   return {
     projects: projectSection,
     workOrders: workOrderSection,
     procurement: procurementSection,
     inventory: inventorySection,
-    activity: null,
-    calendar: { upcoming: [] },
+    activity: activitySection,
+    calendar: calendarSection,
   };
 }
 
@@ -88,6 +114,8 @@ function setSuccess(
   workOrderSection: DashboardReadModel["workOrders"] = workOrders,
   procurementSection: DashboardReadModel["procurement"] = procurement,
   inventorySection: DashboardReadModel["inventory"] = inventory,
+  activitySection: DashboardReadModel["activity"] = activity,
+  calendarSection: DashboardReadModel["calendar"] = calendar,
 ) {
   mocks.useDashboard.mockReturnValue({
     data: {
@@ -97,6 +125,8 @@ function setSuccess(
         workOrderSection,
         procurementSection,
         inventorySection,
+        activitySection,
+        calendarSection,
       ),
     },
     isError: false,
@@ -117,6 +147,65 @@ afterEach(() => {
 });
 
 describe("DashboardPage", () => {
+  it("derives the four summary metrics only from their existing authorized sections", () => {
+    const metricProjects = {
+      ...projects,
+      statusCounts: {
+        planned: 2,
+        inProgress: 3,
+        onHold: 4,
+        completed: 50,
+        cancelled: 60,
+      },
+    };
+    const metricWorkOrders = {
+      recent: [
+        ...workOrders.recent,
+        {
+          ...workOrders.recent[0]!,
+          id: "00000000-0000-4000-8000-000000000012",
+          workOrderNumber: "RN-2026-0002",
+          status: "finished" as const,
+          finishedAt: "2026-10-02T10:00:00Z",
+        },
+      ],
+    };
+    setSuccess(
+      metricProjects,
+      metricWorkOrders,
+      { ...procurement, unresolvedCount: 7 },
+      { ...inventory, activeProductCount: 23 },
+      activity,
+      calendar,
+    );
+    renderPage();
+
+    const summary = screen.getByRole("region", { name: "Dashboard summary" });
+    for (const [label, value] of [
+      ["Active Projects", "9"],
+      ["Recent Work Orders", "2"],
+      ["Unresolved Procurement", "7"],
+      ["Active Products", "23"],
+    ] as const) {
+      const term = within(summary).getByText(label, { selector: "dt" });
+      expect(term.nextElementSibling).toHaveTextContent(value);
+    }
+    expect(within(summary).queryByText(/open work orders|total work orders|all work orders/i))
+      .not.toBeInTheDocument();
+  });
+
+  it("omits each summary metric whose protected section is unavailable", () => {
+    setSuccess(null, null, null, null, activity, calendar);
+    renderPage();
+
+    expect(screen.queryByRole("region", { name: "Dashboard summary" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText("Active Projects")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent Work Orders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unresolved Procurement")).not.toBeInTheDocument();
+    expect(screen.queryByText("Active Products")).not.toBeInTheDocument();
+  });
+
   it("shows one loading state without flashing protected widgets or fake values", () => {
     mocks.useDashboard.mockReturnValue({
       data: undefined,
@@ -132,6 +221,10 @@ describe("DashboardPage", () => {
       .not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Nabavka" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Recent Activity" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Upcoming Calendar" }))
+      .not.toBeInTheDocument();
   });
 
   it("shows a safe retryable error and refetches only the Dashboard query", () => {
@@ -155,23 +248,29 @@ describe("DashboardPage", () => {
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });
 
-  it("renders only Projects when Work Orders are backend-hidden", () => {
-    setSuccess(projects, null, null, null);
+  it("preserves Projects when Work Orders are backend-hidden", () => {
+    setSuccess(projects, null, null, null, null, calendar);
     renderPage();
     expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "Dashboard summary" });
+    expect(within(summary).getByText("Active Projects")).toBeInTheDocument();
+    expect(within(summary).queryByText("Recent Work Orders")).not.toBeInTheDocument();
   });
 
-  it("renders only Work Orders when Projects are backend-hidden", () => {
-    setSuccess(null, workOrders, null, null);
+  it("preserves Work Orders when Projects are backend-hidden", () => {
+    setSuccess(null, workOrders, null, null, null, calendar);
     renderPage();
     expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "Dashboard summary" });
+    expect(within(summary).queryByText("Active Projects")).not.toBeInTheDocument();
+    expect(within(summary).getByText("Recent Work Orders")).toBeInTheDocument();
   });
 
-  it("renders all authorized Task 141 and Task 142 widgets", () => {
+  it("composes Activity and Calendar alongside every Task 141 and Task 142 widget", () => {
     renderPage();
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
@@ -179,10 +278,14 @@ describe("DashboardPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Nabavka" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Recent Activity" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Upcoming Calendar" }))
+      .toBeInTheDocument();
   });
 
   it("renders Procurement without Inventory when only that Task 142 section is authorized", () => {
-    setSuccess(null, null, procurement, null);
+    setSuccess(null, null, procurement, null, null, calendar);
     renderPage();
     expect(screen.getByRole("region", { name: "Nabavka" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
@@ -191,7 +294,7 @@ describe("DashboardPage", () => {
   });
 
   it("renders Inventory without Procurement when only that Task 142 section is authorized", () => {
-    setSuccess(null, null, null, inventory);
+    setSuccess(null, null, null, inventory, null, calendar);
     renderPage();
     expect(screen.queryByRole("region", { name: "Nabavka" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
@@ -199,19 +302,26 @@ describe("DashboardPage", () => {
       .not.toBeInTheDocument();
   });
 
-  it("shows a neutral state only when every implemented protected section is hidden", () => {
-    setSuccess(null, null, null, null);
+  it("omits every unavailable protected widget while keeping company Calendar", () => {
+    setSuccess(null, null, null, null, null, { upcoming: [] });
     renderPage();
-    expect(screen.getByRole("heading", {
-      name: "No operational overview is available for your account.",
-    })).toBeInTheDocument();
-    expect(screen.queryByText(/no permissions/i)).not.toBeInTheDocument();
+    for (const widget of [
+      "Projects", "Recent Work Orders", "Nabavka", "Inventory", "Recent Activity",
+    ]) {
+      expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
+    }
+    expect(screen.getByRole("region", { name: "Upcoming Calendar" }))
+      .toBeInTheDocument();
+    expect(screen.getByText("No upcoming calendar entries."))
+      .toBeInTheDocument();
   });
 
-  it("does not render Task 143 modules or placeholders", () => {
+  it("hides Activity when null without hiding company Calendar", () => {
+    setSuccess(projects, workOrders, procurement, inventory, null, calendar);
     renderPage();
-    for (const heading of ["Activity", "Calendar"]) {
-      expect(screen.queryByRole("heading", { name: heading })).not.toBeInTheDocument();
-    }
+    expect(screen.queryByRole("region", { name: "Recent Activity" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Upcoming Calendar" }))
+      .toBeInTheDocument();
   });
 });

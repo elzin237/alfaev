@@ -1,7 +1,9 @@
+import { ClipboardList, FileText } from "lucide-react";
 import { Link } from "react-router";
 
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { DashboardWorkOrdersSection } from "../services/dashboardService";
+import DashboardSectionHeader from "./DashboardSectionHeader";
 
 export interface DashboardWorkOrdersProps {
   section: DashboardWorkOrdersSection | null;
@@ -18,43 +20,47 @@ function DashboardWorkOrders({ section }: DashboardWorkOrdersProps) {
   return (
     <section
       aria-labelledby="dashboard-work-orders-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm"
+      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
     >
-      <div className="flex items-center justify-between gap-4 border-b border-zinc-200 px-5 py-4">
-        <h2 id="dashboard-work-orders-title" className="text-lg font-bold text-zinc-900">
-          Recent Work Orders
-        </h2>
-        <Link
-          to="/work-orders"
-          className="rounded-lg text-sm font-semibold text-red-600 underline-offset-4 transition hover:text-red-700 hover:underline focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
-        >
-          View all work orders
-        </Link>
-      </div>
+      <DashboardSectionHeader
+        actionLabel="View all work orders"
+        actionTo="/work-orders"
+        icon={ClipboardList}
+        title="Recent Work Orders"
+        titleId="dashboard-work-orders-title"
+      />
 
       <div className="px-5 py-4">
         {section.recent.length === 0 ? (
           <p className="text-sm text-zinc-500">No Work Orders yet.</p>
         ) : (
-          <ul className="divide-y divide-zinc-200">
+          <ul className="divide-y divide-zinc-100">
             {section.recent.map((workOrder) => {
               const isFinished = workOrder.status === "finished";
               const relevantDate = isFinished ? workOrder.finishedAt : workOrder.updatedAt;
               return (
                 <li
                   key={workOrder.id}
-                  className="grid gap-2 py-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+                  className="grid gap-2 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
                 >
-                  <div className="min-w-0">
-                    <Link
-                      to={`/work-orders/${workOrder.id}`}
-                      className="font-semibold text-zinc-900 underline-offset-4 transition hover:text-red-700 hover:underline focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      aria-hidden="true"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500"
                     >
-                      {workOrder.workOrderNumber}
-                    </Link>
-                    <p className="mt-0.5 truncate text-sm text-zinc-500">
-                      {workOrder.customerNameSnapshot ?? "Not set"}
-                    </p>
+                      <FileText className="size-4" strokeWidth={1.8} />
+                    </span>
+                    <div className="min-w-0">
+                      <Link
+                        to={`/work-orders/${workOrder.id}`}
+                        className="rounded-sm font-semibold text-zinc-950 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
+                      >
+                        {workOrder.workOrderNumber}
+                      </Link>
+                      <p className="mt-0.5 truncate text-sm text-zinc-500">
+                        {workOrder.customerNameSnapshot ?? "Not set"}
+                      </p>
+                    </div>
                   </div>
                   {relevantDate && (
                     <p className="text-xs text-zinc-500 sm:text-right">
