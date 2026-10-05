@@ -248,6 +248,42 @@ describe("DashboardPage", () => {
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });
 
+  it("renders PCB production Activity and a finished General Stock Work Order", () => {
+    const productionWorkOrders: DashboardReadModel["workOrders"] = {
+      recent: [{
+        ...workOrders.recent[0]!,
+        workOrderNumber: "RN-2026-0013",
+        status: "finished",
+        projectId: null,
+        customerNameSnapshot: null,
+        finishedAt: "2026-10-05T11:20:04.966049+00:00",
+      }],
+    };
+    const productionActivity: DashboardReadModel["activity"] = {
+      recent: [{
+        ...activity.recent[0]!,
+        actionType: "pcb_production.completed",
+        entityType: "pcb_production_run",
+        summary: "Completed PCB production Work Order RN-2026-0013",
+      }],
+    };
+    setSuccess(
+      projects,
+      productionWorkOrders,
+      procurement,
+      inventory,
+      productionActivity,
+      calendar,
+    );
+
+    renderPage();
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("RN-2026-0013")).toBeInTheDocument();
+    expect(screen.getByText("Completed PCB production Work Order RN-2026-0013"))
+      .toBeInTheDocument();
+  });
+
   it("preserves Projects when Work Orders are backend-hidden", () => {
     setSuccess(projects, null, null, null, null, calendar);
     renderPage();

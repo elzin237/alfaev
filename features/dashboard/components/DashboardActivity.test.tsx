@@ -51,6 +51,41 @@ describe("DashboardActivity", () => {
       .toBeInTheDocument();
   });
 
+  it("renders new or unfamiliar list-safe audit identifiers with the neutral presentation", () => {
+    const pcbSection: DashboardActivitySection = {
+      recent: [{
+        auditLogId: "00000000-0000-4000-8000-000000000030",
+        actorUserId: "00000000-0000-4000-8000-000000000031",
+        actorFullName: "Vladan Markovic",
+        actionType: "pcb_production.completed",
+        entityType: "pcb_production_run",
+        entityId: "00000000-0000-4000-8000-000000000032",
+        summary: "Completed PCB production Work Order RN-2026-0013",
+        createdAt: "2026-10-05T11:20:04.934482+00:00",
+      }, {
+        auditLogId: "00000000-0000-4000-8000-000000000033",
+        actorUserId: "00000000-0000-4000-8000-000000000031",
+        actorFullName: "Vladan Markovic",
+        actionType: "future_module.recorded",
+        entityType: "future_module_record",
+        entityId: null,
+        summary: "Future list-safe activity summary",
+        createdAt: "2026-10-05T11:15:47.246966+00:00",
+      }],
+    };
+
+    const { container } = render(<DashboardActivity section={pcbSection} />, {
+      wrapper: MemoryRouter,
+    });
+
+    expect(screen.getByText("Completed PCB production Work Order RN-2026-0013"))
+      .toBeInTheDocument();
+    expect(screen.getByText("Future list-safe activity summary")).toBeInTheDocument();
+    expect(container.querySelectorAll("li svg")).toHaveLength(2);
+    expect(screen.queryByText("pcb_production.completed")).not.toBeInTheDocument();
+    expect(screen.queryByText("future_module_record")).not.toBeInTheDocument();
+  });
+
   it("uses only list-safe presentation and the existing Archive route", () => {
     render(<DashboardActivity section={section} />, { wrapper: MemoryRouter });
 

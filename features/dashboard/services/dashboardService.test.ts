@@ -13,6 +13,7 @@ const projectTwo = "00000000-0000-4000-8000-000000000002";
 const workOrderOne = "00000000-0000-4000-8000-000000000003";
 const workOrderTwo = "00000000-0000-4000-8000-000000000004";
 const actorId = "00000000-0000-4000-8000-000000000005";
+const productionRunId = "00000000-0000-4000-8000-000000000010";
 
 function validResponse() {
   return {
@@ -179,6 +180,100 @@ describe("dashboardService", () => {
       .toEqual([projectTwo, projectOne]);
     expect(result.value.workOrders?.recent.map((item) => item.id))
       .toEqual([workOrderTwo, workOrderOne]);
+  });
+
+  it("accepts PCB production Activity and a finished General Stock Work Order", async () => {
+    const response = validResponse();
+    Object.assign(response.work_orders.recent[0]!, {
+      work_order_number: "RN-2026-0013",
+      project_id: null,
+      customer_name_snapshot: null,
+    });
+    response.activity.recent = [
+      {
+        audit_log_id: "00000000-0000-4000-8000-000000000011",
+        actor_user_id: actorId,
+        actor_full_name: "Vladan Markovic",
+        action_type: "pcb_production.completed",
+        entity_type: "pcb_production_run",
+        entity_id: productionRunId,
+        summary: "Completed PCB production Work Order RN-2026-0013",
+        created_at: "2026-10-05T11:20:04.934482+00:00",
+      },
+      {
+        audit_log_id: "00000000-0000-4000-8000-000000000012",
+        actor_user_id: actorId,
+        actor_full_name: "Vladan Markovic",
+        action_type: "pcb_production.work_order_created",
+        entity_type: "work_order",
+        entity_id: workOrderTwo,
+        summary: "Created PCB production Work Order RN-2026-0013",
+        created_at: "2026-10-05T11:15:47.246966+00:00",
+      },
+    ];
+    mocks.rpc.mockResolvedValue({ data: response, error: null });
+
+    const result = await getDashboardReadModel();
+
+    if (!result.ok) throw new Error("Expected valid PCB production Dashboard data");
+    expect(result.value.workOrders?.recent[0]).toMatchObject({
+      workOrderNumber: "RN-2026-0013",
+      projectId: null,
+      customerNameSnapshot: null,
+      status: "finished",
+    });
+    expect(result.value.activity?.recent).toEqual([
+      expect.objectContaining({
+        actionType: "pcb_production.completed",
+        entityType: "pcb_production_run",
+        summary: "Completed PCB production Work Order RN-2026-0013",
+      }),
+      expect.objectContaining({
+        actionType: "pcb_production.work_order_created",
+        entityType: "work_order",
+      }),
+    ]);
+  });
+
+  it.each([
+    ["action type", "action_type", "future_module.recorded"],
+    ["entity type", "entity_type", "future_module_record"],
+  ] as const)("accepts a structurally valid future Activity %s", async (
+    _label,
+    field,
+    value,
+  ) => {
+    const response = validResponse();
+    response.activity.recent[0]![field] = value;
+    mocks.rpc.mockResolvedValue({ data: response, error: null });
+
+    await expect(getDashboardReadModel()).resolves.toMatchObject({
+      ok: true,
+      value: { activity: { recent: [{
+        [field === "action_type" ? "actionType" : "entityType"]: value,
+      }] } },
+    });
+  });
+
+  it.each([
+    ["blank action type", (value: ReturnType<typeof validResponse>) => {
+      value.activity.recent[0]!.action_type = "";
+    }],
+    ["untrimmed entity type", (value: ReturnType<typeof validResponse>) => {
+      value.activity.recent[0]!.entity_type = " project";
+    }],
+    ["invalid audit ID", (value: ReturnType<typeof validResponse>) => {
+      value.activity.recent[0]!.audit_log_id = "not-a-uuid";
+    }],
+    ["invalid timestamp", (value: ReturnType<typeof validResponse>) => {
+      value.activity.recent[0]!.created_at = "now";
+    }],
+  ])("rejects malformed Activity data: %s", async (_label, mutate) => {
+    const response = validResponse();
+    mutate(response);
+    mocks.rpc.mockResolvedValue({ data: response, error: null });
+
+    await expect(getDashboardReadModel()).resolves.toMatchObject({ ok: false });
   });
 
   it.each([

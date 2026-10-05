@@ -261,10 +261,7 @@ function parseWorkOrders(
       return undefined;
     }
     if (item.status === "draft" && item.finished_at !== null) return undefined;
-    if (item.status === "finished" && (
-      item.finished_at === null || item.project_id === null ||
-      item.customer_name_snapshot === null
-    )) return undefined;
+    if (item.status === "finished" && item.finished_at === null) return undefined;
     recent.push({
       id: item.id,
       workOrderNumber: item.work_order_number,
