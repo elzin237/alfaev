@@ -166,7 +166,9 @@ describe.skipIf(!enabled)("Task 100 committed PCB production concurrency", () =>
       await client.query("set local lock_timeout = '15s'");
       await client.query("select pg_catalog.set_config('application_name', $1, true)", [label]);
       await client.query("select pg_catalog.set_config('request.jwt.claim.sub', $1, true)", [actor.authId]);
-      await client.query("set local role authenticated");
+      // produce_pcb is retired from browser use but remains an internal legacy
+      // primitive whose transaction/locking regressions are still valuable.
+      // Keep the caller claims while invoking it only through this trusted DB path.
       const value = await operation();
       await client.query("commit");
       return { ok: true, value };

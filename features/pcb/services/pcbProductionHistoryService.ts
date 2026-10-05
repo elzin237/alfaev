@@ -33,6 +33,10 @@ function isPositiveBigintText(value: unknown): value is string {
   return typeof value === "string" && /^[1-9][0-9]*$/.test(value) && BigInt(value) <= maxBigint;
 }
 
+function isNonnegativeBigintText(value: unknown): value is string {
+  return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value) && BigInt(value) <= maxBigint;
+}
+
 function isName(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.trim() === value;
 }
@@ -46,7 +50,7 @@ function parseRow(value: unknown): PcbProductionHistoryItem | null {
     !isUuid(value.production_run_id) ||
     typeof value.completed_at !== "string" || !timestampPattern.test(value.completed_at) ||
     Number.isNaN(Date.parse(value.completed_at)) ||
-    !isPositiveBigintText(value.quantity_produced) ||
+    !isNonnegativeBigintText(value.quantity_produced) ||
     !((value.project_id === null && value.project_name === null) ||
       (isUuid(value.project_id) && isName(value.project_name))) ||
     !isUuid(value.bom_version_id) ||

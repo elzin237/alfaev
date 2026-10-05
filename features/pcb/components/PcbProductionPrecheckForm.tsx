@@ -11,7 +11,8 @@ interface Props {
   projects: PcbProductionProjectChoice[];
   isRefreshing: boolean;
   submit: (submission: ProductionSubmission) => Promise<ProducePcbResult>;
-  onProduced: (summary: { runId: string; cardName: string; quantity: string; projectName: string | null }) => void;
+  onProduced: (summary: { workOrderId: string; workOrderNumber: string; cardName: string;
+    plannedQuantity: string; projectName: string | null }) => void;
 }
 
 const statusLabels = { planned: "Planned", in_progress: "In Progress", on_hold: "On Hold" };
@@ -20,37 +21,40 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
   const [quantity, setQuantity] = useState("");
   const [projectId, setProjectId] = useState("");
   const [confirmation, setConfirmation] = useState<{ quantity: string; projectId: string | null;
-    projectName: string | null; affectedProductIds: string[] } | null>(null);
+    projectName: string | null; creationRequestId: string } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submissionLocked = useRef(false);
+  const creationAttempt = useRef<{ quantity: string; projectId: string | null; requestId: string } | null>(null);
   const preview = quantity === "" ? null : buildPcbProductionPreview(source.inputs, quantity, source.outputIsActive);
   const selectedProject = projects.find((project) => project.projectId === projectId);
-  const canConfirm = preview?.ok === true && preview.ready && !isRefreshing &&
+  const productsAvailable = source.outputIsActive && source.inputs.every((input) => input.isActive);
+  const canConfirm = preview?.ok === true && productsAvailable && !isRefreshing &&
     (projectId === "" || Boolean(selectedProject)) && !isSubmitting;
 
   useEffect(() => { setConfirmation(null); }, [source]);
 
   async function confirmProduction() {
-    if (!confirmation || submissionLocked.current || isRefreshing || !preview?.ok || !preview.ready ||
+    if (!confirmation || submissionLocked.current || isRefreshing || !preview?.ok || !productsAvailable ||
       quantity !== confirmation.quantity || (projectId || null) !== confirmation.projectId ||
       (projectId !== "" && selectedProject?.name !== confirmation.projectName)) return;
     submissionLocked.current = true;
     setIsSubmitting(true);
     try {
       const result = await submit({ pcbCardId: source.cardId,
-        quantityToProduce: confirmation.quantity, projectId: confirmation.projectId,
-        affectedProductIds: confirmation.affectedProductIds });
+        plannedQuantity: confirmation.quantity, projectId: confirmation.projectId,
+        creationRequestId: confirmation.creationRequestId });
       if (result.ok) {
-        onProduced({ runId: result.value.runId, cardName: source.cardName, quantity: confirmation.quantity,
-          projectName: confirmation.projectName });
+        creationAttempt.current = null;
+        onProduced({ workOrderId: result.value.workOrderId,
+          workOrderNumber: result.value.workOrderNumber, cardName: source.cardName,
+          plannedQuantity: confirmation.quantity, projectName: confirmation.projectName });
       } else {
         setErrorMessage(result.error.message);
-        setQuantity("");
+        if (result.error.code !== "unknown_outcome") creationAttempt.current = null;
       }
     } catch {
-      setErrorMessage("Production status could not be confirmed. Review refreshed stock before trying again.");
-      setQuantity("");
+      setErrorMessage("Work Order creation could not be confirmed. Retry to safely check the same request.");
     } finally {
       setConfirmation(null);
       setIsSubmitting(false);
@@ -59,16 +63,21 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
   }
 
   function openConfirmation() {
-    if (!canConfirm || !preview?.ok || !preview.ready) return;
+    if (!canConfirm || !preview?.ok || !productsAvailable) return;
     setErrorMessage(null);
-    setConfirmation({ quantity, projectId: projectId || null, projectName: selectedProject?.name ?? null,
-      affectedProductIds: [...source.inputs.map((input) => input.productId), source.outputProductId] });
+    const normalizedProjectId = projectId || null;
+    if (creationAttempt.current?.quantity !== quantity ||
+      creationAttempt.current.projectId !== normalizedProjectId) {
+      creationAttempt.current = { quantity, projectId: normalizedProjectId, requestId: crypto.randomUUID() };
+    }
+    setConfirmation({ quantity, projectId: normalizedProjectId, projectName: selectedProject?.name ?? null,
+      creationRequestId: creationAttempt.current.requestId });
   }
 
   return <div className="space-y-6">
     <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
       <div className="grid gap-5 sm:grid-cols-2">
-        <label className="block text-sm font-semibold text-zinc-800">Quantity to Produce
+        <label className="block text-sm font-semibold text-zinc-800">Planned Production Quantity
           <input type="text" inputMode="numeric" value={quantity} disabled={isSubmitting || Boolean(confirmation)}
             onChange={(event) => { setQuantity(event.target.value); setErrorMessage(null); }}
             className="mt-2 w-full rounded-xl border border-zinc-300 px-3 py-2" aria-describedby="quantity-help" />
@@ -85,7 +94,7 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
         </label>
       </div>
       <p id="quantity-help" className="mt-3 text-sm text-zinc-500">
-        Enter a positive whole number to preview requirements. Stock may change before production.
+        Enter a positive whole number to freeze the production plan. Inventory is rechecked only when the Work Order is finished.
       </p>
       {errorMessage && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
         {errorMessage}
@@ -96,9 +105,9 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
       The PCB output Product is archived and unavailable for production.
     </p>}
     {source.inputs.length === 0 && <p className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
-      This active BOM has no input Products. Production will add only the finished PCB quantity to Inventory.
+      This active BOM has no input Products. The production Work Order will contain no material rows.
     </p>}
-    {!preview && source.inputs.length > 0 && <EmptyState title="Enter quantity" description="Requirements will appear after you enter Quantity to Produce." />}
+    {!preview && source.inputs.length > 0 && <EmptyState title="Enter planned quantity" description="Frozen BOM requirements will appear after you enter the planned quantity." />}
     {preview && !preview.ok && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
       {preview.code === "overflow" ? "Required quantity exceeds the supported whole-number range."
         : preview.code === "invalid_source" ? "Inventory quantity could not be verified."
@@ -123,20 +132,20 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
         </table>
       </div>
       {preview.insufficient && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-        Production cannot be completed because Inventory is insufficient.
+        Current Inventory is insufficient for this plan. You may create the Work Order, but it cannot be finished until stock is sufficient.
       </p>}
       {preview.ready && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-        Current physical stock meets the previewed requirements. Final stock will be checked during production.
+        Current physical stock meets the planned requirements. Finish will check it again authoritatively.
       </p>}
     </section>}
     <button type="button" onClick={openConfirmation} disabled={!canConfirm}
       className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50">
-      Confirm Production
+      Create Production Work Order
     </button>
     <ConfirmDialog open={Boolean(confirmation)}
-      title={`Produce ${confirmation?.quantity ?? ""} × ${source.cardName}?`}
-      description={`This will deduct BOM components and add ${confirmation?.quantity ?? ""} ${source.cardName} cards to Inventory.${confirmation?.projectName ? ` Project: ${confirmation.projectName}.` : " General Stock."}`}
-      confirmLabel="Confirm Production" onConfirm={() => void confirmProduction()}
+      title={`Create production Work Order for ${source.cardName}?`}
+      description={`This creates a Draft Work Order for ${confirmation?.quantity ?? ""} planned cards and freezes the current BOM materials. Inventory will not change until the Work Order is finished.${confirmation?.projectName ? ` Project: ${confirmation.projectName}.` : " General Stock."}`}
+      confirmLabel="Create Work Order" onConfirm={() => void confirmProduction()}
       onCancel={() => { if (!isSubmitting) setConfirmation(null); }} isSubmitting={isSubmitting} />
   </div>;
 }

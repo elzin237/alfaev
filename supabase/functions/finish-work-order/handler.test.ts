@@ -277,6 +277,27 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
     expect(testHarness.storageClientCreations()).toBe(1);
   });
 
+  it("forwards exact actual-good text only through the trusted snapshot and Finish overloads", async () => {
+    const testHarness = harness();
+    const response = await handleFinishWorkOrderRequest(
+      request({ workOrderId, expectedUpdatedAt, actualGoodQuantity: "9007199254740993" }),
+      testHarness.dependencies,
+    );
+    expect(response.status).toBe(200);
+    expect(testHarness.rpcCalls[0]).toEqual({
+      name: "get_work_order_pdf_snapshot",
+      parameters: {
+        p_work_order_id: workOrderId,
+        p_expected_updated_at: expectedUpdatedAt,
+        p_actual_good_quantity: "9007199254740993",
+      },
+    });
+    expect(testHarness.rpcCalls[1]).toEqual({
+      name: "finish_work_order",
+      parameters: expect.objectContaining({ p_actual_good_quantity: "9007199254740993" }),
+    });
+  });
+
   it("on success removes only temp, keeps final, and returns a narrow result", async () => {
     const testHarness = harness();
     const response = await handleFinishWorkOrderRequest(

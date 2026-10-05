@@ -166,6 +166,8 @@ PcbCard reads require an active Admin or View PCB Cards (`pcb.view`). Task 085 g
 
 The PCB production route and its optional Project picker require an active Admin or `pcb.produce`; `projects.view` is not additionally required. A trusted picker read may expose only Project ID, Name, and Status and only for open Projects (`planned`, `in_progress`, `on_hold`). This does not grant general Project-table reads or `/projects` access, which still require an active Admin or `projects.view`.
 
+`pcb.produce` authorizes creation of the specialized PCB-production Draft Work Order without `work_orders.create`. It does not grant general Work Order view/edit/finish/delete access. After creation, the existing Work Order permissions apply, and Finish specifically requires active Admin or `work_orders.finish`.
+
 ### Radni Nalozi / Work Orders
 
 - View Work Orders

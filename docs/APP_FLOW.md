@@ -353,11 +353,11 @@ If no production history exists:
 1. User opens PCB card.
 2. Click Produce.
 3. Enter:
-   - quantity to produce
+   - planned production quantity
    - optional Project.
    The optional picker shows only open Projects (`planned`, `in_progress`, `on_hold`) through a narrow trusted ID/Name/Status read available to active Admins or `pcb.produce` users; it does not require `projects.view` or grant Projects-module access.
 4. AlfaEV loads latest active BOM.
-5. Calculate every required input:
+5. Calculate every planned input:
 
 `quantity_per_card × quantity_to_produce`
 
@@ -366,34 +366,34 @@ If no production history exists:
    - available physical `InventoryBalance.quantity`, not Available after Commitments
    - missing = max(required - available, 0).
 
-## Insufficient Inventory
+## Create production Work Order
 
-If any component is insufficient:
-
-1. show missing components
-2. block Finish/Confirm production
-3. do not change Inventory
-4. do not create completed production record
+1. Show current missing components as precheck information; shortage does not block Draft creation.
+2. Confirm creation with one durable request UUID.
+3. Trusted backend freezes the active BOM, planned quantity, optional Project, generated description, and derived material rows in a Draft Work Order.
+4. Creation records `work_order.created` and `pcb_production.work_order_created` but changes no Inventory and creates no completed production record.
+5. Navigate to the Work Order only when the actor also has Work Order view authority; otherwise show its generated number safely.
 
 ---
 
 ## Successful production
 
-User confirms.
+In the Draft Work Order the production context/materials are read-only. User enters actual successfully completed quantity from zero through planned quantity and confirms Finish.
 
 Trusted backend transaction:
 
 1. re-check authorization
 2. re-check active BOM version/state
-3. re-check optional Project existence and open status, and every physical Inventory quantity
-4. deduct all BOM input Products
+3. re-check the frozen PCB/BOM/Product identities and every physical Inventory quantity
+4. deduct all frozen BOM input Products based on planned quantity
 5. create negative InventoryMovement rows
-6. add produced quantity to PCB finished-goods Product
-7. create positive InventoryMovement for output
+6. add actual-good quantity to PCB finished-goods Product
+7. create a positive output movement only when actual good is greater than zero
 8. create PcbProductionRun
 9. link optional Project
-10. create AuditLog
-11. commit atomically
+10. finish the Work Order and link its official PDF
+11. append `work_order.finished` and `pcb_production.completed`
+12. commit atomically without automatically completing Project
 
 After success:
 - finished PCB stock increases
@@ -794,7 +794,7 @@ The application flow is correctly implemented when:
 - Nabavka remains simple and does not mutate Inventory automatically
 - Product Serial Numbers are always system-generated
 - Inventory cannot change without a movement record
-- PCB production is atomic and creates finished-goods stock
+- PCB production Work Order creation changes no stock; its later atomic Finish consumes planned inputs and adds only actual-good finished-goods stock
 - used BOM versions remain historical
 - Draft Work Orders never affect Inventory
 - Finished Work Orders are immutable

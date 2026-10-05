@@ -13,6 +13,7 @@ interface WorkOrderMaterialsTableProps {
   readOnly?: boolean;
   disabled?: boolean;
   showRequiredErrors?: boolean;
+  emptyDescription?: string;
 }
 
 function WorkOrderMaterialsTable({
@@ -23,10 +24,11 @@ function WorkOrderMaterialsTable({
   readOnly = false,
   disabled = false,
   showRequiredErrors = false,
+  emptyDescription = "No materials added yet.",
 }: WorkOrderMaterialsTableProps) {
   if (materials.length === 0) {
     return (
-      <p className="mt-6 text-sm text-zinc-500">No materials added yet.</p>
+      <p className="mt-6 text-sm text-zinc-500">{emptyDescription}</p>
     );
   }
 

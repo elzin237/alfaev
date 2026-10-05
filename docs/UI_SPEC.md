@@ -979,7 +979,7 @@ Do not suggest that old production will change.
 Production form:
 
 - PCB Card
-- Quantity to Produce
+- Planned Production Quantity
 - optional Project selected from open (`planned`, `in_progress`, `on_hold`) choices showing only Project Name/Status; the choice read exposes only Project ID/Name/Status and does not require Projects-module access beyond the active Admin or `pcb.produce` production authority
 
 After Quantity input:
@@ -994,28 +994,28 @@ show calculated requirements table:
 
 Available is current physical `InventoryBalance.quantity`, not Available after Commitments. Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory or complete production.
 
-If all sufficient:
+Whether stock is currently sufficient or insufficient:
 
-- positive ready state
-- Confirm Production button
+- show an honest current-stock state
+- allow `Create Production Work Order` when PCB/Product inputs are otherwise eligible
 
 If insufficient:
 
 - missing rows clearly emphasized
-- Confirm button disabled/hidden
-- message:
-  `Production cannot be completed because Inventory is insufficient.`
+- explain that the Work Order may be created but cannot Finish until authoritative stock is sufficient
 
 Before final confirm:
 
-`Produce 20 × E55?`
+`Create production Work Order for E55?`
 
-`This will deduct BOM components and add 20 E55 cards to Inventory.`
+`This creates a Draft Work Order for 20 planned cards and freezes the current BOM materials. Inventory will not change until the Work Order is finished.`
 
-After success:
+After creation:
 
-- show production reference/summary
-- refresh PCB stock and component balances
+- navigate to the Work Order when `work_orders.view` is available, otherwise show only the generated Work Order number and Draft-created confirmation
+- do not refresh stock/history as though production completed
+
+The specialized Work Order shows frozen PCB Card, BOM version, planned quantity, output Product, and Project/General Stock. Generated material rows have no edit/remove/scanner controls. Finish requires an explicit exact `Actual successfully completed quantity` from 0 through planned; its PDF and finished view show both quantities.
 
 ---
 

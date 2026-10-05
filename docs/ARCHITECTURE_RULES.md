@@ -294,13 +294,14 @@ These operations must validate:
 Stock-sensitive workflows must be atomic.
 
 ### PCB production
-Either all occur:
+Creation is one atomic idempotent Draft-Work-Order transaction with no Inventory or production-run write. Later Work Order Finish is a second atomic transaction in which either all occur:
 
 - input stock deductions
 - production record
 - finished-goods stock increase
 - Inventory movements
 - Audit record
+- Work Order/PDF finalization
 
 or none occur.
 

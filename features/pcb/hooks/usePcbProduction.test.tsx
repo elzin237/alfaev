@@ -7,22 +7,16 @@ const mocks = vi.hoisted(() => ({ useAuth: vi.fn(), producePcb: vi.fn() }));
 vi.mock("../../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
 vi.mock("../services/pcbProductionService", () => ({ producePcb: mocks.producePcb }));
 import { usePcbProduction } from "./usePcbProduction";
-import { inventoryBalanceQueryKey } from "../../inventory/inventoryBalanceQueryKeys";
-import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
-import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
-import { projectPlanningQueryKey } from "../../projects/projectPlanningQueryKeys";
-import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
+import { workOrderListQueryKey } from "../../work-orders/workOrderQueryKeys";
 import {
-  pcbBomDetailQueryKey, pcbBomHistoryQueryKey, pcbCardListQueryKey, pcbProductionHistoryQueryKey,
+  pcbBomHistoryQueryKey, pcbProductionHistoryQueryKey,
   pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
 } from "../pcbQueryKeys";
 
 const cardId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
-const inputId = "33333333-3333-4333-8333-333333333333";
-const outputId = "44444444-4444-4444-8444-444444444444";
-const submission = { pcbCardId: cardId, quantityToProduce: "5", projectId: null,
-  affectedProductIds: [inputId, outputId] };
+const submission = { pcbCardId: cardId, plannedQuantity: "5", projectId: null,
+  creationRequestId: "33333333-3333-4333-8333-333333333333" };
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: true } } });
@@ -33,44 +27,25 @@ function setup() {
 
 beforeEach(() => {
   mocks.useAuth.mockReturnValue({ profile: { id: "profile-1", isActive: true } });
-  mocks.producePcb.mockResolvedValue({ ok: true, value: { runId: "run-1" } });
+  mocks.producePcb.mockResolvedValue({ ok: true, value: {
+    workOrderId: "44444444-4444-4444-8444-444444444444", workOrderNumber: "RN-2026-0001",
+  } });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe("PCB production mutation and cache", () => {
-  it("calls the mutation once without automatic retry and invalidates affected read models", async () => {
+  it("calls once without retry and invalidates only creation-relevant reads", async () => {
     const { result, client } = setup();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await act(async () => { await result.current.submit(submission); });
     expect(mocks.producePcb).toHaveBeenCalledTimes(1);
     expect(mocks.producePcb).toHaveBeenCalledWith(submission);
-    const keys = [
-      pcbProductionSourceQueryKey("profile-1", cardId),
-      pcbBomDetailQueryKey("profile-1", cardId),
-      pcbBomHistoryQueryKey("profile-1", cardId),
-      pcbProductionHistoryQueryKey("profile-1", cardId),
-      pcbCardListQueryKey("profile-1"),
-      inventoryBalanceQueryKey("profile-1", inputId),
-      inventoryBalanceQueryKey("profile-1", outputId),
-      productDetailQueryKey("profile-1", inputId),
-      productDetailQueryKey("profile-1", outputId),
-    ];
+    const keys = [pcbProductionSourceQueryKey("profile-1", cardId), workOrderListQueryKey("profile-1")];
     for (const queryKey of keys) {
       expect(invalidate).toHaveBeenCalledWith({ queryKey, exact: true });
     }
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: productListQueryPrefix("profile-1") });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: inventoryCommitmentsQueryKey("profile-1") });
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: projectPlanningQueryKey("profile-1", projectId), exact: true });
-    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: projectMaterialUsageQueryKey("profile-1", projectId), exact: true });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionHistoryQueryKey("profile-1", cardId), exact: true });
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
-  });
-
-  it("refreshes Project planning only for Project-linked success", async () => {
-    const { result, client } = setup();
-    const invalidate = vi.spyOn(client, "invalidateQueries");
-    await act(async () => { await result.current.submit({ ...submission, projectId }); });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectPlanningQueryKey("profile-1", projectId), exact: true });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: projectMaterialUsageQueryKey("profile-1", projectId), exact: true });
   });
 
   it("does not retry a rejected mutation even when the global mutation default enables retry", async () => {

@@ -41,7 +41,6 @@ describe("PCB production history service", () => {
 
   it.each([
     { ...row, quantity_produced: 9007199254740993 },
-    { ...row, quantity_produced: "0" },
     { ...row, quantity_produced: "9223372036854775808" },
     { ...row, bom_version_number: "1e2" },
     { ...row, completed_at: "not-a-date" },

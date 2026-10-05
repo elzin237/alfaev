@@ -119,6 +119,34 @@ describe("trusted Work Order PDF snapshot model", () => {
       rawRow({ material_position: "2" }),
     ])).toThrow();
   });
+
+  it("maps General Stock empty-BOM PCB production with exact planned and actual quantities", () => {
+    const parsed = parseWorkOrderPdfSnapshot([rawRow({
+      project_name: null,
+      customer_name_snapshot: null,
+      material_position: null,
+      product_id: null,
+      serial_number: null,
+      product_name: null,
+      quantity: null,
+      production_pcb_card_id: "33000000-0000-4000-8000-000000000001",
+      production_pcb_card_name: "Controller",
+      production_bom_version_number: "2",
+      production_planned_quantity: "9223372036854775807",
+      production_actual_good_quantity: "0",
+      production_output_product_id: "44000000-0000-4000-8000-000000000001",
+      production_output_serial_number: "0000999",
+      production_output_product_name: "Controller",
+    })]);
+    expect(parsed.projectName).toBe("General Stock");
+    expect(parsed.customerName).toBe("");
+    expect(parsed.materials).toEqual([]);
+    expect(parsed.pcbProduction).toMatchObject({
+      plannedQuantity: "9223372036854775807",
+      actualGoodQuantity: "0",
+    });
+    expect(JSON.stringify(buildWorkOrderPdfDefinition(parsed).content)).toContain("Actual completed");
+  });
 });
 
 describe("deterministic Alfa Proteh Radni Nalog renderer", () => {

@@ -497,7 +497,7 @@ PCB BOM inputs may be existing stock-tracked Products of kind `component` or `pc
 
 For each BOM row:
 
-Required Quantity = Quantity Per Card × Production Quantity
+Required Quantity = Quantity Per Card × Planned Production Quantity
 
 Before production completes, AlfaEV must compare all required quantities with current Inventory.
 
@@ -505,25 +505,28 @@ For PCB production precheck, Available is current physical `InventoryBalance.qua
 
 ### Insufficient stock
 
-If any component is insufficient:
+Insufficient stock does not prevent creating the specialized Draft Work Order because creation reserves and mutates nothing. It prevents Finish:
 
 - production does not complete
 - no Inventory deductions occur
 - show required, available and missing quantities
 
-### Successful production
+### PCB production Work Order creation and Finish
 
-If all components are sufficient:
+`Produce PCB` creates an idempotent specialized Draft Work Order. The planned quantity is a positive exact bigint and freezes the exact PCB Card, BOM version, optional Project, derived BOM material quantities, and description `PCB production — <PcbCard name>`. Project and Customer are not required, an empty BOM is valid, multiple Draft batches for one card are valid, and creation changes no Inventory, creates no InventoryMovement/PcbProductionRun, and records normal `work_order.created` plus `pcb_production.work_order_created` history.
+
+At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual_good <= planned_quantity`. If all frozen inputs remain eligible and sufficient:
 
 - record the production run
 - record the exact BOM version used
 - deduct all required component quantities
-- add the produced PCB quantity to finished-goods Inventory
+- consume BOM inputs for the frozen planned quantity
+- add only actual-good quantity to finished-goods Inventory
 - record Inventory movements for both consumed inputs and produced output
 - record actor and timestamp
 - record audit event
 
-The operation must be atomic: no partial state is allowed. Component deductions, production record creation, and finished-goods stock increase either all succeed or none do.
+Actual good zero still consumes the planned inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes the optional Project. The operation is atomic: component deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
 
 Produced PCB cards are stock-tracked finished goods.
 
@@ -531,7 +534,7 @@ Produced PCB cards are stock-tracked finished goods.
 
 Project is optional.
 
-A new production run may link only a currently open Project (`planned`, `in_progress`, or `on_hold`), not a `completed` or `cancelled` Project. The trusted production operation re-checks Project existence and current status when it executes; a prior frontend choice is not authoritative.
+A new production Work Order may link only a currently open Project (`planned`, `in_progress`, or `on_hold`), not a `completed` or `cancelled` Project. The trusted creation operation re-checks Project existence and current status; a prior frontend choice is not authoritative. This link is traceability-only and does not reserve Project requirements.
 
 If Project is set:
 - the production run is linked to that Project

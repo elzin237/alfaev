@@ -4,13 +4,14 @@ import { isWorkOrderId, isWorkOrderNumber } from "./workOrderService";
 export interface FinishWorkOrderInput {
   workOrderId: string;
   expectedUpdatedAt: string;
+  actualGoodQuantity?: string;
 }
 
 export interface FinishedWorkOrder {
   workOrderId: string;
   workOrderNumber: string;
   finishedAt: string;
-  projectId: string;
+  projectId: string | null;
   projectCompleted: boolean;
   workOrderPdfId: string;
   storageReference: string;
@@ -24,6 +25,7 @@ export interface FinishWorkOrderError {
     | "finish_failed"
     | "insufficient_inventory"
     | "inventory_balance_unavailable"
+    | "invalid_actual_good_quantity"
     | "invalid_request"
     | "pdf_finalization_failed"
     | "product_unavailable"
@@ -76,8 +78,7 @@ function parseSuccess(
     value.workOrderId !== expectedWorkOrderId ||
     !isWorkOrderNumber(value.workOrderNumber) ||
     !isTimestamp(value.finishedAt) ||
-    typeof value.projectId !== "string" ||
-    !uuidPattern.test(value.projectId) ||
+    !(value.projectId === null || (typeof value.projectId === "string" && uuidPattern.test(value.projectId))) ||
     typeof value.projectCompleted !== "boolean" ||
     typeof value.workOrderPdfId !== "string" ||
     !uuidPattern.test(value.workOrderPdfId) ||
@@ -94,7 +95,7 @@ function parseSuccess(
     workOrderId: value.workOrderId,
     workOrderNumber: value.workOrderNumber,
     finishedAt: value.finishedAt,
-    projectId: value.projectId,
+    projectId: value.projectId as string | null,
     projectCompleted: value.projectCompleted,
     workOrderPdfId: value.workOrderPdfId,
     storageReference: value.storageReference,
@@ -177,6 +178,11 @@ function mapError(code: string | null): FinishWorkOrderResult {
         "invalid_request",
         "The Work Order finish request is invalid.",
       );
+    case "invalid_actual_good_quantity":
+      return failure(
+        "invalid_actual_good_quantity",
+        "Enter an actual completed quantity from 0 through the planned quantity.",
+      );
     case "pdf_generation_failed":
     case "storage_preparation_failed":
     case "pdf_candidate_invalid":
@@ -208,6 +214,9 @@ export async function finishWorkOrder(
   if (!isWorkOrderId(input.workOrderId) || !isTimestamp(input.expectedUpdatedAt)) {
     return mapError("invalid_request");
   }
+  if (input.actualGoodQuantity !== undefined && !/^(0|[1-9][0-9]*)$/.test(input.actualGoodQuantity)) {
+    return mapError("invalid_actual_good_quantity");
+  }
 
   try {
     const { data, error } = await supabase.functions.invoke(
@@ -216,6 +225,9 @@ export async function finishWorkOrder(
         body: {
           workOrderId: input.workOrderId,
           expectedUpdatedAt: input.expectedUpdatedAt,
+          ...(input.actualGoodQuantity === undefined
+            ? {}
+            : { actualGoodQuantity: input.actualGoodQuantity }),
         },
       },
     );

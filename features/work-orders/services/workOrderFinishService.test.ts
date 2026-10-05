@@ -45,6 +45,22 @@ describe("finishWorkOrder", () => {
     );
   });
 
+  it("sends exact PCB actual-good text and accepts a General Stock result", async () => {
+    const generalStock = { ...success, projectId: null, projectCompleted: false };
+    finishMocks.invoke.mockResolvedValue({ data: generalStock, error: null });
+    await expect(finishWorkOrder({ workOrderId, expectedUpdatedAt, actualGoodQuantity: "9007199254740993" }))
+      .resolves.toEqual({ ok: true, value: generalStock });
+    expect(finishMocks.invoke).toHaveBeenCalledWith("finish-work-order", { body: {
+      workOrderId, expectedUpdatedAt, actualGoodQuantity: "9007199254740993",
+    } });
+  });
+
+  it("rejects noncanonical actual-good text before Edge invocation", async () => {
+    await expect(finishWorkOrder({ workOrderId, expectedUpdatedAt, actualGoodQuantity: "01" }))
+      .resolves.toMatchObject({ ok: false, error: { code: "invalid_actual_good_quantity" } });
+    expect(finishMocks.invoke).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["missing field", (() => {
       const { storageReference: _storageReference, ...rest } = success;

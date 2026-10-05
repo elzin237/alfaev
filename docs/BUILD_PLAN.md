@@ -2192,6 +2192,20 @@ After 100E, resume Task 101 unchanged.
 
 ---
 
+## 100F — Route PCB Production Through Work Orders
+
+Goal:
+- replace browser immediate PCB completion with idempotent creation of a specialized frozen Draft Work Order
+- defer every Inventory movement and PcbProductionRun until the existing trusted Work Order Finish boundary
+- consume frozen BOM inputs from planned quantity, post finished PCB output from explicit actual-good quantity (`0..planned`), and show both values in the official PDF
+- allow optional Project/General Stock, null Customer, and empty BOM without changing ordinary Work Order rules
+- keep `pcb.produce` limited to specialized creation; normal Work Order view/finish/delete permissions apply afterward
+- preserve historical runs, retire authenticated execution of legacy `produce_pcb`, prevent generic Draft edits/Project allocation, and enforce idempotent creation plus exactly-once output posting
+
+No deployment belongs to this local implementation step; its forward migrations require separate SQL review and explicit dev authorization.
+
+---
+
 # PHASE K — Work Order Drafts
 
 ## 101 — Create WorkOrder Schema + Status Protection

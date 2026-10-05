@@ -9,6 +9,7 @@ const detailMocks = vi.hoisted(() => ({
   getFinishedWorkOrderDetail: vi.fn(),
   getWorkOrderMaterialInventory: vi.fn(),
   getWorkOrderDetail: vi.fn(),
+  getPcbProductionWorkOrderContext: vi.fn(),
   hasPermission: vi.fn(),
   listDraftWorkOrderMaterials: vi.fn(),
   listFinishedWorkOrderMaterials: vi.fn(),
@@ -44,6 +45,9 @@ vi.mock("../services/finishedWorkOrderService", () => ({
   getFinishedWorkOrderDetail: detailMocks.getFinishedWorkOrderDetail,
   listFinishedWorkOrderMaterials: detailMocks.listFinishedWorkOrderMaterials,
   listFinishedWorkOrderMovements: detailMocks.listFinishedWorkOrderMovements,
+}));
+vi.mock("../services/pcbProductionWorkOrderService", () => ({
+  getPcbProductionWorkOrderContext: detailMocks.getPcbProductionWorkOrderContext,
 }));
 
 import { useWorkOrderDetail } from "./useWorkOrderDetail";
@@ -102,6 +106,7 @@ beforeEach(() => {
     ok: true,
     value: draftDetail,
   });
+  detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: null });
   detailMocks.hasPermission.mockResolvedValue({ ok: true, value: false });
   detailMocks.listWorkOrderProjectChoices.mockResolvedValue({
     ok: true,
@@ -182,6 +187,23 @@ afterEach(() => {
 });
 
 describe("useWorkOrderDetail", () => {
+  it("keeps PCB production Draft editing frozen while preserving Finish/Delete permissions", async () => {
+    allowPermissions({ deleteDraft: true, editDraft: true, finish: true });
+    detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: {
+      workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060",
+      pcbCardName: "Controller", bomVersionId: "00000000-0000-4000-8000-000000000061",
+      bomVersionNumber: "1", plannedQuantity: "10",
+      outputProductId: "00000000-0000-4000-8000-000000000062",
+      outputSerialNumber: "0000999", outputProductName: "Controller", actualGoodQuantity: null,
+    } });
+    const { result } = renderDetailHook();
+    await waitFor(() => expect(result.current.productionContextQuery.data?.ok).toBe(true));
+    expect(result.current.canEditDraft).toBe(false);
+    expect(result.current.canDeleteDraft).toBe(true);
+    expect(result.current.canFinishDraft).toBe(true);
+    expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
+  });
+
   it("uses profile-scoped detail and Project-choice keys", async () => {
     detailMocks.hasPermission.mockResolvedValue({ ok: true, value: true });
     const { queryClient, result } = renderDetailHook();

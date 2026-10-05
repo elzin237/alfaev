@@ -222,6 +222,40 @@ export function buildWorkOrderPdfDefinition(
           vLineWidth: () => 0.7,
         },
       },
+      ...(snapshot.pcbProduction ? [
+        sectionTitle("PCB PRODUCTION"),
+        {
+          table: {
+            widths: [92, "*", 92, "*"],
+            body: [
+              [
+                textCell("PCB Card", { bold: true, fillColor: subtleFill }),
+                textCell(snapshot.pcbProduction.pcbCardName),
+                textCell("BOM version", { bold: true, fillColor: subtleFill }),
+                textCell(`v${snapshot.pcbProduction.bomVersionNumber}`),
+              ],
+              [
+                textCell("Planned quantity", { bold: true, fillColor: subtleFill }),
+                textCell(snapshot.pcbProduction.plannedQuantity),
+                textCell("Actual completed", { bold: true, fillColor: subtleFill }),
+                textCell(snapshot.pcbProduction.actualGoodQuantity),
+              ],
+              [
+                textCell("Output Product", { bold: true, fillColor: subtleFill }),
+                { text: `${snapshot.pcbProduction.outputSerialNumber} — ${snapshot.pcbProduction.outputProductName}`, colSpan: 3, margin: [2, 3, 2, 3] },
+                {},
+                {},
+              ],
+            ],
+          },
+          layout: {
+            hLineColor: () => borderColor,
+            hLineWidth: () => 0.7,
+            vLineColor: () => borderColor,
+            vLineWidth: () => 0.7,
+          },
+        } as Content,
+      ] : []),
       {
         table: {
           widths: [90, "*"],

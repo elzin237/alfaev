@@ -39,6 +39,7 @@ function WorkOrderDetailPage() {
     isFinishing,
     isSaving,
     materialsQuery,
+    productionContextQuery,
     projectChoicesQuery,
     reloadLatestDraft,
     loadMaterial,
@@ -70,8 +71,17 @@ function WorkOrderDetailPage() {
         onRetry={isNotFound ? undefined : () => void detailQuery.refetch()}
       />
     );
+  } else if (productionContextQuery.isPending) {
+    content = <LoadingState message="Loading Work Order production context..." />;
+  } else if (productionContextQuery.isError || !productionContextQuery.data?.ok) {
+    content = <ErrorState title="Unable to load Work Order"
+      message={productionContextQuery.data?.ok === false
+        ? productionContextQuery.data.error.message
+        : "The Work Order production context could not be loaded."}
+      onRetry={() => void productionContextQuery.refetch()} />;
   } else {
     const workOrder = detailQuery.data.value;
+    const productionContext = productionContextQuery.data.value;
     const projectChoices = projectChoicesQuery.data?.ok
       ? projectChoicesQuery.data.value
       : [];
@@ -122,6 +132,7 @@ function WorkOrderDetailPage() {
             canEdit={canEditDraft}
             canDelete={canDeleteDraft}
             canFinish={canFinishDraft}
+            productionContext={productionContext}
             projectChoices={projectChoices}
             projectChoicesError={projectChoicesError}
             projectChoicesLoading={projectChoicesQuery.isPending && canEditDraft}
@@ -154,8 +165,9 @@ function WorkOrderDetailPage() {
               }
               return result;
             }}
-            onFinishConfirm={(expectedUpdatedAt) => finishDraft({
+            onFinishConfirm={(expectedUpdatedAt, actualGoodQuantity) => finishDraft({
               expectedUpdatedAt,
+              ...(actualGoodQuantity === undefined ? {} : { actualGoodQuantity }),
             })}
           />
         ) : finishedReadPending ? (
@@ -178,6 +190,7 @@ function WorkOrderDetailPage() {
             detail={finishedDetailQuery.data.value}
             materials={finishedMaterialsQuery.data.value}
             movements={finishedMovementsQuery.data.value}
+            productionContext={productionContext}
           />
         ) : (
           <ErrorState

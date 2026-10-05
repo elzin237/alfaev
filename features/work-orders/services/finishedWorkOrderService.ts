@@ -4,9 +4,9 @@ import { isWorkOrderId, isWorkOrderNumber } from "./workOrderService";
 export interface FinishedWorkOrderDetail {
   id: string;
   workOrderNumber: string;
-  projectId: string;
-  projectName: string;
-  customerName: string;
+  projectId: string | null;
+  projectName: string | null;
+  customerName: string | null;
   description: string;
   createdAt: string;
   finishedAt: string;
@@ -152,9 +152,9 @@ function parseDetail(value: unknown): FinishedWorkOrderDetail | null {
     !hasExactKeys(value, detailKeys) ||
     !isWorkOrderId(value.work_order_id) ||
     !isWorkOrderNumber(value.work_order_number) ||
-    !isUuid(value.project_id) ||
-    !isTrimmedNonblank(value.project_name) ||
-    !isTrimmedNonblank(value.customer_name_snapshot) ||
+    !((value.project_id === null && value.project_name === null) ||
+      (isUuid(value.project_id) && isTrimmedNonblank(value.project_name))) ||
+    !(value.customer_name_snapshot === null || isTrimmedNonblank(value.customer_name_snapshot)) ||
     !isTrimmedNonblank(value.description) ||
     !isTimestamp(value.created_at) ||
     !isTimestamp(value.finished_at) ||
@@ -174,9 +174,9 @@ function parseDetail(value: unknown): FinishedWorkOrderDetail | null {
   return {
     id: value.work_order_id,
     workOrderNumber: value.work_order_number,
-    projectId: value.project_id,
-    projectName: value.project_name,
-    customerName: value.customer_name_snapshot,
+    projectId: value.project_id as string | null,
+    projectName: value.project_name as string | null,
+    customerName: value.customer_name_snapshot as string | null,
     description: value.description,
     createdAt: value.created_at,
     finishedAt: value.finished_at,
@@ -227,7 +227,7 @@ function parseMovement(value: unknown): FinishedWorkOrderMovement | null {
   const quantityBefore = parseNonnegativeBigint(value.quantity_before);
   const quantityAfter = parseNonnegativeBigint(value.quantity_after);
   if (
-    quantityDelta === null || BigInt(quantityDelta) >= 0n ||
+    quantityDelta === null || BigInt(quantityDelta) === 0n ||
     quantityBefore === null || quantityAfter === null ||
     BigInt(quantityAfter) !== BigInt(quantityBefore) + BigInt(quantityDelta)
   ) return null;

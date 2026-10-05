@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
@@ -7,21 +7,27 @@ import PcbProductionPrecheckForm from "./components/PcbProductionPrecheckForm";
 import { usePcbProductionPrecheck } from "./hooks/usePcbProductionPrecheck";
 import { usePcbProduction } from "./hooks/usePcbProduction";
 import { isPcbCardId } from "./services/pcbBomService";
+import { useWorkOrderViewAccess } from "../work-orders/hooks/useWorkOrderViewAccess";
 
 export default function PcbProductionPrecheckPage() {
   const { pcbCardId = "" } = useParams<{ pcbCardId: string }>();
-  const [completed, setCompleted] = useState<{ runId: string; cardName: string; quantity: string; projectName: string | null } | null>(null);
+  const navigate = useNavigate();
+  const viewAccess = useWorkOrderViewAccess();
+  const [completed, setCompleted] = useState<{ workOrderId: string; workOrderNumber: string; cardName: string;
+    plannedQuantity: string; projectName: string | null } | null>(null);
   const { sourceQuery, projectsQuery } = usePcbProductionPrecheck(pcbCardId);
   const production = usePcbProduction(pcbCardId);
   if (!isPcbCardId(pcbCardId)) return <ErrorState title="PCB Card not found" message="The PCB Card could not be found." />;
   if (completed) return <div className="space-y-6">
-    <PageHeader title="Production completed" description={`PCB Card: ${completed.cardName}`} />
+    <PageHeader title="Production Work Order created" description={`PCB Card: ${completed.cardName}`} />
     <section role="status" className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-950 shadow-sm">
-      <p className="font-semibold">Production completed.</p>
-      <p className="mt-2">Quantity produced: {completed.quantity}</p>
+      <p className="font-semibold">Draft Work Order {completed.workOrderNumber} was created.</p>
+      <p className="mt-2">Planned quantity: {completed.plannedQuantity}</p>
       <p>Destination: {completed.projectName ?? "General Stock"}</p>
-      <p className="mt-3 font-mono text-xs">Production reference: {completed.runId}</p>
+      <p className="mt-3">Inventory has not changed. Production is posted only when this Work Order is finished.</p>
     </section>
+    {viewAccess.canView && <Link to={`/work-orders/${completed.workOrderId}`}
+      className="inline-flex rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white">Open Work Order</Link>}
   </div>;
   if (sourceQuery.isPending) return <LoadingState message="Loading production precheck..." />;
   if (sourceQuery.isError || !sourceQuery.data?.ok) {
@@ -39,6 +45,9 @@ export default function PcbProductionPrecheckPage() {
           onRetry={() => void projectsQuery.refetch()} /> :
         <PcbProductionPrecheckForm source={source} projects={projectsQuery.data.value}
           isRefreshing={Boolean(sourceQuery.isFetching || projectsQuery.isFetching || production.isSubmitting)}
-          submit={production.submit} onProduced={setCompleted} />}
+          submit={production.submit} onProduced={(summary) => {
+            if (viewAccess.canView) navigate(`/work-orders/${summary.workOrderId}`);
+            else setCompleted(summary);
+          }} />}
   </div>;
 }

@@ -3,6 +3,7 @@ const uuidPattern =
 const workOrderNumberPattern = /^RN-[0-9]{4}-[0-9]{4}$/;
 const serialNumberPattern = /^[0-9]{7}$/;
 const positiveDecimalPattern = /^[1-9][0-9]*$/;
+const nonnegativeDecimalPattern = /^(0|[1-9][0-9]*)$/;
 const maximumPostgresBigint = 9_223_372_036_854_775_807n;
 
 export interface WorkOrderPdfMaterial {
@@ -22,6 +23,16 @@ export interface WorkOrderPdfSnapshot {
   workOrderCreatedAt: string;
   snapshotUpdatedAt: string;
   materials: WorkOrderPdfMaterial[];
+  pcbProduction?: {
+    pcbCardId: string;
+    pcbCardName: string;
+    bomVersionNumber: string;
+    plannedQuantity: string;
+    actualGoodQuantity: string;
+    outputProductId: string;
+    outputSerialNumber: string;
+    outputProductName: string;
+  } | null;
 }
 
 interface ParsedSnapshotRow {
@@ -32,7 +43,8 @@ interface ParsedSnapshotRow {
   description: string;
   workOrderCreatedAt: string;
   snapshotUpdatedAt: string;
-  material: WorkOrderPdfMaterial;
+  material: WorkOrderPdfMaterial | null;
+  pcbProduction: WorkOrderPdfSnapshot["pcbProduction"];
 }
 
 export class WorkOrderPdfSnapshotError extends Error {
@@ -97,8 +109,38 @@ function exactPositiveBigint(value: unknown): string {
   return value;
 }
 
+function exactNonnegativeBigint(value: unknown): string {
+  if (typeof value !== "string" || !nonnegativeDecimalPattern.test(value)) {
+    throw new WorkOrderPdfSnapshotError();
+  }
+  try {
+    if (BigInt(value) > maximumPostgresBigint) throw new WorkOrderPdfSnapshotError();
+  } catch (error) {
+    if (error instanceof WorkOrderPdfSnapshotError) throw error;
+    throw new WorkOrderPdfSnapshotError();
+  }
+  return value;
+}
+
 function parseRow(value: unknown): ParsedSnapshotRow {
   if (!isRecord(value)) throw new WorkOrderPdfSnapshotError();
+
+  const hasProduction = value.production_pcb_card_id !== undefined &&
+    value.production_pcb_card_id !== null;
+  const productionValues = [
+    value.production_pcb_card_id,
+    value.production_pcb_card_name,
+    value.production_bom_version_number,
+    value.production_planned_quantity,
+    value.production_actual_good_quantity,
+    value.production_output_product_id,
+    value.production_output_serial_number,
+    value.production_output_product_name,
+  ];
+  if (!hasProduction && productionValues.some((field) => field !== undefined && field !== null)) {
+    throw new WorkOrderPdfSnapshotError();
+  }
+  const hasMaterial = value.product_id !== null;
 
   return {
     workOrderId: exactPattern(value.work_order_id, uuidPattern),
@@ -106,18 +148,32 @@ function parseRow(value: unknown): ParsedSnapshotRow {
       value.work_order_number,
       workOrderNumberPattern,
     ),
-    projectName: requiredText(value.project_name),
-    customerName: requiredText(value.customer_name_snapshot),
+    projectName: value.project_name === null && hasProduction
+      ? "General Stock"
+      : requiredText(value.project_name),
+    customerName: value.customer_name_snapshot === null && hasProduction
+      ? ""
+      : requiredText(value.customer_name_snapshot),
     description: requiredText(value.description),
     workOrderCreatedAt: exactTimestamp(value.work_order_created_at),
     snapshotUpdatedAt: exactTimestamp(value.snapshot_updated_at),
-    material: {
+    material: hasMaterial ? {
       position: exactPositiveBigint(value.material_position),
       productId: exactPattern(value.product_id, uuidPattern),
       serialNumber: exactPattern(value.serial_number, serialNumberPattern),
       productName: requiredText(value.product_name),
       quantity: exactPositiveBigint(value.quantity),
-    },
+    } : null,
+    pcbProduction: hasProduction ? {
+      pcbCardId: exactPattern(value.production_pcb_card_id, uuidPattern),
+      pcbCardName: requiredText(value.production_pcb_card_name),
+      bomVersionNumber: exactPositiveBigint(value.production_bom_version_number),
+      plannedQuantity: exactPositiveBigint(value.production_planned_quantity),
+      actualGoodQuantity: exactNonnegativeBigint(value.production_actual_good_quantity),
+      outputProductId: exactPattern(value.production_output_product_id, uuidPattern),
+      outputSerialNumber: exactPattern(value.production_output_serial_number, serialNumberPattern),
+      outputProductName: requiredText(value.production_output_product_name),
+    } : null,
   };
 }
 
@@ -132,6 +188,7 @@ function sameHeader(
     first.description === candidate.description &&
     first.workOrderCreatedAt === candidate.workOrderCreatedAt &&
     first.snapshotUpdatedAt === candidate.snapshotUpdatedAt;
+
 }
 
 /** Parse the narrow RPC result without coercing bigint text through Number. */
@@ -145,17 +202,26 @@ export function parseWorkOrderPdfSnapshot(
   const rows = value.map(parseRow);
   const first = rows[0];
   if (!first) throw new WorkOrderPdfSnapshotError();
+  if (first.pcbProduction &&
+    BigInt(first.pcbProduction.actualGoodQuantity) > BigInt(first.pcbProduction.plannedQuantity)) {
+    throw new WorkOrderPdfSnapshotError();
+  }
 
   const productIds = new Set<string>();
+  const materials = rows.flatMap((row) => row.material ? [row.material] : []);
   for (const [index, row] of rows.entries()) {
     if (
       !sameHeader(first, row) ||
-      row.material.position !== String(index + 1) ||
-      productIds.has(row.material.productId)
+      JSON.stringify(row.pcbProduction) !== JSON.stringify(first.pcbProduction) ||
+      (row.material === null && !(first.pcbProduction && rows.length === 1)) ||
+      (row.material !== null && (
+        row.material.position !== String(index + 1) ||
+        productIds.has(row.material.productId)
+      ))
     ) {
       throw new WorkOrderPdfSnapshotError();
     }
-    productIds.add(row.material.productId);
+    if (row.material) productIds.add(row.material.productId);
   }
 
   return {
@@ -166,6 +232,7 @@ export function parseWorkOrderPdfSnapshot(
     description: first.description,
     workOrderCreatedAt: first.workOrderCreatedAt,
     snapshotUpdatedAt: first.snapshotUpdatedAt,
-    materials: rows.map((row) => row.material),
+    materials,
+    pcbProduction: first.pcbProduction,
   };
 }

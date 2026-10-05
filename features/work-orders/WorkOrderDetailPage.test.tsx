@@ -89,6 +89,12 @@ function successfulHook(overrides: Record<string, unknown> = {}) {
       isPending: false,
       refetch: pageMocks.detailRefetch,
     },
+    productionContextQuery: {
+      data: { ok: true, value: null },
+      isError: false,
+      isPending: false,
+      refetch: vi.fn(),
+    },
     projectChoicesQuery: {
       data: { ok: true, value: projectChoices },
       isError: false,
@@ -186,6 +192,66 @@ afterEach(() => {
 });
 
 describe("WorkOrderDetailPage", () => {
+  it("renders a frozen PCB production Draft and submits exact actual-good quantity", async () => {
+    const onFinishConfirm = vi.fn().mockResolvedValue({ ok: true, value: {
+      ...finishSuccess, projectId: null,
+    } });
+    render(<WorkOrderDraftShell
+      workOrder={{ ...draft, projectId: null, projectName: null, customerName: null,
+        description: "PCB production — Controller" }}
+      canEdit={false}
+      canDelete
+      canFinish
+      productionContext={{
+        workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060",
+        pcbCardName: "Controller", bomVersionId: "00000000-0000-4000-8000-000000000061",
+        bomVersionNumber: "2", plannedQuantity: "10",
+        outputProductId: "00000000-0000-4000-8000-000000000062",
+        outputSerialNumber: "0000999", outputProductName: "Controller", actualGoodQuantity: null,
+      }}
+      projectChoices={[]}
+      projectChoicesError={null}
+      projectChoicesLoading={false}
+      persistedMaterials={[]}
+      materialsLoading={false}
+      materialsError={null}
+      materialsReady
+      isSaving={false}
+      isDeleting={false}
+      isFinishing={false}
+      isLoadingMaterial={false}
+      onReloadLatest={vi.fn().mockResolvedValue({ ok: false })}
+      onRetryMaterials={vi.fn()}
+      onRetryProjectChoices={vi.fn()}
+      onLoadMaterial={vi.fn()}
+      onSave={vi.fn()}
+      onDelete={vi.fn()}
+      onFinishConfirm={onFinishConfirm}
+    />);
+    expect(await screen.findByText("PCB production plan")).toBeInTheDocument();
+    expect(screen.getByText("General Stock")).toBeInTheDocument();
+    expect(screen.getByText(
+      "This frozen PCB BOM has no input Products. Finish will add only the actual completed PCB quantity to Inventory.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("No materials added yet.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save for Later" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Scan Product Barcode" })).not.toBeInTheDocument();
+    const finish = screen.getByRole("button", { name: "Finish Work Order" });
+    expect(finish).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /^Actual successfully completed quantity/ }), {
+      target: { value: "11" },
+    });
+    expect(finish).toBeDisabled();
+    fireEvent.change(screen.getByRole("textbox", { name: /^Actual successfully completed quantity/ }), {
+      target: { value: "000" },
+    });
+    expect(finish).toBeEnabled();
+    fireEvent.click(finish);
+    expect(screen.getByRole("dialog")).toHaveTextContent("planned quantity 10, actual completed quantity 0");
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Finish Work Order" }));
+    await waitFor(() => expect(onFinishConfirm).toHaveBeenCalledWith(draft.updatedAt, "0"));
+  });
+
   it("keeps a successful material query gated until local hydration is established", async () => {
     const persistedMaterial = {
       productId: "00000000-0000-4000-8000-000000000030",

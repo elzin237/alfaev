@@ -16,6 +16,10 @@ import type {
   WorkOrderProjectChoice,
 } from "../services/workOrderService";
 import type { FinishWorkOrderResult } from "../services/workOrderFinishService";
+import {
+  normalizeActualGoodQuantity,
+  type PcbProductionWorkOrderContext,
+} from "../services/pcbProductionWorkOrderService";
 import { isValidWorkOrderMaterialQuantity } from "../workOrderMaterialQuantity";
 
 export interface WorkOrderDraftSubmission {
@@ -36,6 +40,7 @@ interface WorkOrderDraftShellProps {
   canEdit: boolean;
   canDelete: boolean;
   canFinish: boolean;
+  productionContext?: PcbProductionWorkOrderContext | null;
   projectChoices: WorkOrderProjectChoice[];
   projectChoicesError: string | null;
   projectChoicesLoading: boolean;
@@ -53,7 +58,7 @@ interface WorkOrderDraftShellProps {
   onLoadMaterial: (serialNumber: string) => Promise<WorkOrderMaterialLoadResult>;
   onSave: (submission: WorkOrderDraftSubmission) => Promise<DraftWorkOrderSaveResult>;
   onDelete: (expectedUpdatedAt: string) => Promise<DraftWorkOrderDeleteResult>;
-  onFinishConfirm: (expectedUpdatedAt: string) => Promise<FinishWorkOrderResult>;
+  onFinishConfirm: (expectedUpdatedAt: string, actualGoodQuantity?: string) => Promise<FinishWorkOrderResult>;
 }
 
 function materialSignature(materials: DraftWorkOrderMaterial[]): string {
@@ -77,6 +82,7 @@ function WorkOrderDraftShell({
   canEdit,
   canDelete,
   canFinish,
+  productionContext = null,
   projectChoices,
   projectChoicesError,
   projectChoicesLoading,
@@ -124,6 +130,7 @@ function WorkOrderDraftShell({
   const [finishFeedback, setFinishFeedback] = useState<
     { code: string; message: string } | null
   >(null);
+  const [actualGoodQuantity, setActualGoodQuantity] = useState("");
   const [materialFocusRequest, setMaterialFocusRequest] = useState<{ productId: string; requestId: number } | null>(null);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
   const barcodeResolutionInFlight = useRef(false);
@@ -159,6 +166,7 @@ function WorkOrderDraftShell({
     finishConfirmationInFlight.current = false;
     setIsFinishConfirming(false);
     setFinishFeedback(null);
+    setActualGoodQuantity("");
   }, [workOrder.id]);
 
   useEffect(() => {
@@ -188,9 +196,12 @@ function WorkOrderDraftShell({
     selectedProjectId !== savedProjectId ||
     description !== savedDescription ||
     materialSignature(materials) !== savedMaterialsSignature;
-  const savedDraftIsFinishComplete = Boolean(
-    savedProjectId && savedDescription.trim() && savedMaterialCount > 0,
-  );
+  const normalizedActualGood = productionContext
+    ? normalizeActualGoodQuantity(actualGoodQuantity, productionContext.plannedQuantity)
+    : undefined;
+  const savedDraftIsFinishComplete = productionContext
+    ? Boolean(savedDescription.trim() && materialsHydrated && normalizedActualGood !== null)
+    : Boolean(savedProjectId && savedDescription.trim() && savedMaterialCount > 0);
   const interactionBlocked = isSaving || isDeleting || isFinishing ||
     isFinishConfirming ||
     deleteDialogOpen || finishDialogOpen;
@@ -360,7 +371,9 @@ function WorkOrderDraftShell({
     finishConfirmationInFlight.current = true;
     setIsFinishConfirming(true);
     try {
-      const result = await onFinishConfirm(expectedUpdatedAt);
+      const result = productionContext
+        ? await onFinishConfirm(expectedUpdatedAt, normalizedActualGood ?? undefined)
+        : await onFinishConfirm(expectedUpdatedAt);
       if (!result.ok) setFinishFeedback(result.error);
     } catch {
       setFinishFeedback({
@@ -377,6 +390,17 @@ function WorkOrderDraftShell({
 
   return (
     <div className="space-y-6">
+      {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
+        <h2 className="text-xl font-bold text-zinc-900">PCB production plan</h2>
+        <p className="mt-2 text-sm text-sky-900">This production context and its derived material quantities are frozen.</p>
+        <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <ReadOnlyValue label="PCB Card" value={productionContext.pcbCardName} />
+          <ReadOnlyValue label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
+          <ReadOnlyValue label="Planned Quantity" value={productionContext.plannedQuantity} />
+          <ReadOnlyValue label="Output Product" value={`${productionContext.outputSerialNumber} — ${productionContext.outputProductName}`} />
+          <ReadOnlyValue label="Destination" value={workOrder.projectName ?? "General Stock"} />
+        </dl>
+      </section>}
       <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">Draft details</h2>
         {canEdit ? (
@@ -406,7 +430,7 @@ function WorkOrderDraftShell({
             {canEdit && <div className="mt-6"><WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
             {isLoadingMaterial && <p role="status" className="mt-4 text-sm text-zinc-600">Loading material...</p>}
             {barcodeError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">{barcodeError}</p>}
-            <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId) => { setMaterials((current) => current.filter((item) => item.productId !== productId)); setSaveFeedback(null); }} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} />
+            <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId) => { setMaterials((current) => current.filter((item) => item.productId !== productId)); setSaveFeedback(null); }} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This frozen PCB BOM has no input Products. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />
           </>
         ) : materialsReady ? <div className="mt-6"><LoadingState message="Preparing Draft materials..." /></div> : null}
       </section>
@@ -417,7 +441,22 @@ function WorkOrderDraftShell({
         {deleteFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{deleteFeedback.message}</p>{deleteFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || isDeleting} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {finishFeedback && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{finishFeedback.message}</p>{finishFeedback.code === "stale_work_order" && <button type="button" disabled={isReloading || interactionBlocked} onClick={() => void handleReloadLatest()} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-60">{isReloading ? "Reloading..." : "Reload latest Draft"}</button>}</div>}
         {canFinish && hasUnsavedChanges && materialsHydrated && <p className="text-sm font-medium text-amber-700">Save Draft changes before finishing.</p>}
-        {canFinish && materialsHydrated && !hasUnsavedChanges && !savedDraftIsFinishComplete && <p className="text-sm font-medium text-amber-700">Add a Project, Description, and at least one material, then save the Draft before finishing.</p>}
+        {canFinish && productionContext && <label className="block max-w-sm text-sm font-semibold text-zinc-800">
+          Actual successfully completed quantity
+          <input type="text" inputMode="numeric" value={actualGoodQuantity}
+            disabled={interactionBlocked || !materialsHydrated}
+            onChange={(event) => { setActualGoodQuantity(event.target.value); setFinishFeedback(null); }}
+            aria-describedby="actual-good-help"
+            className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm disabled:bg-zinc-100" />
+          <span id="actual-good-help" className="mt-2 block font-normal text-zinc-500">
+            Planned: {productionContext.plannedQuantity}. Enter a whole number from 0 through the planned quantity.
+          </span>
+        </label>}
+        {canFinish && materialsHydrated && !hasUnsavedChanges && !savedDraftIsFinishComplete && <p className="text-sm font-medium text-amber-700">
+          {productionContext
+            ? "Enter the actual successfully completed quantity before finishing."
+            : "Add a Project, Description, and at least one material, then save the Draft before finishing."}
+        </p>}
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           {canDelete ? <button type="button" disabled={interactionBlocked} onClick={() => { if (finishDialogOpenRef.current || finishConfirmationInFlight.current) return; deleteDialogOpenRef.current = true; setDeleteFeedback(null); setDeleteDialogError(null); setDeleteDialogOpen(true); }} className="rounded-xl border border-red-300 bg-white px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60">Delete Draft</button> : <span />}
           <div className="flex flex-col gap-3 sm:flex-row">
@@ -446,6 +485,8 @@ function WorkOrderDraftShell({
         workOrderNumber={workOrder.workOrderNumber}
         projectName={savedProjectName ?? "Not selected"}
         materialCount={savedMaterialCount}
+        plannedQuantity={productionContext?.plannedQuantity}
+        actualGoodQuantity={productionContext ? normalizedActualGood ?? undefined : undefined}
         isConfirming={isFinishConfirming || isFinishing}
         onCancel={() => {
           if (isFinishConfirming || isFinishing) return;

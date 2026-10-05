@@ -577,6 +577,10 @@ Fields:
 - `updated_at`
 - `updated_by_user_id`
 - `completed_at`
+- `work_order_id`
+  - nullable for historical runs created before the Work Order flow
+  - unique when present
+  - references the originating specialized Work Order with `ON DELETE RESTRICT`
   - nullable
 - `cancelled_at`
   - nullable
@@ -977,14 +981,15 @@ Fields:
 
 Rules:
 
-- Project is optional.
+- Project is optional and traceability-only; finishing PCB production never automatically completes it.
 - A newly linked Project must exist and currently be `planned`, `in_progress`, or `on_hold`; `completed` and `cancelled` are ineligible. Trusted production re-checks this at execution time, while historical run references remain preserved.
 - Production uses one immutable BOM version.
-- On successful production:
+- Work Order-driven production creates this row only on successful Finish. `quantity_produced` stores actual-good output and may be zero for new Work Order-driven runs; historical rows remain valid.
+- On successful Finish:
   - validate all BOM inputs
-  - deduct input Products
-  - add `quantity_produced` to the PcbCard output Product
-  - create InventoryMovement rows for every input and the output
+  - deduct frozen WorkOrderItem inputs derived from the planned quantity
+  - add `quantity_produced` actual-good output to the PcbCard output Product
+  - create InventoryMovement rows for every input and a positive output only when actual good is greater than zero
   - create AuditLog
   - commit atomically
 - If any input is insufficient, no stock or production record changes are committed.
@@ -997,6 +1002,10 @@ Input consumption can be reconstructed from:
 - linked InventoryMovement rows
 
 No mutable duplicate consumption table is required unless implementation later demonstrates a concrete need.
+
+## 10.5 PcbProductionWorkOrder
+
+`pcb_production_work_orders` is a protected one-to-one context whose `work_order_id` is its primary key. It stores `pcb_card_id`, the exact `bom_version_id`, positive bigint `planned_quantity`, unique `creation_request_id`, and creation timestamp/actor. The request UUID is a durable idempotency key: replay of the same payload returns the same Work Order, while reuse for different data is rejected. The context, Work Order Project/Customer/description plan, and BOM-derived WorkOrderItems are immutable after creation. A Draft may be deleted through the canonical trusted Work Order deletion flow, which removes context and items without stock/run effects; a finished context is historical and cannot be removed.
 
 ---
 
@@ -1571,14 +1580,14 @@ The physical implementation must provide trusted atomic operations for at least:
 - atomic rollback of balance, movement, and audit on any failure
 
 ## PCB production
-- permission check
-- BOM version validation
-- all-stock sufficiency validation
-- all input InventoryBalance deductions
-- finished PCB InventoryBalance increment
-- all InventoryMovement inserts
-- PcbProductionRun insert
-- AuditLog insert
+- idempotent specialized Draft creation freezes the exact PCB Card, BOM version, planned quantity, optional Project, description, and generated material rows without changing Inventory
+- later Work Order Finish authorization and frozen-identity validation
+- all-stock sufficiency validation at Finish
+- all planned input InventoryBalance deductions
+- actual-good finished PCB InventoryBalance increment only when greater than zero
+- corresponding nonzero InventoryMovement inserts
+- one Work Order-linked PcbProductionRun insert
+- Work Order/PDF finalization and required AuditLog inserts
 
 ## Work Order Finish
 - permission check
@@ -1646,7 +1655,7 @@ The logical model is ready for physical implementation when:
 - Inventory cannot change without an immutable movement record
 - Nabavka can reference both existing and proposed new components
 - PCB BOM version history is preserved
-- PCB production creates finished-goods stock atomically
+- PCB production Draft creation changes no stock; its later Work Order Finish creates actual-good finished-goods stock atomically
 - Work Order drafts do not affect Inventory
 - Work Order Finish is atomic and immutable afterward
 - one Project may own multiple Work Orders without double-allocating planned requirements

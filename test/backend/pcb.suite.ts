@@ -86,7 +86,9 @@ async function saveBomAs(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
         [actor.authUserId],
       );
-      await database.query("set local role authenticated");
+      // The immediate-production RPC is retained only as an internal historical
+      // primitive. Exercise its legacy invariants through the trusted direct-DB
+      // harness; normal authenticated/browser EXECUTE is revoked by the new flow.
     } else {
       await database.query("set local role anon");
     }
@@ -205,7 +207,9 @@ async function producePcbAs(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1, true)",
         [actor.authUserId],
       );
-      await database.query("set local role authenticated");
+      // The legacy immediate-production primitive is internal-only now. Keep
+      // its historical domain regressions on the trusted direct-DB path while
+      // separately asserting that authenticated/browser EXECUTE is revoked.
     } else {
       await database.query("set local role anon");
     }
@@ -1914,9 +1918,13 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
         "select count(*) from public.pcb_production_runs where bom_version_id = $1", [versionA],
       )).rows).toEqual([{ count: "2" }]);
       await database.query(insertSql, [cardBId, versionB, null, 3, "completed", actorId]);
+      const zeroOutput = (await database.query<{ quantity_produced: string }>(
+        insertSql,
+        [cardA.cardId, versionA, null, 0, "completed", actorId],
+      )).rows[0]!;
+      expect(zeroOutput.quantity_produced).toBe("0");
 
       for (const [parameters, code] of [
-        [[cardA.cardId, versionA, null, 0, "completed", actorId], "23514"],
         [[cardA.cardId, versionA, null, -1, "completed", actorId], "23514"],
         [[cardA.cardId, versionA, null, 1, "pending", actorId], "23514"],
         [[cardA.cardId, versionA, null, 1, null, actorId], "23502"],
@@ -1962,7 +1970,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       );
       expect((await database.query<{ count: string }>(
         "select count(*) from public.pcb_production_runs where bom_version_id = $1", [versionA],
-      )).rows).toEqual([{ count: "2" }]);
+      )).rows).toEqual([{ count: "3" }]);
       expect(await readPcbRpcAs(database, fixture.actors.admin,
         "select id from public.pcb_production_runs where id = $1", [first.id]))
         .toEqual([{ id: first.id }]);

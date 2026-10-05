@@ -393,7 +393,7 @@ The page must show a list of all PCB card definitions.
 User chooses:
 
 - PCB card
-- quantity to produce
+- planned production quantity
 - optional Project
 
 AlfaEV calculates the total required quantity of every BOM component.
@@ -412,25 +412,27 @@ If stock is insufficient, show:
 - available quantity
 - missing quantity
 
-Production must not complete if any required component is insufficient.
+Current shortage is informative while creating the Draft; it does not reserve stock. Production must not Finish if any required component is insufficient at Finish time.
 
-If stock is sufficient:
+Creation first freezes the PCB Card, active BOM, planned quantity, optional Project, generated description, and derived material rows in an idempotent specialized Draft Work Order without changing Inventory.
+
+At Finish the user enters actual successfully completed quantity from zero through planned. If stock is sufficient:
 
 1. complete the production run
-2. record the produced PCB quantity and exact BOM version used
-3. deduct all consumed BOM components from Inventory
-4. add the produced PCB cards to finished-goods Inventory stock
+2. record actual-good quantity and the exact frozen BOM version used
+3. deduct BOM components for the planned quantity
+4. add only actual-good PCB cards to finished-goods Inventory stock
 5. record Inventory movements for both component consumption and finished-goods output
 6. record actor and timestamp
 7. create audit history
 
-The operation must be atomic: component deductions, production record creation, and finished-goods stock increase either all succeed or none do.
+The Finish operation must be atomic: component deductions, actual output, production record, Work Order/PDF finalization, and audit history either all succeed or none do. Actual good zero creates no output movement and adds no stock.
 
 Produced PCB cards are real stock-tracked finished goods. Example: producing 20 E55 cards results in `+20 E55` finished-goods inventory in addition to deducting the required BOM components.
 
 ### Optional Project link
 
-Project is optional on a PCB production run.
+Project is optional traceability on a PCB production Work Order/run and Finish never automatically completes it.
 
 If a Project is selected:
 - consumed components contribute to that Project's derived material usage

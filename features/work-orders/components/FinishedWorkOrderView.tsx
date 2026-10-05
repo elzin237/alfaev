@@ -6,11 +6,13 @@ import type {
   FinishedWorkOrderMaterial,
   FinishedWorkOrderMovement,
 } from "../services/finishedWorkOrderService";
+import type { PcbProductionWorkOrderContext } from "../services/pcbProductionWorkOrderService";
 
 interface FinishedWorkOrderViewProps {
   detail: FinishedWorkOrderDetail;
   materials: FinishedWorkOrderMaterial[];
   movements: FinishedWorkOrderMovement[];
+  productionContext?: PcbProductionWorkOrderContext | null;
 }
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -35,14 +37,26 @@ function FinishedWorkOrderView({
   detail,
   materials,
   movements,
+  productionContext = null,
 }: FinishedWorkOrderViewProps) {
   return (
     <div className="space-y-6">
+      {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
+        <h2 className="text-xl font-bold text-zinc-900">PCB production result</h2>
+        <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <ReadOnlyField label="PCB Card" value={productionContext.pcbCardName} />
+          <ReadOnlyField label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
+          <ReadOnlyField label="Planned Quantity" value={productionContext.plannedQuantity} />
+          <ReadOnlyField label="Actual Completed" value={productionContext.actualGoodQuantity ?? "Not recorded"} />
+          <ReadOnlyField label="Output Product" value={`${productionContext.outputSerialNumber} — ${productionContext.outputProductName}`} />
+          <ReadOnlyField label="Destination" value={detail.projectName ?? "General Stock"} />
+        </dl>
+      </section>}
       <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">Work Order Details</h2>
         <dl className="mt-6 grid gap-6 sm:grid-cols-2">
-          <ReadOnlyField label="Project" value={detail.projectName} />
-          <ReadOnlyField label="Customer" value={detail.customerName} />
+          <ReadOnlyField label="Project" value={detail.projectName ?? "General Stock"} />
+          <ReadOnlyField label="Customer" value={detail.customerName ?? "Not required"} />
           <ReadOnlyField
             label="Finished Date"
             value={dateTimeFormatter.format(new Date(detail.finishedAt))}
@@ -147,7 +161,7 @@ function FinishedWorkOrderView({
                         {movement.serialNumber}
                       </td>
                       <td className="px-5 py-4">{movement.productName}</td>
-                      <td className="whitespace-nowrap px-5 py-4 font-semibold tabular-nums text-red-700">
+                      <td className={`whitespace-nowrap px-5 py-4 font-semibold tabular-nums ${movement.quantityDelta.startsWith("-") ? "text-red-700" : "text-emerald-700"}`}>
                         {movement.quantityDelta}
                       </td>
                       <td className="whitespace-nowrap px-5 py-4 tabular-nums">

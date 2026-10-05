@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PcbProductionPrecheckForm from "./PcbProductionPrecheckForm";
 import type { PcbProductionSource } from "../services/pcbProductionPrecheckService";
 
@@ -11,172 +11,79 @@ const source: PcbProductionSource = {
     serialNumber: "0000002", isActive: true, quantityPerCard: "2", availableQuantity: "3" }],
 };
 const projects = [{ projectId: "55555555-5555-4555-8555-555555555555", name: "Alpha", status: "planned" as const }];
-afterEach(cleanup);
-const submit = vi.fn().mockResolvedValue({ ok: true, value: { runId: "66666666-6666-4666-8666-666666666666" } });
+const success = { ok: true as const, value: {
+  workOrderId: "66666666-6666-4666-8666-666666666666", workOrderNumber: "RN-2026-0001",
+} };
+const submit = vi.fn();
 const onProduced = vi.fn();
-function show(precheckSource = source, choices = projects, isRefreshing = false) {
+function show(precheckSource = source, choices = projects) {
   return render(<PcbProductionPrecheckForm source={precheckSource} projects={choices}
-    isRefreshing={isRefreshing} submit={submit} onProduced={onProduced} />);
+    isRefreshing={false} submit={submit} onProduced={onProduced} />);
 }
-afterEach(() => { vi.clearAllMocks(); });
+beforeEach(() => { submit.mockResolvedValue(success); vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "77777777-7777-4777-8777-777777777777") }); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
-describe("PCB production precheck form", () => {
-  it("starts without fabricated totals, allows general stock, and calculates insufficient physical stock", () => {
+describe("PCB production Work Order precheck", () => {
+  it("shows planned requirements and allows creation despite current shortage", () => {
     show();
-    expect(screen.getByText("Enter quantity")).toBeInTheDocument();
-    expect(screen.queryByText("Requirements")).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "No Project / General stock" })).toHaveValue("");
-    expect(screen.getByRole("option", { name: "Alpha — Planned" })).toBeInTheDocument();
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "5" } });
-    const row = screen.getByRole("row", { name: /Resistor/ });
-    expect(within(row).getAllByRole("cell").map((cell) => cell.textContent)).toEqual([
-      "Resistor 0000002", "2", "10", "3", "7",
-    ]);
-    expect(screen.getByText("Production cannot be completed because Inventory is insufficient.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Confirm Production/ })).toBeDisabled();
+    expect(screen.getByText("Enter planned quantity")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Planned Production Quantity" }), { target: { value: "5" } });
+    expect(within(screen.getByRole("row", { name: /Resistor/ })).getAllByRole("cell").map((cell) => cell.textContent))
+      .toEqual(["Resistor 0000002", "2", "10", "3", "7"]);
+    expect(screen.getByText(/You may create the Work Order/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Production Work Order" })).toBeEnabled();
   });
 
-  it("opens explicit confirmation only from ready state and does not submit on first click", () => {
-    show({ ...source, inputs: [{ ...source.inputs[0]!, availableQuantity: "10" }] }, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "5" } });
-    expect(screen.getByText(/Current physical stock meets/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("Produce 5 × Controller?");
-    expect(screen.getByRole("dialog")).toHaveTextContent("deduct BOM components and add 5 Controller cards");
-    expect(screen.getByRole("dialog")).toHaveTextContent("General Stock");
-    expect(screen.getByRole("textbox", { name: "Quantity to Produce" })).toBeDisabled();
+  it("creates a Draft with exact text, optional Project, and durable request UUID", async () => {
+    show({ ...source, inputs: [{ ...source.inputs[0]!, availableQuantity: "999999999999999999" }] });
+    const huge = "9007199254740993";
+    fireEvent.change(screen.getByRole("textbox", { name: "Planned Production Quantity" }), { target: { value: huge } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Project (optional)" }), { target: { value: projects[0]!.projectId } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Production Work Order" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("creates a Draft Work Order");
     expect(submit).not.toHaveBeenCalled();
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(submit).not.toHaveBeenCalled();
-  });
-
-  it("blocks readiness for archived input or output and describes an empty BOM honestly", () => {
-    const archived = show({ ...source, inputs: [{ ...source.inputs[0]!, isActive: false }] }, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "1" } });
-    expect(screen.getByText("Archived / unavailable")).toBeInTheDocument();
-    expect(screen.queryByText(/Current physical stock meets/)).not.toBeInTheDocument();
-    archived.unmount();
-    const output = show({ ...source, outputIsActive: false }, []);
-    expect(screen.getByText(/output Product is archived/)).toBeInTheDocument();
-    output.unmount();
-    show({ ...source, inputs: [] }, []);
-    expect(screen.getByText(/This active BOM has no input Products/)).toBeInTheDocument();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-  });
-
-  it("confirms and completes production with an empty active BOM using only the output Product", async () => {
-    show({ ...source, inputs: [] }, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "1" } });
-    expect(screen.getByRole("button", { name: "Confirm Production" })).toBeEnabled();
-    expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent("Produce 1 × Controller?");
-    expect(submit).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Production" }));
-    await waitFor(() => expect(onProduced).toHaveBeenCalledWith({
-      runId: "66666666-6666-4666-8666-666666666666", cardName: "Controller",
-      quantity: "1", projectName: null,
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create Work Order" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledWith({
+      pcbCardId: source.cardId, plannedQuantity: huge, projectId: projects[0]!.projectId,
+      creationRequestId: "77777777-7777-4777-8777-777777777777",
     }));
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit).toHaveBeenCalledWith({
-      pcbCardId: source.cardId, quantityToProduce: "1", projectId: null,
-      affectedProductIds: [source.outputProductId],
+    expect(onProduced).toHaveBeenCalledWith({
+      workOrderId: success.value.workOrderId, workOrderNumber: success.value.workOrderNumber,
+      cardName: "Controller", plannedQuantity: huge, projectName: "Alpha",
     });
   });
 
-  it("keeps an empty BOM unavailable when output is inactive or quantity is invalid", () => {
-    const inactive = show({ ...source, inputs: [], outputIsActive: false }, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "1" } });
-    expect(screen.getByRole("button", { name: "Confirm Production" })).toBeDisabled();
-    inactive.unmount();
+  it("accepts an empty BOM and makes no fabricated input row", () => {
     show({ ...source, inputs: [] }, []);
-    for (const value of ["0", "9223372036854775808"]) {
-      fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value } });
-      expect(screen.getByRole("button", { name: "Confirm Production" })).toBeDisabled();
-    }
+    fireEvent.change(screen.getByRole("textbox", { name: "Planned Production Quantity" }), { target: { value: "1" } });
+    expect(screen.getByText(/no input Products/)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Production Work Order" })).toBeEnabled();
   });
 
-  it("keeps leading-zero quantity text unchanged through confirmation", async () => {
-    show({ ...source, inputs: [] }, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "005" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    expect(screen.getByRole("dialog")).toHaveTextContent("Produce 005 × Controller?");
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm Production" }));
-    await waitFor(() => expect(submit).toHaveBeenCalledWith(expect.objectContaining({
-      quantityToProduce: "005", affectedProductIds: [source.outputProductId],
-    })));
-  });
-
-  it.each(["0", "-1", "1.5", "1e2", "9223372036854775808"])("rejects invalid quantity %s", (value) => {
+  it.each(["0", "-1", "1.5", "1e2", "9223372036854775808"])("rejects invalid planned quantity %s", (value) => {
     show(source, []);
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value } });
-    expect(screen.getByText(/positive whole-number quantity/)).toBeInTheDocument();
-    expect(screen.queryByText("Requirements")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Planned Production Quantity" }), { target: { value } });
+    expect(screen.getByRole("button", { name: "Create Production Work Order" })).toBeDisabled();
   });
 
-  it("sends one exact bigint quantity with selected Project and blocks rapid duplicate confirmation", async () => {
-    const huge = "9007199254740993";
-    show({ ...source, inputs: [{ ...source.inputs[0]!, quantityPerCard: "1", availableQuantity: huge }] });
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: huge } });
-    fireEvent.change(screen.getByRole("combobox", { name: "Project (optional)" }), { target: { value: projects[0]!.projectId } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveTextContent(`Produce ${huge} × Controller?`);
-    expect(dialog).toHaveTextContent("Project: Alpha");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Production" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: /Confirm Production/ }));
-    await waitFor(() => expect(onProduced).toHaveBeenCalledWith({
-      runId: "66666666-6666-4666-8666-666666666666", cardName: "Controller",
-      quantity: huge, projectName: "Alpha",
-    }));
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit).toHaveBeenCalledWith({ pcbCardId: source.cardId, quantityToProduce: huge,
-      projectId: projects[0]!.projectId, affectedProductIds: [source.inputs[0]!.productId, source.outputProductId] });
-  });
-
-  it("shows a safe server rejection and requires fresh quantity entry", async () => {
-    submit.mockResolvedValueOnce({ ok: false, error: { code: "insufficient_inventory",
-      message: "Production cannot be completed because Inventory is insufficient." } });
-    show({ ...source, inputs: [{ ...source.inputs[0]!, availableQuantity: "10" }] });
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm Production" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Inventory is insufficient"));
-    expect(screen.getByRole("textbox", { name: "Quantity to Produce" })).toHaveValue("");
-    expect(screen.getByRole("button", { name: "Confirm Production" })).toBeDisabled();
+  it("reuses the request UUID after an unknown outcome for the same payload", async () => {
+    submit.mockResolvedValue({ ok: false, error: { code: "unknown_outcome", message: "Creation could not be confirmed." } });
+    show({ ...source, inputs: [] }, []);
+    fireEvent.change(screen.getByRole("textbox", { name: "Planned Production Quantity" }), { target: { value: "005" } });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      fireEvent.click(screen.getByRole("button", { name: "Create Production Work Order" }));
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Create Work Order" }));
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(attempt + 1));
+    }
+    expect(submit.mock.calls[0]?.[0].creationRequestId).toBe(submit.mock.calls[1]?.[0].creationRequestId);
     expect(onProduced).not.toHaveBeenCalled();
   });
 
-  it("keeps confirmation controls disabled while submitting and prevents a second RPC", async () => {
-    let finish!: (value: { ok: true; value: { runId: string } }) => void;
-    submit.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
-    show({ ...source, inputs: [{ ...source.inputs[0]!, availableQuantity: "10" }] });
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    const dialog = screen.getByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Production" }));
-    expect(within(dialog).getByRole("button", { name: "Confirm Production…" })).toBeDisabled();
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: "Quantity to Produce" })).toBeDisabled();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Confirm Production…" }));
-    expect(submit).toHaveBeenCalledTimes(1);
-    finish({ ok: true, value: { runId: "66666666-6666-4666-8666-666666666666" } });
-    await waitFor(() => expect(onProduced).toHaveBeenCalledTimes(1));
-  });
-
-  it("does not claim success after an unknown transport outcome", async () => {
-    submit.mockRejectedValueOnce(new Error("private transport detail"));
-    show({ ...source, inputs: [{ ...source.inputs[0]!, availableQuantity: "10" }] });
-    fireEvent.change(screen.getByRole("textbox", { name: "Quantity to Produce" }), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Production" }));
-    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Confirm Production" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Production status could not be confirmed"));
-    expect(screen.queryByText("private transport detail")).not.toBeInTheDocument();
-    expect(onProduced).not.toHaveBeenCalled();
-    expect(screen.getByRole("textbox", { name: "Quantity to Produce" })).toHaveValue("");
+  it("blocks archived Products and never claims Inventory changed", () => {
+    show({ ...source, outputIsActive: false }, []);
+    expect(screen.getByText(/output Product is archived/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Production Work Order" })).toBeDisabled();
+    expect(screen.queryByText(/Production completed/)).not.toBeInTheDocument();
   });
 });

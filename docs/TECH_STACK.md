@@ -185,7 +185,7 @@ Required trusted operations include at least:
 - Product creation / Serial Number allocation
 - manual Inventory adjustment
 - Create Product from Nabavka
-- PCB production
+- PCB production Work Order creation and specialized Work Order Finish
 - Work Order number allocation
 - Work Order Finish
 - permission changes / Admin-sensitive mutations

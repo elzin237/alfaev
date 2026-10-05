@@ -331,18 +331,18 @@ Purpose:
 - PCB production flow
 
 Input:
-- quantity to produce
+- planned production quantity
 - optional Project
 
 Behavior:
 1. load active BOM version
 2. calculate total required components
 3. show required / available / missing
-4. block completion if any component is insufficient
-5. on confirm, call trusted atomic production operation
-6. deduct BOM inputs
-7. add finished PCB stock
-8. record production + Inventory movements + Audit
+4. show current shortage without treating it as a reservation
+5. on confirm, idempotently create a frozen PCB-production Draft Work Order
+6. change no Inventory and create no production run
+7. after creation, use `/work-orders/:workOrderId` only when the actor has `work_orders.view`
+8. Work Order Finish later consumes planned BOM inputs and adds actual-good output atomically
 
 Access:
 - Admin or `pcb.produce`

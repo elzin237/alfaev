@@ -22,6 +22,13 @@ export function workOrderDraftMaterialsQueryKey(
   return ["work-orders", "draft-materials", profileId, workOrderId] as const;
 }
 
+export function pcbProductionWorkOrderContextQueryKey(
+  profileId: string | undefined,
+  workOrderId: string,
+) {
+  return ["work-orders", "pcb-production-context", profileId, workOrderId] as const;
+}
+
 export function finishedWorkOrderDetailQueryKey(
   profileId: string | undefined,
   workOrderId: string,

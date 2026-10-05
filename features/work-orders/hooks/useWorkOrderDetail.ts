@@ -8,6 +8,10 @@ import {
   projectListQueryKey,
 } from "../../projects/projectQueryKeys";
 import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
+import { inventoryBalanceQueryKey } from "../../inventory/inventoryBalanceQueryKeys";
+import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
+import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
+import { pcbProductionHistoryQueryKey } from "../../pcb/pcbQueryKeys";
 import {
   deleteDraftWorkOrder,
   getWorkOrderDetail,
@@ -30,10 +34,12 @@ import {
   listFinishedWorkOrderMaterials,
   listFinishedWorkOrderMovements,
 } from "../services/finishedWorkOrderService";
+import { getPcbProductionWorkOrderContext } from "../services/pcbProductionWorkOrderService";
 import {
   finishedWorkOrderDetailQueryKey,
   finishedWorkOrderMaterialsQueryKey,
   finishedWorkOrderMovementsQueryKey,
+  pcbProductionWorkOrderContextQueryKey,
   workOrderDetailQueryKey,
   workOrderDraftMaterialsQueryKey,
   workOrderListQueryKey,
@@ -63,6 +69,10 @@ export function useWorkOrderDetail(workOrderId: string) {
     profile?.id,
     workOrderId,
   );
+  const productionContextKey = pcbProductionWorkOrderContextQueryKey(
+    profile?.id,
+    workOrderId,
+  );
   const editPermissionKey = permissionQueryKey(
     session?.user.id,
     profile?.id,
@@ -81,6 +91,12 @@ export function useWorkOrderDetail(workOrderId: string) {
   const detailQuery = useQuery({
     queryKey: detailKey,
     queryFn: () => getWorkOrderDetail(workOrderId),
+    enabled: Boolean(profile?.id && profile.isActive && hasValidWorkOrderId),
+    staleTime: 60_000,
+  });
+  const productionContextQuery = useQuery({
+    queryKey: productionContextKey,
+    queryFn: () => getPcbProductionWorkOrderContext(workOrderId),
     enabled: Boolean(profile?.id && profile.isActive && hasValidWorkOrderId),
     staleTime: 60_000,
   });
@@ -103,13 +119,16 @@ export function useWorkOrderDetail(workOrderId: string) {
     staleTime: 60_000,
   });
   const detail = detailQuery.data?.ok ? detailQuery.data.value : undefined;
+  const productionContext = productionContextQuery.data?.ok
+    ? productionContextQuery.data.value
+    : undefined;
   const hasEditPermission = hasActiveIdentity && (
     isAdmin || (
       editPermissionQuery.data?.ok === true && editPermissionQuery.data.value
     )
   );
   const canEditDraft = Boolean(
-    hasEditPermission && detail?.status === "draft",
+    hasEditPermission && detail?.status === "draft" && productionContext === null,
   );
   const hasDeletePermission = hasActiveIdentity && (
     isAdmin || (
@@ -299,28 +318,42 @@ export function useWorkOrderDetail(workOrderId: string) {
     retry: false,
     onSuccess: async (result) => {
       if (result.ok) {
-        await Promise.all([
+        const commonInvalidations = [
           queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
           queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
-          queryClient.invalidateQueries({
-            queryKey: projectDetailQueryKey(
-              profile?.id,
-              result.value.projectId,
-            ),
-            exact: true,
-          }),
           queryClient.invalidateQueries({
             queryKey: projectListQueryKey(profile?.id),
             exact: true,
           }),
+        ];
+        const projectInvalidations = result.value.projectId ? [
           queryClient.invalidateQueries({
-            queryKey: projectMaterialUsageQueryKey(
-              profile?.id,
-              result.value.projectId,
-            ),
+            queryKey: projectDetailQueryKey(profile?.id, result.value.projectId),
             exact: true,
           }),
-        ]);
+          queryClient.invalidateQueries({
+            queryKey: projectMaterialUsageQueryKey(profile?.id, result.value.projectId),
+            exact: true,
+          }),
+        ] : [];
+        const productionInvalidations = productionContext ? [
+          queryClient.invalidateQueries({
+            queryKey: pcbProductionHistoryQueryKey(profile?.id, productionContext.pcbCardId),
+            exact: true,
+          }),
+          queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profile?.id) }),
+          ...[productionContext.outputProductId, ...(
+            materialsQuery.data?.ok
+              ? materialsQuery.data.value.map((material) => material.productId)
+              : []
+          )]
+            .flatMap((productId) => [
+              queryClient.invalidateQueries({ queryKey: inventoryBalanceQueryKey(profile?.id, productId), exact: true }),
+              queryClient.invalidateQueries({ queryKey: productDetailQueryKey(profile?.id, productId), exact: true }),
+            ]),
+        ] : [];
+        await Promise.all([...commonInvalidations, ...projectInvalidations, ...productionInvalidations]);
         await queryClient.cancelQueries({
           queryKey: materialsKey,
           exact: true,
@@ -385,6 +418,7 @@ export function useWorkOrderDetail(workOrderId: string) {
     finishedDetailQuery,
     finishedMaterialsQuery,
     finishedMovementsQuery,
+    productionContextQuery,
     isDeleting: deleteMutation.isPending,
     isFinishing: finishMutation.isPending,
     isLoadingMaterial: materialLoadMutation.isPending,

@@ -141,7 +141,14 @@ describe("finishedWorkOrderService", () => {
   });
 
   it("preserves exact signed movement quantities and validates ledger arithmetic", async () => {
-    serviceMocks.rpc.mockResolvedValue({ data: [movementRow], error: null });
+    const outputMovement = {
+      ...movementRow,
+      movement_id: "00000000-0000-4000-8000-000000000041",
+      quantity_delta: "8",
+      quantity_before: "2",
+      quantity_after: "10",
+    };
+    serviceMocks.rpc.mockResolvedValue({ data: [movementRow, outputMovement], error: null });
 
     await expect(listFinishedWorkOrderMovements(workOrderId)).resolves.toEqual({
       ok: true,
@@ -153,6 +160,15 @@ describe("finishedWorkOrderService", () => {
         quantityDelta: "-9223372036854775807",
         quantityBefore: "9223372036854775807",
         quantityAfter: "0",
+        createdAt: movementRow.created_at,
+      }, {
+        movementId: outputMovement.movement_id,
+        productId,
+        serialNumber: "0000123",
+        productName: "Archived Relay Module",
+        quantityDelta: "8",
+        quantityBefore: "2",
+        quantityAfter: "10",
         createdAt: movementRow.created_at,
       }],
     });

@@ -75,13 +75,14 @@ export interface FinishWorkOrderDependencies {
 interface FinalizationRequest {
   workOrderId: string;
   expectedUpdatedAt: string;
+  actualGoodQuantity?: string;
 }
 
 interface FinishResult {
   workOrderId: string;
   workOrderNumber: string;
   finishedAt: string;
-  projectId: string;
+  projectId: string | null;
   projectCompleted: boolean;
   workOrderPdfId: string;
   storageReference: string;
@@ -114,14 +115,18 @@ function parseRequest(value: unknown): FinalizationRequest | null {
   if (!isRecord(value)) return null;
   const keys = Object.keys(value);
   if (
-    keys.length !== 2 ||
+    (keys.length !== 2 && keys.length !== 3) ||
     !keys.includes("workOrderId") ||
     !keys.includes("expectedUpdatedAt") ||
+    keys.some((key) => !["workOrderId", "expectedUpdatedAt", "actualGoodQuantity"].includes(key)) ||
     typeof value.workOrderId !== "string" ||
     !uuidPattern.test(value.workOrderId) ||
     typeof value.expectedUpdatedAt !== "string" ||
     !timestampPattern.test(value.expectedUpdatedAt) ||
-    !Number.isFinite(Date.parse(value.expectedUpdatedAt))
+    !Number.isFinite(Date.parse(value.expectedUpdatedAt)) ||
+    !(value.actualGoodQuantity === undefined ||
+      (typeof value.actualGoodQuantity === "string" && /^(0|[1-9][0-9]*)$/.test(value.actualGoodQuantity) &&
+        BigInt(value.actualGoodQuantity) <= 9_223_372_036_854_775_807n))
   ) {
     return null;
   }
@@ -129,6 +134,9 @@ function parseRequest(value: unknown): FinalizationRequest | null {
   return {
     workOrderId: value.workOrderId,
     expectedUpdatedAt: value.expectedUpdatedAt,
+    ...(value.actualGoodQuantity === undefined
+      ? {}
+      : { actualGoodQuantity: value.actualGoodQuantity }),
   };
 }
 
@@ -227,8 +235,7 @@ function parseFinishResult(value: unknown, finalPath: string): FinishResult | nu
     typeof row.finished_at !== "string" ||
     !timestampPattern.test(row.finished_at) ||
     !Number.isFinite(Date.parse(row.finished_at)) ||
-    typeof row.project_id !== "string" ||
-    !uuidPattern.test(row.project_id) ||
+    !(row.project_id === null || (typeof row.project_id === "string" && uuidPattern.test(row.project_id))) ||
     typeof row.project_completed !== "boolean" ||
     typeof row.work_order_pdf_id !== "string" ||
     !uuidPattern.test(row.work_order_pdf_id)
@@ -240,7 +247,7 @@ function parseFinishResult(value: unknown, finalPath: string): FinishResult | nu
     workOrderId: row.work_order_id,
     workOrderNumber: row.work_order_number,
     finishedAt: row.finished_at,
-    projectId: row.project_id,
+    projectId: row.project_id as string | null,
     projectCompleted: row.project_completed,
     workOrderPdfId: row.work_order_pdf_id,
     storageReference: finalPath,
@@ -358,6 +365,9 @@ export async function handleFinishWorkOrderRequest(
     const { data, error } = await actor.rpc("get_work_order_pdf_snapshot", {
       p_work_order_id: input.workOrderId,
       p_expected_updated_at: input.expectedUpdatedAt,
+      ...(input.actualGoodQuantity === undefined
+        ? {}
+        : { p_actual_good_quantity: input.actualGoodQuantity }),
     });
     if (error) return jsonError(domainError(error, "snapshot"));
     rawSnapshot = data;
@@ -453,6 +463,9 @@ export async function handleFinishWorkOrderRequest(
       p_expected_updated_at: input.expectedUpdatedAt,
       p_pdf_storage_reference: finalPath,
       p_pdf_content_hash: contentHash,
+      ...(input.actualGoodQuantity === undefined
+        ? {}
+        : { p_actual_good_quantity: input.actualGoodQuantity }),
     });
     if (error) {
       await cleanupFailureObjects(storage, finalPath, temporaryPath);
