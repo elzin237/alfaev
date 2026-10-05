@@ -846,7 +846,6 @@ describe("workOrderService", () => {
     ["42501", "access_denied"],
     ["WOR02", "work_order_not_editable"],
     ["WOR05", "stale_work_order"],
-    ["WOR06", "project_requirement_exceeded"],
     ["PRD05", "product_unavailable"],
     ["22023", "invalid_draft"],
     ["P0002", "draft_reference_not_found"],
@@ -863,7 +862,7 @@ describe("workOrderService", () => {
     if (!result.ok) expect(result.error.message).not.toContain("raw detail");
   });
 
-  it("maps Project requirement rejection to the approved safe message and preserves the generic fallback", async () => {
+  it("does not preserve the retired Project-requirement warning and keeps the generic fallback safe", async () => {
     serviceMocks.rpc.mockResolvedValueOnce({
       data: null,
       error: {
@@ -881,8 +880,8 @@ describe("workOrderService", () => {
     await expect(saveDraftWorkOrder(detailRow.work_order_id, input)).resolves.toEqual({
       ok: false,
       error: {
-        code: "project_requirement_exceeded",
-        message: "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
+        code: "draft_save_failed",
+        message: "The Draft could not be saved. Please try again.",
       },
     });
 

@@ -393,19 +393,14 @@ Barcode scan input:
 - persisted Draft materials may be reloaded through a narrow trusted read for an
   active Admin, `work_orders.view`, or `work_orders.edit_draft` actor; this does
   not broaden normal Product or InventoryBalance RLS
-- persisted Draft WorkOrderItems are the derived allocation source for Project
-  planning; no separate reservation/allocation table exists
-- for each Project/Product, the complete desired state of the current Draft must fit
-  within outstanding planned requirement after subtracting allocations from other
-  Draft Work Orders on that same Project; the current Draft, Finished Work Orders,
-  and Work Orders for other Projects are excluded
-- Project row locking serializes concurrent Draft allocation changes; a Project switch
-  locks both old and new Projects in deterministic order
-- an already-selected Completed/Cancelled Project may retain an identical historical
-  material set during a header/customer refresh, but material allocation changes require
-  clearing it or selecting an eligible open Project
-- Draft persistence may reject planned-requirement over-allocation, but never checks,
-  reserves, deducts, or otherwise mutates physical Inventory
+- Project requirements are planning/reference data only: generic Draft materials need
+  not appear in them and are not capped by their remaining planned quantities
+- selecting a Project supplies traceability and a trusted Customer snapshot; it does
+  not reserve Project requirements or physical Inventory
+- Project row locking preserves Project-selection/lifecycle serialization; a Project
+  switch locks both old and new Projects in deterministic order
+- Draft persistence never checks physical stock, reserves it, deducts it, or otherwise
+  mutates Inventory; authoritative Product and physical-stock checks occur at Finish
 
 New Draft material references may only target valid active Products where business
 rules permit. A previously persisted reference remains historical if its Product is
@@ -670,8 +665,9 @@ consumption must not be double-counted. Available after Commitments is physical
 InventoryBalance quantity minus the summed commitment; it may be negative and must not
 be clamped or used as a substitute for authoritative physical-stock checks.
 
-One Project may own multiple Work Orders. Trusted Draft synchronization must prevent
-double-allocation of the same planned requirement across concurrent Work Orders. Work
+One Project may own multiple Work Orders. Their generic Draft materials are truthful
+proposed actual-use records and may fall outside or exceed the Project plan; Project
+requirements remain planning/reference data rather than an allocation boundary. Work
 Order Finish remains the only physical consumption event and must not also deduct
 ProjectProductComponent quantities.
 
@@ -995,7 +991,7 @@ Protect:
 - Inventory deductions
 - PCB production
 - Work Order Finish
-- Project requirement synchronization across multiple Work Orders
+- Project lifecycle synchronization across multiple Work Orders
 - final-Work-Order automatic Project completion
 - one-time Product creation from Nabavka
 - permission updates where stale state matters

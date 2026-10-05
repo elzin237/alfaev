@@ -142,22 +142,19 @@ finished-PCB consumption must not be double-counted.
 Availability is not clamped to zero; negative values indicate a shortage. Neither
 commitments nor their release create InventoryMovement rows or directly change stock.
 
-Persisted Draft WorkOrderItems allocate, but do not reserve or consume, the open
-Project's outstanding planned requirement. For Project P and Product X:
+Project requirements are planning/reference data only. A generic Draft Work Order may
+record any active eligible Inventory Product, whether or not that Product appears in
+the selected Project requirements, and its quantity may exceed the Project's remaining
+planned requirement. Selecting a Project supplies traceability and the trusted Customer
+snapshot; it does not make Project requirements a materials whitelist, a quantity cap,
+an Inventory reservation, or a stock mutation.
 
-`other_draft_allocation(P, X) = sum of WorkOrderItem.quantity for X across other Draft Work Orders linked to P`
-
-The current Draft's complete desired quantity for X may not exceed
-`max(outstanding_commitment(P, X) - other_draft_allocation(P, X), 0)`. The current
-Draft is excluded because its desired state replaces its own persisted allocation.
-Finished Work Orders and Work Orders for another Project do not contribute to this
-Draft allocation. Multiple ProjectProducts containing the same Product contribute to
-the Project-level planned requirement before this allocation check. No allocation row
-is persisted separately, and Draft allocation never changes physical Inventory.
-An already-selected Completed or Cancelled Project may retain its identical historical
-Draft material set while header/customer data is refreshed, but it cannot receive a
-new or changed material allocation. The Draft must instead clear that Project or move
-to an eligible open Project before changing its allocation.
+Persisted Draft WorkOrderItems remain the proposed actual material record for that Work
+Order. They do not reduce Project requirements or physical Inventory. On successful
+Finish, the exact persisted quantities are checked against authoritative physical
+Inventory, deducted through immutable InventoryMovement history, and then qualify as
+actual Project consumption where linked. Project commitment/read models remain derived
+from planned requirements and qualifying completed physical consumption.
 
 ### Completed Projects
 

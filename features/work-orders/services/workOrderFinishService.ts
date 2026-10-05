@@ -29,7 +29,6 @@ export interface FinishWorkOrderError {
     | "invalid_request"
     | "pdf_finalization_failed"
     | "product_unavailable"
-    | "project_requirement_exceeded"
     | "project_unavailable"
     | "stale_work_order"
     | "work_order_already_finished"
@@ -142,11 +141,6 @@ function mapError(code: string | null): FinishWorkOrderResult {
       return failure(
         "insufficient_inventory",
         "Current physical Inventory is insufficient to finish this Work Order.",
-      );
-    case "project_requirement_exceeded":
-      return failure(
-        "project_requirement_exceeded",
-        "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
       );
     case "project_unavailable":
       return failure(

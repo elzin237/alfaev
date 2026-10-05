@@ -164,12 +164,6 @@ function domainError(error: unknown, stage: "snapshot" | "finish"): SafeError {
       code: "stale_work_order",
       message: "This Work Order changed. Reload it before finishing.",
     },
-    WOR06: {
-      status: 409,
-      code: "project_requirement_exceeded",
-      message:
-        "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
-    },
     WOR07: {
       status: 422,
       code: "work_order_incomplete",

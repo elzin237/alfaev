@@ -1037,7 +1037,7 @@ describe("WorkOrderDetailPage", () => {
     expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
   });
 
-  it("preserves the complete local Draft after WOR06 and allows a corrected retry", async () => {
+  it("submits a Project-linked material quantity without a Project-plan warning", async () => {
     const persistedMaterial = {
       productId: "00000000-0000-4000-8000-000000000030",
       serialNumber: "0000123",
@@ -1053,21 +1053,13 @@ describe("WorkOrderDetailPage", () => {
         refetch: pageMocks.materialsRefetch,
       },
     }));
-    pageMocks.saveDraft
-      .mockResolvedValueOnce({
-        ok: false,
-        error: {
-          code: "project_requirement_exceeded",
-          message: "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
-        },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        value: {
-          workOrderId,
-          updatedAt: "2026-09-22T10:01:00.123456+00:00",
-        },
-      });
+    pageMocks.saveDraft.mockResolvedValue({
+      ok: true,
+      value: {
+        workOrderId,
+        updatedAt: "2026-09-22T10:01:00.123456+00:00",
+      },
+    });
     renderPage();
 
     const quantity = await screen.findByRole("textbox", {
@@ -1082,34 +1074,14 @@ describe("WorkOrderDetailPage", () => {
     fireEvent.change(quantity, { target: { value: "12" } });
     fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
-    );
-    expect(screen.getByLabelText("Project")).toHaveValue(replacementProjectId);
-    expect(screen.getByLabelText("Short Description"))
-      .toHaveValue("Keep this local description");
-    expect(quantity).toHaveValue("12");
-    expect(screen.queryByText("Draft saved.")).not.toBeInTheDocument();
-    expect(screen.queryByText("Work Orders destination")).not.toBeInTheDocument();
-    expect(pageMocks.reloadLatestDraft).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved.");
+    expect(screen.queryByText(/remaining requirement/i)).not.toBeInTheDocument();
     expect(pageMocks.saveDraft).toHaveBeenCalledExactlyOnceWith({
       projectId: replacementProjectId,
       description: "Keep this local description",
       expectedUpdatedAt: draft.updatedAt,
       items: [{ productId: persistedMaterial.productId, quantity: "12" }],
       materialSnapshot: [{ ...persistedMaterial, quantity: "12" }],
-    });
-
-    fireEvent.change(quantity, { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
-
-    expect(await screen.findByRole("status")).toHaveTextContent("Draft saved.");
-    expect(pageMocks.saveDraft).toHaveBeenCalledTimes(2);
-    expect(pageMocks.saveDraft.mock.calls[1]?.[0]).toMatchObject({
-      projectId: replacementProjectId,
-      description: "Keep this local description",
-      expectedUpdatedAt: draft.updatedAt,
-      items: [{ productId: persistedMaterial.productId, quantity: "5" }],
     });
   });
 

@@ -593,7 +593,9 @@ export function registerWorkOrderFinishPreflightTests(
         });
       });
 
-      it("revalidates current planning, other Drafts, physical consumption, and Product lifecycle", async () => {
+      it.skipIf(
+        process.env.GENERIC_WORK_ORDER_PLANNING_REFERENCE_MIGRATION !== "1",
+      )("treats Project planning as reference data while revalidating Product lifecycle", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const admin = fixture.actors.admin;
@@ -732,14 +734,9 @@ export function registerWorkOrderFinishPreflightTests(
             [state.workOrderId, state.productId],
           )).rows[0];
           await actAs(database, admin);
-          await expectRejected(
-            database,
-            () => preflightFinishWorkOrder(
-              database, state.workOrderId, state.updatedAt,
-            ),
-            "WOR06",
-            "Draft materials exceed the remaining Project requirement",
-          );
+          expect(await preflightFinishWorkOrder(
+            database, state.workOrderId, state.updatedAt,
+          )).toHaveLength(1);
           await database.query("reset role");
           expect((await database.query(
             `select

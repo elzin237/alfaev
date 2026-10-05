@@ -1065,10 +1065,10 @@ Fields:
   - read-only
 - Short Description
 
-One Project may have multiple Work Orders. The Draft UI must make its relationship to
-the selected Project's planned component requirements understandable and must not
-allow the same planned requirement to be silently double-allocated across Draft Work
-Orders.
+One Project may have multiple Work Orders. Project selection supplies traceability and
+the Customer snapshot. Planned component requirements are reference data only: the
+generic Draft UI must not block an otherwise eligible material or quantity because it
+is outside or above the Project plan.
 
 Materials section:
 

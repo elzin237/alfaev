@@ -2438,12 +2438,11 @@ Rules:
 - one meaningful save creates one atomic `work_order.updated` audit
 - no Inventory mutation
 - no Inventory sufficiency check or physical reservation
-- derive Draft planning allocation from persisted Draft WorkOrderItems, excluding the
-  current Draft when replacing its complete desired state
-- enforce per-Project/Product allocation within outstanding planned requirement after
-  subtracting other Draft allocations
-- serialize concurrent allocation changes on the Project row; lock old/new Projects
-  in deterministic order when switching
+- treat Project requirements as planning/reference data, not a whitelist or quantity
+  cap for generic WorkOrderItems
+- permit eligible generic Draft materials outside or above the selected Project plan
+- preserve Project lifecycle/selection serialization; lock old/new Projects in
+  deterministic order when switching
 - preserve normal Product/Inventory RLS and direct WorkOrderItem write denial
 
 Backend only. Keep the existing header-only compatibility RPC unchanged.
@@ -2501,7 +2500,7 @@ Cover:
 - barcode Product validation
 - Draft operations never alter Inventory
 - multiple Work Orders may belong to one Project
-- planned requirements cannot be double-allocated across Draft Work Orders
+- planned requirements remain reference data and do not cap generic Draft materials
 
 ---
 
@@ -2520,7 +2519,7 @@ Validate:
 - Product validity
 - Inventory sufficiency
 - expected Draft version/timestamp
-- Project planned-requirement synchronization
+- Project lifecycle/traceability consistency
 - Drafts have caused no physical Inventory deduction; physical consumption occurs only during successful Finish finalization
 - other unfinished Work Orders for the same Project
 - qualifying Project/Product physical-consumption attribution
@@ -2538,7 +2537,7 @@ Concrete trusted boundary:
   held locks only when it calls validation inside the same finalization transaction,
   while any earlier standalone preflight result remains advisory
 - incomplete Finish content fails with `WOR07`; an unavailable Project fails with
-  `WOR08`; stale allocation continues to fail with `WOR06`
+  `WOR08`; Project requirements do not block generic Work Order Finish
 - insufficient physical stock returns typed per-item available/missing quantities
   with `inventory_sufficient = false`; it does not reserve or mutate stock
 - the RPC is read-only apart from transient row locks and is reusable by the later
@@ -2792,8 +2791,8 @@ Show traceability:
 
 Drafts excluded.
 
-Support one or many Work Orders per Project without double-counting or
-double-allocation.
+Support one or many Work Orders per Project without double-counting completed physical
+consumption.
 
 ---
 
@@ -3107,7 +3106,7 @@ Goal:
 Goal:
 - create Project
 - add Project Products and planned component requirements
-- create multiple Draft Work Orders without double-allocation
+- create multiple Draft Work Orders with Project requirements kept as reference data
 - create Draft
 - scan/add materials
 - Save
@@ -3350,7 +3349,7 @@ Manually verify real production-like flow:
 - PDF
 - immutable state
 - multiple Work Orders per Project
-- no planned-requirement double-allocation
+- Project requirements remain planning/reference data rather than a generic material cap
 - physical deduction occurs only on Finish
 - Project-linked consumption reduces only the matching Project/Product commitment
 - final Work Order completes Project atomically

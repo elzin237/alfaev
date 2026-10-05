@@ -394,8 +394,9 @@ Purpose:
 Draft behavior:
 - select Project
 - Customer auto-fills from Project
-- integrate material lines with that Project's planned requirements
-- support multiple Work Orders per Project without double-allocating the same requirement
+- treat that Project's planned requirements as reference data, not a material whitelist
+  or quantity cap
+- support multiple Work Orders per Project while recording their actual materials
 - scan Product barcode
 - Product resolves by Serial Number / Šifra
 - add Product to materials table

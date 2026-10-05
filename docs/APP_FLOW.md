@@ -472,12 +472,12 @@ If insufficient:
 
 If valid, trusted Finish operation:
 
-1. re-check Project planning and prevent double-allocation across its Draft Work Orders
+1. re-check the selected Project lifecycle and the persisted Work Order materials
 2. deduct every consumed Product exactly once
 3. create Project-linked InventoryMovement records
 4. mark Work Order Finished
 5. record finisher/time
-6. reduce only that Project's per-Product outstanding commitment through qualifying Project-linked physical consumption
+6. let the qualifying Project-linked physical consumption update derived planning reads
 7. check for other unfinished Work Orders on the same Project
 8. if none remain, automatically complete the Project and release unused commitment
 9. generate/finalize permanent PDF
@@ -801,7 +801,7 @@ The application flow is correctly implemented when:
 - Work Order PDFs remain tied to finished records
 - Project material usage is derived without double counting
 - Project Products model planned requirements without changing physical Inventory
-- one Project may have multiple Work Orders without double-allocation
+- one Project may have multiple Work Orders, with requirements retained as planning data
 - final Work Order Finish automatically completes the Project atomically
 - Documentation PDFs remain private and Admin-only
 - Fixed Assets remain Admin-only and separate from Inventory

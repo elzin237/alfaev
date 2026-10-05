@@ -1125,14 +1125,12 @@ Rules:
 - Persisted Draft material reads use a narrow trusted projection of Product ID,
   Serial Number, Name, persisted Quantity, and physical InventoryBalance Quantity;
   normal Product and InventoryBalance RLS remains unchanged.
-- Persisted Draft WorkOrderItems are the derived Project-allocation state; there is no
-  separate reservation table. For each Project/Product, a Draft's complete desired
-  quantity is bounded by the Project's outstanding planned requirement minus quantities
-  on other Draft Work Orders for that same Project/Product. The current Draft is
-  excluded from that other-Draft sum because its desired state replaces its existing
-  rows. Finished and other-Project Work Orders are excluded.
-- The Project row is the concurrency boundary for Draft allocation changes. Switching
-  Projects locks the old and new Project rows in deterministic UUID order.
+- Project requirements are planning/reference data, not a WorkOrderItem whitelist or
+  quantity cap. A generic Draft may reference any active eligible Product and may record
+  quantities above the selected Project's remaining plan.
+- Persisted Draft WorkOrderItems are proposed actual-use records, not Project allocation
+  rows and not Inventory reservations. The Project row remains the lifecycle/selection
+  concurrency boundary; switching Projects locks old and new rows in UUID order.
 - Draft persistence has no physical Inventory side effect and creates no
   InventoryMovement.
 - On Finish, rows become immutable.
@@ -1592,7 +1590,7 @@ The physical implementation must provide trusted atomic operations for at least:
 ## Work Order Finish
 - permission check
 - Draft-state validation
-- Project relationship and planned-requirement synchronization validation
+- Project relationship/lifecycle validation; requirements remain planning/reference data
 - all-stock sufficiency validation
 - InventoryBalance deductions
 - InventoryMovement inserts

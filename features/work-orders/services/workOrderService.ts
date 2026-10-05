@@ -101,7 +101,6 @@ export interface DraftWorkOrderSaveError {
     | "draft_reference_not_found"
     | "draft_save_failed"
     | "invalid_draft"
-    | "project_requirement_exceeded"
     | "product_unavailable"
     | "stale_work_order"
     | "work_order_not_editable";
@@ -829,7 +828,6 @@ function saveDraftFailure(code?: string): DraftWorkOrderSaveResult {
   if (code === "42501") return { ok: false, error: { code: "access_denied", message: "You no longer have permission to edit this Draft." } };
   if (code === "WOR02") return { ok: false, error: { code: "work_order_not_editable", message: "This Work Order can no longer be edited." } };
   if (code === "WOR05") return { ok: false, error: { code: "stale_work_order", message: "This Draft changed somewhere else. Reload the latest Draft before saving." } };
-  if (code === "WOR06") return { ok: false, error: { code: "project_requirement_exceeded", message: "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan." } };
   if (code === "PRD05") return { ok: false, error: { code: "product_unavailable", message: "One of the materials is archived or unavailable for this Work Order." } };
   if (code === "22023") return { ok: false, error: { code: "invalid_draft", message: "The Draft contains invalid data. Review the fields and materials." } };
   if (code === "P0002") return { ok: false, error: { code: "draft_reference_not_found", message: "The Work Order, Project, or Product could not be found." } };

@@ -388,7 +388,6 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
   it.each([
     ["42501", 403, "access_denied"],
     ["WOR02", 409, "work_order_already_finished"],
-    ["WOR06", 409, "project_requirement_exceeded"],
     ["WOR07", 422, "work_order_incomplete"],
     ["WOR08", 409, "project_unavailable"],
     ["PRD05", 409, "product_unavailable"],
@@ -426,7 +425,7 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
     ]);
   });
 
-  it("never converts a business failure into success when cleanup also fails", async () => {
+  it("never converts an unknown business failure into success when cleanup also fails", async () => {
     const testHarness = harness({
       cleanupErrors: true,
       finishErrorCode: "WOR06",
@@ -435,11 +434,10 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
       request(),
       testHarness.dependencies,
     );
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(500);
     expect(await json(response)).toEqual({
-      code: "project_requirement_exceeded",
-      message:
-        "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan.",
+      code: "finish_failed",
+      message: "The Work Order could not be finished.",
     });
     expect(testHarness.removals).toHaveLength(2);
   });

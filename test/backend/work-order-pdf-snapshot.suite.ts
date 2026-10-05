@@ -276,7 +276,7 @@ export function registerWorkOrderPdfSnapshotTests(
         expectPermissionDenied(anonymous.error);
       });
 
-      it("inherits stale, lifecycle, allocation, Product, and Inventory validation", async () => {
+      it("inherits stale, lifecycle, Product, and Inventory validation without imposing Project-plan limits", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const admin = fixture.actors.admin;
@@ -329,7 +329,6 @@ export function registerWorkOrderPdfSnapshotTests(
           for (const [state, code] of [
             [finished, "WOR02"],
             [incomplete, "WOR07"],
-            [allocation, "WOR06"],
             [archived, "PRD05"],
             [missingBalance, "IVB01"],
           ] as const) {
@@ -338,6 +337,15 @@ export function registerWorkOrderPdfSnapshotTests(
               () => getSnapshot(database, state.workOrderId, state.updatedAt),
               code,
             );
+          }
+          if (
+            process.env.GENERIC_WORK_ORDER_PLANNING_REFERENCE_MIGRATION === "1"
+          ) {
+            expect(await getSnapshot(
+              database,
+              allocation.workOrderId,
+              allocation.updatedAt,
+            )).toHaveLength(1);
           }
           await database.query("reset role");
         });

@@ -468,9 +468,9 @@ Each Work Order contains at minimum:
 - short description
 
 One Project may have one or many Work Orders. Do not impose a restriction of one
-Work Order per Project. Draft Work Order materials must integrate with the Project's
-planned component requirements, and allocation across multiple Draft Work Orders
-must not double-allocate one planned requirement.
+Work Order per Project. Planned component requirements remain planning/reference data:
+a generic Draft may record eligible materials outside the plan or above a remaining
+planned quantity. Actual physical consumption is authoritative only at Finish.
 
 ### Work Order number
 

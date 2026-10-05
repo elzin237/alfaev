@@ -99,7 +99,6 @@ describe("finishWorkOrder", () => {
     ["stale_work_order", "stale_work_order", "This Draft changed since you loaded it. Reload the latest Draft before finishing."],
     ["work_order_already_finished", "work_order_already_finished", "This Work Order is already Finished. Its latest state is being loaded."],
     ["insufficient_inventory", "insufficient_inventory", "Current physical Inventory is insufficient to finish this Work Order."],
-    ["project_requirement_exceeded", "project_requirement_exceeded", "These materials exceed the remaining requirement for the selected Project. Reduce the quantities or review the Project plan."],
     ["project_unavailable", "project_unavailable", "The selected Project is no longer available for this Work Order."],
     ["product_unavailable", "product_unavailable", "A Work Order material Product is archived or unavailable."],
     ["inventory_balance_unavailable", "inventory_balance_unavailable", "Current Inventory is unavailable for a Work Order material."],

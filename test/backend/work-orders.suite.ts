@@ -6341,8 +6341,10 @@ export function registerWorkOrderSchemaTests(
     },
   );
 
-  describe.skipIf(process.env.TASK116A_MIGRATION !== "1")(
-    "Draft Work Order Project allocation correction (requires deployed migration)",
+  describe.skipIf(
+    process.env.GENERIC_WORK_ORDER_PLANNING_REFERENCE_MIGRATION !== "1",
+  )(
+    "generic Work Order Project requirements are reference-only (requires deployed migration)",
     () => {
       async function createAllocationDraft(
         database: PoolClient,
@@ -6420,7 +6422,7 @@ export function registerWorkOrderSchemaTests(
         return productId;
       }
 
-      it("enforces aggregate Project requirements, other-Draft allocation, exact limits, and atomic rejection without using physical stock", async () => {
+      it("allows multiple planned and unplanned materials above remaining requirements without changing planning or Inventory", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actor = fixture.actors.admin;
@@ -6472,16 +6474,15 @@ export function registerWorkOrderSchemaTests(
             workOrderId: second.id,
           });
           await database.query("reset role");
-          const rejectedBefore = (await database.query(
-            `select pg_catalog.to_jsonb(work_order) as work_order,
-                    (select pg_catalog.count(*)::text
-                     from public.audit_logs as audit
-                     where audit.entity_id = work_order.id
-                       and audit.action_type = 'work_order.updated') as audits
-             from public.work_orders as work_order
-             where work_order.id = $1::uuid`,
-            [rejected.id],
-          )).rows[0];
+          const requirementsBefore = (await database.query(
+            `select component.product_id, component.required_quantity::text
+             from public.project_product_components as component
+             join public.project_products as project_product
+               on project_product.id = component.project_product_id
+             where project_product.project_id = $1::uuid
+             order by component.id`,
+            [projectId],
+          )).rows;
           const inventoryBefore = (await database.query(
             `select pg_catalog.to_jsonb(balance) as balance,
                     (select pg_catalog.count(*)::text
@@ -6493,32 +6494,37 @@ export function registerWorkOrderSchemaTests(
           )).rows[0];
 
           await actAs(database, actor);
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
-            description: "Must fail",
+          const outsidePlanSaved = await saveDraftWorkOrder(database, {
+            description: "Actual materials may differ from plan",
             expectedUpdatedAt: rejected.updatedAt,
-            items: [{ product_id: productId, quantity: "1" }],
+            items: [
+              { product_id: productId, quantity: "11" },
+              { product_id: unplannedProductId, quantity: "2" },
+            ],
             projectId,
             workOrderId: rejected.id,
-          }), "WOR06", "Draft materials exceed the remaining Project requirement");
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
-            description: "Must fail",
-            expectedUpdatedAt: rejected.updatedAt,
-            items: [{ product_id: unplannedProductId, quantity: "1" }],
-            projectId,
-            workOrderId: rejected.id,
-          }), "WOR06", "Draft materials exceed the remaining Project requirement");
+          });
           await database.query("reset role");
 
           expect((await database.query(
-            `select pg_catalog.to_jsonb(work_order) as work_order,
-                    (select pg_catalog.count(*)::text
-                     from public.audit_logs as audit
-                     where audit.entity_id = work_order.id
-                       and audit.action_type = 'work_order.updated') as audits
-             from public.work_orders as work_order
-             where work_order.id = $1::uuid`,
+            `select product_id, quantity::text as quantity
+             from public.work_order_items
+             where work_order_id = $1::uuid
+             order by product_id`,
             [rejected.id],
-          )).rows[0]).toEqual(rejectedBefore);
+          )).rows).toEqual([
+            { product_id: productId, quantity: "11" },
+            { product_id: unplannedProductId, quantity: "2" },
+          ].sort((left, right) => left.product_id.localeCompare(right.product_id)));
+          expect((await database.query(
+            `select component.product_id, component.required_quantity::text
+             from public.project_product_components as component
+             join public.project_products as project_product
+               on project_product.id = component.project_product_id
+             where project_product.project_id = $1::uuid
+             order by component.id`,
+            [projectId],
+          )).rows).toEqual(requirementsBefore);
           expect((await database.query(
             `select pg_catalog.to_jsonb(balance) as balance,
                     (select pg_catalog.count(*)::text
@@ -6544,13 +6550,14 @@ export function registerWorkOrderSchemaTests(
             projectId,
             workOrderId: first.id,
           });
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
+          const firstAbovePlan = await saveDraftWorkOrder(database, {
             description: "Allocation Draft",
             expectedUpdatedAt: firstRestored.updated_at,
             items: [{ product_id: productId, quantity: "7" }],
             projectId,
             workOrderId: first.id,
-          }), "WOR06");
+          });
+          expect(firstAbovePlan.work_order_id).toBe(first.id);
 
           const secondReleased = await saveDraftWorkOrder(database, {
             description: "Allocation Draft",
@@ -6561,7 +6568,7 @@ export function registerWorkOrderSchemaTests(
           });
           const rejectedNowFits = await saveDraftWorkOrder(database, {
             description: "Allocation Draft",
-            expectedUpdatedAt: rejected.updatedAt,
+            expectedUpdatedAt: outsidePlanSaved.updated_at,
             items: [{ product_id: productId, quantity: "4" }],
             projectId,
             workOrderId: rejected.id,
@@ -6588,7 +6595,7 @@ export function registerWorkOrderSchemaTests(
         });
       });
 
-      it("uses authoritative same-Project consumption while excluding other Projects and Finished Work Orders from Draft allocation", async () => {
+      it("keeps Project consumption planning readable without using it as a Draft quantity cap", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actor = fixture.actors.admin;
@@ -6649,13 +6656,14 @@ export function registerWorkOrderSchemaTests(
             projectId: projectA,
             workOrderId: draftA.id,
           });
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
+          const aboveOutstanding = await saveDraftWorkOrder(database, {
             description: "Allocation Draft",
             expectedUpdatedAt: savedA.updated_at,
             items: [{ product_id: productId, quantity: "8" }],
             projectId: projectA,
             workOrderId: draftA.id,
-          }), "WOR06");
+          });
+          expect(aboveOutstanding.work_order_id).toBe(draftA.id);
           await saveDraftWorkOrder(database, {
             description: "Allocation Draft",
             expectedUpdatedAt: draftB.updatedAt,
@@ -6667,7 +6675,7 @@ export function registerWorkOrderSchemaTests(
         });
       });
 
-      it("handles Project switches, Project-less and empty Drafts, and retained historical Projects without partial changes", async () => {
+      it("handles Project switches, Project-less and empty Drafts, and retained historical Projects without a planning cap", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actor = fixture.actors.admin;
@@ -6731,29 +6739,18 @@ export function registerWorkOrderSchemaTests(
             projectId: projectA,
             workOrderId: blockedSwitch.id,
           });
-          const blockedBefore = (await database.query(
-            `select pg_catalog.to_jsonb(work_order) as work_order,
-                    (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(item)
-                     order by item.id) from public.work_order_items as item
-                     where item.work_order_id = work_order.id) as items
-             from public.work_orders as work_order where work_order.id = $1::uuid`,
-            [blockedSwitch.id],
-          )).rows[0];
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
-            description: "Rejected B switch",
-            expectedUpdatedAt: (blockedBefore.work_order as { updated_at: string }).updated_at,
+          const switchedAbovePlan = await saveDraftWorkOrder(database, {
+            description: "Allowed B switch",
+            expectedUpdatedAt: (await database.query<{ updated_at: string }>(
+              `select updated_at::text as updated_at
+               from public.work_orders where id = $1::uuid`,
+              [blockedSwitch.id],
+            )).rows[0]!.updated_at,
             items: [{ product_id: productId, quantity: "1" }],
             projectId: projectB,
             workOrderId: blockedSwitch.id,
-          }), "WOR06");
-          expect((await database.query(
-            `select pg_catalog.to_jsonb(work_order) as work_order,
-                    (select pg_catalog.jsonb_agg(pg_catalog.to_jsonb(item)
-                     order by item.id) from public.work_order_items as item
-                     where item.work_order_id = work_order.id) as items
-             from public.work_orders as work_order where work_order.id = $1::uuid`,
-            [blockedSwitch.id],
-          )).rows[0]).toEqual(blockedBefore);
+          });
+          expect(switchedAbovePlan.work_order_id).toBe(blockedSwitch.id);
 
           await saveDraftWorkOrder(database, {
             description: "Project-less",
@@ -6794,19 +6791,20 @@ export function registerWorkOrderSchemaTests(
             projectId: completedProject,
             workOrderId: historical.id,
           });
-          await expectRejected(database, () => saveDraftWorkOrder(database, {
+          const historicalChanged = await saveDraftWorkOrder(database, {
             description: "Historical header refresh",
             expectedUpdatedAt: retained.updated_at,
             items: [{ product_id: productId, quantity: "1" }],
             projectId: completedProject,
             workOrderId: historical.id,
-          }), "WOR06");
+          });
+          expect(historicalChanged.work_order_id).toBe(historical.id);
           expect(moved.work_order_id).toBe(moving.id);
           await database.query("reset role");
         });
       });
 
-      it("serializes competing Draft saves on the same Project row without persistent concurrency fixtures", async () => {
+      it("retains Work Order -> Project serialization without enforcing a requirement cap", async () => {
         const fixture = requireHarness();
         const actor = fixture.actors.admin;
         const projectId = randomUUID();
@@ -6929,13 +6927,11 @@ export function registerWorkOrderSchemaTests(
               await new Promise((resolve) => setTimeout(resolve, 20));
             }
             await first.query("commit");
-            await expect(waiting).rejects.toMatchObject({
-              code: "WOR06",
-              message: "Draft materials exceed the remaining Project requirement",
+            await expect(waiting).resolves.toMatchObject({
+              work_order_id: secondWorkOrderId,
             });
             waiting = undefined;
-            await second.query("rollback");
-            expect((await observer.query(
+            expect((await second.query(
               `select work_order_id, quantity::text as quantity
                from public.work_order_items
                where work_order_id = any($1::uuid[])
@@ -6944,12 +6940,17 @@ export function registerWorkOrderSchemaTests(
             )).rows).toEqual([{
               quantity: "6",
               work_order_id: firstWorkOrderId,
-            }]);
-            expect((await observer.query(
-              `select id from public.audit_logs
-               where entity_id = any($1::uuid[])`,
-              [[firstWorkOrderId, secondWorkOrderId]],
-            )).rows).toEqual([]);
+            }, {
+              quantity: "5",
+              work_order_id: secondWorkOrderId,
+            }].sort((left, right) => left.work_order_id.localeCompare(right.work_order_id)));
+            await second.query("reset role");
+            expect((await second.query(
+              `select action_type from public.audit_logs
+               where entity_id = $1::uuid`,
+              [secondWorkOrderId],
+            )).rows).toEqual([{ action_type: "work_order.updated" }]);
+            await second.query("rollback");
           } finally {
             await first.query("rollback").catch(() => undefined);
             if (waiting) await waiting.catch(() => undefined);
