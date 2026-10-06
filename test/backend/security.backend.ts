@@ -37,6 +37,7 @@ import { registerPermissionEscalationAttackTests } from "./permission-escalation
 import { registerIdentifierConcurrencyAuditTests } from "./identifier-concurrency-audit.suite";
 import { registerInventoryConcurrencyAuditTests } from "./inventory-concurrency-audit.suite";
 import { registerHistoricalImmutabilityAuditTests } from "./historical-immutability-audit.suite";
+import { registerProcurementProductInventoryE2eTests } from "./procurement-product-inventory-e2e.suite";
 import { registerProcurementReadsTests } from "./procurement-reads.suite";
 import { registerProcurementCreationTests } from "./procurement-creation.suite";
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
@@ -84,6 +85,7 @@ describe("Supabase security helpers", () => {
   registerIdentifierConcurrencyAuditTests(requireHarness);
   registerInventoryConcurrencyAuditTests(requireHarness);
   registerHistoricalImmutabilityAuditTests(requireHarness);
+  registerProcurementProductInventoryE2eTests(requireHarness);
   registerProcurementReadsTests(requireHarness);
   registerProcurementCreationTests(requireHarness);
   registerProcurementLifecycleTests(requireHarness);
