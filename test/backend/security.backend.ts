@@ -34,6 +34,7 @@ import { registerAuditCoverageTests } from "./audit-coverage.suite";
 import { registerDashboardReadModelTests } from "./dashboard-read-model.suite";
 import { registerRlsPolicyMatrixTests } from "./rls-policy-matrix.suite";
 import { registerPermissionEscalationAttackTests } from "./permission-escalation-attacks.suite";
+import { registerIdentifierConcurrencyAuditTests } from "./identifier-concurrency-audit.suite";
 import { registerProcurementReadsTests } from "./procurement-reads.suite";
 import { registerProcurementCreationTests } from "./procurement-creation.suite";
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
@@ -78,6 +79,7 @@ describe("Supabase security helpers", () => {
   registerDashboardReadModelTests(requireHarness);
   registerRlsPolicyMatrixTests(requireHarness);
   registerPermissionEscalationAttackTests(requireHarness);
+  registerIdentifierConcurrencyAuditTests(requireHarness);
   registerProcurementReadsTests(requireHarness);
   registerProcurementCreationTests(requireHarness);
   registerProcurementLifecycleTests(requireHarness);

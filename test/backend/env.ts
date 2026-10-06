@@ -160,10 +160,17 @@ export function loadBackendTestEnvironment(
       "utf8",
     ),
   );
+  const task147DisposableTarget =
+    process.env.TASK147_COMMITTED_CONCURRENCY === "1";
+  const expectedProjectRef = task147DisposableTarget
+    ? "hipkoxienlffgyofcbzq"
+    : linkedProjectRef;
 
-  if (projectRef !== linkedProjectRef) {
+  if (projectRef !== expectedProjectRef) {
     throw new Error(
-      "Backend test URL does not match the repository's linked development project",
+      task147DisposableTarget
+        ? "Task 147 backend test URL does not match the approved disposable project"
+        : "Backend test URL does not match the repository's linked development project",
     );
   }
 
