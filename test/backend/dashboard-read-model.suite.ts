@@ -59,6 +59,26 @@ async function expectDashboardDenied(
   }
 }
 
+async function expectNoDirectRows(
+  database: PoolClient,
+  actor: SecurityActor,
+  query: string,
+  parameters: readonly unknown[] = [],
+) {
+  await database.query("savepoint direct_dashboard_source_read");
+  await setActor(database, actor);
+  try {
+    const result = await database.query<{ count: string }>(query, [...parameters]);
+    expect(result.rows).toEqual([{ count: "0" }]);
+  } catch (error) {
+    await database.query("rollback to savepoint direct_dashboard_source_read");
+    expect(error).toMatchObject({ code: "42501" });
+  } finally {
+    await database.query("reset role");
+    await database.query("release savepoint direct_dashboard_source_read");
+  }
+}
+
 async function setPermissions(
   database: PoolClient,
   fixture: SecurityFixtureHarness,
@@ -291,40 +311,65 @@ export function registerDashboardReadModelTests(
         });
       });
 
-      it("returns null only for unauthorized protected sections", async () => {
+      it("enforces the complete Dashboard section authorization matrix", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actor = fixture.actors.unpermitted;
           const protectedSections = [
             "projects", "work_orders", "procurement", "inventory", "activity",
           ] as const;
-          const sectionPermissions: Record<(typeof protectedSections)[number], string> = {
-            projects: "projects.view",
-            work_orders: "work_orders.view",
-            procurement: "procurement.view",
-            inventory: "inventory.view",
-            activity: "archive.view",
-          };
+          const cases: Array<{
+            permissions: string[];
+            visible: Array<(typeof protectedSections)[number]>;
+          }> = [
+            { permissions: [], visible: [] },
+            { permissions: ["projects.view"], visible: ["projects"] },
+            { permissions: ["work_orders.view"], visible: ["work_orders"] },
+            { permissions: ["procurement.view"], visible: ["procurement"] },
+            { permissions: ["inventory.view"], visible: ["inventory"] },
+            { permissions: ["archive.view"], visible: ["activity"] },
+            {
+              permissions: ["archive.view", "projects.view"],
+              visible: ["projects", "activity"],
+            },
+            {
+              permissions: ["archive.view", "work_orders.view"],
+              visible: ["work_orders", "activity"],
+            },
+            {
+              permissions: ["archive.view", "procurement.view"],
+              visible: ["procurement", "activity"],
+            },
+            {
+              permissions: ["archive.view", "inventory.view"],
+              visible: ["inventory", "activity"],
+            },
+            { permissions: ["archive.view", "suppliers.view"], visible: ["activity"] },
+            { permissions: ["archive.view", "pcb.view"], visible: ["activity"] },
+            {
+              permissions: [
+                "projects.view", "work_orders.view", "procurement.view",
+                "inventory.view", "archive.view", "suppliers.view", "pcb.view",
+              ],
+              visible: [...protectedSections],
+            },
+          ];
 
-          await setPermissions(database, fixture, actor, ["dashboard.view"]);
-          const base = await callDashboard(database, actor);
-          expectExactKeys(base, [
-            "projects", "work_orders", "procurement", "inventory", "activity",
-            "calendar",
-          ]);
-          for (const section of protectedSections) expect(base[section]).toBeNull();
-          expect(base.calendar).not.toBeNull();
-          expectExactKeys(base.calendar, ["upcoming"]);
-
-          for (const section of protectedSections) {
+          for (const dashboardCase of cases) {
             await setPermissions(database, fixture, actor, [
-              "dashboard.view", sectionPermissions[section],
+              "dashboard.view", ...dashboardCase.permissions,
             ]);
             const model = await callDashboard(database, actor);
-            expect(model[section]).not.toBeNull();
-            for (const unrelated of protectedSections) {
-              if (unrelated !== section) expect(model[unrelated]).toBeNull();
+            expectExactKeys(model, [
+              "projects", "work_orders", "procurement", "inventory", "activity",
+              "calendar",
+            ]);
+            for (const section of protectedSections) {
+              expect(model[section] === null).toBe(
+                !dashboardCase.visible.includes(section),
+              );
             }
+            expectExactKeys(model.calendar, ["upcoming"]);
           }
 
           const admin = await callDashboard(database, fixture.actors.admin);
@@ -572,6 +617,24 @@ export function registerDashboardReadModelTests(
             "audit_log_id", "actor_user_id", "actor_full_name", "action_type",
             "entity_type", "entity_id", "summary", "created_at",
           ]);
+
+          const dashboardOnlyActor = fixture.actors.unpermitted;
+          await setPermissions(database, fixture, dashboardOnlyActor, ["dashboard.view"]);
+          for (const [query, parameters] of [
+            ["select pg_catalog.count(*)::text as count from public.projects where id = $1::uuid", [projectId]],
+            ["select pg_catalog.count(*)::text as count from public.work_orders where id = $1::uuid", [workOrderId]],
+            ["select pg_catalog.count(*)::text as count from public.procurement_requests where id = $1::uuid", [requestId]],
+            ["select pg_catalog.count(*)::text as count from public.products where id = $1::uuid", [productId]],
+            ["select pg_catalog.count(*)::text as count from public.audit_logs where id = $1::uuid", [auditId]],
+            ["select pg_catalog.count(*)::text as count from public.user_profiles where id = $1::uuid", [adminId]],
+          ] as const) {
+            await expectNoDirectRows(
+              database,
+              dashboardOnlyActor,
+              query,
+              parameters,
+            );
+          }
         });
       });
 
@@ -621,6 +684,12 @@ export function registerDashboardReadModelTests(
             "Visible project 4", "Visible project 3", "Visible project 2",
             "Visible project 1", "Visible project 0",
           ]);
+          for (const row of rows) {
+            expectExactKeys(row, [
+              "audit_log_id", "actor_user_id", "actor_full_name", "action_type",
+              "entity_type", "entity_id", "summary", "created_at",
+            ]);
+          }
         });
       });
 
@@ -634,7 +703,8 @@ export function registerDashboardReadModelTests(
             "procurement_request", "product", "brand", "product_inventory",
             "product_supplier", "pcb_card", "pcb_bom_version", "pcb_production_run",
             "work_order", "calendar_entry", "supplier", "user_profile",
-            "documentation_record", "fixed_asset", "unknown_dashboard_type",
+            "user_permission", "security", "documentation_record", "fixed_asset",
+            "unknown_dashboard_type",
           ] as const;
 
           for (const [index, entityType] of entityTypes.entries()) {
@@ -696,7 +766,8 @@ export function registerDashboardReadModelTests(
               expect(rows.some((row) => row.entity_type === allowedType)).toBe(true);
             }
             expect(rows.some((row) => [
-              "user_profile", "documentation_record", "fixed_asset",
+              "user_profile", "user_permission", "security",
+              "documentation_record", "fixed_asset",
               "unknown_dashboard_type",
             ].includes(row.entity_type as string))).toBe(false);
           }
@@ -705,9 +776,65 @@ export function registerDashboardReadModelTests(
           const adminRows = (admin.activity as JsonObject).recent as JsonObject[];
           expect(adminRows).toHaveLength(5);
           expect(adminRows.some((row) => [
-            "user_profile", "documentation_record", "fixed_asset",
+            "user_profile", "user_permission", "security",
+            "documentation_record", "fixed_asset",
             "unknown_dashboard_type",
           ].includes(row.entity_type as string))).toBe(true);
+        });
+      });
+
+      it("keeps the deployed function ACL narrow and browser source reads permission-bound", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const metadata = await database.query<{
+            authenticated_execute: boolean;
+            anonymous_execute: boolean;
+            public_execute: boolean;
+            security_definer: boolean;
+            search_path: string;
+            volatility: string;
+          }>(
+            `select
+               pg_catalog.has_function_privilege(
+                 'authenticated', 'public.get_dashboard_read_model()', 'EXECUTE'
+               ) as authenticated_execute,
+               pg_catalog.has_function_privilege(
+                 'anon', 'public.get_dashboard_read_model()', 'EXECUTE'
+               ) as anonymous_execute,
+               pg_catalog.has_function_privilege(
+                 'public', 'public.get_dashboard_read_model()', 'EXECUTE'
+               ) as public_execute,
+               routine.prosecdef as security_definer,
+               coalesce(
+                 (
+                   select setting
+                   from pg_catalog.unnest(routine.proconfig) as setting
+                   where setting like 'search_path=%'
+                 ),
+                 ''
+               ) as search_path,
+               routine.provolatile as volatility
+             from pg_catalog.pg_proc as routine
+             join pg_catalog.pg_namespace as namespace
+               on namespace.oid = routine.pronamespace
+             where namespace.nspname = 'public'
+               and routine.proname = 'get_dashboard_read_model'
+               and pg_catalog.pg_get_function_identity_arguments(routine.oid) = ''`,
+          );
+
+          expect(metadata.rows).toEqual([{
+            authenticated_execute: true,
+            anonymous_execute: false,
+            public_execute: false,
+            security_definer: true,
+            search_path: "search_path=\"\"",
+            volatility: "s",
+          }]);
+
+          await setPermissions(database, fixture, fixture.actors.unpermitted, [
+            "dashboard.view",
+          ]);
+          expect(await callDashboard(database, fixture.actors.unpermitted)).toBeTruthy();
         });
       });
 

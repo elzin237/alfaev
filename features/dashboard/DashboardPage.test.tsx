@@ -244,6 +244,14 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "The Dashboard overview could not be loaded.",
     );
+    for (const widget of [
+      "Projects", "Recent Work Orders", "Nabavka", "Inventory",
+      "Recent Activity", "Upcoming Calendar",
+    ]) {
+      expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByRole("region", { name: "Dashboard summary" }))
+      .not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });

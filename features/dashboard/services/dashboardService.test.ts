@@ -342,7 +342,13 @@ describe("dashboardService", () => {
     ["later-section extra field", (value: ReturnType<typeof validResponse>) => {
       Object.assign(value.inventory.recent[0]!, { cost: "secret" });
     }],
-    ["protected Activity field", (value: ReturnType<typeof validResponse>) => {
+    ["Activity before_data", (value: ReturnType<typeof validResponse>) => {
+      Object.assign(value.activity.recent[0]!, { before_data: { hidden: true } });
+    }],
+    ["Activity after_data", (value: ReturnType<typeof validResponse>) => {
+      Object.assign(value.activity.recent[0]!, { after_data: { hidden: true } });
+    }],
+    ["Activity metadata", (value: ReturnType<typeof validResponse>) => {
       Object.assign(value.activity.recent[0]!, { metadata: { hidden: true } });
     }],
     ["malformed exact quantity", (value: ReturnType<typeof validResponse>) => {
