@@ -21,6 +21,7 @@ import {
   listWorkOrderProjectChoices,
   resolveWorkOrderProductBarcode,
   saveDraftWorkOrder,
+  savePcbProductionSupplementalMaterials,
   type PersistedDraftWorkOrderMaterial,
   type SaveDraftWorkOrderInput,
   type WorkOrderMaterialLoadResult,
@@ -128,7 +129,8 @@ export function useWorkOrderDetail(workOrderId: string) {
     )
   );
   const canEditDraft = Boolean(
-    hasEditPermission && detail?.status === "draft" && productionContext === null,
+    hasEditPermission && detail?.status === "draft" &&
+      productionContextQuery.data?.ok === true,
   );
   const hasDeletePermission = hasActiveIdentity && (
     isAdmin || (
@@ -151,7 +153,7 @@ export function useWorkOrderDetail(workOrderId: string) {
   const projectChoicesQuery = useQuery({
     queryKey: workOrderProjectChoicesQueryKey(profile?.id),
     queryFn: listWorkOrderProjectChoices,
-    enabled: Boolean(profile?.id && canEditDraft),
+    enabled: Boolean(profile?.id && canEditDraft && productionContext === null),
     staleTime: 60_000,
   });
   const materialsQuery = useQuery({
@@ -194,7 +196,18 @@ export function useWorkOrderDetail(workOrderId: string) {
     mutationFn: (input: SaveDraftWorkOrderInput & {
       materialSnapshot: PersistedDraftWorkOrderMaterial[];
     }) => {
-      const { materialSnapshot: _materialSnapshot, ...serviceInput } = input;
+      const { materialSnapshot, ...serviceInput } = input;
+      if (productionContext) {
+        return savePcbProductionSupplementalMaterials(workOrderId, {
+          expectedUpdatedAt: input.expectedUpdatedAt,
+          items: materialSnapshot
+            .filter((material) => material.sourceType === "manual")
+            .map((material) => ({
+              productId: material.productId,
+              quantity: material.quantity,
+            })),
+        });
+      }
       return saveDraftWorkOrder(workOrderId, serviceInput);
     },
     onSuccess: async (result, input) => {

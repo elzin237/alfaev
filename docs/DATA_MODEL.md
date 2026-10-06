@@ -721,9 +721,11 @@ Sources:
 
 Important anti-double-counting rule:
 
-- A PCB production run linked to a Project contributes its raw BOM input consumption.
+- A PCB production run linked to a Project contributes every persisted production input
+  consumption, including frozen BOM and supplemental materials.
 - If the resulting finished PCB goods are later issued in a Work Order, do not expand that finished PCB Work Order line back into its BOM again.
-- The raw BOM consumption remains represented by the PCB production movements.
+- Frozen BOM and supplemental input consumption remain represented by the PCB
+  production movements.
 - Finished-goods issuance may be displayed separately as a finished item movement, but it must not cause the same underlying raw components to be counted twice.
 
 For a PCB produced for general stock with no Project:
@@ -986,8 +988,8 @@ Rules:
 - Production uses one immutable BOM version.
 - Work Order-driven production creates this row only on successful Finish. `quantity_produced` stores actual-good output and may be zero for new Work Order-driven runs; historical rows remain valid.
 - On successful Finish:
-  - validate all BOM inputs
-  - deduct frozen WorkOrderItem inputs derived from the planned quantity
+  - validate all frozen BOM and supplemental inputs
+  - deduct every persisted WorkOrderItem input, aggregating rows that share a Product
   - add `quantity_produced` actual-good output to the PcbCard output Product
   - create InventoryMovement rows for every input and a positive output only when actual good is greater than zero
   - create AuditLog
@@ -996,16 +998,15 @@ Rules:
 
 Input consumption can be reconstructed from:
 
-- PcbBomVersion
-- PcbBomItem
-- quantity_produced
+- immutable finished WorkOrderItems and their `source_type`
+- the frozen PcbBomVersion/PcbBomItems for the planned BOM portion
 - linked InventoryMovement rows
 
 No mutable duplicate consumption table is required unless implementation later demonstrates a concrete need.
 
 ## 10.5 PcbProductionWorkOrder
 
-`pcb_production_work_orders` is a protected one-to-one context whose `work_order_id` is its primary key. It stores `pcb_card_id`, the exact `bom_version_id`, positive bigint `planned_quantity`, unique `creation_request_id`, and creation timestamp/actor. The request UUID is a durable idempotency key: replay of the same payload returns the same Work Order, while reuse for different data is rejected. The context, Work Order Project/Customer/description plan, and BOM-derived WorkOrderItems are immutable after creation. A Draft may be deleted through the canonical trusted Work Order deletion flow, which removes context and items without stock/run effects; a finished context is historical and cannot be removed.
+`pcb_production_work_orders` is a protected one-to-one context whose `work_order_id` is its primary key. It stores `pcb_card_id`, the exact `bom_version_id`, positive bigint `planned_quantity`, unique `creation_request_id`, and creation timestamp/actor. The request UUID is a durable idempotency key: replay of the same payload returns the same Work Order, while reuse for different data is rejected. The context, Work Order Project/Customer/description plan, and `pcb_bom` WorkOrderItems are immutable after creation. A Draft may additionally contain `manual` supplemental items managed only through the narrow trusted supplemental-material operation. A Draft may be deleted through the canonical trusted Work Order deletion flow, which removes context and both item origins without stock/run effects; a finished context is historical and cannot be removed.
 
 ---
 
@@ -1083,6 +1084,9 @@ Fields:
 - `work_order_id`
 - `product_id`
 - `quantity`
+- `source_type`
+  - `manual`
+  - `pcb_bom`
 - `added_at`
 - `added_by_user_id`
 
@@ -1093,7 +1097,9 @@ Optional implementation convenience:
 Constraints:
 
 - quantity > 0
-- recommended unique `(work_order_id, product_id)` so rescanning the same product updates/merges one row rather than creating duplicate lines
+- unique `(work_order_id, product_id, source_type)`
+  - ordinary Drafts use `manual`, so rescanning locates that one row
+  - a PCB production Draft may represent the same Product once as frozen `pcb_bom` and once as supplemental `manual`
 
 Barcode workflow:
 
@@ -1112,7 +1118,9 @@ Barcode workflow:
 
 Rules:
 
-- WorkOrderItem rows are editable only while parent WorkOrder is Draft.
+- Ordinary `manual` WorkOrderItem rows are editable only while the parent WorkOrder is Draft.
+- PCB-derived `pcb_bom` rows are immutable even while Draft and can be created only as the verified nested effect of trusted PCB-production creation. A client or generic trusted path cannot forge that origin.
+- A PCB production Draft's complete `manual` supplemental set may be added, changed, or removed by Admin or `work_orders.edit_draft`; its production header and frozen rows remain unchanged.
 - Save for Later submits the complete desired set atomically with the Draft header.
 - Quantity is a positive whole `bigint` transported as an exact decimal string.
 - Existing retained/updated rows preserve `id`, `added_at`, and
@@ -1123,7 +1131,7 @@ Rules:
 - Any meaningful header or material save advances the parent WorkOrder `updated_at`
   exactly once; a normalized full no-op changes no row and creates no audit.
 - Persisted Draft material reads use a narrow trusted projection of Product ID,
-  Serial Number, Name, persisted Quantity, and physical InventoryBalance Quantity;
+  Serial Number, Name, persisted Quantity, authoritative origin, and physical InventoryBalance Quantity;
   normal Product and InventoryBalance RLS remains unchanged.
 - Project requirements are planning/reference data, not a WorkOrderItem whitelist or
   quantity cap. A generic Draft may reference any active eligible Product and may record
@@ -1134,6 +1142,8 @@ Rules:
 - Draft persistence has no physical Inventory side effect and creates no
   InventoryMovement.
 - On Finish, rows become immutable.
+- PCB Finish consumes both origins. Rows sharing a Product are aggregated for exact
+  physical-stock validation, deterministic locking, and one input InventoryMovement.
 
 ---
 
@@ -1435,7 +1445,9 @@ Derived from physical completed consumption:
 
 Do not count Draft activity.
 
-Do not expand a finished PCB item consumed by a Work Order back into BOM raw components when those raw components were already recorded through Project-linked PCB production.
+Do not expand a finished PCB item consumed by a Work Order back into raw components when
+those frozen BOM and supplemental inputs were already recorded through Project-linked
+PCB production.
 
 ---
 

@@ -17,6 +17,7 @@ const detailMocks = vi.hoisted(() => ({
   listWorkOrderProjectChoices: vi.fn(),
   resolveWorkOrderProductBarcode: vi.fn(),
   saveDraftWorkOrder: vi.fn(),
+  savePcbProductionSupplementalMaterials: vi.fn(),
   useAuth: vi.fn(),
 }));
 
@@ -37,6 +38,8 @@ vi.mock("../services/workOrderService", () => ({
   listDraftWorkOrderMaterials: detailMocks.listDraftWorkOrderMaterials,
   resolveWorkOrderProductBarcode: detailMocks.resolveWorkOrderProductBarcode,
   saveDraftWorkOrder: detailMocks.saveDraftWorkOrder,
+  savePcbProductionSupplementalMaterials:
+    detailMocks.savePcbProductionSupplementalMaterials,
 }));
 vi.mock("../services/workOrderFinishService", () => ({
   finishWorkOrder: detailMocks.finishWorkOrder,
@@ -162,6 +165,10 @@ beforeEach(() => {
       updatedAt: "2026-09-22T09:01:00.123456+00:00",
     },
   });
+  detailMocks.savePcbProductionSupplementalMaterials.mockResolvedValue({
+    ok: true,
+    value: { workOrderId, updatedAt: draftDetail.updatedAt },
+  });
   detailMocks.deleteDraftWorkOrder.mockResolvedValue({
     ok: true,
     value: { workOrderId, workOrderNumber: draftDetail.workOrderNumber },
@@ -187,7 +194,7 @@ afterEach(() => {
 });
 
 describe("useWorkOrderDetail", () => {
-  it("keeps PCB production Draft editing frozen while preserving Finish/Delete permissions", async () => {
+  it("allows supplemental PCB material editing while preserving frozen header and Finish/Delete permissions", async () => {
     allowPermissions({ deleteDraft: true, editDraft: true, finish: true });
     detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: {
       workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060",
@@ -198,10 +205,61 @@ describe("useWorkOrderDetail", () => {
     } });
     const { result } = renderDetailHook();
     await waitFor(() => expect(result.current.productionContextQuery.data?.ok).toBe(true));
-    expect(result.current.canEditDraft).toBe(false);
+    expect(result.current.canEditDraft).toBe(true);
     expect(result.current.canDeleteDraft).toBe(true);
     expect(result.current.canFinishDraft).toBe(true);
     expect(detailMocks.listWorkOrderProjectChoices).not.toHaveBeenCalled();
+  });
+
+  it("routes PCB Draft saves through the supplemental-only RPC and keeps frozen rows out of its payload", async () => {
+    allowPermissions({ editDraft: true });
+    const sharedProductId = "00000000-0000-4000-8000-000000000030";
+    detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: {
+      workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060",
+      pcbCardName: "Controller", bomVersionId: "00000000-0000-4000-8000-000000000061",
+      bomVersionNumber: "1", plannedQuantity: "10",
+      outputProductId: "00000000-0000-4000-8000-000000000062",
+      outputSerialNumber: "0000999", outputProductName: "Controller", actualGoodQuantity: null,
+    } });
+    const { result } = renderDetailHook();
+    await waitFor(() => expect(result.current.canEditDraft).toBe(true));
+
+    await act(async () => {
+      await result.current.saveDraft({
+        projectId: null,
+        description: "PCB production — Controller",
+        expectedUpdatedAt: draftDetail.updatedAt,
+        items: [
+          { productId: sharedProductId, quantity: "20" },
+          { productId: sharedProductId, quantity: "2" },
+        ],
+        materialSnapshot: [
+          {
+            productId: sharedProductId,
+            serialNumber: "0000123",
+            productName: "Shared Product",
+            quantity: "20",
+            sourceType: "pcb_bom",
+            currentInventory: "100",
+          },
+          {
+            productId: sharedProductId,
+            serialNumber: "0000123",
+            productName: "Shared Product",
+            quantity: "2",
+            sourceType: "manual",
+            currentInventory: "100",
+          },
+        ],
+      });
+    });
+
+    expect(detailMocks.savePcbProductionSupplementalMaterials)
+      .toHaveBeenCalledExactlyOnceWith(workOrderId, {
+        expectedUpdatedAt: draftDetail.updatedAt,
+        items: [{ productId: sharedProductId, quantity: "2" }],
+      });
+    expect(detailMocks.saveDraftWorkOrder).not.toHaveBeenCalled();
   });
 
   it("uses profile-scoped detail and Project-choice keys", async () => {

@@ -136,7 +136,8 @@ Material usage is derived from completed operations linked to the Project:
 
 - finished Radni Nalozi contribute their actual consumed components
 - draft Radni Nalozi do not count
-- PCB production contributes when that production run is linked to the Project
+- PCB production contributes all frozen BOM and supplemental input consumption when
+  that production run is linked to the Project
 
 Project totals must remain traceable back to the original completed operation.
 
@@ -414,13 +415,13 @@ If stock is insufficient, show:
 
 Current shortage is informative while creating the Draft; it does not reserve stock. Production must not Finish if any required component is insufficient at Finish time.
 
-Creation first freezes the PCB Card, active BOM, planned quantity, optional Project, generated description, and derived material rows in an idempotent specialized Draft Work Order without changing Inventory.
+Creation first freezes the PCB Card, active BOM, planned quantity, optional Project, generated description, and BOM-derived material rows in an idempotent specialized Draft Work Order without changing Inventory. Those rows remain immutable. While Draft, an Admin or `work_orders.edit_draft` user may manage a separate supplemental material set without changing the frozen plan or creating Project-planning/Inventory effects.
 
 At Finish the user enters actual successfully completed quantity from zero through planned. If stock is sufficient:
 
 1. complete the production run
 2. record actual-good quantity and the exact frozen BOM version used
-3. deduct BOM components for the planned quantity
+3. deduct BOM components for the planned quantity plus every saved supplemental material quantity; aggregate a Product that appears in both origins
 4. add only actual-good PCB cards to finished-goods Inventory stock
 5. record Inventory movements for both component consumption and finished-goods output
 6. record actor and timestamp

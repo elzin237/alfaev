@@ -16,6 +16,7 @@ import {
   listWorkOrders,
   resolveWorkOrderProductBarcode,
   saveDraftWorkOrder,
+  savePcbProductionSupplementalMaterials,
   updateDraftWorkOrder,
 } from "./workOrderService";
 
@@ -747,6 +748,7 @@ describe("workOrderService", () => {
         serial_number: "0000001",
         product_name: "First Product",
         quantity: "9223372036854775807",
+        source_type: "pcb_bom",
         current_inventory: "0",
       },
       {
@@ -754,6 +756,7 @@ describe("workOrderService", () => {
         serial_number: "0000002",
         product_name: "Second Product",
         quantity: 2,
+        source_type: "manual",
         current_inventory: "9223372036854775807",
       },
     ];
@@ -768,6 +771,7 @@ describe("workOrderService", () => {
             serialNumber: "0000001",
             productName: "First Product",
             quantity: "9223372036854775807",
+            sourceType: "pcb_bom",
             currentInventory: "0",
           },
           {
@@ -775,27 +779,62 @@ describe("workOrderService", () => {
             serialNumber: "0000002",
             productName: "Second Product",
             quantity: "2",
+            sourceType: "manual",
             currentInventory: "9223372036854775807",
           },
         ],
       });
     expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
-      "list_draft_work_order_materials",
+      "list_draft_work_order_materials_with_origin",
       { p_work_order_id: detailRow.work_order_id },
     );
   });
 
+  it("accepts separate frozen and supplemental rows for the same Product", async () => {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [
+        {
+          product_id: resolvedProductRow.product_id,
+          serial_number: "0000001",
+          product_name: "Shared Product",
+          quantity: "20",
+          source_type: "pcb_bom",
+          current_inventory: "100",
+        },
+        {
+          product_id: resolvedProductRow.product_id,
+          serial_number: "0000001",
+          product_name: "Shared Product",
+          quantity: "3",
+          source_type: "manual",
+          current_inventory: "100",
+        },
+      ],
+      error: null,
+    });
+
+    await expect(listDraftWorkOrderMaterials(detailRow.work_order_id)).resolves
+      .toEqual({
+        ok: true,
+        value: [
+          expect.objectContaining({ sourceType: "pcb_bom", quantity: "20" }),
+          expect.objectContaining({ sourceType: "manual", quantity: "3" }),
+        ],
+      });
+  });
+
   it.each([
     ["duplicate", [
-      { product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", current_inventory: "0" },
-      { product_id: resolvedProductRow.product_id, serial_number: "0000002", product_name: "B", quantity: "2", current_inventory: "0" },
+      { product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0" },
+      { product_id: resolvedProductRow.product_id, serial_number: "0000002", product_name: "B", quantity: "2", source_type: "manual", current_inventory: "0" },
     ]],
-    ["zero quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "0", current_inventory: "0" }]],
-    ["overflow quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "9223372036854775808", current_inventory: "0" }]],
-    ["unsafe numeric quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: 9007199254740992, current_inventory: "0" }]],
-    ["invalid serial", [{ product_id: resolvedProductRow.product_id, serial_number: "123", product_name: "A", quantity: "1", current_inventory: "0" }]],
-    ["untrimmed name", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: " A ", quantity: "1", current_inventory: "0" }]],
-    ["extra field", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", current_inventory: "0", hidden: true }]],
+    ["zero quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "0", source_type: "manual", current_inventory: "0" }]],
+    ["overflow quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "9223372036854775808", source_type: "manual", current_inventory: "0" }]],
+    ["unsafe numeric quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: 9007199254740992, source_type: "manual", current_inventory: "0" }]],
+    ["invalid serial", [{ product_id: resolvedProductRow.product_id, serial_number: "123", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0" }]],
+    ["untrimmed name", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: " A ", quantity: "1", source_type: "manual", current_inventory: "0" }]],
+    ["invalid origin", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", source_type: "other", current_inventory: "0" }]],
+    ["extra field", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0", hidden: true }]],
   ])("rejects malformed persisted Draft materials with %s", async (_label, data) => {
     serviceMocks.rpc.mockResolvedValue({ data, error: null });
     await expect(listDraftWorkOrderMaterials(detailRow.work_order_id)).resolves
@@ -840,6 +879,39 @@ describe("workOrderService", () => {
       ],
       p_expected_updated_at: "2026-09-22T11:11:11.654321+00:00",
     });
+  });
+
+  it("saves only exact supplemental rows through the dedicated PCB production boundary", async () => {
+    const returnedTimestamp = "2026-10-05T14:00:00.123456+00:00";
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{ work_order_id: detailRow.work_order_id, updated_at: returnedTimestamp }],
+      error: null,
+    });
+
+    await expect(savePcbProductionSupplementalMaterials(
+      detailRow.work_order_id,
+      {
+        expectedUpdatedAt: detailRow.updated_at,
+        items: [
+          { productId: "00000000-0000-4000-8000-000000000032", quantity: "3" },
+          { productId: "00000000-0000-4000-8000-000000000031", quantity: "2" },
+        ],
+      },
+    )).resolves.toEqual({
+      ok: true,
+      value: { workOrderId: detailRow.work_order_id, updatedAt: returnedTimestamp },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "save_pcb_production_supplemental_materials",
+      {
+        p_work_order_id: detailRow.work_order_id,
+        p_items: [
+          { product_id: "00000000-0000-4000-8000-000000000031", quantity: "2" },
+          { product_id: "00000000-0000-4000-8000-000000000032", quantity: "3" },
+        ],
+        p_expected_updated_at: detailRow.updated_at,
+      },
+    );
   });
 
   it.each([

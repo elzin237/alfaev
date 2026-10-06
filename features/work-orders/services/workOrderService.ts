@@ -71,8 +71,11 @@ export interface PersistedDraftWorkOrderMaterial {
   serialNumber: string;
   productName: string;
   quantity: string;
+  sourceType: WorkOrderMaterialSourceType;
   currentInventory: ExactInventoryQuantity;
 }
+
+export type WorkOrderMaterialSourceType = "manual" | "pcb_bom";
 
 export interface DraftWorkOrderMaterialsError {
   code:
@@ -272,6 +275,7 @@ const draftMaterialAllowedKeys = new Set([
   "serial_number",
   "product_name",
   "quantity",
+  "source_type",
   "current_inventory",
 ]);
 const productSerialNumberPattern = /^[0-9]{7}$/;
@@ -781,13 +785,13 @@ export async function listDraftWorkOrderMaterials(
 ): Promise<DraftWorkOrderMaterialsResult> {
   try {
     const { data, error } = await supabase.rpc(
-      "list_draft_work_order_materials",
+      "list_draft_work_order_materials_with_origin",
       { p_work_order_id: workOrderId },
     );
     if (error) return draftMaterialsFailure(error.code);
     if (!Array.isArray(data)) return draftMaterialsFailure();
 
-    const seenProductIds = new Set<string>();
+    const seenMaterialKeys = new Set<string>();
     const materials: PersistedDraftWorkOrderMaterial[] = [];
     for (const value of data) {
       const quantity = isRecord(value)
@@ -801,7 +805,8 @@ export async function listDraftWorkOrderMaterials(
         Object.keys(value).length !== draftMaterialAllowedKeys.size ||
         Object.keys(value).some((key) => !draftMaterialAllowedKeys.has(key)) ||
         !isUuid(value.product_id) ||
-        seenProductIds.has(value.product_id) ||
+        (value.source_type !== "manual" && value.source_type !== "pcb_bom") ||
+        seenMaterialKeys.has(`${value.source_type}:${value.product_id}`) ||
         typeof value.serial_number !== "string" ||
         !productSerialNumberPattern.test(value.serial_number) ||
         !isTrimmedNonblank(value.product_name) ||
@@ -809,12 +814,13 @@ export async function listDraftWorkOrderMaterials(
         currentInventory === null
       ) return draftMaterialsFailure();
 
-      seenProductIds.add(value.product_id);
+      seenMaterialKeys.add(`${value.source_type}:${value.product_id}`);
       materials.push({
         productId: value.product_id,
         serialNumber: value.serial_number,
         productName: value.product_name,
         quantity,
+        sourceType: value.source_type,
         currentInventory,
       });
     }
@@ -861,6 +867,42 @@ export async function saveDraftWorkOrder(
       !isTimestamp(row.updated_at)
     ) return saveDraftFailure();
     return { ok: true, value: { workOrderId: row.work_order_id, updatedAt: row.updated_at } };
+  } catch {
+    return saveDraftFailure();
+  }
+}
+
+export async function savePcbProductionSupplementalMaterials(
+  workOrderId: string,
+  input: Pick<SaveDraftWorkOrderInput, "items" | "expectedUpdatedAt">,
+): Promise<DraftWorkOrderSaveResult> {
+  try {
+    const items = input.items
+      .map((item) => ({ product_id: item.productId, quantity: item.quantity }))
+      .sort((left, right) => left.product_id.localeCompare(right.product_id));
+    const { data, error } = await supabase.rpc(
+      "save_pcb_production_supplemental_materials",
+      {
+        p_work_order_id: workOrderId,
+        p_items: items,
+        p_expected_updated_at: input.expectedUpdatedAt,
+      },
+    );
+    if (error) return saveDraftFailure(error.code);
+    if (!Array.isArray(data) || data.length !== 1) return saveDraftFailure();
+    const row: unknown = data[0];
+    if (
+      !isRecord(row) ||
+      Object.keys(row).length !== updateResultKeys.size ||
+      Object.keys(row).some((key) => !updateResultKeys.has(key)) ||
+      !isUuid(row.work_order_id) ||
+      row.work_order_id !== workOrderId ||
+      !isTimestamp(row.updated_at)
+    ) return saveDraftFailure();
+    return {
+      ok: true,
+      value: { workOrderId: row.work_order_id, updatedAt: row.updated_at },
+    };
   } catch {
     return saveDraftFailure();
   }

@@ -1015,7 +1015,7 @@ After creation:
 - navigate to the Work Order when `work_orders.view` is available, otherwise show only the generated Work Order number and Draft-created confirmation
 - do not refresh stock/history as though production completed
 
-The specialized Work Order shows frozen PCB Card, BOM version, planned quantity, output Product, and Project/General Stock. Generated material rows have no edit/remove/scanner controls. Finish requires an explicit exact `Actual successfully completed quantity` from 0 through planned; its PDF and finished view show both quantities.
+The specialized Work Order shows frozen PCB Card, BOM version, planned quantity, output Product, and Project/General Stock. Its Materials table includes a Source column. Generated rows are labeled `BOM`, have read-only Quantity, and have no Remove control. An Admin or `work_orders.edit_draft` user receives the existing scanner/manual Product-entry control for supplemental rows labeled `Added material`; those rows have editable Quantity and Remove. Explain: `BOM materials are locked. Additional materials may be added.` The frozen production header remains read-only. Finish requires an explicit exact `Actual successfully completed quantity` from 0 through planned; its PDF and finished view include all consumed materials and show planned/output quantities.
 
 ---
 

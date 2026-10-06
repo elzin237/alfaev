@@ -63,7 +63,9 @@ interface WorkOrderDraftShellProps {
 
 function materialSignature(materials: DraftWorkOrderMaterial[]): string {
   return materials
-    .map((material) => `${material.productId}:${material.quantity}`)
+    .map((material) =>
+      `${material.sourceType}:${material.productId}:${material.quantity}`
+    )
     .sort()
     .join("|");
 }
@@ -302,9 +304,16 @@ function WorkOrderDraftShell({
     try {
       const result = await onLoadMaterial(serialNumber);
       if (result.ok) {
-        setMaterials((current) => current.some((item) => item.productId === result.value.productId)
+        setMaterials((current) => current.some((item) =>
+          item.productId === result.value.productId &&
+          item.sourceType === "manual"
+        )
           ? current
-          : [...current, { ...result.value, quantity: "" }]);
+          : [...current, {
+            ...result.value,
+            quantity: "",
+            sourceType: "manual" as const,
+          }]);
         nextMaterialFocusRequestId.current += 1;
         setMaterialFocusRequest({ productId: result.value.productId, requestId: nextMaterialFocusRequestId.current });
       } else setBarcodeError(result.error.message);
@@ -392,7 +401,7 @@ function WorkOrderDraftShell({
     <div className="space-y-6">
       {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">PCB production plan</h2>
-        <p className="mt-2 text-sm text-sky-900">This production context and its derived material quantities are frozen.</p>
+        <p className="mt-2 text-sm text-sky-900">The production plan and BOM materials are locked. Additional materials may be added to the Draft.</p>
         <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           <ReadOnlyValue label="PCB Card" value={productionContext.pcbCardName} />
           <ReadOnlyValue label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
@@ -403,7 +412,7 @@ function WorkOrderDraftShell({
       </section>}
       <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">Draft details</h2>
-        {canEdit ? (
+        {canEdit && !productionContext ? (
           <form id="work-order-draft-form" className="mt-6 grid gap-6 lg:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void handleSave(); }}>
             <div>
               <label htmlFor="work-order-project" className="block text-sm font-semibold text-zinc-800">Project</label>
@@ -427,10 +436,10 @@ function WorkOrderDraftShell({
         <h2 id="work-order-materials-heading" className="text-xl font-bold text-zinc-900">Materials</h2>
         {materialsLoading ? <div className="mt-6"><LoadingState message="Loading Draft materials..." /></div> : materialsError ? <div className="mt-6"><ErrorState title="Unable to load Materials" message={materialsError} onRetry={onRetryMaterials} /></div> : materialsHydrated ? (
           <>
-            {canEdit && <div className="mt-6"><WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
+            {canEdit && <div className="mt-6 space-y-2">{productionContext && <p className="text-sm text-zinc-600">BOM materials are locked. Additional materials may be added.</p>}<WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
             {isLoadingMaterial && <p role="status" className="mt-4 text-sm text-zinc-600">Loading material...</p>}
             {barcodeError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">{barcodeError}</p>}
-            <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId) => { setMaterials((current) => current.filter((item) => item.productId !== productId)); setSaveFeedback(null); }} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This frozen PCB BOM has no input Products. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />
+            <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, sourceType, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId && item.sourceType === sourceType ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId, sourceType) => { setMaterials((current) => current.filter((item) => item.productId !== productId || item.sourceType !== sourceType)); setSaveFeedback(null); }} showSource={Boolean(productionContext)} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />
           </>
         ) : materialsReady ? <div className="mt-6"><LoadingState message="Preparing Draft materials..." /></div> : null}
       </section>
@@ -460,7 +469,7 @@ function WorkOrderDraftShell({
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           {canDelete ? <button type="button" disabled={interactionBlocked} onClick={() => { if (finishDialogOpenRef.current || finishConfirmationInFlight.current) return; deleteDialogOpenRef.current = true; setDeleteFeedback(null); setDeleteDialogError(null); setDeleteDialogOpen(true); }} className="rounded-xl border border-red-300 bg-white px-5 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60">Delete Draft</button> : <span />}
           <div className="flex flex-col gap-3 sm:flex-row">
-            {canEdit && <button type="submit" form="work-order-draft-form" disabled={interactionBlocked || !materialsHydrated} className="rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Saving..." : "Save for Later"}</button>}
+            {canEdit && <button type="button" onClick={() => void handleSave()} disabled={interactionBlocked || !materialsHydrated} className="rounded-xl border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Saving..." : "Save for Later"}</button>}
             {canFinish && <button type="button" disabled={interactionBlocked || !materialsHydrated || hasUnsavedChanges || !savedDraftIsFinishComplete} onClick={openFinishDialog} className="rounded-xl bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60">Finish Work Order</button>}
           </div>
         </div>

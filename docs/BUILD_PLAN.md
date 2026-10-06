@@ -2201,6 +2201,7 @@ Goal:
 - allow optional Project/General Stock, null Customer, and empty BOM without changing ordinary Work Order rules
 - keep `pcb.produce` limited to specialized creation; normal Work Order view/finish/delete permissions apply afterward
 - preserve historical runs, retire authenticated execution of legacy `produce_pcb`, prevent generic Draft edits/Project allocation, and enforce idempotent creation plus exactly-once output posting
+- distinguish immutable BOM-derived WorkOrderItems from Draft-editable supplemental rows with an authoritative origin; allow supplemental editing only to Admin or `work_orders.edit_draft`, and aggregate both origins safely at Finish
 
 No deployment belongs to this local implementation step; its forward migrations require separate SQL review and explicit dev authorization.
 
@@ -2803,7 +2804,8 @@ Goal:
 
 Rules:
 - Project-linked PCB production raw inputs count
-- later Work Order use of that finished PCB must not re-expand the same raw BOM
+- later Work Order use of that finished PCB must not re-expand the same frozen BOM or
+  supplemental production inputs
 - general-stock PCB produced without Project remains general stock
 
 Add explicit integration tests.

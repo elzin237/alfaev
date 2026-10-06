@@ -378,14 +378,14 @@ If no production history exists:
 
 ## Successful production
 
-In the Draft Work Order the production context/materials are read-only. User enters actual successfully completed quantity from zero through planned quantity and confirms Finish.
+In the Draft Work Order the production context and BOM-derived materials are read-only. An Admin or `work_orders.edit_draft` user may scan/add, change, and remove separate supplemental materials; `pcb.produce` alone does not grant this later editing authority. Supplemental materials are not constrained by Project planning and change no stock until Finish. The user enters actual successfully completed quantity from zero through planned quantity and confirms Finish.
 
 Trusted backend transaction:
 
 1. re-check authorization
 2. re-check active BOM version/state
-3. re-check the frozen PCB/BOM/Product identities and every physical Inventory quantity
-4. deduct all frozen BOM input Products based on planned quantity
+3. re-check the frozen PCB/BOM/Product identities, every supplemental Product, and every physical Inventory quantity
+4. deduct all frozen BOM quantities plus all persisted supplemental quantities, aggregating a shared Product exactly once
 5. create negative InventoryMovement rows
 6. add actual-good quantity to PCB finished-goods Product
 7. create a positive output movement only when actual good is greater than zero
@@ -767,7 +767,8 @@ If the resulting finished PCB is later included in a Work Order:
 If PCB production had no Project:
 - its raw materials remain general production consumption.
 - if finished PCB is later consumed in a Project Work Order, Project records the PCB finished-good item as the consumed stock item.
-- do not retroactively assign its original raw BOM consumption to that Project.
+- do not retroactively assign its original frozen BOM or supplemental input consumption
+  to that Project.
 
 This avoids double-counting while keeping a traceable physical flow.
 

@@ -1,6 +1,7 @@
 import WorkOrderMaterialRow, {
   type DraftWorkOrderMaterial,
 } from "./WorkOrderMaterialRow";
+import type { WorkOrderMaterialSourceType } from "../services/workOrderService";
 
 interface WorkOrderMaterialsTableProps {
   focusRequest: {
@@ -8,8 +9,13 @@ interface WorkOrderMaterialsTableProps {
     requestId: number;
   } | null;
   materials: DraftWorkOrderMaterial[];
-  onQuantityChange: (productId: string, quantity: string) => void;
-  onRemove: (productId: string) => void;
+  onQuantityChange: (
+    productId: string,
+    sourceType: WorkOrderMaterialSourceType,
+    quantity: string,
+  ) => void;
+  onRemove: (productId: string, sourceType: WorkOrderMaterialSourceType) => void;
+  showSource?: boolean;
   readOnly?: boolean;
   disabled?: boolean;
   showRequiredErrors?: boolean;
@@ -21,6 +27,7 @@ function WorkOrderMaterialsTable({
   materials,
   onQuantityChange,
   onRemove,
+  showSource = false,
   readOnly = false,
   disabled = false,
   showRequiredErrors = false,
@@ -40,6 +47,7 @@ function WorkOrderMaterialsTable({
             {[
               "Serial Number",
               "Product Name",
+              ...(showSource ? ["Source"] : []),
               "Quantity",
               "Current Inventory",
               ...(readOnly ? [] : ["Remove"]),
@@ -57,11 +65,13 @@ function WorkOrderMaterialsTable({
         <tbody className="divide-y divide-zinc-100 bg-white">
           {materials.map((material) => (
             <WorkOrderMaterialRow
-              key={material.productId}
-              focusRequestId={focusRequest?.productId === material.productId
+              key={`${material.sourceType}:${material.productId}`}
+              focusRequestId={material.sourceType === "manual" &&
+                  focusRequest?.productId === material.productId
                 ? focusRequest.requestId
                 : null}
               material={material}
+              showSource={showSource}
               onQuantityChange={onQuantityChange}
               onRemove={onRemove}
               readOnly={readOnly}

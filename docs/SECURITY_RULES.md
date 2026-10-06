@@ -300,7 +300,7 @@ PCB production uses two trusted atomic boundaries: creating a specialized Draft 
 
 The `/pcb/:pcbCardId/produce` workflow requires an active Admin or `pcb.produce`; selecting an optional Project does not additionally require `projects.view` or grant general Project reads. A trusted narrow choice read for this workflow may expose only Project ID, Name, and Status to an active Admin or `pcb.produce` user. General Project RLS and `/projects` access remain unchanged. New production planning may link only a Project currently in `planned`, `in_progress`, or `on_hold`; the trusted creation operation re-checks its existence and status. The Project is optional traceability only, does not create a new commitment, and finishing PCB production never automatically completes it.
 
-Creation requires only an active Admin or `pcb.produce`, not `work_orders.create`. It freezes the exact PcbCard, active BOM version, positive bigint planned quantity, optional Project, auto-generated description, and derived WorkOrderItems behind a durable unique client request UUID. The context and generated materials cannot be edited through generic Draft operations. After creation, normal Work Order view, finish, and delete-Draft permissions apply; `pcb.produce` grants no broad Work Order access. The legacy `produce_pcb(uuid,text,uuid)` immediate-stock RPC is not executable by normal authenticated clients.
+Creation requires only an active Admin or `pcb.produce`, not `work_orders.create`. It freezes the exact PcbCard, active BOM version, positive bigint planned quantity, optional Project, auto-generated description, and BOM-derived WorkOrderItems behind a durable unique client request UUID. Each BOM-derived row has authoritative `pcb_bom` origin and cannot be edited, deleted, replaced, or forged through a normal/manual path. An active Admin or user with `work_orders.edit_draft` may later manage a separate complete set of `manual` supplemental rows through a narrow trusted operation; `pcb.produce` alone does not grant that authority. The frozen header and production context remain unavailable to generic Draft editing. After creation, normal Work Order view, finish, and delete-Draft permissions apply; `pcb.produce` grants no broad Work Order access. The legacy `produce_pcb(uuid,text,uuid)` immediate-stock RPC is not executable by normal authenticated clients.
 
 PCB stock sufficiency uses current physical `InventoryBalance.quantity`, not Available after Commitments. Project commitments are a planning read model, not a physical-stock reservation.
 
@@ -312,10 +312,10 @@ At Work Order Finish, require an active Admin or `work_orders.finish` and, befor
 - verify exact planned quantity remains frozen
 - validate exact bigint actual-good quantity from 0 through planned quantity
 - re-read all required Inventory balances
-- validate sufficient stock for every input
+- validate sufficient stock for the combined frozen-BOM plus supplemental quantity of every input Product
 - prevent race-condition overspending
 
-Atomic Finish consumes inputs for the planned quantity, while output stock increases only by actual-good quantity. Actual good zero is valid and creates no output movement. Atomic success creates:
+Atomic Finish consumes every frozen BOM row plus every persisted supplemental row. When both origins reference the same Product, validation, locking, and consumption use their exact combined quantity and one canonical input movement. Output stock increases only by actual-good quantity. Actual good zero is valid, still consumes every input, and creates no output movement. Atomic success creates:
 
 - PcbProductionRun
 - input Inventory deductions

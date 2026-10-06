@@ -510,20 +510,20 @@ Insufficient stock does not prevent creating the specialized Draft Work Order be
 
 ### PCB production Work Order creation and Finish
 
-`Produce PCB` creates an idempotent specialized Draft Work Order. The planned quantity is a positive exact bigint and freezes the exact PCB Card, BOM version, optional Project, derived BOM material quantities, and description `PCB production — <PcbCard name>`. Project and Customer are not required, an empty BOM is valid, multiple Draft batches for one card are valid, and creation changes no Inventory, creates no InventoryMovement/PcbProductionRun, and records normal `work_order.created` plus `pcb_production.work_order_created` history.
+`Produce PCB` creates an idempotent specialized Draft Work Order. The planned quantity is a positive exact bigint and freezes the exact PCB Card, BOM version, optional Project, derived BOM material quantities, and description `PCB production — <PcbCard name>`. BOM-derived WorkOrderItems have authoritative frozen `pcb_bom` origin. They cannot be edited or removed. A separate `manual` row set may contain supplemental active eligible Products while the parent remains Draft; managing that set requires Admin or `work_orders.edit_draft`, never `pcb.produce` alone. Supplemental rows may be outside Project requirements or above planned quantities and create no reservation or Inventory effect. Project and Customer are not required, an empty BOM is valid, multiple Draft batches for one card are valid, and creation changes no Inventory, creates no InventoryMovement/PcbProductionRun, and records normal `work_order.created` plus `pcb_production.work_order_created` history.
 
-At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual_good <= planned_quantity`. If all frozen inputs remain eligible and sufficient:
+At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual_good <= planned_quantity`. If all frozen and supplemental inputs remain eligible and sufficient:
 
 - record the production run
 - record the exact BOM version used
-- deduct all required component quantities
-- consume BOM inputs for the frozen planned quantity
+- deduct every persisted frozen and supplemental material quantity
+- consume BOM inputs for the frozen planned quantity and supplemental inputs exactly as saved
 - add only actual-good quantity to finished-goods Inventory
 - record Inventory movements for both consumed inputs and produced output
 - record actor and timestamp
 - record audit event
 
-Actual good zero still consumes the planned inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes the optional Project. The operation is atomic: component deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
+Frozen and supplemental rows may reference the same Product because origin is part of their authoritative identity. Finish aggregates those rows by Product for deterministic physical-stock locking, sufficiency, and one canonical input movement containing their exact sum. Actual good zero still consumes all saved inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes the optional Project. The operation is atomic: input deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
 
 Produced PCB cards are stock-tracked finished goods.
 

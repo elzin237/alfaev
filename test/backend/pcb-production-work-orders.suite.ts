@@ -11,6 +11,7 @@ const migrationNames = [
   "20261005100000_create_pcb_production_work_order_context.sql",
   "20261005103000_add_trusted_pcb_production_work_order_creation.sql",
   "20261005110000_add_pcb_production_work_order_finish.sql",
+  "20261005120000_allow_pcb_production_supplemental_materials.sql",
 ] as const;
 
 function migration(name: typeof migrationNames[number]) {
@@ -325,6 +326,64 @@ export function registerPcbProductionWorkOrderTests(
       expect(sql).toContain("movement.quantity_delta::text");
     });
 
+    it("adds an authoritative normalized material origin without invalidating history", () => {
+      const sql = migration(migrationNames[3]);
+      expect(sql).toContain("add column source_type text not null default 'manual'");
+      expect(sql).toContain("check (source_type in ('manual', 'pcb_bom'))");
+      expect(sql).toContain("disable trigger work_order_items_enforce_parent_draft");
+      expect(sql).toContain("set source_type = 'pcb_bom'");
+      expect(sql).toContain("from public.pcb_production_work_orders as production");
+      expect(sql).toContain("enable trigger work_order_items_enforce_parent_draft");
+      expect(sql).toContain("drop constraint work_order_items_work_order_product_key");
+      expect(sql).toContain("unique (work_order_id, product_id, source_type)");
+    });
+
+    it("keeps frozen BOM rows immutable and marks only the verified creation snapshot", () => {
+      const sql = migration(migrationNames[3]);
+      expect(sql).toContain("new.source_type = 'pcb_bom'");
+      expect(sql).toContain("using errcode = 'PCB12'");
+      expect(sql).toContain("old.source_type = 'pcb_bom'");
+      expect(sql).toContain("pg_catalog.pg_trigger_depth() > 1");
+      expect(sql).toContain("bom_item.quantity_per_card::numeric\n              * production.planned_quantity::numeric");
+      expect(sql).toContain("create function public.mark_pcb_production_work_order_bom_materials()");
+      expect(sql).toContain("PCB production BOM material snapshot is invalid");
+      expect(sql).toContain("after insert on public.pcb_production_work_orders");
+    });
+
+    it("uses a supplemental-only trusted Draft replacement boundary", () => {
+      const sql = migration(migrationNames[3]);
+      const supplementalSql = sql.slice(
+        sql.indexOf("create function public.save_pcb_production_supplemental_materials("),
+        sql.indexOf("create function public.list_draft_work_order_materials_with_origin("),
+      );
+      expect(supplementalSql).toContain("public.has_permission('work_orders.edit_draft')");
+      expect(supplementalSql).not.toContain("public.has_permission('pcb.produce')");
+      expect(supplementalSql).toContain("and item.source_type = 'manual'");
+      expect(supplementalSql).toContain("and existing.source_type = 'manual'");
+      expect(supplementalSql).toContain("product_record.product_kind not in ('component', 'pcb_finished_good')");
+      expect(supplementalSql).toContain("for share");
+      expect(supplementalSql).toContain("if before_materials = after_materials then");
+      expect(supplementalSql).toContain("p_action_type => 'work_order.updated'");
+      expect(supplementalSql).not.toContain("project_product_components");
+      expect(supplementalSql).not.toContain("apply_inventory_delta(");
+    });
+
+    it("reads origins and aggregates shared Products consistently for preflight, PDF, and Finish", () => {
+      const sql = migration(migrationNames[3]);
+      expect(sql).toContain("create function public.list_draft_work_order_materials_with_origin(");
+      expect(sql).toContain("item.source_type");
+      expect(sql).toContain("pg_catalog.sum(item.quantity::numeric)::bigint as required_quantity");
+      expect(sql).toContain("group by item.product_id");
+      expect(sql).toContain("balance.quantity::numeric >= combined.required");
+      expect(sql).toContain("and item.product_id = card_record.output_product_id");
+      expect(sql).toContain("- coalesce((");
+      expect(sql).toContain("+ actual_good_value::numeric");
+      expect(sql).toContain("p_quantity_delta => -material_record.quantity");
+      expect(sql).toContain("expected_input_movement_count := expected_input_movement_count + 1");
+      expect(sql).toContain("with trusted_preflight as materialized");
+      expect(sql).toContain("preflight.required_quantity::text");
+    });
+
     it("hardens every trusted boundary and does not broaden direct table access", () => {
       for (const name of migrationNames) {
         const sql = migration(name);
@@ -334,9 +393,11 @@ export function registerPcbProductionWorkOrderTests(
       }
       expect(migration(migrationNames[1])).toContain("security definer\nset search_path = ''");
       expect(migration(migrationNames[2])).toContain("security definer\nset search_path = ''");
+      expect(migration(migrationNames[3])).toContain("security definer\nset search_path = ''");
       expect(migration(migrationNames[0])).toContain("from public, anon, authenticated");
       expect(migration(migrationNames[1])).toContain("to authenticated");
       expect(migration(migrationNames[2])).toContain("to authenticated");
+      expect(migration(migrationNames[3])).toContain("to authenticated");
     });
 
     describe.skipIf(process.env.PCB_PRODUCTION_WORK_ORDER_MIGRATIONS !== "1")(
@@ -860,5 +921,340 @@ export function registerPcbProductionWorkOrderTests(
         });
       },
     );
+
+    describe.skipIf(
+      process.env.PCB_PRODUCTION_SUPPLEMENTAL_MATERIALS_MIGRATION !== "1",
+    )("supplemental-material migration-dependent runtime campaign", () => {
+      it("preserves frozen origins while an authorized editor replaces only supplemental rows", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const producer = fixture.actors.supplierCreator;
+          const editor = fixture.actors.supplierViewer;
+          const runtime = await createRuntimeFixture(database, admin.profileId, {
+            includeProject: true,
+          });
+          await setPermissions(database, producer, admin.profileId, ["pcb.produce"]);
+          await setPermissions(database, editor, admin.profileId, ["work_orders.edit_draft"]);
+          const created = await createProductionWorkOrder(database, producer, runtime, "10");
+          const initialTimestamp = (await database.query<{ updated_at: string }>(
+            "select updated_at::text as updated_at from public.work_orders where id = $1::uuid",
+            [created.work_order_id],
+          )).rows[0]!.updated_at;
+
+          const frozenRows = (await database.query<{ source_type: string }>(
+            `select source_type from public.work_order_items
+             where work_order_id = $1::uuid order by product_id`,
+            [created.work_order_id],
+          )).rows;
+          expect(frozenRows).toEqual([
+            { source_type: "pcb_bom" },
+            { source_type: "pcb_bom" },
+          ]);
+
+          const outsideProductId = randomUUID();
+          await database.query(
+            `insert into public.products (
+               id, serial_number, name, category, product_kind,
+               created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::text, $3::text, 'Supplemental', 'component', $4::uuid, $4::uuid)`,
+            [outsideProductId, createTestSerialNumber(), `Supplemental ${outsideProductId}`, admin.profileId],
+          );
+          await database.query(
+            "update public.inventory_balances set quantity = 100 where product_id = $1::uuid",
+            [outsideProductId],
+          );
+
+          const desired = JSON.stringify([
+            { product_id: runtime.componentIds[0], quantity: "5" },
+            { product_id: outsideProductId, quantity: "100" },
+          ]);
+          await expectRpcRejected(
+            database,
+            producer,
+            `select * from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [created.work_order_id, desired, initialTimestamp],
+            "42501",
+          );
+          const saved = await queryAs<{ updated_at: string }>(
+            database,
+            editor,
+            `select work_order_id, updated_at::text
+             from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [created.work_order_id, desired, initialTimestamp],
+          );
+          const savedTimestamp = saved[0]!.updated_at;
+          const materialRows = (await database.query<{
+            product_id: string;
+            quantity: string;
+            source_type: string;
+          }>(
+            `select product_id, quantity, source_type
+             from public.work_order_items
+             where work_order_id = $1::uuid
+             order by product_id, source_type`,
+            [created.work_order_id],
+          )).rows;
+          expect(materialRows).toEqual(expect.arrayContaining([
+            {
+              product_id: runtime.componentIds[0]!,
+              quantity: "20",
+              source_type: "pcb_bom",
+            },
+            {
+              product_id: runtime.componentIds[0]!,
+              quantity: "5",
+              source_type: "manual",
+            },
+            {
+              product_id: outsideProductId,
+              quantity: "100",
+              source_type: "manual",
+            },
+          ]));
+
+          await database.query("savepoint reject_frozen_mutation");
+          await expect(database.query(
+            `update public.work_order_items set quantity = quantity + 1
+             where work_order_id = $1::uuid and source_type = 'pcb_bom'`,
+            [created.work_order_id],
+          )).rejects.toMatchObject({ code: "PCB12" });
+          await database.query("rollback to savepoint reject_frozen_mutation");
+          await database.query("savepoint reject_frozen_forgery");
+          await expect(database.query(
+            `insert into public.work_order_items (
+               work_order_id, product_id, quantity, source_type, added_by_user_id
+             ) values ($1::uuid, $2::uuid, 1, 'pcb_bom', $3::uuid)`,
+            [created.work_order_id, outsideProductId, admin.profileId],
+          )).rejects.toMatchObject({ code: "PCB12" });
+          await database.query("rollback to savepoint reject_frozen_forgery");
+
+          const auditCountBeforeNoop = Number((await database.query<{ count: string }>(
+            `select pg_catalog.count(*)::text as count from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.updated'`,
+            [created.work_order_id],
+          )).rows[0]!.count);
+          const noOp = await queryAs<{ updated_at: string }>(
+            database,
+            editor,
+            `select work_order_id, updated_at::text
+             from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [created.work_order_id, desired, savedTimestamp],
+          );
+          expect(noOp[0]!.updated_at).toBe(savedTimestamp);
+          expect(Number((await database.query<{ count: string }>(
+            `select pg_catalog.count(*)::text as count from public.audit_logs
+             where entity_id = $1::uuid and action_type = 'work_order.updated'`,
+            [created.work_order_id],
+          )).rows[0]!.count)).toBe(auditCountBeforeNoop);
+
+          const replacement = await queryAs<{ updated_at: string }>(
+            database,
+            editor,
+            `select work_order_id, updated_at::text
+             from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [
+              created.work_order_id,
+              JSON.stringify([{ product_id: outsideProductId, quantity: "9" }]),
+              savedTimestamp,
+            ],
+          );
+          expect((await database.query(
+            `select id from public.work_order_items
+             where work_order_id = $1::uuid and source_type = 'manual'
+               and product_id = $2::uuid and quantity = 9`,
+            [created.work_order_id, outsideProductId],
+          )).rowCount).toBe(1);
+          expect((await database.query(
+            `select id from public.work_order_items
+             where work_order_id = $1::uuid and source_type = 'pcb_bom'`,
+            [created.work_order_id],
+          )).rowCount).toBe(2);
+
+          const balancesBeforeDelete = (await database.query(
+            `select product_id, quantity from public.inventory_balances
+             where product_id = any($1::uuid[]) order by product_id`,
+            [[outsideProductId, ...runtime.componentIds]],
+          )).rows;
+          await queryAs(
+            database,
+            admin,
+            "select * from public.delete_draft_work_order($1::uuid, $2::timestamptz)",
+            [created.work_order_id, replacement[0]!.updated_at],
+          );
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [created.work_order_id],
+          )).rowCount).toBe(0);
+          expect((await database.query(
+            `select product_id, quantity from public.inventory_balances
+             where product_id = any($1::uuid[]) order by product_id`,
+            [[outsideProductId, ...runtime.componentIds]],
+          )).rows).toEqual(balancesBeforeDelete);
+        });
+      });
+
+      it("allows an empty-BOM production Draft to add and remove supplemental materials", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const runtime = await createRuntimeFixture(database, admin.profileId, { emptyBom: true });
+          const created = await createProductionWorkOrder(database, admin, runtime, "2");
+          const productId = randomUUID();
+          await database.query(
+            `insert into public.products (
+               id, serial_number, name, category, product_kind,
+               created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::text, 'Empty BOM supplement', 'Supplemental', 'component', $3::uuid, $3::uuid)`,
+            [productId, createTestSerialNumber(), admin.profileId],
+          );
+          const updatedAt = (await database.query<{ updated_at: string }>(
+            "select updated_at::text as updated_at from public.work_orders where id = $1::uuid",
+            [created.work_order_id],
+          )).rows[0]!.updated_at;
+          const added = await queryAs<{ updated_at: string }>(
+            database,
+            admin,
+            `select work_order_id, updated_at::text
+             from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [created.work_order_id, JSON.stringify([{ product_id: productId, quantity: "2" }]), updatedAt],
+          );
+          expect((await database.query(
+            `select id from public.work_order_items
+             where work_order_id = $1::uuid and product_id = $2::uuid
+               and source_type = 'manual'`,
+            [created.work_order_id, productId],
+          )).rowCount).toBe(1);
+          await queryAs(
+            database,
+            admin,
+            `select * from public.save_pcb_production_supplemental_materials(
+               $1::uuid, '[]'::jsonb, $2::timestamptz
+             )`,
+            [created.work_order_id, added[0]!.updated_at],
+          );
+          expect((await database.query(
+            "select id from public.work_order_items where work_order_id = $1::uuid",
+            [created.work_order_id],
+          )).rowCount).toBe(0);
+        });
+      });
+
+      it("aggregates shared Products for physical-stock preflight, PDF, and atomic Finish", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const runtime = await createRuntimeFixture(database, admin.profileId);
+          const created = await createProductionWorkOrder(database, admin, runtime, "10");
+          const originalTimestamp = (await database.query<{ updated_at: string }>(
+            "select updated_at::text as updated_at from public.work_orders where id = $1::uuid",
+            [created.work_order_id],
+          )).rows[0]!.updated_at;
+          const saved = await queryAs<{ updated_at: string }>(
+            database,
+            admin,
+            `select work_order_id, updated_at::text
+             from public.save_pcb_production_supplemental_materials(
+               $1::uuid, $2::jsonb, $3::timestamptz
+             )`,
+            [
+              created.work_order_id,
+              JSON.stringify([{ product_id: runtime.componentIds[0], quantity: "5" }]),
+              originalTimestamp,
+            ],
+          );
+          const updatedAt = saved[0]!.updated_at;
+          await database.query(
+            "update public.inventory_balances set quantity = 24 where product_id = $1::uuid",
+            [runtime.componentIds[0]],
+          );
+          const insufficient = await queryAs<{
+            inventory_sufficient: boolean;
+            product_id: string;
+            required_quantity: string;
+          }>(
+            database,
+            admin,
+            `select product_id, required_quantity, inventory_sufficient
+             from public.preflight_finish_pcb_production_work_order(
+               $1::uuid, $2::timestamptz, '0'
+             )`,
+            [created.work_order_id, updatedAt],
+          );
+          expect(insufficient.find((row) => row.product_id === runtime.componentIds[0]))
+            .toMatchObject({ required_quantity: "25", inventory_sufficient: false });
+          await database.query(
+            "update public.inventory_balances set quantity = 100 where product_id = $1::uuid",
+            [runtime.componentIds[0]],
+          );
+          const snapshot = await queryAs<{ product_id: string; quantity: string }>(
+            database,
+            admin,
+            `select product_id, quantity
+             from public.get_work_order_pdf_snapshot($1::uuid, $2::timestamptz, '0')`,
+            [created.work_order_id, updatedAt],
+          );
+          expect(snapshot.find((row) => row.product_id === runtime.componentIds[0]))
+            .toMatchObject({ quantity: "25" });
+
+          const storageReference = `final/${created.work_order_id}/${randomUUID()}.pdf`;
+          await database.query(
+            `insert into storage.objects (bucket_id, name, metadata)
+             values ('work-order-pdfs', $1::text,
+               pg_catalog.jsonb_build_object('mimetype', 'application/pdf'))`,
+            [storageReference],
+          );
+          await queryAs(
+            database,
+            admin,
+            `select * from public.finish_work_order(
+               $1::uuid, $2::timestamptz, $3::text, null, '0'
+             )`,
+            [created.work_order_id, updatedAt, storageReference],
+          );
+          const runId = (await database.query<{ id: string }>(
+            "select id from public.pcb_production_runs where work_order_id = $1::uuid",
+            [created.work_order_id],
+          )).rows[0]!.id;
+          const movements = (await database.query<{
+            product_id: string;
+            quantity_delta: string;
+          }>(
+            `select product_id, quantity_delta
+             from public.inventory_movements
+             where source_id = $1::uuid and source_type = 'pcb_production_input'
+             order by product_id`,
+            [runId],
+          )).rows;
+          expect(movements).toHaveLength(2);
+          expect(movements.find((row) => row.product_id === runtime.componentIds[0]))
+            .toMatchObject({ quantity_delta: "-25" });
+          expect((await database.query(
+            `select id from public.inventory_movements
+             where source_id = $1::uuid and source_type = 'pcb_production_output'`,
+            [runId],
+          )).rowCount).toBe(0);
+          await expectRpcRejected(
+            database,
+            admin,
+            `select * from public.save_pcb_production_supplemental_materials(
+               $1::uuid, '[]'::jsonb, $2::timestamptz
+             )`,
+            [created.work_order_id, updatedAt],
+            "WOR02",
+          );
+        });
+      });
+    });
   });
 }

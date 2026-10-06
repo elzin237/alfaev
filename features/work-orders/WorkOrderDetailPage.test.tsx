@@ -75,6 +75,7 @@ const savedMaterial = {
   serialNumber: "0000123",
   productName: "Relay Module",
   quantity: "2",
+  sourceType: "manual" as const,
   currentInventory: "17",
 };
 
@@ -231,7 +232,7 @@ describe("WorkOrderDetailPage", () => {
     expect(await screen.findByText("PCB production plan")).toBeInTheDocument();
     expect(screen.getByText("General Stock")).toBeInTheDocument();
     expect(screen.getByText(
-      "This frozen PCB BOM has no input Products. Finish will add only the actual completed PCB quantity to Inventory.",
+      "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory.",
     )).toBeInTheDocument();
     expect(screen.queryByText("No materials added yet.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save for Later" })).not.toBeInTheDocument();
@@ -252,12 +253,108 @@ describe("WorkOrderDetailPage", () => {
     await waitFor(() => expect(onFinishConfirm).toHaveBeenCalledWith(draft.updatedAt, "0"));
   });
 
+  it("keeps BOM rows locked while allowing a same-Product supplemental row", async () => {
+    const onSave = vi.fn().mockResolvedValue({
+      ok: true,
+      value: { workOrderId, updatedAt: "2026-09-22T10:01:00.123456+00:00" },
+    });
+    const frozenMaterial = {
+      ...savedMaterial,
+      quantity: "2",
+      sourceType: "pcb_bom" as const,
+    };
+    render(<WorkOrderDraftShell
+      workOrder={{ ...draft, description: "PCB production — Controller" }}
+      canEdit
+      canDelete={false}
+      canFinish={false}
+      productionContext={{
+        workOrderId,
+        pcbCardId: "00000000-0000-4000-8000-000000000060",
+        pcbCardName: "Controller",
+        bomVersionId: "00000000-0000-4000-8000-000000000061",
+        bomVersionNumber: "2",
+        plannedQuantity: "10",
+        outputProductId: "00000000-0000-4000-8000-000000000062",
+        outputSerialNumber: "0000999",
+        outputProductName: "Controller",
+        actualGoodQuantity: null,
+      }}
+      projectChoices={[]}
+      projectChoicesError={null}
+      projectChoicesLoading={false}
+      persistedMaterials={[frozenMaterial]}
+      materialsLoading={false}
+      materialsError={null}
+      materialsReady
+      isSaving={false}
+      isDeleting={false}
+      isFinishing={false}
+      isLoadingMaterial={false}
+      onReloadLatest={vi.fn().mockResolvedValue({ ok: false })}
+      onRetryMaterials={vi.fn()}
+      onRetryProjectChoices={vi.fn()}
+      onLoadMaterial={pageMocks.loadMaterial}
+      onSave={onSave}
+      onDelete={pageMocks.deleteDraft}
+      onFinishConfirm={pageMocks.finishDraft}
+    />);
+
+    const bomBadge = await screen.findByText("BOM");
+    const bomRow = bomBadge.closest("tr");
+    expect(bomRow).not.toBeNull();
+    expect(within(bomRow!).getByText("2")).toBeInTheDocument();
+    expect(within(bomRow!).getByText("Locked")).toBeInTheDocument();
+    expect(within(bomRow!).queryByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    })).not.toBeInTheDocument();
+    expect(within(bomRow!).queryByRole("button", { name: /Remove/ }))
+      .not.toBeInTheDocument();
+    expect(screen.getByText(
+      "BOM materials are locked. Additional materials may be added.",
+    )).toBeInTheDocument();
+
+    const scanner = screen.getByRole("textbox", {
+      name: "Scan Product Barcode",
+    });
+    fireEvent.change(scanner, { target: { value: "0000123" } });
+    fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
+
+    const supplementalQuantity = await screen.findByRole("textbox", {
+      name: "Quantity for Relay Module (0000123)",
+    });
+    expect(screen.getByText("Added material")).toBeInTheDocument();
+    fireEvent.change(supplementalQuantity, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save for Later" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      materials: [
+        expect.objectContaining({
+          productId: savedMaterial.productId,
+          quantity: "2",
+          sourceType: "pcb_bom",
+        }),
+        expect.objectContaining({
+          productId: savedMaterial.productId,
+          quantity: "3",
+          sourceType: "manual",
+        }),
+      ],
+    })));
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "Remove Relay Module (0000123)",
+    }));
+    expect(screen.queryByText("Added material")).not.toBeInTheDocument();
+    expect(screen.getByText("BOM")).toBeInTheDocument();
+  });
+
   it("keeps a successful material query gated until local hydration is established", async () => {
     const persistedMaterial = {
       productId: "00000000-0000-4000-8000-000000000030",
       serialNumber: "0000123",
       productName: "Relay Module",
       quantity: "2",
+      sourceType: "manual" as const,
       currentInventory: "17",
     };
     const onSave = vi.fn().mockResolvedValue({
@@ -481,6 +578,8 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Product Name" }))
       .toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Source" }))
+      .not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Quantity" }))
       .toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Current Inventory" }))
@@ -709,6 +808,7 @@ describe("WorkOrderDetailPage", () => {
           serialNumber: "0000123",
           productName: "Relay Module",
           quantity: "5",
+          sourceType: "manual",
           currentInventory: "17",
         }],
       }));
