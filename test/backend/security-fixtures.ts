@@ -168,6 +168,42 @@ export async function createSecurityFixtureHarness(
       rejectUnauthorized: false,
     },
   });
+  const usesTask148TemporaryLogin =
+    process.env.TASK148_COMMITTED_CONCURRENCY === "1" &&
+    environment.projectRef === "tkzlbxyjbnntrgohpedd";
+  const prepareDatabaseClient = (client: PoolClient): PoolClient => {
+    if (!usesTask148TemporaryLogin) return client;
+    const originalQuery = client.query.bind(client);
+    return new Proxy(client, {
+      get(target, property, receiver) {
+        if (property === "query") {
+          return ((query: unknown, ...parameters: unknown[]) => {
+            if (
+              typeof query === "string" &&
+              /^reset\s+role\s*;?$/i.test(query.trim())
+            ) {
+              return originalQuery("set role postgres");
+            }
+            return Reflect.apply(originalQuery, target, [query, ...parameters]);
+          }) as PoolClient["query"];
+        }
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  };
+  if (usesTask148TemporaryLogin) {
+    const initializedConnections = await Promise.all(
+      Array.from({ length: 4 }, () => database.connect()),
+    );
+    try {
+      await Promise.all(initializedConnections.map((client) =>
+        client.query("set role postgres")
+      ));
+    } finally {
+      initializedConnections.forEach((client) => client.release());
+    }
+  }
   const state: FixtureState = {
     authUserIds: [],
     profileIds: [],
@@ -390,9 +426,12 @@ export async function createSecurityFixtureHarness(
   const withRollbackDatabaseTransaction = async <Result>(
     operation: (client: PoolClient) => Promise<Result>,
   ): Promise<Result> => {
-    const client = await database.connect();
+    const client = prepareDatabaseClient(await database.connect());
 
     try {
+      if (usesTask148TemporaryLogin) {
+        await client.query("set role postgres");
+      }
       await client.query("begin");
       const result = await operation(client);
       await client.query("rollback");
@@ -401,7 +440,15 @@ export async function createSecurityFixtureHarness(
       await client.query("rollback");
       throw error;
     } finally {
-      client.release();
+      let releaseWithError = false;
+      if (usesTask148TemporaryLogin) {
+        try {
+          await client.query("set role postgres");
+        } catch {
+          releaseWithError = true;
+        }
+      }
+      client.release(releaseWithError);
     }
   };
 
@@ -417,7 +464,11 @@ export async function createSecurityFixtureHarness(
 
     try {
       for (let index = 0; index < count; index += 1) {
-        clients.push(await database.connect());
+        const client = prepareDatabaseClient(await database.connect());
+        if (usesTask148TemporaryLogin) {
+          await client.query("set role postgres");
+        }
+        clients.push(client);
       }
 
       return await operation(clients);
@@ -430,6 +481,13 @@ export async function createSecurityFixtureHarness(
         } catch {
           rollbackFailed = true;
         } finally {
+          if (usesTask148TemporaryLogin && !rollbackFailed) {
+            try {
+              await client.query("set role postgres");
+            } catch {
+              rollbackFailed = true;
+            }
+          }
           client.release(rollbackFailed);
         }
       }

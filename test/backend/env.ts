@@ -50,6 +50,7 @@ function parseDatabaseTarget(
   databaseUrl: string,
   projectRef: string,
   requirePassword: boolean,
+  allowTemporaryLoginRole = false,
 ): DatabaseTarget {
   let parsedUrl: URL;
 
@@ -73,7 +74,14 @@ function parseDatabaseTarget(
     ["", "5432"].includes(parsedUrl.port);
   const poolerTarget =
     parsedUrl.hostname.endsWith(".pooler.supabase.com") &&
-    parsedUrl.username === `postgres.${projectRef}` &&
+    (
+      parsedUrl.username === `postgres.${projectRef}` ||
+      (
+        allowTemporaryLoginRole &&
+        parsedUrl.username.endsWith(`.${projectRef}`) &&
+        parsedUrl.username.startsWith("cli_login_")
+      )
+    ) &&
     ["5432", "6543"].includes(parsedUrl.port);
 
   if (
@@ -95,8 +103,14 @@ function resolveDatabaseConnectionUrl(
   databaseUrl: string,
   projectRef: string,
   rootDirectory: string,
+  allowTemporaryLoginRole = false,
 ): string {
-  const configuredTarget = parseDatabaseTarget(databaseUrl, projectRef, true);
+  const configuredTarget = parseDatabaseTarget(
+    databaseUrl,
+    projectRef,
+    true,
+    allowTemporaryLoginRole,
+  );
 
   if (configuredTarget.connectionType === "pooler") {
     return configuredTarget.url.toString();
@@ -162,15 +176,24 @@ export function loadBackendTestEnvironment(
   );
   const task147DisposableTarget =
     process.env.TASK147_COMMITTED_CONCURRENCY === "1";
+  const task148DisposableTarget =
+    process.env.TASK148_COMMITTED_CONCURRENCY === "1";
+  if (task147DisposableTarget && task148DisposableTarget) {
+    throw new Error("Only one disposable concurrency target may be enabled");
+  }
   const expectedProjectRef = task147DisposableTarget
     ? "hipkoxienlffgyofcbzq"
-    : linkedProjectRef;
+    : task148DisposableTarget
+      ? "tkzlbxyjbnntrgohpedd"
+      : linkedProjectRef;
 
   if (projectRef !== expectedProjectRef) {
     throw new Error(
       task147DisposableTarget
         ? "Task 147 backend test URL does not match the approved disposable project"
-        : "Backend test URL does not match the repository's linked development project",
+        : task148DisposableTarget
+          ? "Task 148 backend test URL does not match the approved disposable project"
+          : "Backend test URL does not match the repository's linked development project",
     );
   }
 
@@ -178,6 +201,7 @@ export function loadBackendTestEnvironment(
     supabaseTestDatabaseUrl,
     projectRef,
     rootDirectory,
+    task148DisposableTarget,
   );
 
   return {
