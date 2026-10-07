@@ -16,6 +16,16 @@ interface DatabaseTarget {
   url: URL;
 }
 
+const PRODUCTION_PROJECT_REFS = new Set([
+  "nhajjfhvlxeiwryfhofa",
+]);
+
+export function assertBackendTestTargetIsNotProduction(projectRef: string): void {
+  if (PRODUCTION_PROJECT_REFS.has(projectRef)) {
+    throw new Error("Backend tests must never target the production project");
+  }
+}
+
 function requireValue(name: string, value: string | undefined): string {
   const normalizedValue = value?.trim();
 
@@ -167,6 +177,7 @@ export function loadBackendTestEnvironment(
   }
 
   const projectRef = deriveProjectRef(supabaseUrl);
+  assertBackendTestTargetIsNotProduction(projectRef);
   const linkedProjectRef = requireValue(
     "linked Supabase development project ref",
     readFileSync(
