@@ -33,9 +33,21 @@ function ConfirmDialog({
   const descriptionId = useId();
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (open) cancelButtonRef.current?.focus();
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    cancelButtonRef.current?.focus();
+
+    return () => {
+      if (returnFocusRef.current?.isConnected) {
+        returnFocusRef.current.focus();
+      }
+      returnFocusRef.current = null;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -80,7 +92,7 @@ function ConfirmDialog({
       : "bg-zinc-900 text-white hover:bg-zinc-800";
 
   return (
-    <div className={`fixed inset-0 ${layerClassName} flex items-center justify-center bg-black/40 p-4`}>
+    <div className={`fixed inset-0 ${layerClassName} flex items-center justify-center overflow-y-auto bg-black/40 p-4`}>
       <section
         role="dialog"
         aria-modal="true"

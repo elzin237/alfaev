@@ -135,6 +135,7 @@ function WorkOrderDraftShell({
   const [actualGoodQuantity, setActualGoodQuantity] = useState("");
   const [materialFocusRequest, setMaterialFocusRequest] = useState<{ productId: string; requestId: number } | null>(null);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
+  const [barcodeFocusRequestId, setBarcodeFocusRequestId] = useState(0);
   const barcodeResolutionInFlight = useRef(false);
   const nextMaterialFocusRequestId = useRef(0);
   const submissionInFlight = useRef(false);
@@ -157,6 +158,7 @@ function WorkOrderDraftShell({
     setSavedMaterialCount(0);
     setMaterialFocusRequest(null);
     setBarcodeError(null);
+    setBarcodeFocusRequestId(0);
     setSaveFeedback(null);
     setShowRequiredErrors(false);
     setDeleteDialogOpen(false);
@@ -316,9 +318,13 @@ function WorkOrderDraftShell({
           }]);
         nextMaterialFocusRequestId.current += 1;
         setMaterialFocusRequest({ productId: result.value.productId, requestId: nextMaterialFocusRequestId.current });
-      } else setBarcodeError(result.error.message);
+      } else {
+        setBarcodeError(result.error.message);
+        setBarcodeFocusRequestId((current) => current + 1);
+      }
     } catch {
       setBarcodeError("The Product could not be resolved. Please try again.");
+      setBarcodeFocusRequestId((current) => current + 1);
     } finally {
       barcodeResolutionInFlight.current = false;
     }
@@ -436,7 +442,7 @@ function WorkOrderDraftShell({
         <h2 id="work-order-materials-heading" className="text-xl font-bold text-zinc-900">Materials</h2>
         {materialsLoading ? <div className="mt-6"><LoadingState message="Loading Draft materials..." /></div> : materialsError ? <div className="mt-6"><ErrorState title="Unable to load Materials" message={materialsError} onRetry={onRetryMaterials} /></div> : materialsHydrated ? (
           <>
-            {canEdit && <div className="mt-6 space-y-2">{productionContext && <p className="text-sm text-zinc-600">BOM materials are locked. Additional materials may be added.</p>}<WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
+            {canEdit && <div className="mt-6 space-y-2">{productionContext && <p className="text-sm text-zinc-600">BOM materials are locked. Additional materials may be added.</p>}<WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} focusRequestId={barcodeFocusRequestId} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
             {isLoadingMaterial && <p role="status" className="mt-4 text-sm text-zinc-600">Loading material...</p>}
             {barcodeError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">{barcodeError}</p>}
             <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, sourceType, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId && item.sourceType === sourceType ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId, sourceType) => { setMaterials((current) => current.filter((item) => item.productId !== productId || item.sourceType !== sourceType)); setSaveFeedback(null); }} showSource={Boolean(productionContext)} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />

@@ -1,6 +1,12 @@
 import { useQueries } from "@tanstack/react-query";
 import { NavLink } from "react-router";
 import { X } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { hasPermission } from "../auth/permissionService";
@@ -17,9 +23,22 @@ const permissionNavigationItems = NAVIGATION.flatMap((item) =>
 interface SidebarProps {
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLButtonElement | null>;
 }
 
-function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
+function Sidebar({
+  sidebarOpen,
+  setSidebarOpen,
+  returnFocusRef,
+}: SidebarProps) {
+  const [isDesktop, setIsDesktop] = useState(() =>
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(min-width: 1024px)").matches
+  );
+  const sidebarRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(sidebarOpen);
   const { session, profile, isAdmin, isActive } = useAuth();
   const canResolvePermissions = Boolean(
     session && profile?.isActive && isActive && !isAdmin,
@@ -79,19 +98,75 @@ function Sidebar({ sidebarOpen, setSidebarOpen }: SidebarProps) {
 
     return result?.ok === true && result.value;
   });
+  const mobileSidebarActive = sidebarOpen && !isDesktop;
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(min-width: 1024px)");
+    const update = () => setIsDesktop(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (wasOpenRef.current && !sidebarOpen && !isDesktop) {
+      returnFocusRef?.current?.focus();
+    }
+    wasOpenRef.current = sidebarOpen;
+  }, [isDesktop, returnFocusRef, sidebarOpen]);
+
+  useEffect(() => {
+    if (!mobileSidebarActive) return;
+    queueMicrotask(() => closeButtonRef.current?.focus());
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSidebarOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const controls = sidebarRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      if (!controls?.length) return;
+      const first = controls[0];
+      const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [mobileSidebarActive, setSidebarOpen]);
 
   return (
     <>
       {sidebarOpen && (
         <div
+          aria-hidden="true"
           className="fixed inset-0 z-40 bg-black/40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       <aside
+        ref={sidebarRef}
+        id="app-sidebar"
+        role={mobileSidebarActive ? "dialog" : undefined}
+        aria-modal={mobileSidebarActive ? "true" : undefined}
+        aria-label={mobileSidebarActive ? "Navigation menu" : undefined}
+        aria-hidden={!isDesktop && !sidebarOpen ? "true" : undefined}
+        inert={!isDesktop && !sidebarOpen ? true : undefined}
         className={`
-          fixed left-0 top-0 z-50 h-screen w-72 bg-[#202225] text-white
+          fixed left-0 top-0 z-50 h-screen w-72 overflow-y-auto bg-[#202225] text-white
           transition-transform duration-300
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
 lg:relative lg:h-screen lg:translate-x-0        `}
@@ -107,12 +182,18 @@ lg:relative lg:h-screen lg:translate-x-0        `}
             </p>
           </div>
 
-          <button onClick={() => setSidebarOpen(false)} className="lg:hidden">
+          <button
+            ref={closeButtonRef}
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() => setSidebarOpen(false)}
+            className="rounded-lg p-2 lg:hidden"
+          >
             <X size={22} />
           </button>
         </div>
 
-        <nav className="p-4">
+        <nav aria-label="Primary navigation" className="p-4">
           {visibleNavigation.map(({ label, path, icon: Icon }) => (
             <NavLink
               key={path}

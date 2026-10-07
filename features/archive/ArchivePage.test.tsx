@@ -322,6 +322,31 @@ describe("ArchivePage", () => {
     expect(mocks.listAuditLogPage).toHaveBeenCalledTimes(3);
   });
 
+  it("labels stale rows after a background refresh failure and offers retry", async () => {
+    mocks.listAuditLogPage
+      .mockResolvedValueOnce({ ok: true, value: [item(1)] })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: "archive_page_failed", message: "Safe" },
+      })
+      .mockResolvedValueOnce({ ok: true, value: [item(2)] });
+    const { client } = renderArchive();
+    expect(await screen.findByText("Exact summary 1")).toBeInTheDocument();
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["archive", "audit-log"] });
+    });
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Archive refresh failed. Previously loaded activity is shown.",
+    );
+    expect(screen.getByText("Exact summary 1")).toBeInTheDocument();
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry refresh" }));
+    expect(await screen.findByText("Exact summary 2")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
   it("fetches detail lazily, renders safe JSON, and links only server-approved context", async () => {
     const row = item(1, { entityType: "project", actionType: "project.updated" });
     mocks.listAuditLogPage.mockResolvedValue({ ok: true, value: [row] });

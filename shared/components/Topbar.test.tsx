@@ -44,6 +44,26 @@ describe("Topbar", () => {
     ).toBeInTheDocument();
   });
 
+  it("names icon controls and exposes mobile navigation state", () => {
+    const setSidebarOpen = vi.fn();
+    render(<Topbar sidebarOpen={false} setSidebarOpen={setSidebarOpen} />);
+
+    const menuButton = screen.getByRole("button", {
+      name: "Open navigation menu",
+    });
+    expect(menuButton).toHaveAttribute("aria-controls", "app-sidebar");
+    expect(menuButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Notifications" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "User account" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search projects" }))
+      .toBeInTheDocument();
+
+    fireEvent.click(menuButton);
+    expect(setSidebarOpen).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
   it("signs out, clears protected query data, and redirects to login", async () => {
     topbarMocks.signOut.mockResolvedValue({ ok: true, value: undefined });
 

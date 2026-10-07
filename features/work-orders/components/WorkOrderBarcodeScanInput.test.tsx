@@ -112,4 +112,34 @@ describe("WorkOrderBarcodeScanInput", () => {
     expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
       .toHaveFocus();
   });
+
+  it("honors an explicit focus request after failed asynchronous resolution", () => {
+    const onScan = vi.fn();
+    const view = render(
+      <>
+        <button type="button">Other control</button>
+        <WorkOrderBarcodeScanInput
+          focusRequestId={0}
+          onScan={onScan}
+          refocusOnEnable={false}
+        />
+      </>,
+    );
+    const other = screen.getByRole("button", { name: "Other control" });
+    other.focus();
+
+    view.rerender(
+      <>
+        <button type="button">Other control</button>
+        <WorkOrderBarcodeScanInput
+          focusRequestId={1}
+          onScan={onScan}
+          refocusOnEnable={false}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Scan Product Barcode" }))
+      .toHaveFocus();
+  });
 });

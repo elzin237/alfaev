@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bell, LogOut, Menu, Search, UserCircle2 } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -6,10 +6,16 @@ import { useNavigate } from "react-router";
 import { signOut } from "../../app/auth/authService";
 
 interface TopbarProps {
+  sidebarOpen?: boolean;
   setSidebarOpen: (open: boolean) => void;
+  sidebarToggleRef?: RefObject<HTMLButtonElement | null>;
 }
 
-function Topbar({ setSidebarOpen }: TopbarProps) {
+function Topbar({
+  sidebarOpen = false,
+  setSidebarOpen,
+  sidebarToggleRef,
+}: TopbarProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -44,7 +50,12 @@ function Topbar({ setSidebarOpen }: TopbarProps) {
     <header className="flex h-20 items-center justify-between border-b border-zinc-200 bg-white px-4 lg:px-8">
       <div className="flex items-center gap-4">
         <button
+          ref={sidebarToggleRef}
+          type="button"
           onClick={() => setSidebarOpen(true)}
+          aria-label="Open navigation menu"
+          aria-controls="app-sidebar"
+          aria-expanded={sidebarOpen}
           className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200 lg:hidden"
         >
           <Menu size={20} />
@@ -67,16 +78,25 @@ function Topbar({ setSidebarOpen }: TopbarProps) {
 
           <input
             type="text"
+            aria-label="Search projects"
             placeholder="Pretraga projekata..."
             className="w-full outline-none"
           />
         </div>
 
-        <button className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200">
+        <button
+          type="button"
+          aria-label="Notifications"
+          className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200"
+        >
           <Bell size={18} />
         </button>
 
-        <button className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2">
+        <button
+          type="button"
+          aria-label="User account"
+          className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2"
+        >
           <UserCircle2 size={22} />
           <span className="hidden text-sm font-medium sm:block">Admin</span>
         </button>

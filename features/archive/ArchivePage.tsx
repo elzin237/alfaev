@@ -124,6 +124,18 @@ function ArchivePage() {
   } else {
     content = (
       <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
+        {query.isError && !query.isFetchNextPageError && (
+          <div role="alert" className="border-b border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900">
+            <span>Archive refresh failed. Previously loaded activity is shown.</span>{" "}
+            <button
+              type="button"
+              className="font-semibold underline underline-offset-4"
+              onClick={() => void query.refetch()}
+            >
+              Retry refresh
+            </button>
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="min-w-[980px] divide-y divide-zinc-200 text-left text-sm">
             <thead className="bg-zinc-50">

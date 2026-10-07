@@ -6,6 +6,9 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import ConfirmDialog from "./ConfirmDialog";
@@ -115,6 +118,36 @@ describe("ConfirmDialog", () => {
     expect(onCancel).toHaveBeenCalledOnce();
   });
 
+  it("returns focus to the control that opened it", async () => {
+    function DialogHarness() {
+      const [open, setOpen] = useState(false);
+
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open confirmation
+          </button>
+          <ConfirmDialog
+            {...defaultProps}
+            open={open}
+            onCancel={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+
+    render(<DialogHarness />);
+    const opener = screen.getByRole("button", { name: "Open confirmation" });
+    opener.focus();
+    fireEvent.click(opener);
+    const cancel = await screen.findByRole("button", { name: "Cancel" });
+    await waitFor(() => expect(cancel).toHaveFocus());
+
+    fireEvent.click(cancel);
+
+    await waitFor(() => expect(opener).toHaveFocus());
+  });
+
   it("disables actions and blocks Escape while submitting", () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();
@@ -144,5 +177,18 @@ describe("ConfirmDialog", () => {
 
     expect(onCancel).not.toHaveBeenCalled();
     expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe("global focus presentation", () => {
+  it("defines a visible focus indicator for native and custom controls", () => {
+    const styles = readFileSync(
+      resolve(process.cwd(), "styles/index.css"),
+      "utf8",
+    );
+
+    expect(styles).toContain("button:focus-visible");
+    expect(styles).toContain("[tabindex]:not([tabindex=\"-1\"]):focus-visible");
+    expect(styles).toContain("outline: 2px solid #dc2626");
   });
 });

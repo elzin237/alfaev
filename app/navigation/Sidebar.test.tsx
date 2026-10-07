@@ -4,9 +4,11 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Session, User } from "@supabase/supabase-js";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
@@ -86,19 +88,22 @@ function createQueryClient(): QueryClient {
 function renderSidebar(
   setSidebarOpen = vi.fn(),
   queryClient = createQueryClient(),
+  sidebarOpen = true,
+  returnFocusRef = createRef<HTMLButtonElement>(),
 ) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <Sidebar
-          sidebarOpen={true}
+          sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
+          returnFocusRef={returnFocusRef}
         />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 
-  return { ...view, queryClient, setSidebarOpen };
+  return { ...view, queryClient, returnFocusRef, setSidebarOpen };
 }
 
 beforeEach(() => {
@@ -409,5 +414,58 @@ describe("Sidebar permission visibility", () => {
     fireEvent.click(screen.getByRole("link", { name: "Projects" }));
 
     expect(setSidebarOpen).toHaveBeenCalledWith(false);
+  });
+
+  it("contains mobile focus, closes with Escape, and restores the menu trigger", async () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    const setSidebarOpen = vi.fn();
+    const returnFocusRef = createRef<HTMLButtonElement>();
+    const trigger = document.createElement("button");
+    trigger.textContent = "Open navigation menu";
+    document.body.append(trigger);
+    returnFocusRef.current = trigger;
+    trigger.focus();
+    const rendered = renderSidebar(
+      setSidebarOpen,
+      createQueryClient(),
+      true,
+      returnFocusRef,
+    );
+
+    const sidebar = screen.getByRole("dialog", { name: "Navigation menu" });
+    const close = within(sidebar).getByRole("button", {
+      name: "Close navigation menu",
+    });
+    await waitFor(() => expect(close).toHaveFocus());
+    expect(within(sidebar).getByRole("navigation", {
+      name: "Primary navigation",
+    })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(within(sidebar).getByRole("link", { name: "Users" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(setSidebarOpen).toHaveBeenCalledWith(false);
+
+    rendered.rerender(
+      <QueryClientProvider client={rendered.queryClient}>
+        <MemoryRouter>
+          <Sidebar
+            sidebarOpen={false}
+            setSidebarOpen={setSidebarOpen}
+            returnFocusRef={returnFocusRef}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(document.querySelector("#app-sidebar")).toHaveAttribute("inert");
+    trigger.remove();
   });
 });

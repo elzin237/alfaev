@@ -922,6 +922,7 @@ describe("WorkOrderDetailPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(message);
     expect(screen.getByText("No materials added yet.")).toBeInTheDocument();
     expect(scanner).not.toBeDisabled();
+    expect(scanner).toHaveFocus();
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
   });
 
