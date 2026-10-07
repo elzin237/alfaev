@@ -3,7 +3,7 @@ import type {
   PhaseStatus,
   Project,
   ProjectPhase,
-} from "../../../../lib/types/domain";
+} from "../../data/dashboardMockTypes";
 
 const phases: ProjectPhase[] = [
   "Projektovanje",

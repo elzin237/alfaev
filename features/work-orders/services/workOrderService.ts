@@ -1,4 +1,10 @@
 import { supabase } from "../../../lib/supabase/client";
+import {
+  isWorkOrderId,
+  isWorkOrderNumber,
+} from "../workOrderIdentifiers";
+
+export { isWorkOrderId, isWorkOrderNumber } from "../workOrderIdentifiers";
 
 export type WorkOrderStatus = "draft" | "finished";
 
@@ -238,7 +244,6 @@ const listAllowedKeys = new Set([
 ]);
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const workOrderNumberPattern = /^RN-[0-9]{4}-[0-9]{4}$/;
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const createResultKeys = new Set(["work_order_id", "work_order_number"]);
@@ -287,14 +292,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isUuid(value: unknown): value is string {
   return typeof value === "string" && uuidPattern.test(value);
-}
-
-export function isWorkOrderId(value: unknown): value is string {
-  return isUuid(value);
-}
-
-export function isWorkOrderNumber(value: unknown): value is string {
-  return typeof value === "string" && workOrderNumberPattern.test(value);
 }
 
 function isTrimmedNonblank(value: unknown): value is string {

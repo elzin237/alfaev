@@ -10,6 +10,7 @@ import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import CreateUserDialog from "./components/CreateUserDialog";
 import { listUsersAdmin } from "./services/usersService";
+import { userListQueryKey } from "./userQueryKeys";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
@@ -24,9 +25,9 @@ function UsersPage() {
   const queryClient = useQueryClient();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const usersListQueryKey = ["users", "list", profile?.id] as const;
+  const usersListKey = userListQueryKey(profile?.id);
   const usersQuery = useQuery({
-    queryKey: usersListQueryKey,
+    queryKey: usersListKey,
     queryFn: listUsersAdmin,
     enabled: Boolean(profile?.id),
     staleTime: 60_000,
@@ -151,7 +152,7 @@ function UsersPage() {
         onCreated={() => {
           setSuccessMessage("User invitation sent.");
           void queryClient.invalidateQueries({
-            queryKey: usersListQueryKey,
+            queryKey: usersListKey,
             exact: true,
           });
         }}

@@ -1,5 +1,8 @@
 import { supabase } from "../../../lib/supabase/client";
-import { isWorkOrderId, isWorkOrderNumber } from "../../work-orders/services/workOrderService";
+import {
+  isWorkOrderId,
+  isWorkOrderNumber,
+} from "../../work-orders/workOrderIdentifiers";
 import { isProjectId } from "./projectService";
 
 export type ProjectMaterialUsageSourceType = "work_order" | "pcb_production";

@@ -12,17 +12,20 @@ import {
   Archive,
   Users,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { PermissionKey } from "../auth/permissions";
-import type { NavigationItem } from "../../lib/types/domain";
 
 export type NavigationAccess =
   | { kind: "permission"; permission: PermissionKey }
   | { kind: "authenticated" }
   | { kind: "admin" };
 
-export type AuthorizedNavigationItem = NavigationItem & {
+export interface AuthorizedNavigationItem {
+  label: string;
+  path: string;
+  icon: LucideIcon;
   access: NavigationAccess;
-};
+}
 
 export const NAVIGATION = [
   {

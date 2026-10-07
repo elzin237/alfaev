@@ -2,11 +2,11 @@ import { useQueries } from "@tanstack/react-query";
 import { NavLink } from "react-router";
 import { X } from "lucide-react";
 
-import { useAuth } from "../../app/auth/AuthProvider";
-import { hasPermission } from "../../app/auth/permissionService";
-import { permissionQueryKey } from "../../app/auth/permissionQueryKeys";
-import { NAVIGATION } from "../../app/navigation/navigation";
+import { useAuth } from "../auth/AuthProvider";
+import { hasPermission } from "../auth/permissionService";
+import { permissionQueryKey } from "../auth/permissionQueryKeys";
 import { useProcurementSidebarBadge } from "../../features/procurement/hooks/useProcurementSidebarBadge";
+import { NAVIGATION } from "./navigation";
 
 const permissionNavigationItems = NAVIGATION.flatMap((item) =>
   item.access.kind === "permission"

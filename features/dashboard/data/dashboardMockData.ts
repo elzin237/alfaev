@@ -13,7 +13,7 @@ import type {
   Project,
   RecentActivity,
   WorkOrder,
-} from "../../../lib/types/domain";
+} from "./dashboardMockTypes";
 
 export const stats = [
   {

@@ -1,4 +1,4 @@
-import { parseDateOnly } from "../calendar/calendarDate";
+import { parseDateOnly } from "../../shared/utils/dateOnly";
 
 export interface ArchiveFilters {
   createdFrom: string | null;

@@ -16,10 +16,10 @@ const sidebarMocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
 }));
 
-vi.mock("../../app/auth/AuthProvider", () => ({
+vi.mock("../auth/AuthProvider", () => ({
   useAuth: sidebarMocks.useAuth,
 }));
-vi.mock("../../app/auth/permissionService", () => ({
+vi.mock("../auth/permissionService", () => ({
   hasPermission: sidebarMocks.hasPermission,
 }));
 vi.mock("../../features/procurement/hooks/useProcurementSidebarBadge", () => ({
@@ -27,9 +27,9 @@ vi.mock("../../features/procurement/hooks/useProcurementSidebarBadge", () => ({
 }));
 
 import Sidebar from "./Sidebar";
-import type { AuthState } from "../../app/auth/AuthProvider";
-import type { PermissionServiceResult } from "../../app/auth/permissionService";
-import type { UserProfile } from "../../app/auth/profileService";
+import type { AuthState } from "../auth/AuthProvider";
+import type { PermissionServiceResult } from "../auth/permissionService";
+import type { UserProfile } from "../auth/profileService";
 
 const firstUser: User = {
   id: "00000000-0000-0000-0000-000000000001",

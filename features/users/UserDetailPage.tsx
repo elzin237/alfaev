@@ -13,6 +13,11 @@ import UserPermissionEditor from "./components/UserPermissionEditor";
 import UserProfileForm from "./components/UserProfileForm";
 import { getUserAdmin } from "./services/userDetailService";
 import { getUserPermissionsAdmin } from "./services/userPermissionsService";
+import {
+  userDetailQueryKey,
+  userListQueryKey,
+  userPermissionsQueryKey,
+} from "./userQueryKeys";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" });
 
@@ -25,14 +30,9 @@ function UserDetailPage() {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const detailQueryKey = ["users", "detail", profile?.id, userId] as const;
-  const permissionsQueryKey = [
-    "users",
-    "permissions",
-    profile?.id,
-    userId,
-  ] as const;
-  const usersListQueryKey = ["users", "list", profile?.id] as const;
+  const detailQueryKey = userDetailQueryKey(profile?.id, userId);
+  const permissionsQueryKey = userPermissionsQueryKey(profile?.id, userId);
+  const usersListQueryKey = userListQueryKey(profile?.id);
   const userQuery = useQuery({
     queryKey: detailQueryKey,
     queryFn: () => getUserAdmin(userId),

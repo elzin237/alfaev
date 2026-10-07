@@ -1,5 +1,5 @@
 import { projects } from "../../data/dashboardMockData";
-import type { ProjectPhase } from "../../../../lib/types/domain";
+import type { ProjectPhase } from "../../data/dashboardMockTypes";
 import ProjectProgressRow from "./ProjectProgressRow";
 
 const phases: ProjectPhase[] = [

@@ -7,6 +7,7 @@ import {
 } from "../../../app/auth/permissions";
 import { saveUserPermissionsAdmin } from "../services/userPermissionSaveService";
 import type { UserPermissionMatrixItem } from "../services/userPermissionsService";
+import { userPermissionsQueryKey } from "../userQueryKeys";
 import UserPermissionMatrix from "./UserPermissionMatrix";
 
 export interface UserPermissionEditorProps {
@@ -52,12 +53,10 @@ function UserPermissionEditor({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStale, setIsStale] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const permissionsQueryKey = [
-    "users",
-    "permissions",
+  const permissionsQueryKey = userPermissionsQueryKey(
     currentAdminProfileId,
     userId,
-  ] as const;
+  );
 
   useEffect(() => {
     setBaselinePermissionKeys(loadedPermissionKeys);

@@ -1,6 +1,6 @@
 import { AlertTriangle, ClipboardList, FileText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { AlertLevel } from "../../../lib/types/domain";
+import type { AlertLevel } from "../data/dashboardMockTypes";
 import { alerts } from "../data/dashboardMockData";
 
 const iconMap: Record<AlertLevel, LucideIcon> = {

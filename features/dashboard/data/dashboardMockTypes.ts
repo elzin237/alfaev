@@ -81,22 +81,3 @@ export interface ProcurementRequest {
   value: string;
   status: ProcurementRequestStatus;
 }
-
-export interface NavigationItem {
-  label: string;
-  path: string;
-  icon: LucideIcon;
-}
-
-export type SettingsSection =
-  | "general"
-  | "company"
-  | "appearance"
-  | "security"
-  | "notifications";
-
-export interface SettingsNavigationItem {
-  id: SettingsSection;
-  label: string;
-  icon: LucideIcon;
-}
