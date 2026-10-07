@@ -39,6 +39,7 @@ import { registerInventoryConcurrencyAuditTests } from "./inventory-concurrency-
 import { registerHistoricalImmutabilityAuditTests } from "./historical-immutability-audit.suite";
 import { registerProcurementProductInventoryE2eTests } from "./procurement-product-inventory-e2e.suite";
 import { registerInventoryPcbProjectE2eTests } from "./inventory-pcb-project-e2e.suite";
+import { registerProjectWorkOrderPdfE2eTests } from "./project-work-order-pdf-e2e.suite";
 import { registerProcurementReadsTests } from "./procurement-reads.suite";
 import { registerProcurementCreationTests } from "./procurement-creation.suite";
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
@@ -88,6 +89,7 @@ describe("Supabase security helpers", () => {
   registerHistoricalImmutabilityAuditTests(requireHarness);
   registerProcurementProductInventoryE2eTests(requireHarness);
   registerInventoryPcbProjectE2eTests(requireHarness);
+  registerProjectWorkOrderPdfE2eTests(requireHarness);
   registerProcurementReadsTests(requireHarness);
   registerProcurementCreationTests(requireHarness);
   registerProcurementLifecycleTests(requireHarness);
