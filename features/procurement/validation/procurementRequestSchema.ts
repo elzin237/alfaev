@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-const supplierId = z.string().min(1, "Select a Supplier.");
 const requestedQuantity = z.string()
   .trim()
   .min(1, "Requested Quantity is required.")
@@ -14,7 +13,6 @@ export const procurementRequestSchema = z.discriminatedUnion("requestMode", [
     requestMode: z.literal("existing"),
     productId: z.string().min(1, "Select a Product."),
     requestedName: z.string(),
-    supplierId,
     requestedQuantity,
   }),
   z.object({
@@ -23,7 +21,6 @@ export const procurementRequestSchema = z.discriminatedUnion("requestMode", [
     requestedName: z.string()
       .trim()
       .min(1, "Component Name is required."),
-    supplierId,
     requestedQuantity,
   }),
 ]);

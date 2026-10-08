@@ -25,12 +25,12 @@ Locked:
 ### Existing component
 - worker selects an existing AlfaEV Product/Component
 - Serial Number / Šifra and Name are populated from the existing record
-- worker selects Supplier and enters Quantity
+- worker enters Quantity; Supplier is not requested at creation
 
 ### Brand-new component
 - worker may create a Nabavka request before the Product/Component exists
 - no AlfaEV Serial Number / Šifra is assigned yet
-- worker enters Name, Supplier and Quantity
+- worker enters Name and Quantity; Supplier is not requested at creation
 - request is marked as not yet linked to a Product/Component
 - Admin later uses `Create component from request`
 - AlfaEV creates the actual Product/Component

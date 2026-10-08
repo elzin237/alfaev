@@ -58,6 +58,7 @@ function renderDialog(options: {
   ) => Promise<ProcurementProductCreationResult>;
   isBrandsLoading?: boolean;
   brandLoadError?: string | null;
+  request?: ProcurementRequestListItem;
 } = {}) {
   const onClose = vi.fn();
   const onRetryBrands = vi.fn();
@@ -72,7 +73,7 @@ function renderDialog(options: {
 
   render(
     <CreateProductFromRequestDialog
-      request={request}
+      request={options.request ?? request}
       brands={brands}
       isBrandsLoading={options.isBrandsLoading ?? false}
       brandLoadError={options.brandLoadError ?? null}
@@ -108,6 +109,32 @@ describe("CreateProductFromRequestDialog", () => {
     expect(screen.getByRole("dialog")).toHaveTextContent(
       "stays in its current lifecycle",
     );
+  });
+
+  it("creates from an unassigned request without inventing Supplier or Catalog Number", async () => {
+    const unassignedRequest = {
+      ...request,
+      supplierId: null,
+      supplierName: null,
+    };
+    const { onSubmit } = renderDialog({ request: unassignedRequest });
+
+    expect(screen.getByText("Not assigned")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Supplier")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Catalog Number/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Category"), {
+      target: { value: "Components" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      requestId: request.requestId,
+      name: request.requestedName,
+      category: "Components",
+      brandId: null,
+      catalogNumber: null,
+    }));
   });
 
   it("offers only active Brands and validates required trimmed Product fields", async () => {

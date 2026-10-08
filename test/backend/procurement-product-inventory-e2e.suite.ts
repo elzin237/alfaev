@@ -98,7 +98,10 @@ async function readRequest(
 export function registerProcurementProductInventoryE2eTests(
   requireHarness: () => SecurityFixtureHarness,
 ): void {
-  it("validates the rollback-safe Nabavka to Product, Supplier, Inventory, and Archive lifecycle", async () => {
+  const legacySuppliedRequestTest =
+    process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1" ? it.skip : it;
+
+  legacySuppliedRequestTest("validates the legacy supplied-request Nabavka to Product, Supplier, Inventory, and Archive lifecycle", async () => {
     const fixture = requireHarness();
     const admin = fixture.actors.admin;
     const worker = await fixture.createTemporaryProfile(

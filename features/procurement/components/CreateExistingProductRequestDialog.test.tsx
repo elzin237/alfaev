@@ -16,11 +16,6 @@ const product = {
   serialNumber: "0000123",
   name: "Server Product Name",
 };
-const supplier = {
-  supplierId: "00000000-0000-4000-8000-000000000002",
-  supplierName: "Active Supplier",
-};
-
 function renderDialog(
   onSubmitExisting = vi.fn<() => Promise<ProcurementCreationResult>>().mockResolvedValue({
     ok: true,
@@ -37,13 +32,9 @@ function renderDialog(
     productSearch: "",
     onProductSearchChange: vi.fn(),
     products: [product],
-    suppliers: [supplier],
     isProductsLoading: false,
-    isSuppliersLoading: false,
     productLoadError: null,
-    supplierLoadError: null,
     onRetryProducts: vi.fn(),
-    onRetrySuppliers: vi.fn(),
     onClose: vi.fn(),
     onSubmitExisting,
     onSubmitNewComponent,
@@ -56,9 +47,6 @@ function renderDialog(
 function selectRequiredValues(quantity = "5") {
   fireEvent.change(screen.getByLabelText("Product"), {
     target: { value: product.productId },
-  });
-  fireEvent.change(screen.getByLabelText("Supplier"), {
-    target: { value: supplier.supplierId },
   });
   fireEvent.change(screen.getByLabelText("Requested Quantity"), {
     target: { value: quantity },
@@ -86,8 +74,7 @@ describe("CreateExistingProductRequestDialog", () => {
       .not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /requested name/i }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Active Supplier" }))
-      .toBeInTheDocument();
+    expect(screen.queryByLabelText("Supplier")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -112,7 +99,6 @@ describe("CreateExistingProductRequestDialog", () => {
 
     await waitFor(() => expect(props.onSubmitExisting).toHaveBeenCalledWith({
       productId: product.productId,
-      supplierId: supplier.supplierId,
       requestedQuantity: 7,
     }));
     expect(props.onCreated).toHaveBeenCalledOnce();
@@ -178,6 +164,7 @@ describe("CreateExistingProductRequestDialog", () => {
       .not.toBeInTheDocument();
     expect(screen.queryByLabelText(/category|brand|catalog|status|delivered/i))
       .not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Supplier")).not.toBeInTheDocument();
   });
 
   it("validates and submits only the trimmed new-component snapshot fields", async () => {
@@ -189,14 +176,10 @@ describe("CreateExistingProductRequestDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create Request" }));
     expect(await screen.findByText("Component Name is required."))
       .toBeInTheDocument();
-    expect(await screen.findByText("Select a Supplier.")).toBeInTheDocument();
     expect(props.onSubmitNewComponent).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText("Component Name"), {
       target: { value: "  New Relay  " },
-    });
-    fireEvent.change(screen.getByLabelText("Supplier"), {
-      target: { value: supplier.supplierId },
     });
     fireEvent.change(screen.getByLabelText("Requested Quantity"), {
       target: { value: "3" },
@@ -205,7 +188,6 @@ describe("CreateExistingProductRequestDialog", () => {
 
     await waitFor(() => expect(props.onSubmitNewComponent).toHaveBeenCalledWith({
       requestedName: "New Relay",
-      supplierId: supplier.supplierId,
       requestedQuantity: 3,
     }));
     expect(props.onSubmitExisting).not.toHaveBeenCalled();
@@ -220,9 +202,6 @@ describe("CreateExistingProductRequestDialog", () => {
       fireEvent.click(screen.getByRole("button", { name: "Brand-New Component" }));
       fireEvent.change(screen.getByLabelText("Component Name"), {
         target: { value: "New Relay" },
-      });
-      fireEvent.change(screen.getByLabelText("Supplier"), {
-        target: { value: supplier.supplierId },
       });
       fireEvent.change(screen.getByLabelText("Requested Quantity"), {
         target: { value: quantity },
@@ -246,9 +225,6 @@ describe("CreateExistingProductRequestDialog", () => {
     fireEvent.change(screen.getByLabelText("Component Name"), {
       target: { value: "New Relay" },
     });
-    fireEvent.change(screen.getByLabelText("Supplier"), {
-      target: { value: supplier.supplierId },
-    });
     fireEvent.change(screen.getByLabelText("Requested Quantity"), {
       target: { value: "3" },
     });
@@ -262,13 +238,13 @@ describe("CreateExistingProductRequestDialog", () => {
     resolveSubmit?.({
       ok: false,
       error: {
-        code: "supplier_unavailable",
-        message: "The selected Supplier is unavailable. Choose an active Supplier.",
+        code: "procurement_creation_failed",
+        message: "The Procurement request could not be created. Please try again.",
       },
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The selected Supplier is unavailable.",
+      "The Procurement request could not be created.",
     );
     expect(props.onClose).not.toHaveBeenCalled();
   });

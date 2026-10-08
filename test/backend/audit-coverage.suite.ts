@@ -132,11 +132,15 @@ const auditedMutations: readonly AuditContract[] = [
     entityTypes: ["project_product_component"],
   },
   {
-    signature: "public.create_procurement_request_for_product(uuid,uuid,bigint)",
+    signature: process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1"
+      ? "public.create_procurement_request_for_product(uuid,bigint)"
+      : "public.create_procurement_request_for_product(uuid,uuid,bigint)",
     actions: ["procurement.created"], entityTypes: ["procurement_request"],
   },
   {
-    signature: "public.create_procurement_request_for_new_component(text,uuid,bigint)",
+    signature: process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1"
+      ? "public.create_procurement_request_for_new_component(text,bigint)"
+      : "public.create_procurement_request_for_new_component(text,uuid,bigint)",
     actions: ["procurement.created"], entityTypes: ["procurement_request"],
   },
   {

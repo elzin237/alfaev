@@ -7,7 +7,6 @@ const creationHookMocks = vi.hoisted(() => ({
   createProcurementRequestForNewComponent: vi.fn(),
   createProcurementRequestForProduct: vi.fn(),
   hasPermission: vi.fn(),
-  listActiveProcurementSupplierChoices: vi.fn(),
   searchProcurementProductChoices: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -23,8 +22,6 @@ vi.mock("../services/procurementService", () => ({
     creationHookMocks.createProcurementRequestForNewComponent,
   createProcurementRequestForProduct:
     creationHookMocks.createProcurementRequestForProduct,
-  listActiveProcurementSupplierChoices:
-    creationHookMocks.listActiveProcurementSupplierChoices,
   searchProcurementProductChoices:
     creationHookMocks.searchProcurementProductChoices,
 }));
@@ -50,7 +47,6 @@ function createQueryClient() {
 
 const input = {
   productId: "00000000-0000-4000-8000-000000000001",
-  supplierId: "00000000-0000-4000-8000-000000000002",
   requestedQuantity: 5,
 };
 
@@ -70,10 +66,6 @@ beforeEach(() => {
     value: { requestId: "00000000-0000-4000-8000-000000000004" },
   });
   creationHookMocks.searchProcurementProductChoices.mockResolvedValue({
-    ok: true,
-    value: [],
-  });
-  creationHookMocks.listActiveProcurementSupplierChoices.mockResolvedValue({
     ok: true,
     value: [],
   });
@@ -167,7 +159,6 @@ describe("useProcurementCreation", () => {
     await act(async () => {
       await result.current.createNewComponentRequest({
         requestedName: "New Relay",
-        supplierId: input.supplierId,
         requestedQuantity: 3,
       });
     });
@@ -191,7 +182,6 @@ describe("useProcurementCreation", () => {
     await act(async () => {
       await result.current.createNewComponentRequest({
         requestedName: "New Relay",
-        supplierId: input.supplierId,
         requestedQuantity: 3,
       });
     });

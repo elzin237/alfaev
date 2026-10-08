@@ -81,6 +81,8 @@ describe("procurementService", () => {
         ...requestRow,
         product_id: null,
         product_serial_number: null,
+        supplier_id: null,
+        supplier_name: null,
         delivered_quantity: 0,
         status: "active",
       }],
@@ -96,6 +98,8 @@ describe("procurementService", () => {
     expect(result.ok && result.value[0]).toMatchObject({
       productId: null,
       productSerialNumber: null,
+      supplierId: null,
+      supplierName: null,
       remainingQuantity: 10,
     });
     expect(procurementServiceMocks.rpc).toHaveBeenCalledWith(
@@ -243,7 +247,6 @@ describe("procurementService", () => {
 
     await expect(createProcurementRequestForProduct({
       productId: requestRow.product_id,
-      supplierId: requestRow.supplier_id,
       requestedQuantity: 12,
     })).resolves.toEqual({
       ok: true,
@@ -254,7 +257,6 @@ describe("procurementService", () => {
       "create_procurement_request_for_product",
       {
         p_product_id: requestRow.product_id,
-        p_supplier_id: requestRow.supplier_id,
         p_requested_quantity: 12,
       },
     );
@@ -263,13 +265,13 @@ describe("procurementService", () => {
     expect(payload).not.toHaveProperty("status");
     expect(payload).not.toHaveProperty("delivered_quantity");
     expect(payload).not.toHaveProperty("actor_user_id");
+    expect(payload).not.toHaveProperty("p_supplier_id");
   });
 
   it.each([
     ["42501", "access_denied", "You do not have permission to create Procurement requests."],
     ["PRQ03", "product_unavailable", "The selected Product is unavailable. Choose an active Product."],
-    ["PRQ04", "supplier_unavailable", "The selected Supplier is unavailable. Choose an active Supplier."],
-    ["22023", "invalid_request", "Enter a valid Product, Supplier, and positive whole-number quantity."],
+    ["22023", "invalid_request", "Enter a valid Product and positive whole-number quantity."],
     ["unexpected", "procurement_creation_failed", "The Procurement request could not be created. Please try again."],
   ] as const)("maps %s to a safe creation error", async (providerCode, code, message) => {
     procurementServiceMocks.rpc.mockResolvedValue({
@@ -279,7 +281,6 @@ describe("procurementService", () => {
 
     const result = await createProcurementRequestForProduct({
       productId: requestRow.product_id,
-      supplierId: requestRow.supplier_id,
       requestedQuantity: 1,
     });
 
@@ -295,7 +296,6 @@ describe("procurementService", () => {
 
     await expect(createProcurementRequestForNewComponent({
       requestedName: "  New Relay  ",
-      supplierId: requestRow.supplier_id,
       requestedQuantity: 4,
     })).resolves.toEqual({
       ok: true,
@@ -305,7 +305,6 @@ describe("procurementService", () => {
       "create_procurement_request_for_new_component",
       {
         p_requested_name: "New Relay",
-        p_supplier_id: requestRow.supplier_id,
         p_requested_quantity: 4,
       },
     );
@@ -314,11 +313,11 @@ describe("procurementService", () => {
     expect(payload).not.toHaveProperty("serial_number");
     expect(payload).not.toHaveProperty("status");
     expect(payload).not.toHaveProperty("delivered_quantity");
+    expect(payload).not.toHaveProperty("p_supplier_id");
   });
 
   it.each([
     ["42501", "access_denied"],
-    ["PRQ04", "supplier_unavailable"],
     ["22023", "invalid_request"],
     ["unexpected", "procurement_creation_failed"],
   ] as const)("maps new-component %s failures safely", async (providerCode, code) => {
@@ -329,7 +328,6 @@ describe("procurementService", () => {
 
     const result = await createProcurementRequestForNewComponent({
       requestedName: "New Relay",
-      supplierId: requestRow.supplier_id,
       requestedQuantity: 1,
     });
 

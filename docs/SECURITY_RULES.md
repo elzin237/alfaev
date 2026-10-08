@@ -583,7 +583,7 @@ Brand-new Product request:
 - requires a trimmed, nonblank worker-supplied `requested_name`
 - worker cannot assign one manually
 
-Every new ProcurementRequest requires a Supplier that exists and is active at execution time. Archived Suppliers cannot be selected for a new request, but later Supplier archival must not remove or rewrite historical ProcurementRequest references.
+Procurement Request creation does not accept or require a Supplier and stores `supplier_id = NULL`; null means Supplier was not selected at request time. Existing historical non-null Supplier references remain protected by the Supplier foreign key, and later Supplier archival must not remove or rewrite them.
 
 While a request is unresolved, trusted delivery updates keep `active` for zero delivered pieces and `partly_delivered` for any positive delivered quantity. Reaching the full requested quantity does not authorize silent resolution and may remain `partly_delivered` until the explicit Task 082 resolve operation. Resolution may occur at any delivered quantity from zero through the requested quantity. Resolved requests are terminal in the current scope, remain readable as history, and have no reopen, hard-delete, or reactivation path.
 
@@ -606,13 +606,14 @@ Resolution metadata must remain equivalent to lifecycle state: `status = 'resolv
 - accepts only an `active` or `partly_delivered` ProcurementRequest whose `product_id` is still `NULL`; reject resolved or already-linked requests
 - locks the ProcurementRequest and re-checks eligibility so competing Admin attempts cannot create two Products for one request
 - derives the request Supplier from `ProcurementRequest.supplier_id`; the client cannot substitute a different Supplier
-- requires that Supplier to still exist and be active, and requires any supplied Brand to exist and be active
+- when that Supplier is non-null, requires it to still exist and be active; any supplied Brand must also exist and be active
 - validates a required trimmed, nonblank Product Name and Category; Product Name may differ from the historical `requested_name` snapshot
 - creates exactly one active `component` Product and allocates its permanent 7-digit Serial Number server-side; the client cannot choose it
-- creates exactly one required active ProductSupplier relation to the request Supplier, with optional Catalog Number normalized by trimming blank to `NULL` while preserving nonblank casing
+- when Supplier is non-null, creates exactly one active ProductSupplier relation to it, with optional Catalog Number normalized by trimming blank to `NULL` while preserving nonblank casing
+- when Supplier is null, creates the Product without a ProductSupplier relation or Catalog Number
 - links `ProcurementRequest.product_id` without modifying its requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
-- creates the required immutable Product, ProductSupplier, and Procurement-link AuditLog history
-- commits Product creation, ProductSupplier creation, Procurement linking, and all required audits atomically
+- creates the required immutable Product and Procurement-link AuditLog history plus ProductSupplier history only when a relationship is created
+- commits Product creation, optional ProductSupplier creation, Procurement linking, and all required audits atomically
 
 Failed or denied attempts persist no Product, ProductSupplier, Procurement link, or audit. A consumed Serial sequence value need not be reused after rollback. Normal Product creation still initializes one zero InventoryBalance through the existing schema mechanism, but this workflow creates no InventoryMovement and never adds delivered Procurement quantity to stock. Physical stock remains a separate Admin Inventory workflow.
 

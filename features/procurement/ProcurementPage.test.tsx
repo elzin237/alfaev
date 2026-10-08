@@ -130,12 +130,6 @@ beforeEach(() => {
       isPending: false,
       refetch: vi.fn(),
     },
-    supplierChoicesQuery: {
-      data: { ok: true, value: [] },
-      isError: false,
-      isPending: false,
-      refetch: vi.fn(),
-    },
   });
   procurementPageMocks.useProcurementDeliveryUpdate.mockReturnValue({
     canUpdateDelivery: false,
@@ -196,6 +190,19 @@ describe("ProcurementPage", () => {
     for (const label of ["Active", "Partly Delivered", "Resolved"]) {
       expect(within(table).getByText(label)).toBeInTheDocument();
     }
+  });
+
+  it("renders a nullable Supplier using the canonical empty-value label", () => {
+    setSuccessfulQueries([{
+      ...requests[1]!,
+      supplierId: null,
+      supplierName: null,
+    }]);
+    render(<ProcurementPage />);
+
+    const row = screen.getByText("Partly Delivered Snapshot").closest("tr");
+    expect(within(row!).getAllByText("Not assigned")).toHaveLength(2);
+    expect(screen.queryByText("null")).not.toBeInTheDocument();
   });
 
   it("wires debounced normalized search and server-backed filters", () => {
@@ -460,6 +467,10 @@ describe("ProcurementPage", () => {
       .toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Brand-New Component" }))
       .toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", {
+      name: "Add Procurement Request",
+    });
+    expect(within(dialog).queryByLabelText("Supplier")).not.toBeInTheDocument();
   });
 
   it("shows Create component only to Admin UX for active/partial unlinked requests", () => {

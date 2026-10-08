@@ -166,11 +166,10 @@ The Project detail page provides traceability back to the original operation.
 4. AlfaEV fills:
    - Serial Number / Šifra
    - Name.
-5. User selects Supplier.
-6. User enters Quantity.
-7. Save as Active.
-8. Sidebar Nabavka badge increments by 1.
-9. Audit creation.
+5. User enters Quantity; Supplier is not requested and remains unassigned.
+6. Save as Active.
+7. Sidebar Nabavka badge increments by 1.
+8. Audit creation.
 
 ---
 
@@ -180,12 +179,12 @@ The Project detail page provides traceability back to the original operation.
 2. Indicates/selects that component does not yet exist.
 3. Enters:
    - Name
-   - Supplier
    - Quantity.
-4. No Serial Number exists yet.
-5. Save request as Active.
-6. Request is clearly marked as not linked to a Product.
-7. Sidebar badge increments.
+4. Supplier is not requested and remains unassigned.
+5. No Serial Number exists yet.
+6. Save request as Active.
+7. Request is clearly marked as not linked to a Product.
+8. Sidebar badge increments.
 
 ### Admin creates component from request
 
@@ -195,7 +194,7 @@ The Project detail page provides traceability back to the original operation.
 4. Trusted backend:
    - allocates next 7-digit Serial Number
    - creates Product
-   - links Supplier/Catalog Number when applicable
+   - links Supplier/Catalog Number only when the historical request already has a Supplier
    - links request to Product
    - audits operation.
 5. Request remains in its procurement lifecycle until resolved.

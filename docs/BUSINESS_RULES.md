@@ -183,17 +183,17 @@ If the requested component already exists:
 - the selected Product must exist and be active when the later trusted request-creation operation executes
 - Serial Number / Šifra comes from that Product/Component
 - the Product's current Name is copied, with surrounding whitespace trimmed before persistence, into `requested_name` as the request-time snapshot
-- Supplier and Quantity are selected/entered for the request
+- Quantity is entered for the request; Supplier is not requested at creation and starts unassigned
 - later Product renames or archival do not rewrite the snapshot or remove the historical Product reference
 
 If the requested component does not yet exist:
 
 - the Nabavka request may exist temporarily without an AlfaEV Serial Number / Šifra
 - `product_id` may start as `NULL`
-- worker enters the required request-time Name snapshot, Supplier and Quantity; surrounding Name whitespace is trimmed before persistence and blank Names are invalid
+- worker enters the required request-time Name snapshot and Quantity; surrounding Name whitespace is trimmed before persistence and blank Names are invalid
 - the request must be distinguishable as not yet linked to a Product/Component
 
-Every new request requires an active Supplier at execution time. Archived Suppliers cannot be selected for new Procurement requests, but Supplier archival never removes or rewrites historical request references.
+Procurement Request creation does not require Supplier; `supplier_id = NULL` means Supplier was not selected at request time. Existing historical requests with a Supplier remain valid, and later Supplier archival never removes or rewrites those references.
 
 Only Admin may create the actual Product/Component from that request.
 
@@ -202,12 +202,13 @@ When Admin uses `Create component from request`:
 - the request must still be Active or Partly Delivered and unlinked; Resolved or already-linked requests are rejected
 - Product Name is prefilled from the request-time `requested_name` snapshot, but Admin may edit it before creation; the final Name and required free-text Category are trimmed and nonblank
 - optional Brand must still exist and be active
-- the request's existing Supplier is fixed for this workflow and must still exist and be active; an archived Supplier leaves history readable but blocks Product creation from that request
+- when the request has a Supplier, that Supplier is fixed for this workflow and must still exist and be active; an archived Supplier leaves history readable but blocks Product creation from that request
 - create exactly one active Product/Component with `product_kind = 'component'`
 - generate the next unique 7-digit Serial Number / Šifra through trusted backend/database logic
-- create one required active ProductSupplier relationship to the request Supplier, with an optional supplier-specific Catalog Number normalized by trimming blank to `NULL` and preserving nonblank casing
+- when the request has a Supplier, create one active ProductSupplier relationship to it, with an optional supplier-specific Catalog Number normalized by trimming blank to `NULL` and preserving nonblank casing
+- when the request has no Supplier, create the Product without a ProductSupplier relationship or Catalog Number
 - link the Product/Component back to the original Nabavka request without changing its historical requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
-- preserve immutable audit history for Product creation, ProductSupplier creation, and the Procurement-to-Product link
+- preserve immutable audit history for Product creation, any ProductSupplier creation, and the Procurement-to-Product link
 
 Workers never manually assign Serial Number / Šifra values.
 

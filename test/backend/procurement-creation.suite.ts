@@ -33,7 +33,10 @@ interface ProcurementRequestRow {
 }
 
 export function registerProcurementCreationTests(requireHarness: () => SecurityFixtureHarness): void {
-  it("creates existing-Product Procurement requests through independent trusted creation authority", async () => {
+  const legacyCreationTest =
+    process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1" ? it.skip : it;
+
+  legacyCreationTest("creates existing-Product Procurement requests through the legacy supplied-request contract", async () => {
     const fixture = requireHarness();
     const admin = fixture.actors.admin;
     const creator = fixture.actors.productCreator;
@@ -561,7 +564,7 @@ export function registerProcurementCreationTests(requireHarness: () => SecurityF
       { p_search: null },
     )).error);
   });
-  it("creates unlinked brand-new component Procurement requests without Product, Serial, or Inventory side effects", async () => {
+  legacyCreationTest("creates unlinked brand-new component Procurement requests through the legacy supplied-request contract", async () => {
     const fixture = requireHarness();
     const admin = fixture.actors.admin;
     const creator = fixture.actors.productCreator;

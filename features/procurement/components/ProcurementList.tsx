@@ -59,7 +59,9 @@ function ProcurementList({
                   <td className="px-5 py-4 font-semibold text-zinc-900">
                     {request.requestedName}
                   </td>
-                  <td className="px-5 py-4">{request.supplierName}</td>
+                  <td className="px-5 py-4">
+                    {request.supplierName ?? "Not assigned"}
+                  </td>
                   <td className="whitespace-nowrap px-5 py-4 tabular-nums">
                     {request.requestedQuantity}
                   </td>

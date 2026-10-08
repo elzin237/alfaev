@@ -60,7 +60,7 @@ function ProcurementPage() {
     canCreateProduct,
     createProduct: createProductFromRequest,
   } = useProcurementProductCreation(productCreationRequest !== null);
-  const { productChoicesQuery, supplierChoicesQuery } =
+  const { productChoicesQuery } =
     useProcurementCreationChoices(
       debouncedProductChoiceSearch,
       isCreateOpen && canCreate,
@@ -258,11 +258,7 @@ function ProcurementPage() {
         products={
           productChoicesQuery.data?.ok ? productChoicesQuery.data.value : []
         }
-        suppliers={
-          supplierChoicesQuery.data?.ok ? supplierChoicesQuery.data.value : []
-        }
         isProductsLoading={productChoicesQuery.isPending}
-        isSuppliersLoading={supplierChoicesQuery.isPending}
         productLoadError={
           productChoicesQuery.isError || productChoicesQuery.data?.ok === false
             ? productChoicesQuery.data?.ok === false
@@ -270,15 +266,7 @@ function ProcurementPage() {
               : "The Product choices could not be loaded."
             : null
         }
-        supplierLoadError={
-          supplierChoicesQuery.isError || supplierChoicesQuery.data?.ok === false
-            ? supplierChoicesQuery.data?.ok === false
-              ? supplierChoicesQuery.data.error.message
-              : "The Supplier choices could not be loaded."
-            : null
-        }
         onRetryProducts={() => void productChoicesQuery.refetch()}
-        onRetrySuppliers={() => void supplierChoicesQuery.refetch()}
         onClose={() => {
           setIsCreateOpen(false);
           setProductChoiceSearch("");

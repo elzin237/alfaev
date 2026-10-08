@@ -4,7 +4,6 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import {
-  procurementActiveSupplierChoicesQueryKey,
   procurementBadgeQueryKey,
   procurementListQueryPrefix,
   procurementProductChoicesQueryKey,
@@ -13,7 +12,6 @@ import {
 import {
   createProcurementRequestForNewComponent,
   createProcurementRequestForProduct,
-  listActiveProcurementSupplierChoices,
   searchProcurementProductChoices,
 } from "../services/procurementService";
 
@@ -88,12 +86,5 @@ export function useProcurementCreationChoices(
     enabled: enabled && Boolean(profile?.id),
     staleTime: 60_000,
   });
-  const supplierChoicesQuery = useQuery({
-    queryKey: procurementActiveSupplierChoicesQueryKey(profile?.id),
-    queryFn: listActiveProcurementSupplierChoices,
-    enabled: enabled && Boolean(profile?.id),
-    staleTime: 60_000,
-  });
-
-  return { productChoicesQuery, supplierChoicesQuery };
+  return { productChoicesQuery };
 }

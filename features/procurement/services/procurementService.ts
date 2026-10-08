@@ -9,8 +9,8 @@ export interface ProcurementRequestListItem {
   productId: string | null;
   productSerialNumber: string | null;
   requestedName: string;
-  supplierId: string;
-  supplierName: string;
+  supplierId: string | null;
+  supplierName: string | null;
   requestedQuantity: number;
   deliveredQuantity: number;
   remainingQuantity: number;
@@ -38,13 +38,11 @@ export interface ProcurementActiveSupplierChoice {
 
 export interface CreateProcurementRequestForProductInput {
   productId: string;
-  supplierId: string;
   requestedQuantity: number;
 }
 
 export interface CreateProcurementRequestForNewComponentInput {
   requestedName: string;
-  supplierId: string;
   requestedQuantity: number;
 }
 
@@ -118,7 +116,6 @@ export interface ProcurementCreationError {
   code:
     | "access_denied"
     | "product_unavailable"
-    | "supplier_unavailable"
     | "invalid_request"
     | "procurement_creation_failed";
   message: string;
@@ -178,8 +175,8 @@ interface ProcurementRequestRow {
   product_id: string | null;
   product_serial_number: string | null;
   requested_name: string;
-  supplier_id: string;
-  supplier_name: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
   requested_quantity: unknown;
   delivered_quantity: unknown;
   status: ProcurementStatus;
@@ -250,9 +247,11 @@ function isProcurementRequestRow(
     "requested_name" in value &&
     isTrimmedNonblank(value.requested_name) &&
     "supplier_id" in value &&
-    isUuid(value.supplier_id) &&
+    (value.supplier_id === null || isUuid(value.supplier_id)) &&
     "supplier_name" in value &&
-    isTrimmedNonblank(value.supplier_name) &&
+    (value.supplier_name === null || isTrimmedNonblank(value.supplier_name)) &&
+    ((value.supplier_id === null && value.supplier_name === null) ||
+      (value.supplier_id !== null && value.supplier_name !== null)) &&
     "requested_quantity" in value &&
     parseSafeInteger(value.requested_quantity) !== null &&
     "delivered_quantity" in value &&
@@ -393,14 +392,6 @@ function creationFailure(code?: string): ProcurementCreationResult {
           message: "The selected Product is unavailable. Choose an active Product.",
         },
       };
-    case "PRQ04":
-      return {
-        ok: false,
-        error: {
-          code: "supplier_unavailable",
-          message: "The selected Supplier is unavailable. Choose an active Supplier.",
-        },
-      };
     case "22003":
     case "22023":
     case "23514":
@@ -408,7 +399,7 @@ function creationFailure(code?: string): ProcurementCreationResult {
         ok: false,
         error: {
           code: "invalid_request",
-          message: "Enter a valid Product, Supplier, and positive whole-number quantity.",
+          message: "Enter a valid Product and positive whole-number quantity.",
         },
       };
     default:
@@ -432,14 +423,6 @@ function newComponentCreationFailure(code?: string): ProcurementCreationResult {
           message: "You do not have permission to create Procurement requests.",
         },
       };
-    case "PRQ04":
-      return {
-        ok: false,
-        error: {
-          code: "supplier_unavailable",
-          message: "The selected Supplier is unavailable. Choose an active Supplier.",
-        },
-      };
     case "22003":
     case "22023":
     case "23514":
@@ -447,7 +430,7 @@ function newComponentCreationFailure(code?: string): ProcurementCreationResult {
         ok: false,
         error: {
           code: "invalid_request",
-          message: "Enter a valid Component Name, Supplier, and positive whole-number quantity.",
+          message: "Enter a valid Component Name and positive whole-number quantity.",
         },
       };
     default:
@@ -765,7 +748,6 @@ export async function createProcurementRequestForProduct(
       "create_procurement_request_for_product",
       {
         p_product_id: input.productId,
-        p_supplier_id: input.supplierId,
         p_requested_quantity: input.requestedQuantity,
       },
     );
@@ -787,7 +769,6 @@ export async function createProcurementRequestForNewComponent(
       "create_procurement_request_for_new_component",
       {
         p_requested_name: input.requestedName.trim(),
-        p_supplier_id: input.supplierId,
         p_requested_quantity: input.requestedQuantity,
       },
     );

@@ -170,16 +170,16 @@ If the requested component already exists in AlfaEV:
 - worker selects the existing product/component
 - Serial Number / Šifra is populated automatically
 - Name is populated automatically
-- worker selects Supplier
 - worker enters Number of Pieces / Quantity
+- Supplier is not requested and may remain unassigned
 
 #### Brand-new component
 If the requested component does not yet exist in AlfaEV:
 
 - worker may create the Nabavka request without an AlfaEV Serial Number / Šifra
 - worker enters Name
-- worker selects Supplier
 - worker enters Number of Pieces / Quantity
+- Supplier is not requested and may remain unassigned
 - the request is clearly marked as not yet linked to an AlfaEV product
 
 Admin may later use a `Create component from request` action.

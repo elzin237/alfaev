@@ -332,6 +332,7 @@ export function registerProcurementReadsTests(requireHarness: () => SecurityFixt
         "procurement_requests_requested_name_search_trgm_idx",
         "procurement_requests_status_idx",
         "procurement_requests_supplier_id_idx",
+        "procurement_requests_unresolved_updated_at_id_idx",
       ]);
     });
   });

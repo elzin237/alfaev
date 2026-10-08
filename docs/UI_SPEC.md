@@ -553,13 +553,13 @@ Start with a choice/search experience:
 - search/select Product
 - Serial Number auto-fills
 - Name auto-fills
-- Supplier select
 - Quantity
+- no Supplier field; Supplier remains unassigned at creation
 
 ### New Component
 - Name
-- Supplier
 - Quantity
+- no Supplier field; Supplier remains unassigned at creation
 - clear message:
   `Serial Number will be generated later when Admin creates the Product.`
 
@@ -611,8 +611,8 @@ Fields:
 - Name: required, trimmed, nonblank
 - Category: required, trimmed, nonblank free text
 - Brand: optional; active choices only
-- Supplier: read-only/prefilled from the request and not replaceable in this workflow
-- Catalog Number: optional; blank becomes no Catalog Number and nonblank casing is preserved
+- Supplier: when assigned on a historical request, read-only/prefilled and not replaceable in this workflow; otherwise show `Not assigned`
+- Catalog Number: available only when the request has a Supplier; optional, with blank stored as no Catalog Number and nonblank casing preserved
 
 Serial Number:
 
@@ -621,7 +621,7 @@ Serial Number:
 
 On success:
 - Product is created
-- the required ProductSupplier relation to the request Supplier is created
+- a ProductSupplier relation is created only when the request has a Supplier; otherwise none is invented
 - request links to Product
 - Serial Number appears on Nabavka row
 - request status, quantities, Supplier, and requested-name snapshot remain unchanged

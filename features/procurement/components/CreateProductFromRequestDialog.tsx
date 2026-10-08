@@ -134,7 +134,13 @@ function CreateProductFromRequestDialog({
     setSubmissionError(null);
 
     try {
-      const result = await onSubmit({ ...input, requestId: request.requestId });
+      const result = await onSubmit({
+        ...input,
+        catalogNumber: request.supplierId === null
+          ? null
+          : input.catalogNumber,
+        requestId: request.requestId,
+      });
       if (!result.ok) {
         setSubmissionError(result.error.message);
         return;
@@ -252,34 +258,46 @@ function CreateProductFromRequestDialog({
             )}
           </div>
 
-          <div>
-            <label htmlFor="request-product-supplier" className="block text-sm font-semibold text-zinc-800">
-              Supplier
-            </label>
-            <input
-              id="request-product-supplier"
-              type="text"
-              readOnly
-              value={request.supplierName}
-              className="mt-2 w-full rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-3 text-sm text-zinc-700"
-            />
-            <p className="mt-2 text-xs text-zinc-500">
-              The Supplier is fixed by the Procurement request.
-            </p>
-          </div>
+          {request.supplierId === null ? (
+            <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+              <p className="text-sm font-semibold text-zinc-800">Supplier</p>
+              <p className="mt-1 text-sm text-zinc-600">Not assigned</p>
+              <p className="mt-2 text-xs text-zinc-500">
+                The Component will be created without a Product-Supplier relationship or Catalog Number.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div>
+                <label htmlFor="request-product-supplier" className="block text-sm font-semibold text-zinc-800">
+                  Supplier
+                </label>
+                <input
+                  id="request-product-supplier"
+                  type="text"
+                  readOnly
+                  value={request.supplierName ?? "Not assigned"}
+                  className="mt-2 w-full rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-3 text-sm text-zinc-700"
+                />
+                <p className="mt-2 text-xs text-zinc-500">
+                  The Supplier is fixed by the Procurement request.
+                </p>
+              </div>
 
-          <div>
-            <label htmlFor="request-product-catalog-number" className="block text-sm font-semibold text-zinc-800">
-              Catalog Number <span className="font-normal text-zinc-500">(optional)</span>
-            </label>
-            <input
-              {...register("catalogNumber")}
-              id="request-product-catalog-number"
-              type="text"
-              disabled={isSubmitting}
-              className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
-            />
-          </div>
+              <div>
+                <label htmlFor="request-product-catalog-number" className="block text-sm font-semibold text-zinc-800">
+                  Catalog Number <span className="font-normal text-zinc-500">(optional)</span>
+                </label>
+                <input
+                  {...register("catalogNumber")}
+                  id="request-product-catalog-number"
+                  type="text"
+                  disabled={isSubmitting}
+                  className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                />
+              </div>
+            </>
+          )}
 
           <div>
             <label htmlFor="request-product-serial" className="block text-sm font-semibold text-zinc-800">

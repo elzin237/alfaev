@@ -1458,7 +1458,7 @@ Schema rules:
 - `remaining_quantity = requested_quantity - delivered_quantity` is derived and is not persisted
 - `requested_name` is a required request-time display/name snapshot; trim surrounding whitespace before persistence and reject blank values
 - `product_id` is nullable and preserves historical Product references
-- `supplier_id` is required and preserves historical Supplier references
+- `supplier_id` is nullable, preserves historical Supplier references when present, and is `NULL` for newly created requests where Supplier is unknown
 - statuses are exactly `active`, `partly_delivered`, and `resolved`
 - every new row starts `active`, with Delivered Quantity 0 and both resolution metadata fields `NULL`
 - while unresolved, zero delivered corresponds to `active` and positive delivered corresponds to `partly_delivered`
@@ -1473,8 +1473,8 @@ Security:
 - Task 075 adds no trusted create, edit, delivery, resolve, or Product-creation RPC
 
 Later workflow ownership:
-- Task 078 creates existing-Product requests, re-checks an active Product and active Supplier at execution time, and copies Product Name into the snapshot
-- Task 079 creates brand-new component requests with `product_id = NULL`, a worker-supplied snapshot, and an active Supplier
+- Task 078 creates existing-Product requests without asking for Supplier, re-checks an active Product at execution time, and copies Product Name into the snapshot
+- Task 079 creates brand-new component requests with `product_id = NULL`, a worker-supplied snapshot, and no required Supplier
 - Task 080 owns trusted Delivered Quantity updates and Active/Partly Delivered synchronization without Inventory mutation
 - Task 082 owns explicit resolution and its audit without requiring full delivery
 - Task 083 may atomically populate `product_id` while creating a Product from an unlinked request
@@ -1513,8 +1513,8 @@ Wire Sidebar badge refresh.
 Goal:
 - select existing Product
 - Serial/Name auto-fill
-- Supplier
 - Quantity
+- Supplier is not requested and remains unassigned
 - save Active request
 - audit
 
@@ -1527,8 +1527,8 @@ No Inventory mutation.
 Goal:
 - no Product required
 - Name
-- Supplier
 - Quantity
+- Supplier is not requested and remains unassigned
 - clearly show `Serial Number not assigned`
 
 Worker never enters Serial Number.
@@ -1643,12 +1643,12 @@ Inputs and validation:
 - do not accept Supplier or Serial Number as client choices
 
 Atomic workflow:
-- derive the fixed Supplier from the request and require it still exists and is active
+- derive Supplier from the request; when non-null, require it still exists and is active
 - allocate the next permanent 7-digit Serial Number server-side
 - create exactly one active Product with `product_kind = 'component'`
-- create exactly one required active ProductSupplier relation to the request Supplier
+- when Supplier is non-null, create exactly one active ProductSupplier relation to it; otherwise create none
 - set only `ProcurementRequest.product_id`; preserve requested name, Supplier, quantities, Active/Partly Delivered status, resolution metadata, and creation metadata
-- create immutable audit history for Product creation, ProductSupplier creation, and Procurement linking using established domain conventions
+- create immutable audit history for Product creation, any ProductSupplier creation, and Procurement linking using established domain conventions
 - commit all mutations and audits atomically; required audit failure rolls everything back
 
 Concurrency and Inventory:
@@ -1673,8 +1673,8 @@ Fields:
 - editable required Name prefilled from `requested_name`
 - required free-text Category
 - optional active Brand
-- read-only/prefilled request Supplier
-- optional Catalog Number
+- read-only/prefilled request Supplier when assigned; otherwise show `Not assigned`
+- optional Catalog Number only when Supplier is assigned
 
 Serial:
 - generated automatically

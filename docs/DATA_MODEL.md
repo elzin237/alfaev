@@ -752,7 +752,8 @@ Fields:
   - surrounding whitespace is trimmed before persistence
   - nonblank
 - `supplier_id`
-  - required foreign key to Supplier with historical references preserved
+  - nullable foreign key to Supplier with historical references preserved
+  - `NULL` means Supplier was not selected at request time
 - `requested_quantity`
   - required whole-number pieces
   - greater than 0
@@ -799,14 +800,14 @@ Rules:
 
 ### Brand-new Product request
 - `product_id` starts as null
-- a worker provides the trimmed, nonblank `requested_name`, Supplier and Quantity
+- a worker provides the trimmed, nonblank `requested_name` and Quantity
 - request is clearly marked as not yet linked to a Product
 - Admin may execute `Create component from request`
 
 ### Supplier relation
-- every ProcurementRequest has one Supplier
-- trusted creation requires the Supplier to exist and be active at execution time
-- archived Suppliers cannot be selected for new requests
+- Procurement Request creation does not ask for or require Supplier and stores `supplier_id = NULL`
+- existing historical requests may retain a non-null Supplier reference
+- every non-null Supplier reference remains protected by the Supplier foreign key
 - later Supplier archival preserves the historical Supplier reference and request readability
 - Procurement history is never cascade-deleted
 
@@ -838,14 +839,14 @@ Trusted workflow:
 2. lock the ProcurementRequest and verify it remains `active` or `partly_delivered` with `product_id = NULL`; reject resolved or already-linked requests
 3. validate required trimmed, nonblank Product Name and free-text Category; Name may be prefilled from but may differ from immutable `requested_name`
 4. validate an optional supplied Brand exists and is active
-5. derive Supplier only from `ProcurementRequest.supplier_id` and require it still exists and is active
+5. derive Supplier only from `ProcurementRequest.supplier_id`; when non-null, require it still exists and is active
 6. allocate the next permanent 7-digit Serial Number server-side and create exactly one active Product with `product_kind = 'component'`
-7. create exactly one required active ProductSupplier relation to the request Supplier; normalize optional Catalog Number by trimming, storing blank as `NULL`, and preserving nonblank casing
+7. when Supplier is non-null, create exactly one active ProductSupplier relation to it and normalize optional Catalog Number by trimming, storing blank as `NULL`, and preserving nonblank casing; when Supplier is null, create neither a ProductSupplier relation nor Catalog Number
 8. set only `ProcurementRequest.product_id`; preserve requested name, Supplier, requested/delivered quantities, status, resolution metadata, and creation metadata
-9. create immutable audit history for Product creation, ProductSupplier creation, and Procurement linking
+9. create immutable audit history for Product creation, any ProductSupplier creation, and Procurement linking
 10. commit all domain mutations and required audits atomically
 
-The Product's request-time name snapshot remains unchanged even when the final Product Name differs. An archived request Supplier or supplied Brand cannot be used for this new Product/relationship. Competing Admin attempts on one request cannot create duplicate linked Products. Failed attempts persist no domain mutation or audit; consumed Serial sequence values are never reused.
+The Product's request-time name snapshot remains unchanged even when the final Product Name differs. A request with no Supplier can still create and link its Product without inventing a Supplier relationship. An archived non-null request Supplier or supplied Brand cannot be used for this new Product/relationship. Competing Admin attempts on one request cannot create duplicate linked Products. Failed attempts persist no domain mutation or audit; consumed Serial sequence values are never reused.
 
 Existing Product initialization creates one zero InventoryBalance automatically. This workflow creates no InventoryMovement and does not convert Delivered Quantity into stock; physical receipt remains a separate Admin Inventory operation.
 
@@ -1536,7 +1537,7 @@ WorkOrder
 
 ProcurementRequest
   ├─0..1 Product
-  └─1 Supplier
+  └─0..1 Supplier
 
 DocumentationRecord
   └─0..1 private PDF Storage object reference

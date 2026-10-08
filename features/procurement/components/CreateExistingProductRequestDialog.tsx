@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form";
 import type {
   CreateProcurementRequestForNewComponentInput,
   CreateProcurementRequestForProductInput,
-  ProcurementActiveSupplierChoice,
   ProcurementCreationResult,
   ProcurementProductChoice,
 } from "../services/procurementService";
@@ -20,13 +19,9 @@ interface CreateExistingProductRequestDialogProps {
   productSearch: string;
   onProductSearchChange: (search: string) => void;
   products: ProcurementProductChoice[];
-  suppliers: ProcurementActiveSupplierChoice[];
   isProductsLoading: boolean;
-  isSuppliersLoading: boolean;
   productLoadError: string | null;
-  supplierLoadError: string | null;
   onRetryProducts: () => void;
-  onRetrySuppliers: () => void;
   onClose: () => void;
   onSubmitExisting: (
     input: CreateProcurementRequestForProductInput,
@@ -41,7 +36,6 @@ const emptyValues: ProcurementRequestFormInput = {
   requestMode: "existing",
   productId: "",
   requestedName: "",
-  supplierId: "",
   requestedQuantity: "",
 };
 
@@ -50,13 +44,9 @@ function CreateExistingProductRequestDialog({
   productSearch,
   onProductSearchChange,
   products,
-  suppliers,
   isProductsLoading,
-  isSuppliersLoading,
   productLoadError,
-  supplierLoadError,
   onRetryProducts,
-  onRetrySuppliers,
   onClose,
   onSubmitExisting,
   onSubmitNewComponent,
@@ -65,7 +55,6 @@ function CreateExistingProductRequestDialog({
   const titleId = useId();
   const descriptionId = useId();
   const productErrorId = useId();
-  const supplierErrorId = useId();
   const quantityErrorId = useId();
   const searchRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
@@ -92,10 +81,9 @@ function CreateExistingProductRequestDialog({
   const selectedProduct = products.find(
     (product) => product.productId === selectedProductId,
   ) ?? null;
-  const choicesUnavailable = isSuppliersLoading || Boolean(supplierLoadError) ||
-    (requestMode === "existing" && (
-      isProductsLoading || Boolean(productLoadError)
-    ));
+  const choicesUnavailable = requestMode === "existing" && (
+    isProductsLoading || Boolean(productLoadError)
+  );
 
   const resetDialog = useCallback(() => {
     setSubmissionError(null);
@@ -161,12 +149,10 @@ function CreateExistingProductRequestDialog({
       const result = input.requestMode === "existing"
         ? await onSubmitExisting({
           productId: input.productId,
-          supplierId: input.supplierId,
           requestedQuantity: input.requestedQuantity,
         })
         : await onSubmitNewComponent({
           requestedName: input.requestedName,
-          supplierId: input.supplierId,
           requestedQuantity: input.requestedQuantity,
         });
       if (!result.ok) {
@@ -198,7 +184,7 @@ function CreateExistingProductRequestDialog({
           Add Procurement Request
         </h2>
         <p id={descriptionId} className="mt-2 text-sm leading-6 text-zinc-500">
-          Request an existing Product or a brand-new component from an active Supplier.
+          Request what is needed and how many pieces are required. A Supplier can remain unassigned.
         </p>
 
         <form
@@ -380,48 +366,6 @@ function CreateExistingProductRequestDialog({
               </div>
             </dl>
           </>}
-
-          <div>
-            <label
-              htmlFor="procurement-active-supplier"
-              className="block text-sm font-semibold text-zinc-800"
-            >
-              Supplier
-            </label>
-            {isSuppliersLoading ? (
-              <p role="status" className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">
-                Loading active Suppliers...
-              </p>
-            ) : supplierLoadError ? (
-              <div role="alert" className="mt-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                <p>{supplierLoadError}</p>
-                <button type="button" onClick={onRetrySuppliers} className="mt-2 font-semibold underline underline-offset-2">
-                  Try again
-                </button>
-              </div>
-            ) : (
-              <select
-                {...register("supplierId")}
-                id="procurement-active-supplier"
-                disabled={isSubmitting}
-                aria-invalid={Boolean(errors.supplierId)}
-                aria-describedby={errors.supplierId ? supplierErrorId : undefined}
-                className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
-              >
-                <option value="">Select a Supplier</option>
-                {suppliers.map((supplier) => (
-                  <option key={supplier.supplierId} value={supplier.supplierId}>
-                    {supplier.supplierName}
-                  </option>
-                ))}
-              </select>
-            )}
-            {errors.supplierId && (
-              <p id={supplierErrorId} className="mt-2 text-sm text-red-600">
-                {errors.supplierId.message}
-              </p>
-            )}
-          </div>
 
           <div>
             <label
