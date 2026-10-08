@@ -1,9 +1,13 @@
 import { useState, type RefObject } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Bell, LogOut, Menu, Search, UserCircle2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { LogOut, Menu, UserCircle2 } from "lucide-react";
 import { useNavigate } from "react-router";
 
 import { signOut } from "../../app/auth/authService";
+import { useAuth } from "../../app/auth/AuthProvider";
+import { hasPermission } from "../../app/auth/permissionService";
+import { permissionQueryKey } from "../../app/auth/permissionQueryKeys";
+import ProjectQuickSearch from "./ProjectQuickSearch";
 
 interface TopbarProps {
   sidebarOpen?: boolean;
@@ -18,8 +22,29 @@ function Topbar({
 }: TopbarProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { session, profile, isAdmin, isActive } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [logoutError, setLogoutError] = useState<string | null>(null);
+  const canCheckProjectPermission = Boolean(
+    session && profile?.isActive && isActive && !isAdmin,
+  );
+  const projectViewPermission = useQuery({
+    queryKey: permissionQueryKey(
+      session?.user.id,
+      profile?.id,
+      "projects.view",
+    ),
+    queryFn: () => hasPermission("projects.view"),
+    enabled: canCheckProjectPermission,
+    staleTime: 60_000,
+  });
+  const canSearchProjects = Boolean(
+    session && profile?.isActive && isActive && (
+      isAdmin || (
+        projectViewPermission.data?.ok && projectViewPermission.data.value
+      )
+    ),
+  );
 
   const handleLogout = async () => {
     if (isSigningOut) {
@@ -72,34 +97,27 @@ function Topbar({
         </div>
       </div>
 
-      <div className="flex items-center gap-3 lg:gap-4">
-        <div className="hidden h-11 w-80 items-center gap-2 rounded-xl border border-zinc-200 px-4 lg:flex">
-          <Search size={18} className="text-zinc-400" />
+      <div className="flex min-w-0 items-center gap-3 lg:gap-4">
+        <ProjectQuickSearch enabled={canSearchProjects} />
 
-          <input
-            type="text"
-            aria-label="Search projects"
-            placeholder="Pretraga projekata..."
-            className="w-full outline-none"
-          />
-        </div>
-
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-200"
-        >
-          <Bell size={18} />
-        </button>
-
-        <button
-          type="button"
-          aria-label="User account"
-          className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2"
-        >
-          <UserCircle2 size={22} />
-          <span className="hidden text-sm font-medium sm:block">Admin</span>
-        </button>
+        {profile && (
+          <div
+            aria-label={`Signed in as ${profile.fullName}${
+              isAdmin ? ", Admin" : ""
+            }`}
+            className="hidden min-w-0 items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 sm:flex"
+          >
+            <UserCircle2 size={22} aria-hidden="true" className="shrink-0" />
+            <span className="max-w-36 truncate text-sm font-medium text-zinc-800">
+              {profile.fullName}
+            </span>
+            {isAdmin && (
+              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-semibold text-zinc-600">
+                Admin
+              </span>
+            )}
+          </div>
+        )}
 
         <button
           type="button"

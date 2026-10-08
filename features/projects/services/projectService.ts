@@ -19,6 +19,12 @@ interface ProjectDetailRow extends ProjectListRow {
   updated_at: string;
 }
 
+interface ProjectSearchRow {
+  project_id: string;
+  name: string;
+  status: ProjectStatus;
+}
+
 export interface ProjectListItem {
   id: string;
   name: string;
@@ -33,6 +39,12 @@ export interface ProjectDetail extends ProjectListItem {
   updatedAt: string;
 }
 
+export interface ProjectSearchItem {
+  projectId: string;
+  name: string;
+  status: ProjectStatus;
+}
+
 export interface ProjectListError {
   code: "project_list_failed";
   message: string;
@@ -41,6 +53,15 @@ export interface ProjectListError {
 export type ProjectListResult =
   | { ok: true; value: ProjectListItem[] }
   | { ok: false; error: ProjectListError };
+
+export interface ProjectSearchError {
+  code: "project_search_failed";
+  message: string;
+}
+
+export type ProjectSearchResult =
+  | { ok: true; value: ProjectSearchItem[] }
+  | { ok: false; error: ProjectSearchError };
 
 export interface ProjectDetailError {
   code: "project_not_found" | "project_detail_failed";
@@ -175,6 +196,20 @@ function isProjectDetailRow(value: unknown): value is ProjectDetailRow {
     isIsoTimestamp(value.created_at) &&
     "updated_at" in value &&
     isIsoTimestamp(value.updated_at);
+}
+
+function isProjectSearchRow(value: unknown): value is ProjectSearchRow {
+  if (typeof value !== "object" || value === null) return false;
+
+  return (
+    "project_id" in value &&
+    typeof value.project_id === "string" &&
+    uuidPattern.test(value.project_id) &&
+    "name" in value &&
+    isTrimmedNonblank(value.name) &&
+    "status" in value &&
+    isProjectStatus(value.status)
+  );
 }
 
 function mapProjectDetail(row: ProjectDetailRow): ProjectDetail {
@@ -367,6 +402,54 @@ export async function listProjects(): Promise<ProjectListResult> {
     };
   } catch {
     return listFailure();
+  }
+}
+
+export async function searchProjects(
+  search: string,
+): Promise<ProjectSearchResult> {
+  const normalizedSearch = search.trim();
+
+  if (!normalizedSearch) {
+    return { ok: true, value: [] };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("search_projects", {
+      p_search: normalizedSearch,
+    });
+
+    if (
+      error ||
+      !Array.isArray(data) ||
+      data.length > 8 ||
+      !data.every(isProjectSearchRow)
+    ) {
+      return {
+        ok: false,
+        error: {
+          code: "project_search_failed",
+          message: "Projects could not be searched.",
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      value: data.map((row) => ({
+        projectId: row.project_id,
+        name: row.name,
+        status: row.status,
+      })),
+    };
+  } catch {
+    return {
+      ok: false,
+      error: {
+        code: "project_search_failed",
+        message: "Projects could not be searched.",
+      },
+    };
   }
 }
 

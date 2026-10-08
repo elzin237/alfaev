@@ -113,9 +113,13 @@ Topbar should remain lightweight.
 Expected responsibilities:
 
 - mobile Sidebar toggle
-- optional page/global search entry if retained
-- current user identity/profile access
+- bounded Project quick-search for active Admin or `projects.view` users
+- non-interactive current user identity, with Admin indicated only for Admin users
 - logout action
+
+The Project quick-search uses only the canonical Project name, returns a small
+bounded result set, and opens the existing Project detail route. The Topbar does
+not show placeholder notification or account-menu controls.
 
 Do not overload Topbar with module-specific actions.
 

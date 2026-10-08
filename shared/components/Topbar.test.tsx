@@ -8,13 +8,25 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const topbarMocks = vi.hoisted(() => ({
+  auth: {
+    session: { user: { id: "auth-user-1" } },
+    profile: {
+      id: "profile-1",
+      fullName: "Ada Admin",
+      isActive: true,
+    },
+    isAdmin: true,
+    isActive: true,
+  },
   clear: vi.fn(),
   navigate: vi.fn(),
   signOut: vi.fn(),
+  permissionResult: { ok: true, value: true },
 }));
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ clear: topbarMocks.clear }),
+  useQuery: () => ({ data: topbarMocks.permissionResult }),
 }));
 vi.mock("react-router", () => ({
   useNavigate: () => topbarMocks.navigate,
@@ -22,11 +34,28 @@ vi.mock("react-router", () => ({
 vi.mock("../../app/auth/authService", () => ({
   signOut: topbarMocks.signOut,
 }));
+vi.mock("../../app/auth/AuthProvider", () => ({
+  useAuth: () => topbarMocks.auth,
+}));
+vi.mock("./ProjectQuickSearch", () => ({
+  default: ({ enabled }: { enabled: boolean }) => enabled
+    ? <input aria-label="Search projects" />
+    : null,
+}));
 
 import Topbar from "./Topbar";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  topbarMocks.auth.session = { user: { id: "auth-user-1" } };
+  topbarMocks.auth.profile = {
+    id: "profile-1",
+    fullName: "Ada Admin",
+    isActive: true,
+  };
+  topbarMocks.auth.isAdmin = true;
+  topbarMocks.auth.isActive = true;
+  topbarMocks.permissionResult = { ok: true, value: true };
 });
 
 afterEach(() => {
@@ -44,7 +73,7 @@ describe("Topbar", () => {
     ).toBeInTheDocument();
   });
 
-  it("names icon controls and exposes mobile navigation state", () => {
+  it("exposes mobile navigation state without dead notification or account buttons", () => {
     const setSidebarOpen = vi.fn();
     render(<Topbar sidebarOpen={false} setSidebarOpen={setSidebarOpen} />);
 
@@ -53,15 +82,37 @@ describe("Topbar", () => {
     });
     expect(menuButton).toHaveAttribute("aria-controls", "app-sidebar");
     expect(menuButton).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Notifications" }))
-      .toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "User account" }))
-      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Notifications" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "User account" }))
+      .not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Search projects" }))
       .toBeInTheDocument();
+    expect(screen.getByLabelText("Signed in as Ada Admin, Admin"))
+      .toHaveTextContent("Ada Admin");
 
     fireEvent.click(menuButton);
     expect(setSidebarOpen).toHaveBeenCalledExactlyOnceWith(true);
+  });
+
+  it("renders truthful non-clickable identity and permission-aware Project search", () => {
+    topbarMocks.auth.profile = {
+      id: "profile-2",
+      fullName: "Nina Worker",
+      isActive: true,
+    };
+    topbarMocks.auth.isAdmin = false;
+    topbarMocks.permissionResult = { ok: true, value: false };
+
+    render(<Topbar setSidebarOpen={vi.fn()} />);
+
+    const identity = screen.getByLabelText("Signed in as Nina Worker");
+    expect(identity).toHaveTextContent("Nina Worker");
+    expect(identity).not.toHaveTextContent("Admin");
+    expect(screen.queryByRole("button", { name: /Nina Worker/i }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Search projects" }))
+      .not.toBeInTheDocument();
   });
 
   it("signs out, clears protected query data, and redirects to login", async () => {

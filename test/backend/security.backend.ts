@@ -21,6 +21,7 @@ import { registerInventoryPrimitiveTests, registerManualInventoryAdjustmentTests
 import { registerInventoryReadsTests } from "./inventory-reads.suite";
 import { registerProductSuppliersTests } from "./product-suppliers.suite";
 import { registerProjectsTests } from "./projects.suite";
+import { registerProjectSearchTests } from "./project-search.suite";
 import { registerProjectPlanningTests } from "./project-planning.suite";
 import { registerProjectMaterialUsageTests } from "./project-material-usage.suite";
 import { registerUnifiedProjectMaterialUsageTests } from "./project-material-usage-unified.suite";
@@ -72,6 +73,7 @@ describe("Supabase security helpers", () => {
   registerManualInventoryAdjustmentTests(requireHarness);
   registerInventoryReadsTests(requireHarness);
   registerProjectsTests(requireHarness);
+  registerProjectSearchTests(requireHarness);
   registerProjectPlanningTests(requireHarness);
   registerProjectMaterialUsageTests(requireHarness);
   registerUnifiedProjectMaterialUsageTests(requireHarness);

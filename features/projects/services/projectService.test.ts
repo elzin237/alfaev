@@ -21,6 +21,7 @@ import {
   getProject,
   listProjects,
   reopenProject,
+  searchProjects,
   updateProject,
 } from "./projectService";
 
@@ -35,6 +36,87 @@ beforeEach(() => {
 });
 
 describe("projectService", () => {
+  it("uses the bounded trusted Project search and preserves backend ordering", async () => {
+    projectServiceMocks.rpc.mockResolvedValue({
+      data: [
+        {
+          project_id: "00000000-0000-4000-8000-000000000002",
+          name: "Alpha Control Upgrade",
+          status: "in_progress",
+        },
+        {
+          project_id: "00000000-0000-4000-8000-000000000001",
+          name: "Central Alpha Cabinet",
+          status: "planned",
+        },
+      ],
+      error: null,
+    });
+
+    await expect(searchProjects("  Alpha  ")).resolves.toEqual({
+      ok: true,
+      value: [
+        {
+          projectId: "00000000-0000-4000-8000-000000000002",
+          name: "Alpha Control Upgrade",
+          status: "in_progress",
+        },
+        {
+          projectId: "00000000-0000-4000-8000-000000000001",
+          name: "Central Alpha Cabinet",
+          status: "planned",
+        },
+      ],
+    });
+    expect(projectServiceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "search_projects",
+      { p_search: "Alpha" },
+    );
+    expect(projectServiceMocks.from).not.toHaveBeenCalled();
+  });
+
+  it("returns no Project search rows without calling the backend for blank input", async () => {
+    await expect(searchProjects("   ")).resolves.toEqual({
+      ok: true,
+      value: [],
+    });
+    expect(projectServiceMocks.rpc).not.toHaveBeenCalled();
+  });
+
+  it("fails Project search safely for provider, thrown, and malformed-row failures", async () => {
+    const safeFailure = {
+      ok: false,
+      error: {
+        code: "project_search_failed",
+        message: "Projects could not be searched.",
+      },
+    };
+    projectServiceMocks.rpc
+      .mockResolvedValueOnce({ data: null, error: { message: "raw database" } })
+      .mockRejectedValueOnce(new Error("raw network"))
+      .mockResolvedValueOnce({
+        data: [{
+          project_id: "not-a-uuid",
+          name: " Project ",
+          status: "unknown",
+        }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 9 }, (_, index) => ({
+          project_id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          name: `Project ${index}`,
+          status: "planned",
+        })),
+        error: null,
+      });
+
+    await expect(searchProjects("Alpha")).resolves.toEqual(safeFailure);
+    await expect(searchProjects("Alpha")).resolves.toEqual(safeFailure);
+    await expect(searchProjects("Alpha")).resolves.toEqual(safeFailure);
+    await expect(searchProjects("Alpha")).resolves.toEqual(safeFailure);
+  });
+
   it("reads the RLS-protected Projects table, maps canonical fields, and orders deterministically", async () => {
     projectServiceMocks.select.mockResolvedValue({
       data: [
