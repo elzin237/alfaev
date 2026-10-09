@@ -46,19 +46,6 @@ export async function fetchDocumentationPdf(recordId: string, action: "open" | "
   return { ok: true, value: data };
 }
 
-export function openPdfBlob(blob: Blob): boolean {
-  const url = URL.createObjectURL(blob);
-  const windowRef = window.open(url, "_blank");
-  if (!windowRef) {
-    URL.revokeObjectURL(url);
-    return false;
-  }
-  windowRef.opener = null;
-  // Give the new tab time to load before releasing the temporary URL.
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return true;
-}
-
 export function downloadPdfBlob(blob: Blob, recordId: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

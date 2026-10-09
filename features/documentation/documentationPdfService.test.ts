@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../../lib/supabase/client", () => ({ supabase: { functions: { invoke: mocks.invoke } } }));
-import { downloadPdfBlob, fetchDocumentationPdf, openPdfBlob, removeDocumentationPdf, uploadDocumentationPdf, validatePdfFile } from "./documentationPdfService";
+import { downloadPdfBlob, fetchDocumentationPdf, removeDocumentationPdf, uploadDocumentationPdf, validatePdfFile } from "./documentationPdfService";
 
 beforeEach(() => vi.resetAllMocks());
 
@@ -31,29 +31,20 @@ describe("Documentation private PDF client", () => {
     ]);
   });
 
+  it("maps private access failures to safe copy without exposing backend details", async () => {
+    mocks.invoke.mockResolvedValue({
+      data: { message: "Only an active administrator may access Documentation PDFs." },
+      error: { message: "FunctionsHttpError: permission denied for storage.objects" },
+    });
+    expect(await fetchDocumentationPdf("id", "open")).toEqual({
+      ok: false,
+      error: "PDF could not be loaded. Please try again.",
+    });
+  });
+
   it("rejects oversized and non-PDF files before Edge call", () => {
     expect(validatePdfFile(new File(["x"], "x.txt", { type: "text/plain" }))).not.toBeNull();
     expect(validatePdfFile(new File(["x"], "x.pdf", { type: "application/pdf" }))).toBeNull();
-  });
-
-  it("opens a temporary PDF URL, handles popup failure, and revokes it", () => {
-    const pdf = new Blob(["%PDF-"], { type: "application/pdf" });
-    const create = vi.fn().mockReturnValue("blob:test-pdf");
-    const revoke = vi.fn();
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
-    const originalCreate = URL.createObjectURL;
-    const originalRevoke = URL.revokeObjectURL;
-    URL.createObjectURL = create;
-    URL.revokeObjectURL = revoke;
-    try {
-      expect(openPdfBlob(pdf)).toBe(false);
-      expect(open).toHaveBeenCalledWith("blob:test-pdf", "_blank");
-      expect(revoke).toHaveBeenCalledWith("blob:test-pdf");
-    } finally {
-      open.mockRestore();
-      URL.createObjectURL = originalCreate;
-      URL.revokeObjectURL = originalRevoke;
-    }
   });
 
   it("downloads with deterministic filename and releases the URL", () => {

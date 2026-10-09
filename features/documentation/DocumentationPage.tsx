@@ -8,6 +8,8 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import DocumentationFormDialog from "./DocumentationFormDialog";
+import DocumentationPdfActionsMenu from "./DocumentationPdfActionsMenu";
+import DocumentationPdfViewerDialog from "./DocumentationPdfViewerDialog";
 import { documentationListKey } from "./documentationQueryKeys";
 import {
   archiveDocumentationRecord, categoryLabels, createDocumentationRecord,
@@ -15,7 +17,7 @@ import {
   type DocumentationInput, type DocumentationRecord, type DocumentationResult,
 } from "./documentationService";
 import {
-  downloadPdfBlob, fetchDocumentationPdf, openPdfBlob, removeDocumentationPdf,
+  downloadPdfBlob, fetchDocumentationPdf, removeDocumentationPdf,
   uploadDocumentationPdf, validatePdfFile,
 } from "./documentationPdfService";
 
@@ -34,6 +36,7 @@ function DocumentationPage() {
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [viewerRecord, setViewerRecord] = useState<DocumentationRecord | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadRecordRef = useRef<string | null>(null);
 
@@ -66,17 +69,15 @@ function DocumentationPage() {
     } finally { busyRef.current = false; setBusy(false); }
   }
 
-  async function handlePdf(record: DocumentationRecord, action: "open" | "download") {
+  async function handleDownload(record: DocumentationRecord) {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const result = await fetchDocumentationPdf(record.id, action);
+      const result = await fetchDocumentationPdf(record.id, "download");
       if (!result.ok) { setError(result.error); return; }
-      if (action === "open") {
-        if (!openPdfBlob(result.value)) setError("Your browser blocked the PDF window. Please allow popups and try again.");
-      } else downloadPdfBlob(result.value, record.id);
+      downloadPdfBlob(result.value, record.id);
     } finally { busyRef.current = false; setBusy(false); }
   }
 
@@ -119,17 +120,23 @@ function DocumentationPage() {
         <td className="px-4 py-3">{record.pdfStoragePath ? "Attached" : "None"}</td>
         <td className="px-4 py-3"><StatusBadge label={record.isActive ? "Active" : "Archived"}
           tone={record.isActive ? "success" : "neutral"} /></td>
-        <td className="min-w-64 px-4 py-3"><div className="flex flex-wrap gap-2">
+        <td className="min-w-[32rem] px-4 py-3"><div className="flex flex-wrap items-center gap-2">
           {record.pdfStoragePath && <>
-            <button type="button" disabled={busy} onClick={() => void handlePdf(record, "open")}>Open</button>
-            <button type="button" disabled={busy} onClick={() => void handlePdf(record, "download")}>Download</button>
+            <button type="button" disabled={busy || viewerRecord !== null}
+              onClick={() => setViewerRecord((current) => current ?? record)}
+              className="inline-flex h-9 items-center rounded-lg border border-red-600 bg-white px-3 text-sm font-semibold text-red-700 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">Open</button>
+            <button type="button" disabled={busy || viewerRecord !== null}
+              onClick={() => void handleDownload(record)}
+              className="inline-flex h-9 items-center rounded-lg border border-zinc-300 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">Download</button>
           </>}
           {record.isActive && <>
-            <button type="button" disabled={busy} onClick={() => { setEditing(record); setFormOpen(true); }}>Edit</button>
-            <button type="button" disabled={busy} onClick={() => { uploadRecordRef.current = record.id; fileInputRef.current?.click(); }}>
-              {record.pdfStoragePath ? "Replace PDF" : "Upload PDF"}</button>
-            {record.pdfStoragePath && <button type="button" disabled={busy} onClick={() => setConfirmation({ kind: "remove", record })}>Remove PDF</button>}
-            <button type="button" disabled={busy} onClick={() => setConfirmation({ kind: "archive", record })}>Archive</button>
+            <button type="button" disabled={busy} onClick={() => { setEditing(record); setFormOpen(true); }}
+              className="inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">Edit</button>
+            <DocumentationPdfActionsMenu recordName={record.name} hasPdf={Boolean(record.pdfStoragePath)}
+              disabled={busy} onUpload={() => { uploadRecordRef.current = record.id; fileInputRef.current?.click(); }}
+              onRemove={() => setConfirmation({ kind: "remove", record })} />
+            <button type="button" disabled={busy} onClick={() => setConfirmation({ kind: "archive", record })}
+              className="ml-auto inline-flex h-9 items-center rounded-lg px-3 text-sm font-medium text-red-700 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50">Archive</button>
           </>}
         </div></td>
       </tr>)}</tbody>
@@ -149,6 +156,8 @@ function DocumentationPage() {
       onSuccess={(pdfFailed) => setNotice(pdfFailed
         ? "Document created, but PDF upload failed. You can attach it later."
         : editing ? "Document updated." : "Document created.")} />
+    {viewerRecord && <DocumentationPdfViewerDialog record={viewerRecord}
+      onClose={() => setViewerRecord(null)} />}
     <ConfirmDialog open={confirmation !== null} title={confirmation?.kind === "archive" ? "Archive Document" : "Remove PDF"}
       description={confirmation?.kind === "archive"
         ? "This document becomes historical and read-only. Its attached PDF remains preserved."

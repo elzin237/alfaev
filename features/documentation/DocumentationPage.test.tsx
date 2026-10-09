@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(), invalidateQueries: vi.fn(), refetch: vi.fn(),
   list: vi.fn(), create: vi.fn(), update: vi.fn(), archive: vi.fn(),
-  upload: vi.fn(), remove: vi.fn(), fetch: vi.fn(), useAuth: vi.fn(),
+  upload: vi.fn(), remove: vi.fn(), fetch: vi.fn(), download: vi.fn(), useAuth: vi.fn(),
 }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: mocks.useQuery,
@@ -23,6 +23,7 @@ vi.mock("./documentationPdfService", async (importOriginal) => ({
   uploadDocumentationPdf: mocks.upload,
   removeDocumentationPdf: mocks.remove,
   fetchDocumentationPdf: mocks.fetch,
+  downloadPdfBlob: mocks.download,
 }));
 
 import DocumentationPage from "./DocumentationPage";
@@ -49,6 +50,11 @@ beforeEach(() => {
   mocks.invalidateQueries.mockResolvedValue(undefined);
   mocks.create.mockResolvedValue({ ok: true, value: "00000000-0000-0000-0000-000000000003" });
   mocks.upload.mockResolvedValue({ ok: true, value: undefined });
+  mocks.remove.mockResolvedValue({ ok: true, value: undefined });
+  mocks.fetch.mockResolvedValue({
+    ok: true,
+    value: new Blob(["%PDF-1.7"], { type: "application/pdf" }),
+  });
   mocks.archive.mockResolvedValue({ ok: true, value: active.id });
   setRows([active, archived]);
 });
@@ -67,6 +73,155 @@ describe("Dokumentacija page", () => {
     expect(archivedRow).not.toHaveTextContent("Edit");
     expect(archivedRow).not.toHaveTextContent("Remove PDF");
     expect(archivedRow).not.toHaveTextContent("Replace PDF");
+    expect(within(archivedRow!).queryByRole("button", { name: /PDF actions/ })).not.toBeInTheDocument();
+  });
+
+  it("uses a clear action hierarchy and keeps PDF maintenance inside its menu", async () => {
+    render(<DocumentationPage />);
+    const activeRow = screen.getByText("Import invoice").closest("tr")!;
+    const open = within(activeRow).getByRole("button", { name: "Open" });
+    const download = within(activeRow).getByRole("button", { name: "Download" });
+    const edit = within(activeRow).getByRole("button", { name: "Edit" });
+    const pdfMenuButton = within(activeRow).getByRole("button", {
+      name: "PDF actions for Import invoice",
+    });
+    const archive = within(activeRow).getByRole("button", { name: "Archive" });
+
+    expect(open).toHaveClass("border-red-600");
+    expect(download).toHaveClass("border-zinc-300");
+    expect(edit).not.toHaveClass("border");
+    expect(archive).toHaveClass("text-red-700");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(pdfMenuButton).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(pdfMenuButton);
+    const menu = await screen.findByRole("menu", { name: "PDF actions for Import invoice" });
+    expect(pdfMenuButton).toHaveAttribute("aria-expanded", "true");
+    const replace = within(menu).getByRole("menuitem", { name: "Replace PDF" });
+    expect(replace).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Remove PDF" })).toHaveClass("text-red-700");
+    expect(within(menu).queryByRole("menuitem", { name: "Archive" })).not.toBeInTheDocument();
+    expect(archive).toBeInTheDocument();
+    const fileInputClick = vi.spyOn(screen.getByLabelText("Select PDF"), "click");
+    fireEvent.click(replace);
+    expect(fileInputClick).toHaveBeenCalledOnce();
+  });
+
+  it("preserves Remove PDF confirmation and does not remove from the menu immediately", async () => {
+    render(<DocumentationPage />);
+    const activeRow = screen.getByText("Import invoice").closest("tr")!;
+    fireEvent.click(within(activeRow).getByRole("button", { name: "PDF actions for Import invoice" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Remove PDF" }));
+
+    expect(mocks.remove).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("dialog", { name: "Remove PDF" });
+    expect(dialog).toHaveTextContent("Remove this PDF attachment");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove PDF" }));
+    await waitFor(() => expect(mocks.remove).toHaveBeenCalledExactlyOnceWith(active.id));
+    expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["documentation", "admin-profile", "list"],
+      exact: true,
+    });
+  });
+
+  it("supports keyboard menu navigation, Escape, and outside-click closing", async () => {
+    render(<DocumentationPage />);
+    const activeRow = screen.getByText("Import invoice").closest("tr")!;
+    const trigger = within(activeRow).getByRole("button", { name: "PDF actions for Import invoice" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+
+    const replace = await screen.findByRole("menuitem", { name: "Replace PDF" });
+    const remove = screen.getByRole("menuitem", { name: "Remove PDF" });
+    await waitFor(() => expect(replace).toHaveFocus());
+    fireEvent.keyDown(replace, { key: "ArrowDown" });
+    expect(remove).toHaveFocus();
+    fireEvent.keyDown(remove, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens an ephemeral in-app viewer, restores focus, and refetches after reopening", async () => {
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    const create = vi.fn()
+      .mockReturnValueOnce("blob:documentation-first")
+      .mockReturnValueOnce("blob:documentation-second");
+    const revoke = vi.fn();
+    const windowOpen = vi.spyOn(window, "open");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: create });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: revoke });
+    try {
+      render(<DocumentationPage />);
+      const activeRow = screen.getByText("Import invoice").closest("tr")!;
+      const open = within(activeRow).getByRole("button", { name: "Open" });
+      open.focus();
+      fireEvent.click(open);
+
+      expect(screen.getByText("Preparing document PDF...")).toBeInTheDocument();
+      expect(await screen.findByTitle("Import invoice PDF"))
+        .toHaveAttribute("src", "blob:documentation-first");
+      expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(active.id, "open");
+      expect(windowOpen).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Close PDF viewer" }));
+      await waitFor(() => expect(open).toHaveFocus());
+      expect(revoke).toHaveBeenCalledWith("blob:documentation-first");
+
+      fireEvent.click(open);
+      expect(await screen.findByTitle("Import invoice PDF"))
+        .toHaveAttribute("src", "blob:documentation-second");
+      expect(mocks.fetch).toHaveBeenCalledTimes(2);
+      expect(within(activeRow).getByRole("button", { name: "Open" })).toBeDisabled();
+    } finally {
+      windowOpen.mockRestore();
+      Object.defineProperty(URL, "createObjectURL", { configurable: true, value: originalCreate });
+      Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: originalRevoke });
+    }
+  });
+
+  it("keeps Download separate and does not offer PDF actions without an attachment", async () => {
+    render(<DocumentationPage />);
+    const activeRow = screen.getByText("Import invoice").closest("tr")!;
+    fireEvent.click(within(activeRow).getByRole("button", { name: "Download" }));
+    await waitFor(() => expect(mocks.fetch).toHaveBeenCalledExactlyOnceWith(active.id, "download"));
+    expect(mocks.download).toHaveBeenCalledWith(expect.any(Blob), active.id);
+    expect(screen.queryByRole("dialog", { name: "Document PDF" })).not.toBeInTheDocument();
+
+    cleanup();
+    setRows([{ ...active, pdfStoragePath: null }]);
+    render(<DocumentationPage />);
+    const noPdfRow = screen.getByText("Import invoice").closest("tr")!;
+    expect(noPdfRow).toHaveTextContent("None");
+    expect(within(noPdfRow).queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(within(noPdfRow).queryByRole("button", { name: "Download" })).not.toBeInTheDocument();
+    const pdfMenuButton = within(noPdfRow).getByRole("button", {
+      name: "PDF actions for Import invoice",
+    });
+    fireEvent.click(pdfMenuButton);
+    const menu = screen.getByRole("menu", { name: "PDF actions for Import invoice" });
+    expect(within(menu).getByRole("menuitem", { name: "Upload PDF" })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "Replace PDF" })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: "Remove PDF" })).not.toBeInTheDocument();
+  });
+
+  it("shows a safe access failure inside the viewer without raw authorization details", async () => {
+    mocks.fetch.mockResolvedValue({
+      ok: false,
+      error: "PDF could not be loaded. Please try again.",
+    });
+    render(<DocumentationPage />);
+    fireEvent.click(within(screen.getByText("Import invoice").closest("tr")!)
+      .getByRole("button", { name: "Open" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "PDF could not be loaded. Please try again.",
+    );
+    expect(screen.queryByText(/permission denied|service role|popup/i)).not.toBeInTheDocument();
   });
 
   it("handles loading, retryable error and empty states", () => {
