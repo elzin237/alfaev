@@ -66,9 +66,9 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
            is_active, created_by_user_id, updated_by_user_id,
            archived_at, archived_by_user_id
          ) values
-           ($1::uuid, $2::text, $3::text, 'Components', $7::uuid,
+           ($1::uuid, $2::text, $3::text, $9::text, $7::uuid,
             'component', true, $8::uuid, $8::uuid, null, null),
-           ($4::uuid, $5::text, $6::text, 'Historical', null,
+           ($4::uuid, $5::text, $6::text, $10::text, null,
             'pcb_finished_good', false, $8::uuid, $8::uuid,
             pg_catalog.now(), $8::uuid)`,
         [
@@ -80,6 +80,8 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
           `Archived ${token} Controller`,
           brandId,
           actorId,
+          `Power Distribution ${token}`,
+          `Legacy Control ${token}`,
         ],
       );
       await database.query(
@@ -172,6 +174,19 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
       expect(catalogMatches.filter((row) => row.id === activeProductId))
         .toHaveLength(1);
 
+      const categoryMatch = await searchAs(
+        fixture.actors.brandManager.authUserId,
+        `dIsTrIbUtIoN ${token.toUpperCase()}`,
+      );
+      expect(categoryMatch.map((row) => row.id)).toEqual([activeProductId]);
+
+      const archivedCategoryMatch = await searchAs(
+        fixture.actors.admin.authUserId,
+        `lEgAcY cOnTrOl ${token.toUpperCase()}`,
+      );
+      expect(archivedCategoryMatch.map((row) => row.id))
+        .toEqual([archivedProductId]);
+
       const historicalCatalog = await searchAs(
         fixture.actors.admin.authUserId,
         `historical-${token}`,
@@ -189,7 +204,7 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
       const activeResult = nameMatch[0];
       expect(activeResult).toEqual({
         brand_name: `Search Brand ${token}`,
-        category: "Components",
+        category: `Power Distribution ${token}`,
         id: activeProductId,
         is_active: true,
         name: `Alpha ${token} Sensor %_`,
@@ -227,12 +242,14 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
 
       const infrastructure = await database.query<{
         catalog_index: string | null;
+        category_index: string | null;
         extension_schema: string;
         function_definition: string;
         name_index: string | null;
       }>(
         `select
            pg_catalog.pg_get_indexdef(name_index.indexrelid) as name_index,
+           pg_catalog.pg_get_indexdef(category_index.indexrelid) as category_index,
            pg_catalog.pg_get_indexdef(catalog_index.indexrelid) as catalog_index,
            extension_namespace.nspname as extension_schema,
            pg_catalog.pg_get_functiondef(search_function.oid) as function_definition
@@ -252,6 +269,10 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
          left join pg_catalog.pg_index as name_index
            on name_index.indrelid = product_table.oid
           and name_index.indexrelid = 'public.products_name_search_trgm_idx'::regclass
+         left join pg_catalog.pg_index as category_index
+           on category_index.indrelid = product_table.oid
+          and category_index.indexrelid =
+            'public.products_category_search_trgm_idx'::regclass
          left join pg_catalog.pg_class as relation_table
            on relation_table.relname = 'product_suppliers'
          left join pg_catalog.pg_namespace as relation_namespace
@@ -266,12 +287,16 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
       expect(infrastructure.rows).toHaveLength(1);
       expect(infrastructure.rows[0]?.extension_schema).toBe("extensions");
       expect(infrastructure.rows[0]?.name_index).toContain("gin_trgm_ops");
+      expect(infrastructure.rows[0]?.category_index).toContain("gin_trgm_ops");
       expect(infrastructure.rows[0]?.catalog_index).toContain("gin_trgm_ops");
       expect(infrastructure.rows[0]?.function_definition).toContain(
         "SECURITY DEFINER",
       );
       expect(infrastructure.rows[0]?.function_definition).toContain(
         "SET search_path TO ''",
+      );
+      expect(infrastructure.rows[0]?.function_definition).toContain(
+        "lower(product.category)",
       );
     });
 

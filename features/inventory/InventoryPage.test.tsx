@@ -289,6 +289,10 @@ describe("InventoryPage", () => {
     renderInventory();
 
     const search = screen.getByRole("searchbox", { name: "Search Products" });
+    expect(search).toHaveAttribute(
+      "placeholder",
+      "Name, Category, Serial Number / Šifra, or Catalog Number",
+    );
     expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
     expect(screen.getByRole("heading", { name: "No Products found" }))
       .toBeInTheDocument();
