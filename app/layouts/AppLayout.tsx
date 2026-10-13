@@ -9,21 +9,21 @@ function AppLayout() {
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f4f5f7]">
+    <div className="flex min-h-screen min-h-dvh bg-[#f4f5f7]">
       <Sidebar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
         returnFocusRef={sidebarToggleRef}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-screen min-h-dvh min-w-0 flex-1 flex-col">
         <Topbar
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
           sidebarToggleRef={sidebarToggleRef}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8">
+        <main className="flex-1 p-4 lg:p-8">
           <AppRouter />
         </main>
       </div>

@@ -166,10 +166,11 @@ function Sidebar({
         aria-hidden={!isDesktop && !sidebarOpen ? "true" : undefined}
         inert={!isDesktop && !sidebarOpen ? true : undefined}
         className={`
-          fixed left-0 top-0 z-50 h-screen w-72 overflow-y-auto bg-[#202225] text-white
+          fixed left-0 top-0 z-50 h-dvh w-72 overflow-y-auto bg-[#202225] text-white
           transition-transform duration-300
           ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
-lg:relative lg:h-screen lg:translate-x-0        `}
+          lg:sticky lg:top-0 lg:h-dvh lg:shrink-0 lg:translate-x-0
+        `}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-6 py-6">
           <div>

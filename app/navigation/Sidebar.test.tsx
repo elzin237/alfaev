@@ -117,6 +117,18 @@ afterEach(() => {
 });
 
 describe("Sidebar permission visibility", () => {
+  it("fills the dynamic viewport and keeps its own navigation scroll", () => {
+    renderSidebar();
+
+    expect(document.querySelector("#app-sidebar")).toHaveClass(
+      "h-dvh",
+      "overflow-y-auto",
+      "lg:sticky",
+      "lg:h-dvh",
+      "lg:shrink-0",
+    );
+  });
+
   it("shows the 12 canonical items to an active Admin in order", () => {
     sidebarMocks.useAuth.mockReturnValue(
       createAuthState({
