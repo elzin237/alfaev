@@ -31,6 +31,12 @@ function renderDialog(options: {
     <InventoryAdjustmentDialog
       open
       currentQuantity={options.currentQuantity ?? 10}
+      sourceChoices={[{
+        productSupplierId: "relation-1",
+        supplierName: "IBP",
+        catalogNumber: "CAT-100",
+        description: "Control relay",
+      }]}
       onClose={onClose}
       onSubmit={onSubmit}
       onSucceeded={onSucceeded}
@@ -61,6 +67,9 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(within(dialog).getByLabelText("Quantity"), {
       target: { value: "3" },
     });
+    fireEvent.change(within(dialog).getByLabelText("Supplier Catalog Source"), {
+      target: { value: "relation-1" },
+    });
     enterReason();
 
     expect(within(dialog).getByText("+3")).toBeInTheDocument();
@@ -71,6 +80,7 @@ describe("InventoryAdjustmentDialog", () => {
       adjustmentType: "add",
       quantity: 3,
       reason: "Cycle count",
+      productSupplierId: "relation-1",
     }));
     expect(onSucceeded).toHaveBeenCalledWith(successfulAdjustment.value);
     expect(onClose).toHaveBeenCalledOnce();
@@ -120,6 +130,64 @@ describe("InventoryAdjustmentDialog", () => {
       adjustmentType: "correction",
       quantity: 0,
       reason: "Correct to zero",
+      productSupplierId: null,
+    }));
+  });
+
+  it("shows the exact ProductSupplier source only for Add and upward Correction", async () => {
+    const { onSubmit } = renderDialog();
+    expect(screen.getByRole("option", {
+      name: "IBP — CAT-100 — Control relay",
+    })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Quantity"), {
+      target: { value: "2" },
+    });
+    enterReason("Inbound");
+    fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Select the Supplier Catalog Source for inbound stock.",
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Adjustment Type"), {
+      target: { value: "correction" },
+    });
+    fireEvent.change(screen.getByLabelText("Quantity"), {
+      target: { value: "12" },
+    });
+    expect(screen.getByLabelText("Supplier Catalog Source")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+      target: { value: "relation-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      adjustmentType: "correction",
+      quantity: 12,
+      reason: "Inbound",
+      productSupplierId: "relation-1",
+    }));
+  });
+
+  it("never asks for a new source on Remove or downward Correction", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(successfulAdjustment);
+    renderDialog({ onSubmit });
+    fireEvent.change(screen.getByLabelText("Adjustment Type"), {
+      target: { value: "correction" },
+    });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "8" } });
+    expect(screen.queryByLabelText("Supplier Catalog Source")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Adjustment Type"), {
+      target: { value: "remove" },
+    });
+    expect(screen.queryByLabelText("Supplier Catalog Source")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
+    enterReason("Outbound");
+    fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
+      adjustmentType: "remove",
+      quantity: 2,
+      reason: "Outbound",
+      productSupplierId: null,
     }));
   });
 
@@ -167,6 +235,9 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), {
       target: { value: "1" },
     });
+    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+      target: { value: "relation-1" },
+    });
     enterReason("Delivery");
     const submit = screen.getByRole("button", { name: "Adjust Inventory" });
     fireEvent.click(submit);
@@ -189,6 +260,9 @@ describe("InventoryAdjustmentDialog", () => {
     renderDialog({ onSubmit: failedSubmit });
     fireEvent.change(screen.getByLabelText("Quantity"), {
       target: { value: "1" },
+    });
+    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+      target: { value: "relation-1" },
     });
     fireEvent.change(screen.getByLabelText("Reason"), {
       target: { value: "Reason" },

@@ -11,6 +11,7 @@ import InventoryHistorySection from "./components/InventoryHistorySection";
 import ProductBarcodeSection from "./components/ProductBarcodeSection";
 import ProductEditDialog from "./components/ProductEditDialog";
 import ProductSuppliersSection from "./components/ProductSuppliersSection";
+import SupplierStockHistorySection from "./components/SupplierStockHistorySection";
 import { useProductDetail } from "./hooks/useProductDetail";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -192,6 +193,8 @@ function ProductDetailPage() {
           productName={product.name}
           productIsActive={product.isActive}
         />
+
+        <SupplierStockHistorySection productId={product.id} />
 
         <ProductEditDialog
           open={isEditOpen}

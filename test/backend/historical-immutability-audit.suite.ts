@@ -6,6 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadBackendTestEnvironment } from "./env";
 import { createTestSerialNumber } from "./helpers/serial";
+import {
+  assertInventorySourceInvariant,
+  createSupplierSourceFixture,
+  getWorkOrderAllocationFingerprint,
+} from "./helpers/inventory-provenance";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 import {
   actAs,
@@ -119,9 +124,14 @@ async function finishWorkOrder(
   const row = (await database.query<{ work_order_pdf_id: string }>(
     `select finished.work_order_pdf_id
      from public.finish_work_order(
-       $1::uuid, $2::timestamptz, $3::text, null::text
+       $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
      ) as finished`,
-    [workOrderId, expectedUpdatedAt, storageReference],
+    [
+      workOrderId,
+      expectedUpdatedAt,
+      storageReference,
+      await getWorkOrderAllocationFingerprint(database, workOrderId),
+    ],
   )).rows[0];
   if (!row) throw new Error("Task 149 Finish returned no row");
   await resetRole(database);
@@ -167,6 +177,138 @@ export function registerHistoricalImmutabilityAuditTests(
       await removeStorageFixtures();
     });
 
+    it.skipIf(process.env.SUPPLIER_PROVENANCE_MIGRATIONS !== "1")(
+      "keeps Supplier lot snapshots and outbound allocations immutable after source edits and archival",
+      async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const product = await createProduct(database, admin.profileId);
+          const source = await createSupplierSourceFixture(database, admin, product.id, {
+            catalogNumber: "TASK149-CATALOG-OLD",
+            description: "Task 149 original source description",
+            supplierName: "Task 149 Original Supplier",
+          });
+
+          await actAs(database, admin);
+          const inboundMovementId = (await database.query<{ movement_id: string }>(
+            `select movement_id
+             from public.manual_adjust_inventory(
+               $1::uuid, 'add', 5::bigint, 'Task 149 immutable source lot', $2::uuid
+             )`,
+            [product.id, source.productSupplierId],
+          )).rows[0]?.movement_id;
+          await resetRole(database);
+          if (!inboundMovementId) throw new Error("Task 149 source movement unavailable");
+
+          await actAs(database, admin);
+          await database.query(
+            "select public.update_product_supplier($1::uuid, $2::text, $3::text)",
+            [
+              source.productSupplierId,
+              "TASK149-CATALOG-NEW",
+              "Task 149 changed source description",
+            ],
+          );
+          await database.query(
+            `select public.update_supplier(
+               $1::uuid, 'Task 149 Renamed Supplier', 'Bosnia and Herzegovina',
+               null, null, null
+             )`,
+            [source.supplierId],
+          );
+          await database.query(
+            "select public.archive_product_supplier($1::uuid)",
+            [source.productSupplierId],
+          );
+          await resetRole(database);
+
+          await actAs(database, admin);
+          const outboundMovementId = (await database.query<{ movement_id: string }>(
+            `select movement_id
+             from public.manual_adjust_inventory(
+               $1::uuid, 'remove', 2::bigint, 'Task 149 immutable allocation', null
+             )`,
+            [product.id],
+          )).rows[0]?.movement_id;
+          await resetRole(database);
+          if (!outboundMovementId) throw new Error("Task 149 allocation movement unavailable");
+
+          const lot = (await database.query<{
+            catalog_number_snapshot: string;
+            id: string;
+            remaining_quantity: string;
+            source_kind: string;
+            supplier_description_snapshot: string;
+            supplier_name_snapshot: string;
+          }>(
+            `select id, source_kind, supplier_name_snapshot,
+                    catalog_number_snapshot, supplier_description_snapshot,
+                    remaining_quantity::text
+             from public.inventory_source_lots
+             where originating_inventory_movement_id = $1::uuid`,
+            [inboundMovementId],
+          )).rows[0];
+          expect(lot).toMatchObject({
+            catalog_number_snapshot: "TASK149-CATALOG-OLD",
+            remaining_quantity: "3",
+            source_kind: "supplier",
+            supplier_description_snapshot: "Task 149 original source description",
+            supplier_name_snapshot: "Task 149 Original Supplier",
+          });
+          expect((await database.query(
+            `select catalog_number, description, is_active
+             from public.product_suppliers where id = $1::uuid`,
+            [source.productSupplierId],
+          )).rows).toEqual([{
+            catalog_number: "TASK149-CATALOG-NEW",
+            description: "Task 149 changed source description",
+            is_active: false,
+          }]);
+          expect((await database.query<{ allocated_quantity: string; id: string }>(
+            `select id, allocated_quantity::text
+             from public.inventory_source_allocations
+             where outbound_inventory_movement_id = $1::uuid`,
+            [outboundMovementId],
+          )).rows).toEqual([expect.objectContaining({ allocated_quantity: "2" })]);
+
+          const allocationId = (await database.query<{ id: string }>(
+            `select id from public.inventory_source_allocations
+             where outbound_inventory_movement_id = $1::uuid`,
+            [outboundMovementId],
+          )).rows[0]?.id;
+          if (!lot?.id || !allocationId) throw new Error("Task 149 provenance rows unavailable");
+          await expectSqlRejected(
+            database,
+            () => database.query(
+              `update public.inventory_source_lots
+               set catalog_number_snapshot = 'FORGED' where id = $1::uuid`,
+              [lot.id],
+            ),
+            "IVL01",
+          );
+          await expectSqlRejected(
+            database,
+            () => database.query(
+              `update public.inventory_source_allocations
+               set allocated_quantity = allocated_quantity where id = $1::uuid`,
+              [allocationId],
+            ),
+            "IVL01",
+          );
+          await expectSqlRejected(
+            database,
+            () => database.query(
+              "delete from public.inventory_source_allocations where id = $1::uuid",
+              [allocationId],
+            ),
+            "IVL01",
+          );
+          await assertInventorySourceInvariant(database, product.id);
+        });
+      },
+    );
+
     it("keeps AuditLog and InventoryMovement append-only across every browser actor and privileged row attacks", async () => {
       const fixture = requireHarness();
       await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -180,7 +322,11 @@ export function registerHistoricalImmutabilityAuditTests(
         const movementId = (await database.query<{ movement_id: string }>(
           `select adjusted.movement_id
            from public.manual_adjust_inventory(
-             $1::uuid, 'add'::text, 1::bigint, 'Task 149 positive control'::text
+             $1::uuid, 'add'::text, 1::bigint,
+             'Task 149 positive control'::text,
+             (select relationship.id from public.product_suppliers as relationship
+              where relationship.product_id = $1::uuid and relationship.is_active
+              order by relationship.created_at, relationship.id limit 1)
            ) as adjusted`,
           [state.productId],
         )).rows[0]?.movement_id;
@@ -513,9 +659,9 @@ export function registerHistoricalImmutabilityAuditTests(
         ), "WOR02");
         await expectSqlRejected(database, () => database.query(
           `select * from public.finish_work_order(
-             $1::uuid, $2::timestamptz, $3::text, null::text
+             $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
            )`,
-          [state.workOrderId, finishedUpdatedAt, secondPath],
+          [state.workOrderId, finishedUpdatedAt, secondPath, "0".repeat(32)],
         ), "WOR02");
         await resetRole(database);
 

@@ -12,6 +12,7 @@ export interface InventoryAdjustmentInput {
   adjustmentType: InventoryAdjustmentType;
   quantity: number;
   reason: string;
+  productSupplierId?: string | null;
 }
 
 export interface InventoryAdjustment {
@@ -32,6 +33,7 @@ export interface InventoryAdjustmentError {
     | "adjustment_no_op"
     | "balance_unavailable"
     | "insufficient_stock"
+    | "inventory_source_unavailable"
     | "product_unavailable"
     | "inventory_adjustment_failed";
   message: string;
@@ -143,6 +145,14 @@ function adjustmentFailure(providerCode?: string): InventoryAdjustmentResult {
           message: "The requested removal exceeds the available stock.",
         },
       };
+    case "IVL03":
+      return {
+        ok: false,
+        error: {
+          code: "inventory_source_unavailable",
+          message: "Select an active Supplier Catalog source for inbound stock.",
+        },
+      };
     case "P0002":
     case "PRD01":
       return {
@@ -243,6 +253,7 @@ export async function adjustInventory(
       p_adjustment_type: input.adjustmentType,
       p_quantity: input.quantity,
       p_reason: input.reason.trim(),
+      p_product_supplier_id: input.productSupplierId ?? null,
     });
 
     if (error) return adjustmentFailure(error.code);

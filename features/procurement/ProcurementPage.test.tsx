@@ -567,6 +567,9 @@ describe("ProcurementPage", () => {
     fireEvent.change(within(dialog).getByLabelText("Category"), {
       target: { value: "Components" },
     });
+    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
+      target: { value: "CAT-789" },
+    });
     fireEvent.click(within(dialog).getByRole("button", {
       name: "Create Component",
     }));

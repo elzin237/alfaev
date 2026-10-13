@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { expectPermissionDenied } from "./helpers/assertions";
 import { createTestSerialNumber } from "./helpers/serial";
+import { seedSupplierStockForProfile } from "./helpers/inventory-provenance";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 
 interface FinishPreflightRow {
@@ -185,12 +186,16 @@ export async function createPreflightFixture(
       actorId,
     ],
   );
-  await database.query(
-    `update public.inventory_balances
-     set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
-     where product_id = $1::uuid`,
-    [productId, options.physicalQuantity ?? "10"],
-  );
+  const physicalQuantity = options.physicalQuantity ?? "10";
+  if (BigInt(physicalQuantity) > 0n) {
+    await seedSupplierStockForProfile(
+      database,
+      actorId,
+      productId,
+      physicalQuantity,
+      { catalogNumber: `PREFLIGHT-${productId}` },
+    );
+  }
   if (projectId) {
     await addRequirement(
       database,

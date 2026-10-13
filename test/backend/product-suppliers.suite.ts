@@ -24,6 +24,7 @@ interface ProductSupplierRow {
   catalog_number: string | null;
   created_at: Date;
   created_by_user_id: string;
+  description: string | null;
   id: string;
   is_active: boolean;
   product_id: string;
@@ -34,6 +35,7 @@ interface ProductSupplierRow {
 
 interface ProductSupplierReadRow {
   catalog_number: string | null;
+  description: string | null;
   relationship_id: string;
   relationship_is_active: boolean;
   supplier_id: string;
@@ -48,6 +50,7 @@ interface ProductSupplierChoiceRow {
 
 interface SupplierProductReadRow {
   catalog_number: string | null;
+  description: string | null;
   product_id: string;
   product_is_active: boolean;
   product_name: string;
@@ -198,13 +201,20 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
            supplier_id,
            catalog_number,
            created_by_user_id,
-           updated_by_user_id
+           updated_by_user_id,
+           is_active,
+           archived_at,
+           archived_by_user_id
          )
          values
-           ($1::uuid, $5::uuid, $7::uuid, null, $8::uuid, $8::uuid),
-           ($2::uuid, $5::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid),
-           ($3::uuid, $5::uuid, $7::uuid, 'CAT-OTHER', $8::uuid, $8::uuid),
-           ($4::uuid, $6::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid)`,
+           ($1::uuid, $5::uuid, $7::uuid, null, $8::uuid, $8::uuid,
+            false, pg_catalog.now(), $8::uuid),
+           ($2::uuid, $5::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid,
+            true, null, null),
+           ($3::uuid, $5::uuid, $7::uuid, 'CAT-OTHER', $8::uuid, $8::uuid,
+            true, null, null),
+           ($4::uuid, $6::uuid, $7::uuid, 'Cat-AbC', $8::uuid, $8::uuid,
+            true, null, null)`,
         [
           nullCatalogRelationId,
           catalogRelationId,
@@ -238,17 +248,17 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
 
       expect(validRows.rows).toHaveLength(4);
       expect(nullCatalog).toMatchObject({
-        archived_at: null,
-        archived_by_user_id: null,
+        archived_by_user_id: actorId,
         catalog_number: null,
-        is_active: true,
+        is_active: false,
         product_id: productOneId,
         supplier_id: supplierId,
       });
+      expect(nullCatalog?.archived_at).toBeInstanceOf(Date);
       expect(nullCatalog?.created_at).toEqual(nullCatalog?.updated_at);
       expect(preservedCase?.catalog_number).toBe("Cat-AbC");
 
-      for (const catalogNumber of [null, "Cat-AbC"] as const) {
+      for (const catalogNumber of ["Cat-AbC"] as const) {
         await database.query("savepoint duplicate_product_supplier");
         await expect(
           database.query(
@@ -265,6 +275,18 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         ).rejects.toMatchObject({ code: "23505" });
         await database.query("rollback to savepoint duplicate_product_supplier");
       }
+
+      await database.query("savepoint active_null_product_supplier");
+      await expect(
+        database.query(
+          `insert into public.product_suppliers (
+             product_id, supplier_id, catalog_number,
+             created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, $2::uuid, null, $3::uuid, $3::uuid)`,
+          [productTwoId, supplierId, actorId],
+        ),
+      ).rejects.toMatchObject({ code: "23514" });
+      await database.query("rollback to savepoint active_null_product_supplier");
 
       for (const catalogNumber of ["", "   ", " Untrimmed"] as const) {
         await database.query("savepoint invalid_product_supplier_catalog");
@@ -681,6 +703,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         expect(rows.rows).toEqual([
           {
             catalog_number: "ACTIVE-CAT",
+            description: null,
             relationship_id: activeRelationId,
             relationship_is_active: true,
             supplier_id: endpoints.supplierId,
@@ -689,6 +712,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
           },
           {
             catalog_number: null,
+            description: null,
             relationship_id: archivedRelationId,
             relationship_is_active: false,
             supplier_id: archivedSupplierId,
@@ -698,6 +722,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         ]);
         expect(Object.keys(rows.rows[0] ?? {}).sort()).toEqual([
           "catalog_number",
+          "description",
           "relationship_id",
           "relationship_is_active",
           "supplier_id",
@@ -943,6 +968,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         expect(rows.rows).toEqual([
           {
             catalog_number: "ACTIVE-CAT",
+            description: null,
             product_id: activeEndpoints.productId,
             product_is_active: true,
             product_name: activeProductName,
@@ -952,6 +978,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
           },
           {
             catalog_number: null,
+            description: null,
             product_id: archivedEndpoints.productId,
             product_is_active: false,
             product_name: archivedProduct.rows[0]?.name,
@@ -962,6 +989,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         ]);
         expect(Object.keys(rows.rows[0] ?? {}).sort()).toEqual([
           "catalog_number",
+          "description",
           "product_id",
           "product_is_active",
           "product_name",
@@ -1298,6 +1326,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
       )).toBe(true);
       expect(audits.rows[0]?.after_data).toEqual({
         catalog_number: "Cat-AbC",
+        description: null,
         is_active: true,
         product_id: endpoints.productId,
         supplier_id: endpoints.supplierId,
@@ -1305,12 +1334,14 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
       expect(audits.rows[1]).toMatchObject({
         before_data: {
           catalog_number: "Cat-AbC",
+          description: null,
           is_active: true,
           product_id: endpoints.productId,
           supplier_id: endpoints.supplierId,
         },
         after_data: {
           catalog_number: "Next-Catalog",
+          description: null,
           is_active: true,
           product_id: endpoints.productId,
           supplier_id: endpoints.supplierId,
@@ -1366,7 +1397,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         },
         {
           anonymous_execute: false,
-          arguments: "p_product_id uuid, p_supplier_id uuid, p_catalog_number text DEFAULT NULL::text",
+          arguments: "p_product_id uuid, p_supplier_id uuid, p_catalog_number text, p_description text DEFAULT NULL::text",
           authenticated_execute: true,
           is_security_definer: true,
           name: "create_product_supplier",
@@ -1384,7 +1415,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         },
         {
           anonymous_execute: false,
-          arguments: "p_product_supplier_id uuid, p_catalog_number text",
+          arguments: "p_product_supplier_id uuid, p_catalog_number text, p_description text DEFAULT NULL::text",
           authenticated_execute: true,
           is_security_definer: true,
           name: "update_product_supplier",
@@ -1539,14 +1570,14 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         [actor.authUserId],
       );
       await database.query("set local role authenticated");
-      const nullCatalog = await database.query<{ relation_id: string }>(
+      await database.query("savepoint blank_product_supplier_catalog");
+      await expect(database.query(
         `select public.create_product_supplier(
-           $1::uuid,
-           $2::uuid,
-           '   '
-         ) as relation_id`,
+           $1::uuid, $2::uuid, '   ', null
+         )`,
         [active.productId, active.supplierId],
-      );
+      )).rejects.toMatchObject({ code: "PSR05" });
+      await database.query("rollback to savepoint blank_product_supplier_catalog");
       const firstCatalog = await database.query<{ relation_id: string }>(
         `select public.create_product_supplier(
            $1::uuid,
@@ -1578,10 +1609,10 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
           "22023",
         ],
         [
-          "duplicate_null_product_supplier",
+          "blank_catalog_product_supplier",
           "select public.create_product_supplier($1::uuid, $2::uuid, null)",
           [active.productId, active.supplierId],
-          "PSR04",
+          "PSR05",
         ],
         [
           "duplicate_catalog_product_supplier",
@@ -1591,25 +1622,25 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         ],
         [
           "missing_product_supplier_product",
-          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          "select public.create_product_supplier($1::uuid, $2::uuid, 'MISSING-PRODUCT')",
           [randomUUID(), active.supplierId],
           "PSR02",
         ],
         [
           "archived_product_supplier_product",
-          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          "select public.create_product_supplier($1::uuid, $2::uuid, 'ARCHIVED-PRODUCT')",
           [archivedProduct.productId, active.supplierId],
           "PSR02",
         ],
         [
           "missing_product_supplier_supplier",
-          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          "select public.create_product_supplier($1::uuid, $2::uuid, 'MISSING-SUPPLIER')",
           [active.productId, randomUUID()],
           "PSR03",
         ],
         [
           "archived_product_supplier_supplier",
-          "select public.create_product_supplier($1::uuid, $2::uuid, null)",
+          "select public.create_product_supplier($1::uuid, $2::uuid, 'ARCHIVED-SUPPLIER')",
           [active.productId, archivedSupplier.supplierId],
           "PSR03",
         ],
@@ -1623,7 +1654,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
       await database.query("savepoint duplicate_product_supplier_edit");
       await expect(
         database.query(
-          "select public.update_product_supplier($1::uuid, null)",
+          "select public.update_product_supplier($1::uuid, 'Case-Kept')",
           [differentCatalog.rows[0]?.relation_id],
         ),
       ).rejects.toMatchObject({ code: "PSR04" });
@@ -1642,7 +1673,7 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
         ],
         [
           "missing_product_supplier_update",
-          "select public.update_product_supplier($1::uuid, null)",
+          "select public.update_product_supplier($1::uuid, 'VALID')",
           [randomUUID()],
         ],
         [
@@ -1666,7 +1697,6 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
          where id = any($1::uuid[])
          order by id`,
         [[
-          nullCatalog.rows[0]?.relation_id,
           firstCatalog.rows[0]?.relation_id,
           differentCatalog.rows[0]?.relation_id,
         ]],
@@ -1677,19 +1707,17 @@ export function registerProductSuppliersTests(requireHarness: () => SecurityFixt
          where entity_id = any($1::uuid[])
            and action_type like 'product_supplier.%'`,
         [[
-          nullCatalog.rows[0]?.relation_id,
           firstCatalog.rows[0]?.relation_id,
           differentCatalog.rows[0]?.relation_id,
         ]],
       );
 
-      expect(relations.rows).toHaveLength(3);
+      expect(relations.rows).toHaveLength(2);
       expect(relations.rows.map((row) => row.catalog_number).sort()).toEqual([
         "Case-Kept",
         "DIFFERENT",
-        null,
       ]);
-      expect(auditCount.rows).toEqual([{ count: 3 }]);
+      expect(auditCount.rows).toEqual([{ count: 2 }]);
 
       await database.query(
         `update public.products

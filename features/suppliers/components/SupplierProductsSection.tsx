@@ -136,6 +136,7 @@ function SupplierProductsSection({
                   <th scope="col" className="px-4 py-3">Serial Number</th>
                   <th scope="col" className="px-4 py-3">Product</th>
                   <th scope="col" className="px-4 py-3">Catalog Number</th>
+                  <th scope="col" className="px-4 py-3">Description</th>
                   <th scope="col" className="px-4 py-3">Relationship</th>
                   <th scope="col" className="px-4 py-3">Product status</th>
                   {canManage && <th scope="col" className="px-4 py-3 text-right">Actions</th>}
@@ -154,8 +155,9 @@ function SupplierProductsSection({
                       )}
                     </td>
                     <td className="px-4 py-4 font-mono text-zinc-700">
-                      {relation.catalogNumber ?? "Not provided"}
+                      {relation.catalogNumber ?? "—"}
                     </td>
+                    <td className="px-4 py-4 text-zinc-700">{relation.description ?? "—"}</td>
                     <td className="px-4 py-4">
                       <StatusBadge
                         label={relation.isActive ? "Active" : "Archived"}
@@ -224,6 +226,7 @@ function SupplierProductsSection({
           mode="edit"
           productName={editingRelation.productName}
           initialCatalogNumber={editingRelation.catalogNumber}
+          initialDescription={editingRelation.description ?? null}
           onClose={() => setEditingRelation(null)}
           onSubmit={(input) => update(editingRelation.relationId, input)}
           onSucceeded={() => setSuccessMessage("Catalog Number updated.")}

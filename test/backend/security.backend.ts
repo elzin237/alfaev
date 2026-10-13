@@ -19,6 +19,7 @@ import { registerInventoryLedgerTests } from "./inventory-ledger.suite";
 import { registerInventoryReversalFoundationTests } from "./inventory-reversal-foundation.suite";
 import { registerInventoryPrimitiveTests, registerManualInventoryAdjustmentTests } from "./inventory-mutation.suite";
 import { registerInventoryReadsTests } from "./inventory-reads.suite";
+import { registerInventorySourceProvenanceTests } from "./inventory-source-provenance.suite";
 import { registerProductSuppliersTests } from "./product-suppliers.suite";
 import { registerProjectsTests } from "./projects.suite";
 import { registerProjectSearchTests } from "./project-search.suite";
@@ -72,6 +73,7 @@ describe("Supabase security helpers", () => {
   registerProductSuppliersTests(requireHarness);
   registerManualInventoryAdjustmentTests(requireHarness);
   registerInventoryReadsTests(requireHarness);
+  registerInventorySourceProvenanceTests(requireHarness);
   registerProjectsTests(requireHarness);
   registerProjectSearchTests(requireHarness);
   registerProjectPlanningTests(requireHarness);

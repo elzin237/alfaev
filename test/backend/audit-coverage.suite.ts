@@ -78,11 +78,11 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["product.bulk_imported"], entityTypes: ["product"],
   },
   {
-    signature: "public.create_product_supplier(uuid,uuid,text)",
+    signature: "public.create_product_supplier(uuid,uuid,text,text)",
     actions: ["product_supplier.created"], entityTypes: ["product_supplier"],
   },
   {
-    signature: "public.update_product_supplier(uuid,text)",
+    signature: "public.update_product_supplier(uuid,text,text)",
     actions: ["product_supplier.updated"], entityTypes: ["product_supplier"],
   },
   {
@@ -90,7 +90,7 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["product_supplier.archived"], entityTypes: ["product_supplier"],
   },
   {
-    signature: "public.manual_adjust_inventory(uuid,text,bigint,text)",
+    signature: "public.manual_adjust_inventory(uuid,text,bigint,text,uuid)",
     actions: ["inventory.manual_adjusted"], entityTypes: ["product_inventory"],
     delegates: ["public.apply_inventory_delta"],
   },
@@ -132,15 +132,11 @@ const auditedMutations: readonly AuditContract[] = [
     entityTypes: ["project_product_component"],
   },
   {
-    signature: process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1"
-      ? "public.create_procurement_request_for_product(uuid,bigint)"
-      : "public.create_procurement_request_for_product(uuid,uuid,bigint)",
+    signature: "public.create_procurement_request_for_product(uuid,bigint)",
     actions: ["procurement.created"], entityTypes: ["procurement_request"],
   },
   {
-    signature: process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1"
-      ? "public.create_procurement_request_for_new_component(text,bigint)"
-      : "public.create_procurement_request_for_new_component(text,uuid,bigint)",
+    signature: "public.create_procurement_request_for_new_component(text,bigint)",
     actions: ["procurement.created"], entityTypes: ["procurement_request"],
   },
   {
@@ -222,9 +218,25 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["work_order.deleted"], entityTypes: ["work_order"],
   },
   {
-    signature: "public.finish_work_order(uuid,timestamptz,text,text)",
+    signature: "public.finish_work_order(uuid,timestamptz,text,text,text)",
+    actions: [], entityTypes: [],
+    delegates: ["public.finish_generic_work_order_internal"],
+  },
+  {
+    signature: "public.finish_generic_work_order_internal(uuid,timestamptz,text,text)",
     actions: ["work_order.finished", "project.completed"],
     entityTypes: ["work_order", "project"],
+    delegates: ["public.apply_inventory_delta"],
+  },
+  {
+    signature: "public.finish_work_order(uuid,timestamptz,text,text,text,text)",
+    actions: [], entityTypes: [],
+    delegates: ["public.finish_pcb_work_order_internal"],
+  },
+  {
+    signature: "public.finish_pcb_work_order_internal(uuid,timestamptz,text,text,text)",
+    actions: ["work_order.finished", "pcb_production.completed"],
+    entityTypes: ["work_order", "pcb_production_run"],
     delegates: ["public.apply_inventory_delta"],
   },
   {
@@ -245,7 +257,7 @@ const internalMutationFunctions = [
   "public.append_audit_log(text,text,text,uuid,jsonb,jsonb,jsonb)",
   "public.touch_user_permission_revision(uuid)",
   "public.initialize_product_inventory_balance()",
-  "public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid)",
+  "public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)",
   "public.allocate_product_serial_number()",
   "public.allocate_work_order_number_for_year(integer)",
   "public.allocate_work_order_number()",
@@ -260,7 +272,7 @@ const normalizedNoOpContracts = [
   ["public.update_brand(uuid,text)", "return current_brand.id;"],
   ["public.update_supplier(uuid,text,text,text,text,text)", "return current_supplier.id;"],
   ["public.update_product(uuid,text,text,uuid)", "return current_product.id;"],
-  ["public.update_product_supplier(uuid,text)", "return current_relation.id;"],
+  ["public.update_product_supplier(uuid,text,text)", "return current_relation.id;"],
   ["public.update_project(uuid,text,text,date,date,text)", "return current_project.id;"],
   ["public.update_project_product(uuid,text)", "return v_current.id;"],
   ["public.update_project_product_component(uuid,uuid,bigint)", "return v_current.id;"],

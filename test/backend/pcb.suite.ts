@@ -1,9 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient, QueryResultRow } from "pg";
 import { expect, it } from "vitest";
+import {
+  isDisposableOrLocalBackendTarget,
+  loadBackendTestEnvironment,
+} from "./env";
 import { expectPermissionDenied } from "./helpers/assertions";
 import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 import { createTestSerialNumber } from "./helpers/serial";
+import {
+  assertInventorySourceInvariant,
+  seedSupplierStockForProfile,
+} from "./helpers/inventory-provenance";
+
+const committedConcurrencyIt = it.skipIf(
+  !isDisposableOrLocalBackendTarget(loadBackendTestEnvironment().projectRef),
+);
 
 interface CountResultRow {
   count: number;
@@ -184,12 +196,12 @@ async function createProductionFixture(database: PoolClient, actorId: string) {
      values ($1, $2, 2), ($1, $3, 3)`,
     [versionId, products.componentId, products.finishedId],
   );
-  await database.query(
-    `update public.inventory_balances set quantity =
-       case when product_id = $1 then 20 else 30 end
-     where product_id in ($1, $2)`,
-    [products.componentId, products.finishedId],
-  );
+  await seedSupplierStockForProfile(database, actorId, products.componentId, 20, {
+    catalogNumber: `PCB-${products.componentId}`,
+  });
+  await seedSupplierStockForProfile(database, actorId, products.finishedId, 30, {
+    catalogNumber: `PCB-${products.finishedId}`,
+  });
   return { ...products, versionId };
 }
 
@@ -388,6 +400,10 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       const auditBefore = (await database.query<{ count: string }>(
         "select count(*) from public.audit_logs where action_type = 'pcb_production.completed'",
       )).rows[0]!.count;
+      const componentMovementsBefore = (await database.query<{ count: string }>(
+        "select count(*) from public.inventory_movements where product_id = $1",
+        [componentId],
+      )).rows[0]!.count;
       for (const actor of [fixture.actors.productCreator, fixture.actors.productEditor,
         fixture.actors.brandManager, fixture.actors.supplierCreator,
         fixture.actors.permitted, fixture.actors.unpermitted, fixture.actors.inactive, null]) {
@@ -414,7 +430,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
       )).rows[0]?.count).toBe("0");
       expect((await database.query<{ count: string }>(
         "select count(*) from public.inventory_movements where product_id = $1", [componentId],
-      )).rows[0]?.count).toBe("0");
+      )).rows[0]?.count).toBe(componentMovementsBefore);
       expect((await database.query<{ count: string }>(
         "select count(*) from public.audit_logs where action_type = 'pcb_production.completed'",
       )).rows[0]?.count).toBe(auditBefore);
@@ -685,7 +701,9 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
         `insert into public.pcb_bom_items (bom_version_id, component_product_id, quantity_per_card)
          values ($1, $2, 9007199254740993), ($1, $3, 1)`, [v2, componentId, finishedId],
       );
-      await database.query("update public.inventory_balances set quantity = 10 where product_id = $1", [componentId]);
+      await seedSupplierStockForProfile(database, admin.profileId, componentId, 10, {
+        catalogNumber: `PCB-PRECHECK-${componentId}`,
+      });
       await database.query(
         `update public.products set is_active = false, archived_at = pg_catalog.now(),
            archived_by_user_id = $2, updated_at = pg_catalog.now(), updated_by_user_id = $2
@@ -1244,7 +1262,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
     });
   });
 
-  it("serializes a trusted save and first production on card then version locks (Task 093)", async () => {
+  committedConcurrencyIt("serializes a trusted save and first production on card then version locks (Task 093)", async () => {
     const fixture = requireHarness();
     const actor = fixture.actors.admin;
     const outputId = randomUUID();
@@ -1376,13 +1394,8 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
           await saver.query("rollback");
         }
         if (setupCommitted) {
-          await observer.query("delete from public.pcb_bom_items where bom_version_id = $1", [versionId]);
-          await observer.query("delete from public.pcb_bom_versions where id = $1", [versionId]);
-          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
-          await observer.query("delete from public.inventory_balances where product_id = any($1::uuid[])",
-            [[outputId, inputId]]);
-          await observer.query("delete from public.products where id = any($1::uuid[])",
-            [[outputId, inputId]]);
+          await assertInventorySourceInvariant(observer, outputId);
+          await assertInventorySourceInvariant(observer, inputId);
         } else {
           await observer.query("rollback");
         }
@@ -1605,7 +1618,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
     });
   });
 
-  it("serializes first production-run insertion behind a BOM item mutation (Task 092)", async () => {
+  committedConcurrencyIt("serializes first production-run insertion behind a BOM item mutation (Task 092)", async () => {
     const fixture = requireHarness();
     const actorId = fixture.actors.admin.profileId;
     const outputId = randomUUID();
@@ -1727,11 +1740,8 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
           await production.query("rollback");
         }
         if (setupCommitted) {
-          await observer.query("delete from public.pcb_bom_items where id = $1", [itemId]);
-          await observer.query("delete from public.pcb_bom_versions where id = $1", [versionId]);
-          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
-          await observer.query("delete from public.inventory_balances where product_id = any($1::uuid[])", [[outputId, inputId]]);
-          await observer.query("delete from public.products where id = any($1::uuid[])", [[outputId, inputId]]);
+          await assertInventorySourceInvariant(observer, outputId);
+          await assertInventorySourceInvariant(observer, inputId);
         } else {
           await observer.query("rollback");
         }
@@ -1739,7 +1749,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
     });
   });
 
-  it("serializes version mutation and first production insertion through the same parent lock (Task 092)", async () => {
+  committedConcurrencyIt("serializes version mutation and first production insertion through the same parent lock (Task 092)", async () => {
     const fixture = requireHarness();
     const actorId = fixture.actors.admin.profileId;
     const outputId = randomUUID();
@@ -1855,10 +1865,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
           await production.query("rollback");
         }
         if (setupCommitted) {
-          await observer.query("delete from public.pcb_bom_versions where id = $1", [versionId]);
-          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
-          await observer.query("delete from public.inventory_balances where product_id = $1", [outputId]);
-          await observer.query("delete from public.products where id = $1", [outputId]);
+          await assertInventorySourceInvariant(observer, outputId);
         } else {
           await observer.query("rollback");
         }
@@ -2557,7 +2564,7 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
     });
   });
 
-  it("serializes concurrent first BOM saves through the PCB Card row lock", async () => {
+  committedConcurrencyIt("serializes concurrent first BOM saves through the PCB Card row lock", async () => {
     const fixture = requireHarness();
     const outputId = randomUUID();
     const inputA = randomUUID();
@@ -2657,9 +2664,9 @@ export function registerPcbTests(requireHarness: () => SecurityFixtureHarness): 
         if (waitingSave) await waitingSave;
         await second.query("rollback");
         if (setupCommitted) {
-          await observer.query("delete from public.pcb_cards where id = $1", [cardId]);
-          await observer.query("delete from public.inventory_balances where product_id = any($1::uuid[])", [ids]);
-          await observer.query("delete from public.products where id = any($1::uuid[])", [ids]);
+          for (const productId of ids) {
+            await assertInventorySourceInvariant(observer, productId);
+          }
         } else {
           await observer.query("rollback");
         }

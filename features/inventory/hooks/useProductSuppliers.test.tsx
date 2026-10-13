@@ -168,8 +168,9 @@ describe("useProductSuppliers", () => {
       await result.current.create({
         supplierId: "supplier-1",
         catalogNumber: "CAT-1",
+        description: null,
       });
-      await result.current.update("relation-1", { catalogNumber: "CAT-2" });
+      await result.current.update("relation-1", { catalogNumber: "CAT-2", description: null });
       await result.current.archive("relation-1");
     });
 
@@ -204,7 +205,8 @@ describe("useProductSuppliers", () => {
     await act(async () => {
       await result.current.create({
         supplierId: "supplier-1",
-        catalogNumber: null,
+        catalogNumber: "",
+        description: null,
       });
     });
 

@@ -46,6 +46,13 @@ vi.mock("./components/ProductBarcodeSection", () => ({
     <section aria-label="Product barcode">Barcode preview available</section>
   ),
 }));
+vi.mock("./components/SupplierStockHistorySection", () => ({
+  default: ({ productId }: { productId: string }) => (
+    <section aria-label="Supplier Stock History">
+      Supplier stock history for {productId}
+    </section>
+  ),
+}));
 
 import ProductDetailPage from "./ProductDetailPage";
 import type { Brand } from "./services/brandService";

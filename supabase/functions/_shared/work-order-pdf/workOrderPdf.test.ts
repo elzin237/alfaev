@@ -25,9 +25,10 @@ function rawRow(overrides: Record<string, unknown> = {}) {
     description: "Install and commission the control cabinet.",
     work_order_created_at: "2026-09-29T22:30:00.123456+00:00",
     snapshot_updated_at: "2026-09-29T22:31:00.654321+00:00",
+    allocation_fingerprint: "a".repeat(32),
     material_position: "1",
     product_id: firstProductId,
-    serial_number: "0000123",
+    catalog_number: "CAT-100",
     product_name: "Control relay",
     quantity: "9007199254740993",
     ...overrides,
@@ -40,7 +41,7 @@ function snapshot(materialCount = 2): WorkOrderPdfSnapshot {
     (_, index) => rawRow({
       material_position: String(index + 1),
       product_id: `22000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
-      serial_number: String(index + 123).padStart(7, "0"),
+      catalog_number: index === 1 ? "MOU-4421" : "CAT-100",
       product_name: `Industrial component ${index + 1}`,
       quantity: index === 0 ? "9007199254740993" : String(index + 1),
     }),
@@ -79,13 +80,14 @@ describe("trusted Work Order PDF snapshot model", () => {
       customerName: "Customer One",
       workOrderCreatedAt: "2026-09-29T22:30:00.123456+00:00",
       snapshotUpdatedAt: "2026-09-29T22:31:00.654321+00:00",
+      allocationFingerprint: "a".repeat(32),
     });
     expect(parsed.materials[0]).toEqual({
       position: "1",
       productId: firstProductId,
       productName: "Industrial component 1",
       quantity: "9007199254740993",
-      serialNumber: "0000123",
+      catalogNumber: "CAT-100",
     });
   });
 
@@ -101,7 +103,7 @@ describe("trusted Work Order PDF snapshot model", () => {
     );
   });
 
-  it("fails safely for empty, malformed, inconsistent, duplicate, or unsafe numeric rows", () => {
+  it("fails safely for empty, malformed, inconsistent, or unsafe numeric rows while allowing split-source Products", () => {
     expect(() => parseWorkOrderPdfSnapshot([])).toThrow(
       "The Work Order PDF snapshot is unavailable.",
     );
@@ -114,10 +116,19 @@ describe("trusted Work Order PDF snapshot model", () => {
       rawRow(),
       rawRow({ material_position: "2", project_name: "Different" }),
     ])).toThrow();
-    expect(() => parseWorkOrderPdfSnapshot([
+    const split = parseWorkOrderPdfSnapshot([
       rawRow(),
-      rawRow({ material_position: "2" }),
-    ])).toThrow();
+      rawRow({ material_position: "2", catalog_number: "MOU-4421", quantity: "10" }),
+    ]).materials;
+    expect(split).toHaveLength(2);
+    expect(split.map((material) => [material.productId, material.catalogNumber, material.quantity]))
+      .toEqual([
+        [firstProductId, "CAT-100", "9007199254740993"],
+        [firstProductId, "MOU-4421", "10"],
+      ]);
+    expect(parseWorkOrderPdfSnapshot([
+      rawRow({ catalog_number: "—" }),
+    ]).materials[0]?.catalogNumber).toBe("—");
   });
 
   it("maps General Stock empty-BOM PCB production with exact planned and actual quantities", () => {
@@ -126,7 +137,7 @@ describe("trusted Work Order PDF snapshot model", () => {
       customer_name_snapshot: null,
       material_position: null,
       product_id: null,
-      serial_number: null,
+      catalog_number: null,
       product_name: null,
       quantity: null,
       production_pcb_card_id: "33000000-0000-4000-8000-000000000001",
@@ -175,7 +186,7 @@ describe("deterministic Alfa Proteh Radni Nalog renderer", () => {
     expect(table.body).toHaveLength(3);
     expect(table.body[1]?.map((cell) => cell.text)).toEqual([
       "1",
-      "0000123",
+      "CAT-100",
       "Industrial component 1",
       "",
       "9007199254740993",

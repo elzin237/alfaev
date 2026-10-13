@@ -616,7 +616,7 @@ Fields:
 - Category: required, trimmed, nonblank free text
 - Brand: optional; active choices only
 - Supplier: when assigned on a historical request, read-only/prefilled and not replaceable in this workflow; otherwise show `Not assigned`
-- Catalog Number: available only when the request has a Supplier; optional, with blank stored as no Catalog Number and nonblank casing preserved
+- Catalog Number: available and required only when the request has a Supplier; trim surrounding whitespace and preserve nonblank casing
 
 Serial Number:
 
@@ -738,6 +738,9 @@ Fields:
 - Brand
 - Supplier(s)
 - Catalog Number per Supplier
+- required Catalog Number for every active relationship
+- optional Supplier/Product-specific Description
+- read-only Supplier Stock History with Date, Supplier, Catalog Number, Description, Received Quantity, Remaining Quantity, and Added By
 
 Serial Number:
 
@@ -1194,9 +1197,11 @@ Document layout:
 - footer area for completion date, `M.P.`, and signature/stamp
 
 Populate only trusted Work Order Number, Project Name, Customer snapshot, Description,
-Work Order creation date, and persisted Product Serial Number/Name/Quantity. Unit,
-prices, totals, authorized person, report, completion date, signatures, and stamp remain
-blank. Material headers repeat when the table continues onto another page.
+Work Order creation date, frozen source-allocation Catalog Number, Product Name, and
+allocation Quantity. `KAT. BROJ` is `—` for legacy/unknown or internally produced
+stock, and mixed-source Product quantities render as separate rows. Unit, prices,
+totals, authorized person, report, completion date, signatures, and stamp remain blank.
+Material headers repeat when the table continues onto another page.
 
 ---
 
@@ -1547,3 +1552,5 @@ A feature UI is complete when:
 - TSX files remain focused
 - repeated patterns use reusable components where appropriate
 - no backend/security rule is assumed to be enforced only by the UI
+- `KAT. BROJ` displays the frozen Supplier Catalog Number from the committed source allocation, or `—` for legacy/unknown and internally produced stock; it never substitutes AlfaEV Product Serial Number
+- `OPIS` remains Product name; split-source consumption renders separate material rows with each allocation quantity

@@ -29,6 +29,7 @@ const activeRelation: ProductSupplierRelation = {
   supplierId: activeSupplier.supplierId,
   supplierName: activeSupplier.supplierName,
   catalogNumber: "AbC-42",
+  description: "Control cabinet relay",
   isActive: true,
   supplierIsActive: true,
 };
@@ -37,6 +38,7 @@ const historicalRelation: ProductSupplierRelation = {
   supplierId: "supplier-archived",
   supplierName: "Legacy Supplier",
   catalogNumber: null,
+  description: null,
   isActive: false,
   supplierIsActive: false,
 };
@@ -155,7 +157,8 @@ describe("ProductSuppliersSection", () => {
     expect(screen.getByText("ABB")).toBeInTheDocument();
     expect(screen.getByText("AbC-42")).toBeInTheDocument();
     expect(screen.getByText("Legacy Supplier")).toBeInTheDocument();
-    expect(screen.getByText("Not provided")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getByText("Control cabinet relay")).toBeInTheDocument();
     expect(screen.getAllByText("Archived")).toHaveLength(1);
     expect(screen.getByText("Archived Supplier")).toBeInTheDocument();
 
@@ -208,13 +211,20 @@ describe("ProductSuppliersSection", () => {
       target: { value: "supplier-active" },
     });
     fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
+      target: { value: "CAT-1" },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
       target: { value: "  AbC-77  " },
+    });
+    fireEvent.change(within(dialog).getByLabelText(/Description/), {
+      target: { value: "  Supplier relay  " },
     });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add Supplier" }));
 
     await waitFor(() => expect(sectionMocks.create).toHaveBeenCalledWith({
       supplierId: "supplier-active",
       catalogNumber: "AbC-77",
+      description: "Supplier relay",
     }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Supplier link added.",
@@ -237,6 +247,9 @@ describe("ProductSuppliersSection", () => {
     fireEvent.change(within(dialog).getByLabelText("Supplier"), {
       target: { value: "supplier-active" },
     });
+    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
+      target: { value: "CAT-1" },
+    });
     const submit = within(dialog).getByRole("button", { name: "Add Supplier" });
 
     fireEvent.click(submit);
@@ -258,7 +271,7 @@ describe("ProductSuppliersSection", () => {
     });
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit Catalog Number" });
+    const dialog = screen.getByRole("dialog", { name: "Edit Supplier Link" });
 
     expect(within(dialog).getByText(/ABB/)).toBeInTheDocument();
     expect(within(dialog).queryByLabelText("Supplier")).not.toBeInTheDocument();
@@ -270,7 +283,7 @@ describe("ProductSuppliersSection", () => {
 
     await waitFor(() => expect(sectionMocks.update).toHaveBeenCalledWith(
       "relation-active",
-      { catalogNumber: "New-Cat" },
+      { catalogNumber: "New-Cat", description: "Control cabinet relay" },
     ));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent(
       "Safe duplicate error.",

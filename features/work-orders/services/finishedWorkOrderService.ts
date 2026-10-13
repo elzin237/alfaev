@@ -24,6 +24,10 @@ export interface FinishedWorkOrderMaterial {
   serialNumber: string;
   productName: string;
   quantity: string;
+  sourceKind: "supplier" | "legacy_unknown" | "internal_production";
+  supplierName: string | null;
+  catalogNumber: string;
+  supplierDescription: string | null;
 }
 
 export interface FinishedWorkOrderMovement {
@@ -79,6 +83,10 @@ const materialKeys = new Set([
   "serial_number",
   "product_name",
   "quantity",
+  "source_kind",
+  "supplier_name",
+  "catalog_number",
+  "supplier_description",
 ]);
 const movementKeys = new Set([
   "movement_id",
@@ -199,9 +207,18 @@ function parseMaterial(value: unknown): FinishedWorkOrderMaterial | null {
     !isUuid(value.product_id) ||
     typeof value.serial_number !== "string" ||
     !serialNumberPattern.test(value.serial_number) ||
-    !isTrimmedNonblank(value.product_name)
+    !isTrimmedNonblank(value.product_name) ||
+    !["supplier", "legacy_unknown", "internal_production"].includes(String(value.source_kind)) ||
+    !(value.supplier_name === null || isTrimmedNonblank(value.supplier_name)) ||
+    !isTrimmedNonblank(value.catalog_number) ||
+    !(value.supplier_description === null || isTrimmedNonblank(value.supplier_description))
   ) return null;
   const quantity = parsePositiveBigint(value.quantity);
+  const sourceKind = value.source_kind as FinishedWorkOrderMaterial["sourceKind"];
+  if (
+    (sourceKind === "supplier" && (value.supplier_name === null || value.catalog_number === "—")) ||
+    (sourceKind !== "supplier" && (value.supplier_name !== null || value.catalog_number !== "—"))
+  ) return null;
   return quantity === null
     ? null
     : {
@@ -209,6 +226,10 @@ function parseMaterial(value: unknown): FinishedWorkOrderMaterial | null {
       serialNumber: value.serial_number,
       productName: value.product_name,
       quantity,
+      sourceKind,
+      supplierName: value.supplier_name as string | null,
+      catalogNumber: value.catalog_number,
+      supplierDescription: value.supplier_description as string | null,
     };
 }
 

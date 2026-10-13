@@ -130,6 +130,11 @@ function CreateProductFromRequestDialog({
       brandLoadError
     ) return;
 
+    if (request.supplierId !== null && input.catalogNumber === null) {
+      setSubmissionError("Catalog Number is required for the Supplier relationship.");
+      return;
+    }
+
     submissionLockRef.current = true;
     setSubmissionError(null);
 
@@ -286,12 +291,13 @@ function CreateProductFromRequestDialog({
 
               <div>
                 <label htmlFor="request-product-catalog-number" className="block text-sm font-semibold text-zinc-800">
-                  Catalog Number <span className="font-normal text-zinc-500">(optional)</span>
+                  Catalog Number
                 </label>
                 <input
                   {...register("catalogNumber")}
                   id="request-product-catalog-number"
                   type="text"
+                  required
                   disabled={isSubmitting}
                   className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
                 />

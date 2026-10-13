@@ -20,9 +20,43 @@ const PRODUCTION_PROJECT_REFS = new Set([
   "nhajjfhvlxeiwryfhofa",
 ]);
 
+export const SHARED_DEVELOPMENT_PROJECT_REF = "yzysgbrpbhiapalgetau";
+export const TASK147_DISPOSABLE_PROJECT_REF = "hipkoxienlffgyofcbzq";
+export const TASK148_DISPOSABLE_PROJECT_REF = "tkzlbxyjbnntrgohpedd";
+const APPROVED_DISPOSABLE_PROJECT_REFS = new Set([
+  TASK147_DISPOSABLE_PROJECT_REF,
+  TASK148_DISPOSABLE_PROJECT_REF,
+]);
+
+export function isDisposableOrLocalBackendTarget(projectRef: string): boolean {
+  return projectRef === "local" || APPROVED_DISPOSABLE_PROJECT_REFS.has(projectRef);
+}
+
 export function assertBackendTestTargetIsNotProduction(projectRef: string): void {
   if (PRODUCTION_PROJECT_REFS.has(projectRef)) {
     throw new Error("Backend tests must never target the production project");
+  }
+}
+
+export function assertCommittedConcurrencyTarget(
+  projectRef: string,
+  approvedDisposableProjectRefs: readonly string[],
+): void {
+  assertBackendTestTargetIsNotProduction(projectRef);
+
+  if (projectRef === SHARED_DEVELOPMENT_PROJECT_REF) {
+    throw new Error(
+      "Committed concurrency tests must never target the shared development project",
+    );
+  }
+
+  if (
+    projectRef !== "local" &&
+    !approvedDisposableProjectRefs.includes(projectRef)
+  ) {
+    throw new Error(
+      "Committed concurrency tests require local Supabase or an explicitly approved disposable project",
+    );
   }
 }
 
@@ -36,8 +70,16 @@ function requireValue(name: string, value: string | undefined): string {
   return normalizedValue;
 }
 
-function deriveProjectRef(supabaseUrl: string): string {
+function deriveProjectRef(supabaseUrl: string, allowLocal: boolean): string {
   const parsedUrl = new URL(supabaseUrl);
+  if (
+    allowLocal &&
+    parsedUrl.protocol === "http:" &&
+    parsedUrl.hostname === "127.0.0.1" &&
+    parsedUrl.port === "54321"
+  ) {
+    return "local";
+  }
   const hostnameSuffix = ".supabase.co";
 
   if (
@@ -61,6 +103,7 @@ function parseDatabaseTarget(
   projectRef: string,
   requirePassword: boolean,
   allowTemporaryLoginRole = false,
+  allowLocal = false,
 ): DatabaseTarget {
   let parsedUrl: URL;
 
@@ -76,6 +119,17 @@ function parseDatabaseTarget(
 
   if (requirePassword && !parsedUrl.password) {
     throw new Error("The backend test database URL must include a password");
+  }
+
+  if (
+    allowLocal &&
+    projectRef === "local" &&
+    parsedUrl.hostname === "127.0.0.1" &&
+    parsedUrl.username === "postgres" &&
+    parsedUrl.port === "54322" &&
+    parsedUrl.pathname === "/postgres"
+  ) {
+    return { connectionType: "direct", url: parsedUrl };
   }
 
   const directTarget =
@@ -114,13 +168,17 @@ function resolveDatabaseConnectionUrl(
   projectRef: string,
   rootDirectory: string,
   allowTemporaryLoginRole = false,
+  allowLocal = false,
 ): string {
   const configuredTarget = parseDatabaseTarget(
     databaseUrl,
     projectRef,
     true,
     allowTemporaryLoginRole,
+    allowLocal,
   );
+
+  if (allowLocal) return configuredTarget.url.toString();
 
   if (configuredTarget.connectionType === "pooler") {
     return configuredTarget.url.toString();
@@ -150,6 +208,7 @@ export function loadBackendTestEnvironment(
   const loadedEnvironment = loadEnv("test", rootDirectory, "");
   const environmentValue = (name: string): string | undefined =>
     process.env[name] ?? loadedEnvironment[name];
+  const localTestTarget = process.env.SUPABASE_LOCAL_TEST === "1";
 
   const supabaseUrl = requireValue(
     "VITE_SUPABASE_URL",
@@ -176,15 +235,17 @@ export function loadBackendTestEnvironment(
     throw new Error("Backend tests require a Supabase secret key");
   }
 
-  const projectRef = deriveProjectRef(supabaseUrl);
+  const projectRef = deriveProjectRef(supabaseUrl, localTestTarget);
   assertBackendTestTargetIsNotProduction(projectRef);
-  const linkedProjectRef = requireValue(
-    "linked Supabase development project ref",
-    readFileSync(
-      resolve(rootDirectory, "supabase/.temp/project-ref"),
-      "utf8",
-    ),
-  );
+  const linkedProjectRef = localTestTarget
+    ? "local"
+    : requireValue(
+      "linked Supabase development project ref",
+      readFileSync(
+        resolve(rootDirectory, "supabase/.temp/project-ref"),
+        "utf8",
+      ),
+    );
   const task147DisposableTarget =
     process.env.TASK147_COMMITTED_CONCURRENCY === "1";
   const task148DisposableTarget =
@@ -192,10 +253,18 @@ export function loadBackendTestEnvironment(
   if (task147DisposableTarget && task148DisposableTarget) {
     throw new Error("Only one disposable concurrency target may be enabled");
   }
-  const expectedProjectRef = task147DisposableTarget
-    ? "hipkoxienlffgyofcbzq"
-    : task148DisposableTarget
-      ? "tkzlbxyjbnntrgohpedd"
+  if (task147DisposableTarget) {
+    assertCommittedConcurrencyTarget(projectRef, [TASK147_DISPOSABLE_PROJECT_REF]);
+  }
+  if (task148DisposableTarget) {
+    assertCommittedConcurrencyTarget(projectRef, [TASK148_DISPOSABLE_PROJECT_REF]);
+  }
+  const expectedProjectRef = localTestTarget
+    ? "local"
+    : task147DisposableTarget
+      ? TASK147_DISPOSABLE_PROJECT_REF
+      : task148DisposableTarget
+        ? TASK148_DISPOSABLE_PROJECT_REF
       : linkedProjectRef;
 
   if (projectRef !== expectedProjectRef) {
@@ -213,6 +282,7 @@ export function loadBackendTestEnvironment(
     projectRef,
     rootDirectory,
     task148DisposableTarget,
+    localTestTarget,
   );
 
   return {

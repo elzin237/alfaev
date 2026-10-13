@@ -93,7 +93,8 @@ export function useProductSuppliers(
 
   async function create(input: {
     supplierId: string;
-    catalogNumber: string | null;
+    catalogNumber: string;
+    description: string | null;
   }) {
     const result = await createProductSupplier({ productId, ...input });
     if (result.ok) await invalidateRelations();

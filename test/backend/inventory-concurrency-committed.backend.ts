@@ -7,10 +7,19 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import {
+  assertCommittedConcurrencyTarget,
+  TASK148_DISPOSABLE_PROJECT_REF,
+} from "./env";
+import {
+  assertInventorySourceInvariant,
+  createSupplierSourceFixture,
+  seedSupplierStockForProfile,
+} from "./helpers/inventory-provenance";
+
 const enabled = process.env.TASK148_COMMITTED_CONCURRENCY === "1";
-const disposableProjectRef = "tkzlbxyjbnntrgohpedd";
+const disposableProjectRef = TASK148_DISPOSABLE_PROJECT_REF;
 const disposableProjectName = "alfaev-inventory-concurrency-test";
-const sharedDevelopmentRef = "yzysgbrpbhiapalgetau";
 const pdfBytes = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n%%EOF\n");
 
 interface Actor {
@@ -135,12 +144,14 @@ async function createProduct(
      )`,
     [productId, `Task 148 committed Product ${productId}`, kind, actorId],
   );
-  await database.query(
-    `update public.inventory_balances
-     set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
-     where product_id = $1::uuid`,
-    [productId, quantity],
-  );
+  if (BigInt(quantity) > 0n) {
+    await database.query("begin");
+    await seedSupplierStockForProfile(database, actorId, productId, quantity, {
+      catalogNumber: `TASK148-COMMITTED-${productId}`,
+      reason: "Task 148 committed initial supplier stock",
+    });
+    await database.query("commit");
+  }
   return productId;
 }
 
@@ -336,12 +347,27 @@ async function finishGeneric(
   fixture: GenericFixture,
   reference: string,
 ): Promise<OperationResult> {
+  let allocationFingerprint: string;
+  try {
+    allocationFingerprint = (await pool.query<{ fingerprint: string }>(
+      `select public.get_work_order_source_allocation_fingerprint($1::uuid)
+         as fingerprint`,
+      [fixture.workOrderId],
+    )).rows[0]?.fingerprint ?? "";
+  } catch (error) {
+    return { code: errorCode(error), ok: false };
+  }
   return await runAuthenticated(pool, actor, async (database) => {
     await database.query(
       `select * from public.finish_work_order(
-         $1::uuid, $2::timestamptz, $3::text, null::text
+         $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
        )`,
-      [fixture.workOrderId, fixture.updatedAt, reference],
+      [
+        fixture.workOrderId,
+        fixture.updatedAt,
+        reference,
+        allocationFingerprint,
+      ],
     );
   });
 }
@@ -353,12 +379,28 @@ async function finishPcb(
   reference: string,
   actualGood = "1",
 ): Promise<OperationResult> {
+  let allocationFingerprint: string;
+  try {
+    allocationFingerprint = (await pool.query<{ fingerprint: string }>(
+      `select public.get_work_order_source_allocation_fingerprint($1::uuid)
+         as fingerprint`,
+      [fixture.workOrderId],
+    )).rows[0]?.fingerprint ?? "";
+  } catch (error) {
+    return { code: errorCode(error), ok: false };
+  }
   return await runAuthenticated(pool, actor, async (database) => {
     await database.query(
       `select * from public.finish_work_order(
-         $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
+         $1::uuid, $2::timestamptz, $3::text, null::text, $4::text, $5::text
        )`,
-      [fixture.workOrderId, fixture.updatedAt, reference, actualGood],
+      [
+        fixture.workOrderId,
+        fixture.updatedAt,
+        reference,
+        allocationFingerprint,
+        actualGood,
+      ],
     );
   });
 }
@@ -371,11 +413,29 @@ async function manualAdjust(
   quantity: string,
 ): Promise<OperationResult> {
   return await runAuthenticated(pool, actor, async (database) => {
+    const currentQuantity = BigInt((await database.query<{ quantity: string }>(
+      "select quantity::text as quantity from public.inventory_balances where product_id = $1::uuid",
+      [productId],
+    )).rows[0]?.quantity ?? "0");
+    const createsStock = type === "add" ||
+      (type === "correction" && BigInt(quantity) > currentQuantity);
+    const source = createsStock
+      ? await createSupplierSourceFixture(database, actor, productId, {
+        catalogNumber: `TASK148-COMMITTED-RACE-${randomUUID()}`,
+      })
+      : null;
+    await setActor(database, actor);
     await database.query(
       `select * from public.manual_adjust_inventory(
-         $1::uuid, $2::text, $3::bigint, $4::text
+         $1::uuid, $2::text, $3::bigint, $4::text, $5::uuid
        )`,
-      [productId, type, quantity, `Task 148 committed ${type}`],
+      [
+        productId,
+        type,
+        quantity,
+        `Task 148 committed ${type}`,
+        source?.productSupplierId ?? null,
+      ],
     );
   });
 }
@@ -389,6 +449,7 @@ async function movementsFor(
             quantity_after::text, source_type, source_id
      from public.inventory_movements
      where product_id = $1::uuid
+       and reason is distinct from 'Task 148 committed initial supplier stock'
      order by created_at, id`,
     [productId],
   )).rows;
@@ -415,6 +476,12 @@ async function expectLedger(
     [productId],
   )).rows[0]?.quantity;
   expect(balance).toBe(current.toString());
+  const database = await pool.connect();
+  try {
+    await assertInventorySourceInvariant(database, productId);
+  } finally {
+    database.release();
+  }
   return movements;
 }
 
@@ -452,58 +519,78 @@ describe.skipIf(!enabled)(
     let storage: SupabaseClient;
 
     beforeAll(async () => {
-      const requestedRef = process.env.TASK148_PROJECT_REF;
-      if (
-        requestedRef !== disposableProjectRef ||
-        [sharedDevelopmentRef].includes(requestedRef ?? "")
-      ) {
-        throw new Error("Task 148 committed runner target is not the approved disposable ref");
-      }
-      const accessToken = (
-        process.env.SUPABASE_ACCESS_TOKEN ??
-        await readFile(join(homedir(), ".supabase", "access-token"), "utf8")
-      ).trim();
-      const project = await managementRequest<{ id: string; name: string }>(
-        accessToken,
-        `/v1/projects/${disposableProjectRef}`,
-      );
-      if (
-        project.id !== disposableProjectRef ||
-        project.name !== disposableProjectName
-      ) {
-        throw new Error("Task 148 disposable project identity mismatch");
-      }
-      const [login, poolers, apiKeys] = await Promise.all([
-        managementRequest<LoginRole>(
+      const localTarget = process.env.SUPABASE_LOCAL_TEST === "1";
+      const requestedRef = localTarget
+        ? "local"
+        : process.env.TASK148_PROJECT_REF ?? "";
+      assertCommittedConcurrencyTarget(requestedRef, [disposableProjectRef]);
+      let serviceKey: string;
+      let supabaseUrl: string;
+      let expectedLatest: string;
+      let expectedMigrationCount: string;
+      if (localTarget) {
+        const databaseUrl = process.env.SUPABASE_TEST_DATABASE_URL;
+        serviceKey = process.env.SUPABASE_SECRET_KEY ?? "";
+        supabaseUrl = process.env.VITE_SUPABASE_URL ?? "";
+        if (!databaseUrl || !serviceKey.startsWith("sb_secret_") || !supabaseUrl) {
+          throw new Error("Task 148 local disposable connection material unavailable");
+        }
+        if (!/^http:\/\/(127\.0\.0\.1|localhost):/.test(supabaseUrl)) {
+          throw new Error("Task 148 local runner is not targeting loopback Supabase");
+        }
+        pool = new Pool({ connectionString: databaseUrl, max: 15 });
+        expectedLatest = "20261013110000";
+        expectedMigrationCount = "118";
+      } else {
+        const accessToken = (
+          process.env.SUPABASE_ACCESS_TOKEN ??
+          await readFile(join(homedir(), ".supabase", "access-token"), "utf8")
+        ).trim();
+        const project = await managementRequest<{ id: string; name: string }>(
           accessToken,
-          `/v1/projects/${disposableProjectRef}/cli/login-role`,
-          { method: "POST", body: JSON.stringify({ read_only: false }) },
-        ),
-        managementRequest<PoolerConfig[]>(
-          accessToken,
-          `/v1/projects/${disposableProjectRef}/config/database/pooler`,
-        ),
-        managementRequest<ApiKeyRow[]>(
-          accessToken,
-          `/v1/projects/${disposableProjectRef}/api-keys?reveal=true`,
-        ),
-      ]);
-      const pooler = poolers.find((candidate) => candidate.database_type === "PRIMARY");
-      const serviceKey = apiKeys.find((candidate) => candidate.type === "secret")?.api_key;
-      if (!pooler || !serviceKey?.startsWith("sb_secret_")) {
-        throw new Error("Task 148 disposable connection material unavailable");
+          `/v1/projects/${disposableProjectRef}`,
+        );
+        if (
+          project.id !== disposableProjectRef ||
+          project.name !== disposableProjectName
+        ) {
+          throw new Error("Task 148 disposable project identity mismatch");
+        }
+        const [login, poolers, apiKeys] = await Promise.all([
+          managementRequest<LoginRole>(
+            accessToken,
+            `/v1/projects/${disposableProjectRef}/cli/login-role`,
+            { method: "POST", body: JSON.stringify({ read_only: false }) },
+          ),
+          managementRequest<PoolerConfig[]>(
+            accessToken,
+            `/v1/projects/${disposableProjectRef}/config/database/pooler`,
+          ),
+          managementRequest<ApiKeyRow[]>(
+            accessToken,
+            `/v1/projects/${disposableProjectRef}/api-keys?reveal=true`,
+          ),
+        ]);
+        const pooler = poolers.find((candidate) => candidate.database_type === "PRIMARY");
+        serviceKey = apiKeys.find((candidate) => candidate.type === "secret")?.api_key ?? "";
+        if (!pooler || !serviceKey.startsWith("sb_secret_")) {
+          throw new Error("Task 148 disposable connection material unavailable");
+        }
+        const databaseUrl = new URL("postgresql://placeholder:placeholder@localhost/postgres");
+        databaseUrl.hostname = pooler.db_host;
+        databaseUrl.port = "5432";
+        databaseUrl.pathname = `/${pooler.db_name}`;
+        databaseUrl.username = `${login.role}.${disposableProjectRef}`;
+        databaseUrl.password = login.password;
+        pool = new Pool({
+          connectionString: databaseUrl.toString(),
+          max: 15,
+          ssl: { rejectUnauthorized: false },
+        });
+        supabaseUrl = `https://${disposableProjectRef}.supabase.co`;
+        expectedLatest = "20261005120000";
+        expectedMigrationCount = "111";
       }
-      const databaseUrl = new URL("postgresql://placeholder:placeholder@localhost/postgres");
-      databaseUrl.hostname = pooler.db_host;
-      databaseUrl.port = "5432";
-      databaseUrl.pathname = `/${pooler.db_name}`;
-      databaseUrl.username = `${login.role}.${disposableProjectRef}`;
-      databaseUrl.password = login.password;
-      pool = new Pool({
-        connectionString: databaseUrl.toString(),
-        max: 15,
-        ssl: { rejectUnauthorized: false },
-      });
       const initializedConnections = await Promise.all(
         Array.from({ length: 15 }, () => pool.connect()),
       );
@@ -512,7 +599,7 @@ describe.skipIf(!enabled)(
       ));
       initializedConnections.forEach((database) => database.release());
       storage = createClient(
-        `https://${disposableProjectRef}.supabase.co`,
+        supabaseUrl,
         serviceKey,
         { auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false } },
       );
@@ -545,8 +632,8 @@ describe.skipIf(!enabled)(
                 pg_catalog.max(version) as latest
          from supabase_migrations.schema_migrations`,
       )).rows).toEqual([{
-        latest: "20261005120000",
-        migration_count: "111",
+        latest: expectedLatest,
+        migration_count: expectedMigrationCount,
       }]);
     }, 120_000);
 
@@ -733,9 +820,10 @@ describe.skipIf(!enabled)(
 
     it("serializes manual Add, Remove, and Correction with generic Finish", async () => {
       const cases = [
-        { initial: "10", quantity: "7", type: "remove" as const },
-        { initial: "5", quantity: "4", type: "add" as const },
-        { initial: "10", quantity: "4", type: "correction" as const },
+        { direction: null, initial: "10", quantity: "7", type: "remove" as const },
+        { direction: null, initial: "5", quantity: "4", type: "add" as const },
+        { direction: "up", initial: "5", quantity: "9", type: "correction" as const },
+        { direction: "down", initial: "10", quantity: "4", type: "correction" as const },
       ];
       for (const testCase of cases) {
         const setup = await pool.connect();
@@ -752,8 +840,13 @@ describe.skipIf(!enabled)(
         if (testCase.type === "remove") {
           expect([finish, adjustment].filter((result) => result.ok)).toHaveLength(1);
           expect([finish, adjustment].find((result) => !result.ok)?.code).toBe("IVB02");
+        } else if (testCase.type === "correction" && testCase.direction === "down") {
+          expect([finish, adjustment].filter((result) => result.ok)).toHaveLength(1);
+          expect(["IVB02", "IVL03"]).toContain(
+            [finish, adjustment].find((result) => !result.ok)?.code,
+          );
         } else {
-          expect(adjustment.ok).toBe(true);
+          expect(adjustment).toEqual({ ok: true });
         }
         const movements = await expectLedger(pool, productId, BigInt(testCase.initial));
         expect(movements.filter((row) => row.movement_type === "work_order"))
@@ -765,9 +858,10 @@ describe.skipIf(!enabled)(
 
     it("serializes manual Add, Remove, and Correction with PCB Finish", async () => {
       const cases = [
-        { initial: "10", quantity: "7", type: "remove" as const },
-        { initial: "5", quantity: "4", type: "add" as const },
-        { initial: "10", quantity: "4", type: "correction" as const },
+        { direction: null, initial: "10", quantity: "7", type: "remove" as const },
+        { direction: null, initial: "5", quantity: "4", type: "add" as const },
+        { direction: "up", initial: "5", quantity: "9", type: "correction" as const },
+        { direction: "down", initial: "10", quantity: "4", type: "correction" as const },
       ];
       for (const testCase of cases) {
         const setup = await pool.connect();
@@ -784,8 +878,13 @@ describe.skipIf(!enabled)(
         if (testCase.type === "remove") {
           expect([finish, adjustment].filter((result) => result.ok)).toHaveLength(1);
           expect([finish, adjustment].find((result) => !result.ok)?.code).toBe("IVB02");
+        } else if (testCase.type === "correction" && testCase.direction === "down") {
+          expect([finish, adjustment].filter((result) => result.ok)).toHaveLength(1);
+          expect(["IVB02", "IVL03"]).toContain(
+            [finish, adjustment].find((result) => !result.ok)?.code,
+          );
         } else {
-          expect(adjustment.ok).toBe(true);
+          expect(adjustment).toEqual({ ok: true });
         }
         const movements = await expectLedger(pool, productId, BigInt(testCase.initial));
         expect(movements.filter((row) => row.movement_type === "pcb_production_input"))
@@ -881,11 +980,18 @@ describe.skipIf(!enabled)(
           bomItems: [{ productId: inputProductId, quantity: "1" }],
           plannedQuantity: "3",
         });
-        await setup.query(
-          `update public.inventory_balances set quantity = 10
-           where product_id = $1::uuid`,
-          [fixture.outputProductId],
+        await setup.query("begin");
+        await seedSupplierStockForProfile(
+          setup,
+          actor.profileId,
+          fixture.outputProductId,
+          "10",
+          {
+            catalogNumber: `TASK148-COMMITTED-OUTPUT-${fixture.outputProductId}`,
+            reason: "Task 148 committed initial supplier stock",
+          },
         );
+        await setup.query("commit");
         setup.release();
         const reference = await uploadPdf(storage, fixture.workOrderId);
         const [finish, adjustment] = await Promise.all([

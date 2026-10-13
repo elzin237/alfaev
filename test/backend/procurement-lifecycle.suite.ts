@@ -1183,7 +1183,7 @@ export function registerProcurementLifecycleTests(requireHarness: () => Security
         "Snapshot-independent Name",
         "Components",
         null,
-        "   ",
+        "PARTIAL-001",
       );
       expect((await database.query<ProductRow>(
         "select * from public.products where id = $1::uuid",
@@ -1193,7 +1193,7 @@ export function registerProcurementLifecycleTests(requireHarness: () => Security
         "select * from public.product_suppliers where product_id = $1::uuid",
         [createdWithoutOptionalValues.product_id],
       )).rows[0]).toMatchObject({
-        catalog_number: null,
+        catalog_number: "PARTIAL-001",
         supplier_id: activeSupplierId,
       });
       expect(await requestState(partialRequestId)).toMatchObject({
@@ -1245,14 +1245,14 @@ export function registerProcurementLifecycleTests(requireHarness: () => Security
       expect(await requestState(deniedRequestId)).toEqual(deniedBefore);
 
       for (const [index, values, code] of [
-        [0, [randomUUID(), "Missing Request", "Components", null, null], "P0002"],
-        [1, [linkedRequestId, "Linked Request", "Components", null, null], "PRQ05"],
-        [2, [resolvedRequestId, "Resolved Request", "Components", null, null], "PRQ02"],
-        [3, [archivedSupplierRequestId, "Archived Supplier", "Components", null, null], "PRQ04"],
-        [4, [deniedRequestId, "Missing Brand", "Components", randomUUID(), null], "PRD04"],
-        [5, [deniedRequestId, "Archived Brand", "Components", archivedBrandId, null], "PRD04"],
-        [6, [deniedRequestId, "   ", "Components", null, null], "22023"],
-        [7, [deniedRequestId, "Valid Name", "   ", null, null], "22023"],
+        [0, [randomUUID(), "Missing Request", "Components", null, "VALID"], "P0002"],
+        [1, [linkedRequestId, "Linked Request", "Components", null, "VALID"], "PRQ05"],
+        [2, [resolvedRequestId, "Resolved Request", "Components", null, "VALID"], "PRQ02"],
+        [3, [archivedSupplierRequestId, "Archived Supplier", "Components", null, "VALID"], "PRQ04"],
+        [4, [deniedRequestId, "Missing Brand", "Components", randomUUID(), "VALID"], "PRD04"],
+        [5, [deniedRequestId, "Archived Brand", "Components", archivedBrandId, "VALID"], "PRD04"],
+        [6, [deniedRequestId, "   ", "Components", null, "VALID"], "22023"],
+        [7, [deniedRequestId, "Valid Name", "   ", null, "VALID"], "22023"],
       ] as const) {
         await database.query(
           "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
@@ -1296,7 +1296,7 @@ export function registerProcurementLifecycleTests(requireHarness: () => Security
       await database.query("savepoint failed_procurement_product_supplier");
       await expect(database.query(
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Must Roll Back Product', 'Components', null, null
+           $1::uuid, 'Must Roll Back Product', 'Components', null, 'ROLLBACK-001'
          )`,
         [productSupplierFailureRequestId],
       )).rejects.toMatchObject({ code: "TST02" });
@@ -1344,7 +1344,7 @@ export function registerProcurementLifecycleTests(requireHarness: () => Security
       await database.query("savepoint failed_procurement_product_audit");
       await expect(database.query(
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Audit Rollback Product', 'Components', null, null
+           $1::uuid, 'Audit Rollback Product', 'Components', null, 'ROLLBACK-002'
          )`,
         [auditFailureRequestId],
       )).rejects.toMatchObject({ code: "TST01" });
@@ -1450,7 +1450,7 @@ export function registerProcurementProductConcurrencyTests(requireHarness: () =>
           serial_number: string;
         }>(
           `select * from public.create_product_from_procurement_request(
-             $1::uuid, 'Concurrent Product', 'Components', null, null
+             $1::uuid, 'Concurrent Product', 'Components', null, 'CONCURRENT-001'
            )`,
           [requestId],
         );
@@ -1474,7 +1474,7 @@ export function registerProcurementProductConcurrencyTests(requireHarness: () =>
         await secondAdmin.query("set local role authenticated");
         const secondResult = secondAdmin.query(
           `select * from public.create_product_from_procurement_request(
-             $1::uuid, 'Duplicate Concurrent Product', 'Components', null, null
+             $1::uuid, 'Duplicate Concurrent Product', 'Components', null, 'CONCURRENT-002'
            )`,
           [requestId],
         ).then(
@@ -1498,6 +1498,7 @@ export function registerProcurementProductConcurrencyTests(requireHarness: () =>
         }
         expect(observedRequestLockWait).toBe(true);
 
+        await firstAdmin.query("reset role");
         await firstAdmin.query("commit");
         expect(await secondResult).toMatchObject({ code: "PRQ05" });
         await secondAdmin.query("rollback");

@@ -767,3 +767,11 @@ Unused placeholder pages from the current React prototype must be removed from p
 Do not implement fake modules merely because placeholder routes/components already exist.
 
 Dashboard is the only intentional temporary placeholder.
+# Supplier Catalog Inventory Provenance
+
+- Required Catalog Number and optional description on active ProductSupplier relationships
+- Immutable Supplier, legacy/unknown, and internal-production source lots while preserving aggregate InventoryBalance
+- Admin Inventory Add/upward Correction selects an exact ProductSupplier; outbound stock consumes FIFO automatically
+- Immutable outbound allocation history for Work Order and PCB consumption
+- Product detail Supplier Stock History
+- Official Work Order PDFs render frozen Supplier Catalog Number allocations and split mixed-source quantities into truthful rows

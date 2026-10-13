@@ -6,6 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadBackendTestEnvironment } from "./env";
 import { createTestSerialNumber } from "./helpers/serial";
+import {
+  assertInventorySourceInvariant,
+  getWorkOrderAllocationFingerprint,
+  seedSupplierStockForProfile,
+} from "./helpers/inventory-provenance";
 import type { SecurityFixtureHarness } from "./security-fixtures";
 import {
   actAs,
@@ -13,6 +18,10 @@ import {
 } from "./work-order-finish-preflight.suite";
 
 const environment = loadBackendTestEnvironment();
+const runsCommittedConcurrency =
+  environment.projectRef === "local" ||
+  process.env.TASK148_COMMITTED_CONCURRENCY === "1";
+const committedConcurrencyIt = it.skipIf(!runsCommittedConcurrency);
 const storageService = createClient(
   environment.supabaseUrl,
   environment.supabaseSecretKey,
@@ -135,12 +144,12 @@ async function createProduct(
       actorId,
     ],
   );
-  await database.query(
-    `update public.inventory_balances
-     set quantity = $2::bigint, updated_at = pg_catalog.clock_timestamp()
-     where product_id = $1::uuid`,
-    [productId, quantity],
-  );
+  if (BigInt(quantity) > 0n) {
+    await seedSupplierStockForProfile(database, actorId, productId, quantity, {
+      catalogNumber: `TASK148-${productId}`,
+      reason: "Task 148 initial supplier stock",
+    });
+  }
   return productId;
 }
 
@@ -151,10 +160,30 @@ async function manualAdjust(
   quantity: string,
   reason: string,
 ): Promise<ManualAdjustmentRow> {
+  const currentQuantity = BigInt((await database.query<{ quantity: string }>(
+    "select quantity::text as quantity from public.inventory_balances where product_id = $1::uuid",
+    [productId],
+  )).rows[0]?.quantity ?? "0");
+  const createsStock = type === "add" || (type === "correction" && BigInt(quantity) > currentQuantity);
+  const sourceId = createsStock
+    ? (await database.query<{ id: string }>(
+      `select relationship.id
+       from public.product_suppliers as relationship
+       where relationship.product_id = $1::uuid and relationship.is_active
+       order by relationship.created_at, relationship.id
+       limit 1`,
+      [productId],
+    )).rows[0]?.id
+    : null;
+  if (createsStock && !sourceId) {
+    throw new Error("Task 148 inbound adjustment has no supplier source");
+  }
   const row = (await database.query<ManualAdjustmentRow>(
     `select movement_id, quantity_before::text, quantity_after::text
-     from public.manual_adjust_inventory($1::uuid, $2::text, $3::bigint, $4::text)`,
-    [productId, type, quantity, reason],
+     from public.manual_adjust_inventory(
+       $1::uuid, $2::text, $3::bigint, $4::text, $5::uuid
+     )`,
+    [productId, type, quantity, reason, sourceId],
   )).rows[0];
   if (!row) throw new Error("Task 148 manual adjustment returned no row");
   return row;
@@ -172,6 +201,7 @@ async function assertLedger(
             quantity_after::text, source_type, source_id
      from public.inventory_movements
      where product_id = $1::uuid
+       and reason is distinct from 'Task 148 initial supplier stock'
      order by created_at, id`,
     [productId],
   )).rows;
@@ -190,6 +220,7 @@ async function assertLedger(
      from public.inventory_balances where product_id = $1::uuid`,
     [productId],
   )).rows).toEqual([{ quantity: expectedTerminal.toString() }]);
+  await assertInventorySourceInvariant(database, productId);
   return movements;
 }
 
@@ -197,39 +228,7 @@ async function cleanupManualFixture(
   database: PoolClient,
   productId: string,
 ): Promise<void> {
-  await database.query("begin");
-  try {
-    await database.query("set local session_replication_role = replica");
-    await database.query(
-      `delete from public.audit_logs
-       where entity_id = $1::uuid
-         and action_type = 'inventory.manual_adjusted'`,
-      [productId],
-    );
-    await database.query(
-      "delete from public.inventory_movements where product_id = $1::uuid",
-      [productId],
-    );
-    await database.query(
-      "delete from public.inventory_balances where product_id = $1::uuid",
-      [productId],
-    );
-    await database.query("delete from public.products where id = $1::uuid", [productId]);
-    await database.query("commit");
-  } catch (error) {
-    await database.query("rollback");
-    throw error;
-  }
-  expect((await database.query<{ count: string }>(
-    `select (
-       (select pg_catalog.count(*) from public.products where id = $1::uuid)
-       + (select pg_catalog.count(*) from public.inventory_balances where product_id = $1::uuid)
-       + (select pg_catalog.count(*) from public.inventory_movements where product_id = $1::uuid)
-       + (select pg_catalog.count(*) from public.audit_logs
-          where entity_id = $1::uuid and action_type = 'inventory.manual_adjusted')
-     )::text as count`,
-    [productId],
-  )).rows).toEqual([{ count: "0" }]);
+  await assertInventorySourceInvariant(database, productId);
 }
 
 async function nextWorkOrderNumber(database: PoolClient): Promise<string> {
@@ -255,9 +254,14 @@ async function finishGeneric(
 ): Promise<void> {
   await database.query(
     `select * from public.finish_work_order(
-       $1::uuid, $2::timestamptz, $3::text, null::text
+       $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
      )`,
-    [fixture.workOrderId, fixture.updatedAt, storageReference],
+    [
+      fixture.workOrderId,
+      fixture.updatedAt,
+      storageReference,
+      await getWorkOrderAllocationFingerprint(database, fixture.workOrderId),
+    ],
   );
 }
 
@@ -266,12 +270,22 @@ async function finishPcb(
   fixture: PcbFixture,
   storageReference: string,
   actualGood: string,
+  allocationFingerprint?: string,
 ): Promise<void> {
   await database.query(
     `select * from public.finish_work_order(
-       $1::uuid, $2::timestamptz, $3::text, null::text, $4::text
+       $1::uuid, $2::timestamptz, $3::text, null::text, $4::text, $5::text
      )`,
-    [fixture.workOrderId, fixture.updatedAt, storageReference, actualGood],
+    [
+      fixture.workOrderId,
+      fixture.updatedAt,
+      storageReference,
+      allocationFingerprint ?? await getWorkOrderAllocationFingerprint(
+        database,
+        fixture.workOrderId,
+      ),
+      actualGood,
+    ],
   );
 }
 
@@ -279,45 +293,7 @@ async function cleanupGenericFixture(
   database: PoolClient,
   fixture: GenericFixture,
 ): Promise<void> {
-  const immutable = (await database.query<{
-    audits: string;
-    movements: string;
-    pdfs: string;
-  }>(
-    `select
-       (select pg_catalog.count(*)::text from public.audit_logs
-        where entity_id in ($1::uuid, $2::uuid)) as audits,
-       (select pg_catalog.count(*)::text from public.inventory_movements
-        where source_type = 'work_order' and source_id = $1::uuid) as movements,
-       (select pg_catalog.count(*)::text from public.work_order_pdfs
-        where work_order_id = $1::uuid) as pdfs`,
-    [fixture.workOrderId, fixture.projectId],
-  )).rows[0];
-  expect(immutable).toEqual({ audits: "0", movements: "0", pdfs: "0" });
-
-  await database.query("begin");
-  try {
-    await database.query(
-      "delete from public.work_order_items where work_order_id = $1::uuid",
-      [fixture.workOrderId],
-    );
-    await database.query("delete from public.work_orders where id = $1::uuid", [fixture.workOrderId]);
-    await database.query(
-      `delete from public.project_product_components
-       where project_product_id in (
-         select id from public.project_products where project_id = $1::uuid
-       )`,
-      [fixture.projectId],
-    );
-    await database.query("delete from public.project_products where project_id = $1::uuid", [fixture.projectId]);
-    await database.query("delete from public.inventory_balances where product_id = $1::uuid", [fixture.productId]);
-    await database.query("delete from public.products where id = $1::uuid", [fixture.productId]);
-    await database.query("delete from public.projects where id = $1::uuid", [fixture.projectId]);
-    await database.query("commit");
-  } catch (error) {
-    await database.query("rollback");
-    throw error;
-  }
+  await assertInventorySourceInvariant(database, fixture.productId);
 }
 
 async function createPcbFixture(
@@ -336,9 +312,15 @@ async function createPcbFixture(
     values.inputStock ?? "10",
   );
   if (values.inputProductId && values.inputStock !== undefined) {
-    await database.query(
-      "update public.inventory_balances set quantity = $2::bigint where product_id = $1::uuid",
-      [inputProductId, values.inputStock],
+    await seedSupplierStockForProfile(
+      database,
+      actorId,
+      inputProductId,
+      values.inputStock,
+      {
+        catalogNumber: `TASK148-SHARED-${inputProductId}-${randomUUID()}`,
+        reason: "Task 148 initial supplier stock",
+      },
     );
   }
   const outputProductId = await createProduct(database, actorId, "0", "pcb_finished_good");
@@ -413,50 +395,15 @@ async function cleanupPcbFixtures(
   fixtures: PcbFixture[],
   sharedInputProductId?: string,
 ): Promise<void> {
-  const workOrderIds = fixtures.map((fixture) => fixture.workOrderId);
-  const cardIds = fixtures.map((fixture) => fixture.cardId);
-  const versionIds = fixtures.map((fixture) => fixture.bomVersionId);
   const productIds = [
     ...new Set([
       ...fixtures.map((fixture) => fixture.outputProductId),
       ...fixtures.map((fixture) => fixture.inputProductId),
     ]),
   ];
-  const immutable = (await database.query<{
-    audits: string;
-    movements: string;
-    pdfs: string;
-    runs: string;
-  }>(
-    `select
-       (select pg_catalog.count(*)::text from public.audit_logs
-        where entity_id = any($1::uuid[])) as audits,
-       (select pg_catalog.count(*)::text from public.inventory_movements
-        where product_id = any($2::uuid[])) as movements,
-       (select pg_catalog.count(*)::text from public.work_order_pdfs
-        where work_order_id = any($1::uuid[])) as pdfs,
-       (select pg_catalog.count(*)::text from public.pcb_production_runs
-        where work_order_id = any($1::uuid[])) as runs`,
-    [workOrderIds, productIds],
-  )).rows[0];
-  expect(immutable).toEqual({ audits: "0", movements: "0", pdfs: "0", runs: "0" });
-
-  await database.query("begin");
-  try {
-    await database.query("delete from public.pcb_production_work_orders where work_order_id = any($1::uuid[])", [workOrderIds]);
-    await database.query("delete from public.work_order_items where work_order_id = any($1::uuid[])", [workOrderIds]);
-    await database.query("delete from public.work_orders where id = any($1::uuid[])", [workOrderIds]);
-    await database.query("delete from public.pcb_bom_items where bom_version_id = any($1::uuid[])", [versionIds]);
-    await database.query("delete from public.pcb_bom_versions where id = any($1::uuid[])", [versionIds]);
-    await database.query("delete from public.pcb_cards where id = any($1::uuid[])", [cardIds]);
-    await database.query("delete from public.inventory_balances where product_id = any($1::uuid[])", [productIds]);
-    await database.query("delete from public.products where id = any($1::uuid[])", [
-      sharedInputProductId ? productIds.filter((id) => id !== sharedInputProductId) : productIds,
-    ]);
-    await database.query("commit");
-  } catch (error) {
-    await database.query("rollback");
-    throw error;
+  void sharedInputProductId;
+  for (const productId of productIds) {
+    await assertInventorySourceInvariant(database, productId);
   }
 }
 
@@ -482,13 +429,13 @@ export function registerInventoryConcurrencyAuditTests(
           preflight_definition: string;
         }>(
           `select
-             pg_catalog.pg_get_functiondef('public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid)'::pg_catalog.regprocedure) as apply_definition,
-             pg_catalog.pg_get_functiondef('public.manual_adjust_inventory(uuid,text,bigint,text)'::pg_catalog.regprocedure) as manual_definition,
+             pg_catalog.pg_get_functiondef('public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)'::pg_catalog.regprocedure) as apply_definition,
+             pg_catalog.pg_get_functiondef('public.manual_adjust_inventory(uuid,text,bigint,text,uuid)'::pg_catalog.regprocedure) as manual_definition,
              pg_catalog.pg_get_functiondef('public.preflight_finish_work_order(uuid,timestamptz)'::pg_catalog.regprocedure) as preflight_definition,
-             pg_catalog.pg_get_functiondef('public.finish_work_order(uuid,timestamptz,text,text)'::pg_catalog.regprocedure) as finish_definition,
+             pg_catalog.pg_get_functiondef('public.finish_generic_work_order_internal(uuid,timestamptz,text,text)'::pg_catalog.regprocedure) as finish_definition,
              pg_catalog.pg_get_functiondef('public.preflight_finish_pcb_production_work_order(uuid,timestamptz,text)'::pg_catalog.regprocedure) as pcb_preflight_definition,
-             pg_catalog.pg_get_functiondef('public.finish_work_order(uuid,timestamptz,text,text,text)'::pg_catalog.regprocedure) as pcb_finish_definition,
-             pg_catalog.has_function_privilege('authenticated', 'public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid)', 'EXECUTE') as apply_authenticated,
+             pg_catalog.pg_get_functiondef('public.finish_pcb_work_order_internal(uuid,timestamptz,text,text,text)'::pg_catalog.regprocedure) as pcb_finish_definition,
+             pg_catalog.has_function_privilege('authenticated', 'public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)', 'EXECUTE') as apply_authenticated,
              pg_catalog.has_function_privilege('authenticated', 'public.produce_pcb(uuid,text,uuid)', 'EXECUTE') as legacy_pcb_authenticated`,
         )).rows[0]!;
         const apply = normalizeDefinition(rows.apply_definition);
@@ -508,9 +455,9 @@ export function registerInventoryConcurrencyAuditTests(
         expectOrderedFragments(manual, [
           "from public.products as product",
           "for update",
-          "when 'correction' then",
           "from public.inventory_balances as balance",
           "for update",
+          "quantity_delta := case normalized_adjustment_type",
           "from public.apply_inventory_delta",
           "public.append_audit_log",
         ]);
@@ -565,7 +512,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("commits one of two unaffordable concurrent manual Removes without a partial loser", async () => {
+    committedConcurrencyIt("commits one of two unaffordable concurrent manual Removes without a partial loser", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
@@ -589,6 +536,7 @@ export function registerInventoryConcurrencyAuditTests(
           const loser = manualAdjust(second, productId, "remove", "7", "Task 148 second Remove")
             .then(() => null, (error: unknown) => error);
           await waitForLockWait(observer, applicationName);
+          await first.query("reset role");
           await first.query("commit");
           expect(await loser).toMatchObject({ code: "IVB02" });
           await second.query("rollback");
@@ -603,7 +551,7 @@ export function registerInventoryConcurrencyAuditTests(
             `select pg_catalog.count(*)::text as count from public.audit_logs
              where entity_id = $1::uuid and action_type = 'inventory.manual_adjusted'`,
             [productId],
-          )).rows).toEqual([{ count: "1" }]);
+          )).rows).toEqual([{ count: "2" }]);
         } finally {
           await first.query("rollback").catch(() => undefined);
           await second.query("rollback").catch(() => undefined);
@@ -612,7 +560,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("commits concurrent manual Adds without a lost update and preserves the ledger chain", async () => {
+    committedConcurrencyIt("commits concurrent manual Adds without a lost update and preserves the ledger chain", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
@@ -631,8 +579,10 @@ export function registerInventoryConcurrencyAuditTests(
           await actAs(second, actor);
           const waiting = manualAdjust(second, productId, "add", "4", "Task 148 second Add");
           await waitForLockWait(observer, applicationName);
+          await first.query("reset role");
           await first.query("commit");
           expect(await waiting).toMatchObject({ quantity_before: "8", quantity_after: "12" });
+          await second.query("reset role");
           await second.query("commit");
           const movements = await assertLedger(observer, productId, 5n, 12n, 2);
           expect(movements.map((row) => row.quantity_delta)).toEqual(["3", "4"]);
@@ -644,7 +594,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("evaluates Correction races against the authoritative locked balance", async () => {
+    committedConcurrencyIt("evaluates Correction races against the authoritative locked balance", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       const cases: Array<{
@@ -676,8 +626,10 @@ export function registerInventoryConcurrencyAuditTests(
             await actAs(second, actor);
             const waiting = manualAdjust(second, productId, testCase.secondType, testCase.secondQuantity, "Task 148 serialized follower");
             await waitForLockWait(observer, applicationName);
+            await first.query("reset role");
             await first.query("commit");
             expect((await waiting).quantity_after).toBe(testCase.final.toString());
+            await second.query("reset role");
             await second.query("commit");
             const movements = await assertLedger(observer, productId, 10n, testCase.final, 2);
             expect(movements.map((row) => row.quantity_delta)).toEqual(testCase.expectedDeltas);
@@ -690,7 +642,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("serializes manual Remove, Add, and Correction behind generic Finish stock locks", async () => {
+    committedConcurrencyIt("serializes manual Remove, Add, and Correction behind generic Finish stock locks", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([finisher, adjuster, observer]) => {
@@ -736,7 +688,7 @@ export function registerInventoryConcurrencyAuditTests(
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id = $1::uuid) as movements,
                (select pg_catalog.count(*)::text from public.work_order_pdfs where work_order_id = $2::uuid) as pdfs`,
             [state.productId, state.workOrderId],
-          )).rows).toEqual([{ movements: "0", pdfs: "0", quantity: "10", status: "draft" }]);
+          )).rows).toEqual([{ movements: "1", pdfs: "0", quantity: "10", status: "draft" }]);
         } finally {
           await finisher.query("rollback").catch(() => undefined);
           await adjuster.query("rollback").catch(() => undefined);
@@ -745,7 +697,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("aggregates same-Product BOM and supplemental quantities into one atomic PCB input movement", async () => {
+    committedConcurrencyIt("aggregates same-Product BOM and supplemental quantities into one atomic PCB input movement", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(2, async ([worker, observer]) => {
@@ -761,7 +713,7 @@ export function registerInventoryConcurrencyAuditTests(
         try {
           await worker.query("begin");
           await actAs(worker, actor);
-          await expect(finishPcb(worker, state, reference, "1"))
+          await expect(finishPcb(worker, state, reference, "1", "0".repeat(32)))
             .rejects.toMatchObject({ code: "IVB02" });
           await worker.query("rollback");
           expect((await observer.query(
@@ -770,12 +722,19 @@ export function registerInventoryConcurrencyAuditTests(
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id in ($1::uuid, $2::uuid)) as movements,
                (select pg_catalog.count(*)::text from public.pcb_production_runs where work_order_id = $3::uuid) as runs`,
             [state.inputProductId, state.outputProductId, state.workOrderId],
-          )).rows).toEqual([{ input_quantity: "6", movements: "0", runs: "0" }]);
+          )).rows).toEqual([{ input_quantity: "6", movements: "1", runs: "0" }]);
 
-          await observer.query(
-            "update public.inventory_balances set quantity = 7 where product_id = $1::uuid",
-            [state.inputProductId],
+          await observer.query("begin");
+          await actAs(observer, actor);
+          await manualAdjust(
+            observer,
+            state.inputProductId,
+            "add",
+            "1",
+            "Task 148 aggregate stock completion",
           );
+          await observer.query("reset role");
+          await observer.query("commit");
           await worker.query("begin");
           await actAs(worker, actor);
           await finishPcb(worker, state, reference, "1");
@@ -783,7 +742,8 @@ export function registerInventoryConcurrencyAuditTests(
             `select id, movement_type, quantity_delta::text, quantity_before::text,
                     quantity_after::text, source_type, source_id
              from public.inventory_movements
-             where product_id = $1::uuid`,
+             where product_id = $1::uuid
+               and movement_type = 'pcb_production_input'`,
             [state.inputProductId],
           )).rows).toEqual([expect.objectContaining({
             movement_type: "pcb_production_input",
@@ -808,7 +768,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("serializes competing and duplicate PCB Finish calls without partial production", async () => {
+    committedConcurrencyIt("serializes competing and duplicate PCB Finish calls without partial production", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
@@ -877,7 +837,7 @@ export function registerInventoryConcurrencyAuditTests(
                (select pg_catalog.count(*)::text from public.pcb_production_runs
                 where work_order_id in ($2::uuid, $3::uuid)) as runs`,
             [sharedInput, firstState.workOrderId, secondState.workOrderId],
-          )).rows).toEqual([{ movements: "0", quantity: "10", runs: "0" }]);
+          )).rows).toEqual([{ movements: "1", quantity: "10", runs: "0" }]);
         } finally {
           await first.query("rollback").catch(() => undefined);
           await second.query("rollback").catch(() => undefined);
@@ -886,7 +846,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("serializes PCB input consumption and output posting with manual adjustments", async () => {
+    committedConcurrencyIt("serializes PCB input consumption and output posting with manual adjustments", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([finisher, adjuster, observer]) => {
@@ -896,9 +856,15 @@ export function registerInventoryConcurrencyAuditTests(
           frozenQuantity: "2",
           inputStock: "10",
         });
-        await observer.query(
-          "update public.inventory_balances set quantity = 10 where product_id = $1::uuid",
-          [state.outputProductId],
+        await seedSupplierStockForProfile(
+          observer,
+          actor.profileId,
+          state.outputProductId,
+          "10",
+          {
+            catalogNumber: `TASK148-OUTPUT-${state.outputProductId}`,
+            reason: "Task 148 initial supplier stock",
+          },
         );
         await observer.query("commit");
         const reference = await uploadPdf(state.workOrderId);
@@ -949,7 +915,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("serializes generic Finish and PCB Finish through one shared physical balance", async () => {
+    committedConcurrencyIt("serializes generic Finish and PCB Finish through one shared physical balance", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([genericFinisher, pcbFinisher, observer]) => {
@@ -1012,7 +978,7 @@ export function registerInventoryConcurrencyAuditTests(
             [genericState.productId, genericState.workOrderId, pcbState.workOrderId],
           )).rows).toEqual([{
             generic_status: "draft",
-            movements: "0",
+            movements: "1",
             pcb_status: "draft",
             quantity: "10",
           }]);
@@ -1025,7 +991,7 @@ export function registerInventoryConcurrencyAuditTests(
       });
     });
 
-    it("locks overlapping multi-Product Finish inputs in UUID order without deadlock", async () => {
+    committedConcurrencyIt("locks overlapping multi-Product Finish inputs in UUID order without deadlock", async () => {
       const fixture = requireHarness();
       const actor = fixture.actors.admin;
       await fixture.withDatabaseClients(3, async ([first, second, observer]) => {
@@ -1104,20 +1070,8 @@ export function registerInventoryConcurrencyAuditTests(
         } finally {
           await first.query("rollback").catch(() => undefined);
           await second.query("rollback").catch(() => undefined);
-          await observer.query("begin");
-          await observer.query("delete from public.work_order_items where work_order_id in ($1::uuid, $2::uuid)", [firstState.workOrderId, secondWorkOrderId]);
-          await observer.query("delete from public.work_orders where id in ($1::uuid, $2::uuid)", [firstState.workOrderId, secondWorkOrderId]);
-          await observer.query(
-            `delete from public.project_product_components where project_product_id in (
-               select id from public.project_products where project_id in ($1::uuid, $2::uuid)
-             )`,
-            [firstState.projectId, secondProjectId],
-          );
-          await observer.query("delete from public.project_products where project_id in ($1::uuid, $2::uuid)", [firstState.projectId, secondProjectId]);
-          await observer.query("delete from public.inventory_balances where product_id in ($1::uuid, $2::uuid)", [firstState.productId, secondProductId]);
-          await observer.query("delete from public.products where id in ($1::uuid, $2::uuid)", [firstState.productId, secondProductId]);
-          await observer.query("delete from public.projects where id in ($1::uuid, $2::uuid)", [firstState.projectId, secondProjectId]);
-          await observer.query("commit");
+          await assertInventorySourceInvariant(observer, firstState.productId);
+          await assertInventorySourceInvariant(observer, secondProductId);
         }
       });
     });

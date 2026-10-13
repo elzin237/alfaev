@@ -104,6 +104,7 @@ describe("inventoryBalanceService", () => {
       adjustmentType: "add",
       quantity: 5,
       reason: "  Counted delivery  ",
+      productSupplierId: "relation-1",
     })).resolves.toEqual({
       ok: true,
       value: {
@@ -117,6 +118,7 @@ describe("inventoryBalanceService", () => {
       p_adjustment_type: "add",
       p_quantity: 5,
       p_reason: "Counted delivery",
+      p_product_supplier_id: "relation-1",
     });
     expect(serviceMocks.from).not.toHaveBeenCalled();
   });
@@ -128,6 +130,7 @@ describe("inventoryBalanceService", () => {
     ["MIA02", "adjustment_no_op", "The correction target must differ from the current quantity."],
     ["IVB01", "balance_unavailable", "The Inventory balance is unavailable."],
     ["IVB02", "insufficient_stock", "The requested removal exceeds the available stock."],
+    ["IVL03", "inventory_source_unavailable", "Select an active Supplier Catalog source for inbound stock."],
     ["P0002", "product_unavailable", "This Product is unavailable for Inventory adjustment."],
     ["PRD01", "product_unavailable", "This Product is unavailable for Inventory adjustment."],
     ["unexpected", "inventory_adjustment_failed", "The Inventory adjustment could not be completed. Please try again."],

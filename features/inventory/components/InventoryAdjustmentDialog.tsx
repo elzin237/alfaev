@@ -13,10 +13,15 @@ import {
   type InventoryAdjustmentFormInput,
   type InventoryAdjustmentFormOutput,
 } from "../validation/inventoryAdjustmentSchema";
+import type { InventorySourceChoice } from "../services/inventorySourceService";
 
 export interface InventoryAdjustmentDialogProps {
   open: boolean;
   currentQuantity: number;
+  sourceChoices?: InventorySourceChoice[];
+  isSourceChoicesLoading?: boolean;
+  sourceChoicesError?: string | null;
+  onRetrySourceChoices?: () => void;
   onClose: () => void;
   onSubmit: (input: InventoryAdjustmentInput) => Promise<InventoryAdjustmentResult>;
   onSucceeded: (adjustment: InventoryAdjustment) => void;
@@ -66,6 +71,10 @@ function getPreview(
 function InventoryAdjustmentDialog({
   open,
   currentQuantity,
+  sourceChoices = [],
+  isSourceChoicesLoading = false,
+  sourceChoicesError = null,
+  onRetrySourceChoices = () => undefined,
   onClose,
   onSubmit,
   onSucceeded,
@@ -78,6 +87,7 @@ function InventoryAdjustmentDialog({
   const submitButtonRef = useRef<HTMLButtonElement>(null);
   const submissionLockRef = useRef(false);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [productSupplierId, setProductSupplierId] = useState("");
   const schema = useMemo(
     () => createInventoryAdjustmentSchema(currentQuantity),
     [currentQuantity],
@@ -109,6 +119,7 @@ function InventoryAdjustmentDialog({
     if (submissionLockRef.current || isSubmitting) return;
 
     setSubmissionError(null);
+    setProductSupplierId("");
     reset(defaultValues);
     onClose();
   }, [isSubmitting, onClose, reset]);
@@ -117,6 +128,7 @@ function InventoryAdjustmentDialog({
     if (!open) return;
 
     setSubmissionError(null);
+    setProductSupplierId("");
     reset(defaultValues);
     queueMicrotask(() => typeSelectRef.current?.focus());
   }, [open, reset]);
@@ -157,17 +169,27 @@ function InventoryAdjustmentDialog({
   const submit = handleSubmit(async (input) => {
     if (submissionLockRef.current) return;
 
+    const requiresSource = input.adjustmentType === "add" ||
+      (input.adjustmentType === "correction" && input.quantity > currentQuantity);
+    if (requiresSource && !productSupplierId) {
+      setSubmissionError("Select the Supplier Catalog Source for inbound stock.");
+      return;
+    }
     submissionLockRef.current = true;
     setSubmissionError(null);
 
     try {
-      const result = await onSubmit(input);
+      const result = await onSubmit({
+        ...input,
+        productSupplierId: requiresSource ? productSupplierId : null,
+      });
       if (!result.ok) {
         setSubmissionError(result.error.message);
         return;
       }
 
       reset(defaultValues);
+      setProductSupplierId("");
       onSucceeded(result.value);
       onClose();
     } finally {
@@ -176,6 +198,10 @@ function InventoryAdjustmentDialog({
   });
 
   if (!open) return null;
+
+  const sourceRequired = adjustmentType === "add" ||
+    (adjustmentType === "correction" &&
+      preview.resultingQuantity !== null && preview.resultingQuantity > currentQuantity);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -203,6 +229,7 @@ function InventoryAdjustmentDialog({
               {currentQuantity}
             </dd>
           </div>
+
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
               Adjustment
@@ -245,6 +272,38 @@ function InventoryAdjustmentDialog({
               <option value="correction">Correction</option>
             </select>
           </div>
+
+          {sourceRequired && (
+            <div>
+              <label htmlFor="inventory-product-supplier-source" className="block text-sm font-semibold text-zinc-800">
+                Supplier Catalog Source
+              </label>
+              {isSourceChoicesLoading ? (
+                <p role="status" className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">Loading source choices...</p>
+              ) : sourceChoicesError ? (
+                <div role="alert" className="mt-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  <p>{sourceChoicesError}</p>
+                  <button type="button" onClick={onRetrySourceChoices} className="mt-2 font-semibold underline underline-offset-2">Try again</button>
+                </div>
+              ) : (
+                <select
+                  id="inventory-product-supplier-source"
+                  value={productSupplierId}
+                  onChange={(event) => setProductSupplierId(event.target.value)}
+                  disabled={isSubmitting}
+                  required
+                  className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                >
+                  <option value="">Select a Supplier Catalog Source</option>
+                  {sourceChoices.map((source) => (
+                    <option key={source.productSupplierId} value={source.productSupplierId}>
+                      {source.supplierName} — {source.catalogNumber}{source.description ? ` — ${source.description}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           <div>
             <label htmlFor="inventory-adjustment-quantity" className="block text-sm font-semibold text-zinc-800">
@@ -305,7 +364,7 @@ function InventoryAdjustmentDialog({
             <button
               ref={submitButtonRef}
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || (sourceRequired && (isSourceChoicesLoading || Boolean(sourceChoicesError)))}
               className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSubmitting ? "Adjusting Inventory…" : "Adjust Inventory"}

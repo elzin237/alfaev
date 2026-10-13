@@ -174,6 +174,11 @@ function domainError(error: unknown, stage: "snapshot" | "finish"): SafeError {
       code: "project_unavailable",
       message: "The selected Project is no longer available for this Work Order.",
     },
+    WOR11: {
+      status: 409,
+      code: "inventory_sources_changed",
+      message: "Inventory sources changed. Reload before finishing.",
+    },
     PRD05: {
       status: 409,
       code: "product_unavailable",
@@ -457,6 +462,7 @@ export async function handleFinishWorkOrderRequest(
       p_expected_updated_at: input.expectedUpdatedAt,
       p_pdf_storage_reference: finalPath,
       p_pdf_content_hash: contentHash,
+      p_allocation_fingerprint: snapshot.allocationFingerprint,
       ...(input.actualGoodQuantity === undefined
         ? {}
         : { p_actual_good_quantity: input.actualGoodQuantity }),

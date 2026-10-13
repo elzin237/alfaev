@@ -32,6 +32,7 @@ const activeRelation: SupplierProductRelation = {
   productName: activeProduct.productName,
   productIsActive: true,
   catalogNumber: "AbC-42",
+  description: "Control cabinet relay",
   isActive: true,
 };
 const historicalRelation: SupplierProductRelation = {
@@ -41,6 +42,7 @@ const historicalRelation: SupplierProductRelation = {
   productName: "Legacy Controller",
   productIsActive: false,
   catalogNumber: null,
+  description: null,
   isActive: false,
 };
 
@@ -136,7 +138,8 @@ describe("SupplierProductsSection", () => {
     expect(screen.getByText("Controller")).toBeInTheDocument();
     expect(screen.getByText("AbC-42")).toBeInTheDocument();
     expect(screen.getByText("Legacy Controller")).toBeInTheDocument();
-    expect(screen.getByText("Not provided")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
+    expect(screen.getByText("Control cabinet relay")).toBeInTheDocument();
     expect(screen.getByText("Archived Product")).toBeInTheDocument();
     const historicalRow = screen.getByText("Legacy Controller").closest("tr");
     expect(within(historicalRow as HTMLElement).queryByRole("button", {
@@ -183,11 +186,15 @@ describe("SupplierProductsSection", () => {
     fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
       target: { value: "  AbC-77  " },
     });
+    fireEvent.change(within(dialog).getByLabelText(/Description/), {
+      target: { value: "  Supplier relay  " },
+    });
     fireEvent.click(within(dialog).getByRole("button", { name: "Add Product" }));
 
     await waitFor(() => expect(sectionMocks.create).toHaveBeenCalledWith({
       productId: "product-active",
       catalogNumber: "AbC-77",
+      description: "Supplier relay",
     }));
     expect(await screen.findByRole("status")).toHaveTextContent("Product link added.");
   });
@@ -195,7 +202,7 @@ describe("SupplierProductsSection", () => {
   it("edits only Catalog Number and requires confirmation before archive", async () => {
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const editDialog = screen.getByRole("dialog", { name: "Edit Catalog Number" });
+    const editDialog = screen.getByRole("dialog", { name: "Edit Supplier Link" });
     expect(within(editDialog).queryByLabelText("Product")).not.toBeInTheDocument();
     fireEvent.change(within(editDialog).getByLabelText(/Catalog Number/), {
       target: { value: "  New-Cat  " },
@@ -203,7 +210,7 @@ describe("SupplierProductsSection", () => {
     fireEvent.click(within(editDialog).getByRole("button", { name: "Save Changes" }));
     await waitFor(() => expect(sectionMocks.update).toHaveBeenCalledWith(
       "relation-active",
-      { catalogNumber: "New-Cat" },
+      { catalogNumber: "New-Cat", description: "Control cabinet relay" },
     ));
 
     fireEvent.click(screen.getByRole("button", { name: "Archive" }));

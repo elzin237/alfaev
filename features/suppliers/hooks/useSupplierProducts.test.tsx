@@ -155,8 +155,8 @@ describe("useSupplierProducts", () => {
     await waitFor(() => expect(result.current.relationQuery.isSuccess).toBe(true));
 
     await act(async () => {
-      await result.current.create({ productId: "product-1", catalogNumber: "CAT-1" });
-      await result.current.update("relation-1", { catalogNumber: "CAT-2" });
+      await result.current.create({ productId: "product-1", catalogNumber: "CAT-1", description: null });
+      await result.current.update("relation-1", { catalogNumber: "CAT-2", description: null });
       await result.current.archive("relation-1");
     });
 
@@ -164,6 +164,7 @@ describe("useSupplierProducts", () => {
       supplierId: "supplier-1",
       productId: "product-1",
       catalogNumber: "CAT-1",
+      description: null,
     });
     const expected = {
       queryKey: ["suppliers", "product-suppliers", "profile-1", "supplier-1"],
@@ -185,7 +186,7 @@ describe("useSupplierProducts", () => {
     await waitFor(() => expect(result.current.relationQuery.isSuccess).toBe(true));
 
     await act(async () => {
-      await result.current.create({ productId: "product-1", catalogNumber: null });
+      await result.current.create({ productId: "product-1", catalogNumber: "", description: null });
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();

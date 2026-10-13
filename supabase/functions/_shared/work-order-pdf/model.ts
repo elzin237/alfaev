@@ -9,7 +9,7 @@ const maximumPostgresBigint = 9_223_372_036_854_775_807n;
 export interface WorkOrderPdfMaterial {
   position: string;
   productId: string;
-  serialNumber: string;
+  catalogNumber: string;
   productName: string;
   quantity: string;
 }
@@ -22,6 +22,7 @@ export interface WorkOrderPdfSnapshot {
   description: string;
   workOrderCreatedAt: string;
   snapshotUpdatedAt: string;
+  allocationFingerprint: string;
   materials: WorkOrderPdfMaterial[];
   pcbProduction?: {
     pcbCardId: string;
@@ -43,6 +44,7 @@ interface ParsedSnapshotRow {
   description: string;
   workOrderCreatedAt: string;
   snapshotUpdatedAt: string;
+  allocationFingerprint: string;
   material: WorkOrderPdfMaterial | null;
   pcbProduction: WorkOrderPdfSnapshot["pcbProduction"];
 }
@@ -157,10 +159,14 @@ function parseRow(value: unknown): ParsedSnapshotRow {
     description: requiredText(value.description),
     workOrderCreatedAt: exactTimestamp(value.work_order_created_at),
     snapshotUpdatedAt: exactTimestamp(value.snapshot_updated_at),
+    allocationFingerprint: exactPattern(
+      value.allocation_fingerprint,
+      /^[0-9a-f]{32}$/,
+    ),
     material: hasMaterial ? {
       position: exactPositiveBigint(value.material_position),
       productId: exactPattern(value.product_id, uuidPattern),
-      serialNumber: exactPattern(value.serial_number, serialNumberPattern),
+      catalogNumber: requiredText(value.catalog_number),
       productName: requiredText(value.product_name),
       quantity: exactPositiveBigint(value.quantity),
     } : null,
@@ -187,7 +193,8 @@ function sameHeader(
     first.customerName === candidate.customerName &&
     first.description === candidate.description &&
     first.workOrderCreatedAt === candidate.workOrderCreatedAt &&
-    first.snapshotUpdatedAt === candidate.snapshotUpdatedAt;
+    first.snapshotUpdatedAt === candidate.snapshotUpdatedAt &&
+    first.allocationFingerprint === candidate.allocationFingerprint;
 
 }
 
@@ -207,21 +214,16 @@ export function parseWorkOrderPdfSnapshot(
     throw new WorkOrderPdfSnapshotError();
   }
 
-  const productIds = new Set<string>();
   const materials = rows.flatMap((row) => row.material ? [row.material] : []);
   for (const [index, row] of rows.entries()) {
     if (
       !sameHeader(first, row) ||
       JSON.stringify(row.pcbProduction) !== JSON.stringify(first.pcbProduction) ||
       (row.material === null && !(first.pcbProduction && rows.length === 1)) ||
-      (row.material !== null && (
-        row.material.position !== String(index + 1) ||
-        productIds.has(row.material.productId)
-      ))
+      (row.material !== null && row.material.position !== String(index + 1))
     ) {
       throw new WorkOrderPdfSnapshotError();
     }
-    if (row.material) productIds.add(row.material.productId);
   }
 
   return {
@@ -232,6 +234,7 @@ export function parseWorkOrderPdfSnapshot(
     description: first.description,
     workOrderCreatedAt: first.workOrderCreatedAt,
     snapshotUpdatedAt: first.snapshotUpdatedAt,
+    allocationFingerprint: first.allocationFingerprint,
     materials,
     pcbProduction: first.pcbProduction,
   };

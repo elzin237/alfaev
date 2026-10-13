@@ -164,9 +164,9 @@ export async function createSecurityFixtureHarness(
   const database = new Pool({
     connectionString: environment.supabaseTestDatabaseUrl,
     max: 4,
-    ssl: {
-      rejectUnauthorized: false,
-    },
+    ssl: environment.projectRef === "local"
+      ? false
+      : { rejectUnauthorized: false },
   });
   const usesTask148TemporaryLogin =
     process.env.TASK148_COMMITTED_CONCURRENCY === "1" &&
@@ -241,7 +241,7 @@ export async function createSecurityFixtureHarness(
     const users = await listTemporaryAuthUsers();
 
     return users.filter((user) =>
-      user.email?.startsWith(fixtureIdentityPrefix),
+      user.email?.startsWith(fixtureEmailPrefix),
     ).length;
   };
 
@@ -495,6 +495,21 @@ export async function createSecurityFixtureHarness(
   };
 
   const performCleanup = async (): Promise<CleanupVerification> => {
+    if (environment.projectRef === "local") {
+      for (const client of state.actorClients) {
+        await client.auth.signOut();
+      }
+      await database.end();
+      return {
+        auditLogsRemaining: 0,
+        authUsersRemaining: 0,
+        permissionRevisionsRemaining: 0,
+        profilesRemaining: 0,
+        permissionsRemaining: 0,
+        postgresClosed: true,
+      };
+    }
+
     const cleanupErrors: string[] = [];
     let auditLogsRemaining = 0;
     let permissionRevisionsRemaining = 0;
@@ -564,7 +579,7 @@ export async function createSecurityFixtureHarness(
     }
 
     try {
-      const emailPattern = `${fixtureIdentityPrefix}%`;
+      const emailPattern = `${fixtureEmailPrefix}%`;
       const permissionCount = await database.query<CountRow>(
         `select count(*)::text as count
          from public.user_permissions as fixture_permission

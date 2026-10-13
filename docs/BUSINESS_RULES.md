@@ -205,7 +205,7 @@ When Admin uses `Create component from request`:
 - when the request has a Supplier, that Supplier is fixed for this workflow and must still exist and be active; an archived Supplier leaves history readable but blocks Product creation from that request
 - create exactly one active Product/Component with `product_kind = 'component'`
 - generate the next unique 7-digit Serial Number / Šifra through trusted backend/database logic
-- when the request has a Supplier, create one active ProductSupplier relationship to it, with an optional supplier-specific Catalog Number normalized by trimming blank to `NULL` and preserving nonblank casing
+- when the request has a Supplier, require a nonblank supplier-specific Catalog Number and create one active ProductSupplier relationship to it; optional ProductSupplier description remains `NULL` unless supplied by an authorized workflow
 - when the request has no Supplier, create the Product without a ProductSupplier relationship or Catalog Number
 - link the Product/Component back to the original Nabavka request without changing its historical requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
 - preserve immutable audit history for Product creation, any ProductSupplier creation, and the Procurement-to-Product link
@@ -356,9 +356,11 @@ The sequence must be generated safely by trusted backend/database logic to preve
 
 - separate from Serial Number
 - supplier-related
-- belongs to the Product–Supplier relationship
-- optional and nullable
-- trimmed when provided, with blank input stored as `NULL`
+- belongs to the ProductSupplier relationship, never Product
+- required, normalized, and nonblank for every active relationship
+- archived legacy relationships remain readable and may retain a historical missing value
+- ProductSupplier `description` is optional, trimmed, stores blank as `NULL`, and preserves nonblank casing/content; it is distinct from Product name, Work Order description, and Procurement requested name
+- trimmed and nonblank when required for an active relationship
 - preserves entered casing
 - one product/component may have multiple Suppliers
 - the same Product and Supplier may have multiple relationships when their Catalog Numbers differ
@@ -384,6 +386,21 @@ The sequence must be generated safely by trusted backend/database logic to preve
 - A trusted Product-choice lookup for ProductSupplier management may expose only active Product IDs, Serial Numbers, and Names to an active Admin or a user with `inventory.products.edit` or `suppliers.edit`.
 - These narrow ProductSupplier reads do not provide general Product access or Product Category, Brand, lifecycle timestamps/actors, or other Product details; normal Product reads still require an active Admin or `inventory.view`.
 - No separate ProductSupplier permission key is added.
+
+### Inventory Source Provenance
+
+- `InventoryBalance.quantity` remains the canonical aggregate physical balance.
+- Every positive balance is represented by immutable inbound source lots whose remaining quantities reconcile exactly to that balance.
+- Supplier receipts freeze Supplier name, Catalog Number, and optional ProductSupplier description at receipt time.
+- Pre-provenance positive stock is represented explicitly as `legacy_unknown`; no Supplier or Catalog Number is fabricated.
+- PCB finished-goods output is `internal_production` and has no Supplier or Catalog Number.
+- Outbound stock is allocated FIFO by receipt timestamp and source-lot UUID. One consumption may allocate across multiple lots.
+- Manual Add and upward Correction require the exact active ProductSupplier relationship. Remove and downward Correction never ask for a new Supplier and consume existing lots FIFO.
+- Source lots and outbound allocation history are trusted-only and immutable except that trusted consumption may decrease a lot's remaining quantity.
+- After every trusted mutation, the sum of remaining source-lot quantities for a Product equals its InventoryBalance quantity.
+- Work Order and PCB Finish allocate persisted material quantities at Finish time; Drafts do not reserve stock.
+- Finished history and PDFs use frozen allocation facts rather than current ProductSupplier metadata.
+- PDF `KAT. BROJ` is the frozen Supplier Catalog Number for a supplier-sourced allocation and `—` for legacy or internally produced stock. `OPIS` remains Product name. Split-source consumption produces one PDF row per allocation.
 
 ---
 

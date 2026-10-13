@@ -34,6 +34,7 @@ describe("productSupplierService", () => {
           supplier_name: "Legacy Supplier",
           supplier_is_active: false,
           catalog_number: null,
+          description: null,
           relationship_is_active: false,
         },
         {
@@ -42,6 +43,7 @@ describe("productSupplierService", () => {
           supplier_name: "Beta",
           supplier_is_active: true,
           catalog_number: "Z-20",
+          description: "Industrial relay",
           relationship_is_active: true,
         },
         {
@@ -50,6 +52,7 @@ describe("productSupplierService", () => {
           supplier_name: "Alpha",
           supplier_is_active: false,
           catalog_number: null,
+          description: null,
           relationship_is_active: true,
         },
       ],
@@ -64,6 +67,7 @@ describe("productSupplierService", () => {
           supplierId: "supplier-1",
           supplierName: "Alpha",
           catalogNumber: null,
+          description: null,
           isActive: true,
           supplierIsActive: false,
         },
@@ -72,6 +76,7 @@ describe("productSupplierService", () => {
           supplierId: "supplier-2",
           supplierName: "Beta",
           catalogNumber: "Z-20",
+          description: "Industrial relay",
           isActive: true,
           supplierIsActive: true,
         },
@@ -80,6 +85,7 @@ describe("productSupplierService", () => {
           supplierId: "supplier-3",
           supplierName: "Legacy Supplier",
           catalogNumber: null,
+          description: null,
           isActive: false,
           supplierIsActive: false,
         },
@@ -165,6 +171,7 @@ describe("productSupplierService", () => {
           product_name: "Legacy Controller",
           product_is_active: false,
           catalog_number: null,
+          description: null,
           relationship_is_active: false,
         },
         {
@@ -174,6 +181,7 @@ describe("productSupplierService", () => {
           product_name: "Controller",
           product_is_active: true,
           catalog_number: "AbC-42",
+          description: "Control cabinet relay",
           relationship_is_active: true,
         },
       ],
@@ -190,6 +198,7 @@ describe("productSupplierService", () => {
           productName: "Controller",
           productIsActive: true,
           catalogNumber: "AbC-42",
+          description: "Control cabinet relay",
           isActive: true,
         },
         {
@@ -199,6 +208,7 @@ describe("productSupplierService", () => {
           productName: "Legacy Controller",
           productIsActive: false,
           catalogNumber: null,
+          description: null,
           isActive: false,
         },
       ],
@@ -259,6 +269,7 @@ describe("productSupplierService", () => {
       productId: "product-1",
       supplierId: "supplier-1",
       catalogNumber: "  AbC-42  ",
+      description: "  Control relay  ",
     })).resolves.toEqual({
       ok: true,
       value: { relationId: "relation-1" },
@@ -267,17 +278,19 @@ describe("productSupplierService", () => {
       p_product_id: "product-1",
       p_supplier_id: "supplier-1",
       p_catalog_number: "AbC-42",
+      p_description: "Control relay",
     });
   });
 
-  it("stores blank Catalog Number as null and edit changes only that field", async () => {
+  it("forwards blank Catalog Number for trusted rejection and normalizes optional description", async () => {
     serviceMocks.rpc.mockResolvedValue({ data: "relation-1", error: null });
 
-    await updateProductSupplier("relation-1", { catalogNumber: "   " });
+    await updateProductSupplier("relation-1", { catalogNumber: "   ", description: "   " });
 
     expect(serviceMocks.rpc).toHaveBeenCalledWith("update_product_supplier", {
       p_product_supplier_id: "relation-1",
-      p_catalog_number: null,
+      p_catalog_number: "",
+      p_description: null,
     });
     expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_product_id");
     expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_supplier_id");
@@ -298,7 +311,8 @@ describe("productSupplierService", () => {
     const result = await createProductSupplier({
       productId: "product-1",
       supplierId: "supplier-1",
-      catalogNumber: null,
+      catalogNumber: "CAT-1",
+      description: null,
     });
 
     expect(result.ok).toBe(false);
@@ -318,7 +332,8 @@ describe("productSupplierService", () => {
     });
 
     const result = await updateProductSupplier("relation-1", {
-      catalogNumber: null,
+      catalogNumber: "CAT-1",
+      description: null,
     });
 
     expect(result.ok).toBe(false);

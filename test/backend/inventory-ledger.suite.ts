@@ -36,22 +36,20 @@ interface CreatedProductRow {
 }
 
 export function registerInventoryLedgerTests(requireHarness: () => SecurityFixtureHarness): void {
-  it("creates exactly one whole-number zero InventoryBalance for every existing and future Product", async () => {
+  it("creates exactly one whole-number InventoryBalance for every existing Product and a zero balance for future Products", async () => {
     const fixture = requireHarness();
 
     await fixture.withRollbackDatabaseTransaction(async (database) => {
       const actorId = fixture.actors.admin.profileId;
-      const missingZeroBalances = await database.query<CountResultRow>(
+      const invalidBalanceCardinality = await database.query<CountResultRow>(
         `select count(*)::integer as count
          from public.products as product
-         where not exists (
-           select 1
-           from public.inventory_balances as balance
-           where balance.product_id = product.id
-             and balance.quantity = 0
-         )`,
+         left join public.inventory_balances as balance
+           on balance.product_id = product.id
+         group by product.id
+         having pg_catalog.count(balance.product_id) <> 1`,
       );
-      expect(missingZeroBalances.rows).toEqual([{ count: 0 }]);
+      expect(invalidBalanceCardinality.rows).toEqual([]);
 
       const activeProductId = randomUUID();
       const archivedProductId = randomUUID();

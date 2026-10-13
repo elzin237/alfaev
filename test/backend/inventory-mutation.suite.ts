@@ -1,8 +1,21 @@
 import { randomUUID } from "node:crypto";
 import { expect, it } from "vitest";
+import {
+  isDisposableOrLocalBackendTarget,
+  loadBackendTestEnvironment,
+} from "./env";
 import { expectPermissionDenied } from "./helpers/assertions";
 import type { SecurityFixtureHarness } from "./security-fixtures";
 import { createTestSerialNumber } from "./helpers/serial";
+import {
+  assertInventorySourceInvariant,
+  createSupplierSourceFixture,
+  seedSupplierStock,
+} from "./helpers/inventory-provenance";
+
+const committedConcurrencyIt = it.skipIf(
+  !isDisposableOrLocalBackendTarget(loadBackendTestEnvironment().projectRef),
+);
 
 interface CountResultRow {
   count: number;
@@ -66,12 +79,18 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
          )`,
         [productId, createTestSerialNumber(), actor.profileId],
       );
-      const auditBefore = await database.query<CountResultRow>(
-        "select count(*)::integer as count from public.audit_logs",
-      );
       await database.query(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
         [actor.authUserId],
+      );
+      const source = await createSupplierSourceFixture(
+        database,
+        actor,
+        productId,
+        { catalogNumber: "DELTA-001" },
+      );
+      const auditBefore = await database.query<CountResultRow>(
+        "select count(*)::integer as count from public.audit_logs",
       );
 
       const positive = await database.query<AppliedInventoryDeltaRow>(
@@ -84,9 +103,11 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
            '  fixture_source  ',
            $2::uuid,
            $3::uuid,
-           null
+           null,
+           $4::uuid,
+           'supplier'
          )`,
-        [productId, sourceId, projectId],
+        [productId, sourceId, projectId, source.productSupplierId],
       );
       expect(positive.rows).toEqual([{
         movement_id: expect.any(String),
@@ -166,9 +187,11 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
 
       await database.query("savepoint outer_inventory_operation");
       const rolledBack = await database.query<AppliedInventoryDeltaRow>(
-        `select *
-         from public.apply_inventory_delta($1::uuid, 2, 'stock_in')`,
-        [productId],
+        `select * from public.apply_inventory_delta(
+           $1::uuid, 2, 'stock_in', null, null, null, null, null,
+           $2::uuid, 'supplier'
+         )`,
+        [productId, source.productSupplierId],
       );
       await database.query("rollback to savepoint outer_inventory_operation");
       const afterOuterRollback = await database.query<InventoryBalanceRow>(
@@ -185,6 +208,7 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       );
       expect(afterOuterRollback.rows).toEqual(balance.rows);
       expect(rolledBackMovement.rows).toEqual([{ count: 0 }]);
+      await assertInventorySourceInvariant(database, productId);
 
       const auditAfter = await database.query<CountResultRow>(
         "select count(*)::integer as count from public.audit_logs",
@@ -208,11 +232,12 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
          )`,
         [productId, createTestSerialNumber(), actor.profileId],
       );
-      await database.query(
-        `update public.inventory_balances
-         set quantity = 3
-         where product_id = $1::uuid`,
-        [productId],
+      const source = await seedSupplierStock(
+        database,
+        actor,
+        productId,
+        3,
+        { catalogNumber: "FAILED-DELTA-001" },
       );
       await database.query(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
@@ -228,14 +253,20 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
         ],
         [
           "blank_inventory_movement_type",
-          "select * from public.apply_inventory_delta($1::uuid, 1, '   ')",
-          [productId],
+          `select * from public.apply_inventory_delta(
+             $1::uuid, 1, '   ', null, null, null, null, null,
+             $2::uuid, 'supplier'
+           )`,
+          [productId, source.productSupplierId],
           "22023",
         ],
         [
           "null_inventory_delta",
-          "select * from public.apply_inventory_delta($1::uuid, null, 'stock_in')",
-          [productId],
+          `select * from public.apply_inventory_delta(
+             $1::uuid, null, 'stock_in', null, null, null, null, null,
+             $2::uuid, 'supplier'
+           )`,
+          [productId, source.productSupplierId],
           "22023",
         ],
         [
@@ -244,9 +275,9 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
            from public.apply_inventory_delta(
              $1::uuid, 1, 'correction_reversal', 'Missing original',
              'correction_reversal', null, null,
-             $2::uuid
+             $2::uuid, $3::uuid, 'supplier'
            )`,
-          [productId, randomUUID()],
+          [productId, randomUUID(), source.productSupplierId],
           "23503",
         ],
       ] as const) {
@@ -268,20 +299,24 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
           [productId],
         );
         expect(unchangedBalance.rows).toEqual([{ quantity: "3" }]);
-        expect(movementCount.rows).toEqual([{ count: 0 }]);
+        expect(movementCount.rows).toEqual([{ count: 1 }]);
       }
 
       await database.query(
-        `update public.inventory_balances
-         set quantity = 9223372036854775807
-         where product_id = $1::uuid`,
-        [productId],
+        `select * from public.manual_adjust_inventory(
+           $1::uuid, 'correction', 9223372036854775807,
+           'Prepare bigint overflow boundary', $2::uuid
+         )`,
+        [productId, source.productSupplierId],
       );
       await database.query("savepoint overflowing_inventory_delta");
       await expect(
         database.query(
-          "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
-          [productId],
+          `select * from public.apply_inventory_delta(
+             $1::uuid, 1, 'stock_in', null, null, null, null, null,
+             $2::uuid, 'supplier'
+           )`,
+          [productId, source.productSupplierId],
         ),
       ).rejects.toMatchObject({ code: "22003" });
       await database.query("rollback to savepoint overflowing_inventory_delta");
@@ -293,15 +328,26 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       );
       expect(afterOverflow.rows).toEqual([{ quantity: "9223372036854775807" }]);
 
+      const missingBalanceProductId = randomUUID();
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values (
+           $1::uuid, $2::text, 'Missing Balance Delta Product', 'Components',
+           'component', $3::uuid, $3::uuid
+         )`,
+        [missingBalanceProductId, createTestSerialNumber(), actor.profileId],
+      );
       await database.query(
         "delete from public.inventory_balances where product_id = $1::uuid",
-        [productId],
+        [missingBalanceProductId],
       );
       await database.query("savepoint missing_inventory_balance");
       await expect(
         database.query(
           "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
-          [productId],
+          [missingBalanceProductId],
         ),
       ).rejects.toMatchObject({ code: "IVB01" });
       await database.query("rollback to savepoint missing_inventory_balance");
@@ -309,7 +355,7 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       await database.query(
         `insert into public.inventory_balances (product_id, quantity)
          values ($1::uuid, 0)`,
-        [productId],
+        [missingBalanceProductId],
       );
       await database.query(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
@@ -319,7 +365,7 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       await expect(
         database.query(
           "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
-          [productId],
+          [missingBalanceProductId],
         ),
       ).rejects.toMatchObject({ code: "42501" });
       await database.query("rollback to savepoint inactive_inventory_actor");
@@ -331,7 +377,7 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       await expect(
         database.query(
           "select * from public.apply_inventory_delta($1::uuid, 1, 'stock_in')",
-          [productId],
+          [missingBalanceProductId],
         ),
       ).rejects.toMatchObject({ code: "42501" });
       await database.query("rollback to savepoint anonymous_inventory_actor");
@@ -339,12 +385,12 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
         `select quantity
          from public.inventory_balances
          where product_id = $1::uuid`,
-        [productId],
+        [missingBalanceProductId],
       );
       expect(finalBalance.rows).toEqual([{ quantity: "0" }]);
     });
   });
-  it("serializes competing deductions on one Product and prevents overspending", async () => {
+  committedConcurrencyIt("serializes competing deductions on one Product and prevents overspending", async () => {
     const fixture = requireHarness();
     const productId = randomUUID();
     const applicationName = `alfaev-inventory-wait-${randomUUID()}`;
@@ -372,11 +418,12 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
           fixture.actors.admin.profileId,
         ],
       );
-      await observer.query(
-        `update public.inventory_balances
-         set quantity = 5
-         where product_id = $1::uuid`,
-        [productId],
+      await seedSupplierStock(
+        observer,
+        fixture.actors.admin,
+        productId,
+        5,
+        { catalogNumber: "CONCURRENT-DELTA-001" },
       );
       await observer.query("commit");
 
@@ -445,7 +492,7 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
           [productId],
         );
         expect(committedWhileWaiting.rows).toEqual([{
-          movement_count: 0,
+          movement_count: 1,
           quantity: "5",
         }]);
 
@@ -470,22 +517,13 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
           [productId],
         );
         expect(finalState.rows).toEqual([{
-          movement_count: 0,
+          movement_count: 1,
           quantity: "5",
         }]);
       } finally {
         await first.query("rollback");
         await second.query("rollback");
-        await observer.query("begin");
-        await observer.query(
-          "delete from public.inventory_balances where product_id = $1::uuid",
-          [productId],
-        );
-        await observer.query(
-          "delete from public.products where id = $1::uuid",
-          [productId],
-        );
-        await observer.query("commit");
+        await assertInventorySourceInvariant(observer, productId);
       }
     });
   });
@@ -571,6 +609,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
          )`,
         [productId, createTestSerialNumber(), actor.profileId],
       );
+      const source = await createSupplierSourceFixture(
+        database,
+        actor,
+        productId,
+        { catalogNumber: "MANUAL-001" },
+      );
       await database.query(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
         [actor.authUserId],
@@ -629,13 +673,17 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              $2::text,
              $3::bigint,
-             $4::text
+             $4::text,
+             $5::uuid
            )`,
           [
             productId,
             adjustment.adjustmentType,
             adjustment.quantity,
             adjustment.reason,
+            BigInt(adjustment.expectedAfter) > BigInt(adjustment.expectedBefore)
+              ? source.productSupplierId
+              : null,
           ],
         );
         expect(result.rows).toEqual([{
@@ -802,6 +850,7 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           }),
         ]),
       );
+      await assertInventorySourceInvariant(database, productId);
     });
   });
   it("rejects invalid, missing, archived, no-op, and insufficient manual adjustments without side effects", async () => {
@@ -830,11 +879,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           actor.profileId,
         ],
       );
-      await database.query(
-        `update public.inventory_balances
-         set quantity = 5
-         where product_id = $1::uuid`,
-        [productId],
+      const source = await seedSupplierStock(
+        database,
+        actor,
+        productId,
+        5,
+        { catalogNumber: "VALIDATION-001" },
       );
       await database.query(
         "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
@@ -850,77 +900,77 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
         {
           code: "MIA01",
           label: "null_product",
-          values: [null, "add", 1, "Reason"],
+          values: [null, "add", 1, "Reason", source.productSupplierId],
         },
         {
           code: "P0002",
           label: "missing_product",
-          values: [randomUUID(), "add", 1, "Reason"],
+          values: [randomUUID(), "add", 1, "Reason", source.productSupplierId],
         },
         {
           code: "PRD01",
           label: "archived_product",
-          values: [archivedProductId, "add", 1, "Reason"],
+          values: [archivedProductId, "add", 1, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "invalid_type",
-          values: [productId, "replace", 1, "Reason"],
+          values: [productId, "replace", 1, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "null_type",
-          values: [productId, null, 1, "Reason"],
+          values: [productId, null, 1, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "zero_add",
-          values: [productId, "add", 0, "Reason"],
+          values: [productId, "add", 0, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "negative_add",
-          values: [productId, "add", -1, "Reason"],
+          values: [productId, "add", -1, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "zero_remove",
-          values: [productId, "remove", 0, "Reason"],
+          values: [productId, "remove", 0, "Reason", null],
         },
         {
           code: "MIA01",
           label: "negative_remove",
-          values: [productId, "remove", -1, "Reason"],
+          values: [productId, "remove", -1, "Reason", null],
         },
         {
           code: "MIA01",
           label: "negative_correction",
-          values: [productId, "correction", -1, "Reason"],
+          values: [productId, "correction", -1, "Reason", null],
         },
         {
           code: "MIA01",
           label: "null_quantity",
-          values: [productId, "add", null, "Reason"],
+          values: [productId, "add", null, "Reason", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "blank_reason",
-          values: [productId, "add", 1, "   "],
+          values: [productId, "add", 1, "   ", source.productSupplierId],
         },
         {
           code: "MIA01",
           label: "null_reason",
-          values: [productId, "add", 1, null],
+          values: [productId, "add", 1, null, source.productSupplierId],
         },
         {
           code: "MIA02",
           label: "no_op_correction",
-          values: [productId, "correction", 5, "No change"],
+          values: [productId, "correction", 5, "No change", null],
         },
         {
           code: "IVB02",
           label: "insufficient_remove",
-          values: [productId, "remove", 6, "Too much"],
+          values: [productId, "remove", 6, "Too much", null],
         },
       ];
 
@@ -933,7 +983,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
                $1::uuid,
                $2::text,
                $3::bigint,
-               $4::text
+               $4::text,
+               $5::uuid
              )`,
             rejected.values,
           ),
@@ -965,10 +1016,11 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
         [productId],
       );
       expect(state.rows).toEqual([{
-        audit_count: 0,
-        movement_count: 0,
+        audit_count: 1,
+        movement_count: 1,
         quantity: "5",
       }]);
+      await assertInventorySourceInvariant(database, productId);
     });
   });
   it("keeps manual adjustment Admin-only and preserves all lower-level client write boundaries", async () => {
@@ -976,6 +1028,7 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
     const argumentsForRpc = {
       p_adjustment_type: "add",
       p_product_id: randomUUID(),
+      p_product_supplier_id: randomUUID(),
       p_quantity: 1,
       p_reason: "Authorization probe",
     };
@@ -1064,7 +1117,7 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
         settings: ["search_path=\"\""],
       });
       expect(security.rows[0]?.arguments).toBe(
-        "p_product_id uuid, p_adjustment_type text, p_quantity bigint, p_reason text",
+        "p_product_id uuid, p_adjustment_type text, p_quantity bigint, p_reason text, p_product_supplier_id uuid",
       );
       const definition = security.rows[0]?.definition.toLowerCase() ?? "";
       expect(definition.match(/apply_inventory_delta/g)).toHaveLength(1);
@@ -1122,11 +1175,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           fixture.actors.admin.profileId,
         ],
       );
-      await database.query(
-        `update public.inventory_balances
-         set quantity = 8
-         where product_id = $1::uuid`,
-        [productId],
+      await seedSupplierStock(
+        database,
+        fixture.actors.admin,
+        productId,
+        8,
+        { catalogNumber: "DENIED-001" },
       );
 
       for (const [label, actor] of [
@@ -1149,7 +1203,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
                $1::uuid,
                'remove',
                1,
-               'Denied authorization attempt'
+               'Denied authorization attempt',
+               null
              )`,
             [productId],
           ),
@@ -1170,7 +1225,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              'remove',
              1,
-             'Anonymous authorization attempt'
+             'Anonymous authorization attempt',
+             null
            )`,
           [productId],
         ),
@@ -1201,13 +1257,14 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
         [productId],
       );
       expect(unchanged.rows).toEqual([{
-        audit_count: 0,
-        movement_count: 0,
+        audit_count: 1,
+        movement_count: 1,
         quantity: "8",
       }]);
+      await assertInventorySourceInvariant(database, productId);
     });
   });
-  it("serializes competing Admin manual removals and commits only the affordable adjustment", async () => {
+  committedConcurrencyIt("serializes competing Admin manual removals and commits only the affordable adjustment", async () => {
     const fixture = requireHarness();
     const productId = randomUUID();
     const applicationName = `alfaev-manual-remove-wait-${randomUUID()}`;
@@ -1235,11 +1292,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           fixture.actors.admin.profileId,
         ],
       );
-      await observer.query(
-        `update public.inventory_balances
-         set quantity = 10
-         where product_id = $1::uuid`,
-        [productId],
+      await seedSupplierStock(
+        observer,
+        fixture.actors.admin,
+        productId,
+        10,
+        { catalogNumber: "CONCURRENT-REMOVE-001" },
       );
       await observer.query("commit");
 
@@ -1258,7 +1316,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              'remove',
              7,
-             'First concurrent removal'
+             'First concurrent removal',
+             null
            )`,
           [productId],
         );
@@ -1284,7 +1343,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              'remove',
              6,
-             'Competing concurrent removal'
+             'Competing concurrent removal',
+             null
            )`,
           [productId],
         ).then(
@@ -1331,11 +1391,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           [productId],
         );
         expect(stateWhileWaiting.rows).toEqual([{
-          audit_count: 0,
-          movement_count: 0,
+          audit_count: 1,
+          movement_count: 1,
           quantity: "10",
         }]);
 
+        await firstAdmin.query("reset role");
         await firstAdmin.query("commit");
         const competingError = await unaffordableRemoval;
         expect(competingError).toMatchObject({ code: "IVB02" });
@@ -1374,17 +1435,19 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
            from public.inventory_balances as balance
            join public.inventory_movements as movement
              on movement.product_id = balance.product_id
+            and movement.movement_type = 'manual_remove'
            join public.audit_logs as audit
              on audit.entity_id = balance.product_id
             and audit.action_type = 'inventory.manual_adjusted'
+            and audit.after_data->>'movement_id' = movement.id::text
            where balance.product_id = $1::uuid`,
           [productId],
         );
         expect(committedState.rows).toEqual([{
           action_type: "inventory.manual_adjusted",
           actor_user_id: fixture.actors.admin.profileId,
-          audit_count: 1,
-          movement_count: 1,
+          audit_count: 2,
+          movement_count: 2,
           movement_type: "manual_remove",
           quantity: "3",
           quantity_after: "3",
@@ -1397,7 +1460,7 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           { p_product_id: productId },
         );
         expect(readableHistory.error).toBeNull();
-        expect(readableHistory.data).toEqual([
+        expect(readableHistory.data).toEqual(expect.arrayContaining([
           expect.objectContaining({
             movement_id: affordableRemoval.rows[0]?.movement_id,
             movement_type: "manual_remove",
@@ -1405,33 +1468,11 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
             quantity_before: 10,
             quantity_delta: -7,
           }),
-        ]);
+        ]));
+        await assertInventorySourceInvariant(observer, productId);
       } finally {
         await firstAdmin.query("rollback");
         await secondAdmin.query("rollback");
-        await observer.query("begin");
-        await observer.query("set local session_replication_role = replica");
-        await observer.query(
-          `delete from public.audit_logs
-           where entity_id = $1::uuid
-             and action_type = 'inventory.manual_adjusted'`,
-          [productId],
-        );
-        await observer.query(
-          `delete from public.inventory_movements
-           where product_id = $1::uuid`,
-          [productId],
-        );
-        await observer.query(
-          `delete from public.inventory_balances
-           where product_id = $1::uuid`,
-          [productId],
-        );
-        await observer.query(
-          "delete from public.products where id = $1::uuid",
-          [productId],
-        );
-        await observer.query("commit");
       }
     });
   });
@@ -1450,6 +1491,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
            'component', $3::uuid, $3::uuid
          )`,
         [productId, createTestSerialNumber(), actor.profileId],
+      );
+      const source = await createSupplierSourceFixture(
+        database,
+        actor,
+        productId,
+        { catalogNumber: "AUDIT-ROLLBACK-001" },
       );
       await database.query(
         `create function public.test_reject_manual_inventory_audit()
@@ -1486,9 +1533,10 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              'add',
              3,
-             'Must roll back'
+             'Must roll back',
+             $2::uuid
            )`,
-          [productId],
+          [productId, source.productSupplierId],
         ),
       ).rejects.toMatchObject({ code: "TST01" });
       await database.query("rollback to savepoint failed_manual_inventory_audit");
@@ -1521,9 +1569,10 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
         movement_count: 0,
         quantity: "0",
       }]);
+      await assertInventorySourceInvariant(database, productId);
     });
   });
-  it("fails a waiting manual adjustment when the Product archive transition wins", async () => {
+  committedConcurrencyIt("fails a waiting manual adjustment when the Product archive transition wins", async () => {
     const fixture = requireHarness();
     const productId = randomUUID();
     const applicationName = `alfaev-manual-adjust-wait-${randomUUID()}`;
@@ -1550,6 +1599,12 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
           createTestSerialNumber(),
           fixture.actors.admin.profileId,
         ],
+      );
+      const source = await createSupplierSourceFixture(
+        observer,
+        fixture.actors.admin,
+        productId,
+        { catalogNumber: "ARCHIVE-RACE-001" },
       );
       await observer.query("commit");
 
@@ -1582,9 +1637,10 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
              $1::uuid,
              'add',
              1,
-             'Must lose archive race'
+             'Must lose archive race',
+             $2::uuid
            )`,
-          [productId],
+          [productId, source.productSupplierId],
         ).then(
           () => null,
           (error: unknown) => error,
@@ -1646,16 +1702,6 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
       } finally {
         await archiver.query("rollback");
         await adjuster.query("rollback");
-        await observer.query("begin");
-        await observer.query(
-          "delete from public.inventory_balances where product_id = $1::uuid",
-          [productId],
-        );
-        await observer.query(
-          "delete from public.products where id = $1::uuid",
-          [productId],
-        );
-        await observer.query("commit");
       }
     });
   });

@@ -91,6 +91,9 @@ function FinishedWorkOrderView({
                     {[
                       "Serial Number",
                       "Product Name",
+                      "Supplier",
+                      "Catalog Number",
+                      "Source Description",
                       "Quantity",
                     ].map((heading) => (
                       <th key={heading} scope="col" className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -100,12 +103,15 @@ function FinishedWorkOrderView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 bg-white">
-                  {materials.map((material) => (
-                    <tr key={material.productId} className="text-sm text-zinc-700">
+                  {materials.map((material, index) => (
+                    <tr key={`${material.productId}-${material.catalogNumber}-${index}`} className="text-sm text-zinc-700">
                       <td className="whitespace-nowrap px-5 py-4 font-mono font-semibold text-zinc-900">
                         {material.serialNumber}
                       </td>
                       <td className="px-5 py-4">{material.productName}</td>
+                      <td className="px-5 py-4">{material.supplierName ?? (material.sourceKind === "legacy_unknown" ? "Legacy / Unknown" : "Internal Production")}</td>
+                      <td className="whitespace-nowrap px-5 py-4 font-mono">{material.catalogNumber}</td>
+                      <td className="px-5 py-4">{material.supplierDescription ?? "—"}</td>
                       <td className="whitespace-nowrap px-5 py-4 tabular-nums">
                         {material.quantity}
                       </td>

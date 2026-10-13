@@ -5,6 +5,7 @@ export interface ProductSupplierRelation {
   supplierId: string;
   supplierName: string;
   catalogNumber: string | null;
+  description: string | null;
   isActive: boolean;
   supplierIsActive: boolean;
 }
@@ -21,6 +22,7 @@ export interface SupplierProductRelation {
   productName: string;
   productIsActive: boolean;
   catalogNumber: string | null;
+  description: string | null;
   isActive: boolean;
 }
 
@@ -31,7 +33,8 @@ export interface ProductSupplierProductChoice {
 }
 
 export interface ProductSupplierMutationInput {
-  catalogNumber: string | null;
+  catalogNumber: string;
+  description: string | null;
 }
 
 export interface CreateProductSupplierInput
@@ -84,6 +87,7 @@ interface ProductSupplierRow {
   supplier_name: string;
   supplier_is_active: boolean;
   catalog_number: string | null;
+  description: string | null;
   relationship_is_active: boolean;
 }
 
@@ -99,6 +103,7 @@ interface SupplierProductRow {
   product_name: string;
   product_is_active: boolean;
   catalog_number: string | null;
+  description: string | null;
   relationship_is_active: boolean;
 }
 
@@ -126,6 +131,8 @@ function isProductSupplierRow(value: unknown): value is ProductSupplierRow {
     "catalog_number" in value &&
     (value.catalog_number === null ||
       typeof value.catalog_number === "string") &&
+    "description" in value &&
+    (value.description === null || typeof value.description === "string") &&
     "relationship_is_active" in value &&
     typeof value.relationship_is_active === "boolean"
   );
@@ -167,6 +174,8 @@ function isSupplierProductRow(value: unknown): value is SupplierProductRow {
     "catalog_number" in value &&
     (value.catalog_number === null ||
       typeof value.catalog_number === "string") &&
+    "description" in value &&
+    (value.description === null || typeof value.description === "string") &&
     "relationship_is_active" in value &&
     typeof value.relationship_is_active === "boolean"
   );
@@ -198,6 +207,7 @@ function mapProductSupplier(
     supplierId: row.supplier_id,
     supplierName: row.supplier_name,
     catalogNumber: row.catalog_number,
+    description: row.description,
     isActive: row.relationship_is_active,
     supplierIsActive: row.supplier_is_active,
   };
@@ -230,6 +240,7 @@ function mapSupplierProduct(row: SupplierProductRow): SupplierProductRelation {
     productName: row.product_name,
     productIsActive: row.product_is_active,
     catalogNumber: row.catalog_number,
+    description: row.description,
     isActive: row.relationship_is_active,
   };
 }
@@ -345,6 +356,18 @@ function mutationFailure(
     };
   }
 
+  if (providerCode === "PSR05" || providerCode === "22023") {
+    return {
+      ok: false,
+      error: {
+        code: operation === "create"
+          ? "relationship_create_failed"
+          : "relationship_update_failed",
+        message: "Catalog Number is required for an active Supplier link.",
+      },
+    };
+  }
+
   if (providerCode === "P0002") {
     return {
       ok: false,
@@ -373,7 +396,11 @@ function mutationFailure(
   return { ok: false, error: fallback };
 }
 
-function normalizeCatalogNumber(value: string | null): string | null {
+function normalizeCatalogNumber(value: string): string {
+  return value.trim();
+}
+
+function normalizeDescription(value: string | null): string | null {
   const normalized = value?.trim() ?? "";
   return normalized || null;
 }
@@ -497,6 +524,7 @@ export async function createProductSupplier(
       p_product_id: input.productId,
       p_supplier_id: input.supplierId,
       p_catalog_number: normalizeCatalogNumber(input.catalogNumber),
+      p_description: normalizeDescription(input.description ?? null),
     });
 
     if (error) return mutationFailure("create", error.code);
@@ -518,6 +546,7 @@ export async function updateProductSupplier(
     const { data, error } = await supabase.rpc("update_product_supplier", {
       p_product_supplier_id: relationId,
       p_catalog_number: normalizeCatalogNumber(input.catalogNumber),
+      p_description: normalizeDescription(input.description ?? null),
     });
 
     if (error) return mutationFailure("update", error.code);

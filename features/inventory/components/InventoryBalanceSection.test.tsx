@@ -6,6 +6,7 @@ const sectionMocks = vi.hoisted(() => ({
   useInventoryBalance: vi.fn(),
   useInventoryCommitments: vi.fn(),
   useProductProjectCommitments: vi.fn(),
+  useInventorySourceChoices: vi.fn(),
   refetch: vi.fn(),
   adjust: vi.fn(),
 }));
@@ -19,6 +20,9 @@ vi.mock("../hooks/useInventoryBalance", () => ({
 vi.mock("../hooks/useInventoryCommitments", () => ({
   useInventoryCommitments: sectionMocks.useInventoryCommitments,
   useProductProjectCommitments: sectionMocks.useProductProjectCommitments,
+}));
+vi.mock("../hooks/useInventorySources", () => ({
+  useInventorySourceChoices: sectionMocks.useInventorySourceChoices,
 }));
 
 import InventoryBalanceSection from "./InventoryBalanceSection";
@@ -47,6 +51,18 @@ function setSectionState(options: {
     refetch: vi.fn(),
   });
   sectionMocks.useProductProjectCommitments.mockReturnValue({ isPending: false, isError: false, data: { ok: true, value: [] }, refetch: vi.fn() });
+  sectionMocks.useInventorySourceChoices.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: { ok: true, value: [{
+      productSupplierId: "relation-1",
+      supplierId: "supplier-1",
+      supplierName: "ABB",
+      catalogNumber: "CAT-1",
+      description: null,
+    }] },
+    refetch: vi.fn(),
+  });
   sectionMocks.useInventoryBalance.mockReturnValue({
     balanceQuery: {
       isPending: options.isPending ?? false,

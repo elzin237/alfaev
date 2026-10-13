@@ -3233,7 +3233,26 @@ Verify exact production state after deployment.
 
 ---
 
+## 159A — Supplier Catalog Provenance + Lot-Aware Inventory
+
+Before production frontend deployment:
+
+- require Catalog Number and add optional description on active ProductSupplier relationships
+- backfill existing positive aggregate stock as explicit legacy/unknown source lots without inventing Supplier history
+- add immutable Supplier, legacy, and internal-production source lots plus immutable outbound allocations
+- keep InventoryBalance canonical and enforce transaction-end lot/balance reconciliation
+- require exact ProductSupplier for manual Add/upward Correction; consume FIFO for every outbound mutation
+- apply FIFO to generic Work Order and PCB input Finish; create internal-production lots for PCB output
+- bind trusted PDF snapshot allocations to Finish with a revalidated fingerprint
+- render frozen Catalog Number in `KAT. BROJ`, `—` for legacy/internal, and split mixed-source quantities into separate PDF rows
+- update Product/Supplier relationship UI and Product Supplier Stock History
+- extend security, immutability, migration, and committed concurrency coverage
+
+Do not deploy while any active ProductSupplier lacks an authoritative Catalog Number. Do not invent values or rewrite historical InventoryMovement, Finished Work Order, PDF, or AuditLog records.
+
 ## 160 — Configure Production Frontend Deployment
+
+PAUSED until Task 159A is reviewed, deployed, and validated.
 
 Goal:
 - Vercel production configuration

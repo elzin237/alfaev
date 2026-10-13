@@ -1551,6 +1551,7 @@ export function registerProductEditTests(requireHarness: () => SecurityFixtureHa
   });
   it("limits Product archive to Admin or inventory.products.edit and fails safely", async () => {
     const fixture = requireHarness();
+    const deniedProductIds: string[] = [];
 
     for (const client of [
       fixture.anonymousClient,
@@ -1560,8 +1561,10 @@ export function registerProductEditTests(requireHarness: () => SecurityFixtureHa
       fixture.actors.inactive.client,
       fixture.actors.inactiveBrandManager.client,
     ]) {
+      const deniedProductId = randomUUID();
+      deniedProductIds.push(deniedProductId);
       const { error } = await client.rpc("archive_product", {
-        p_product_id: randomUUID(),
+        p_product_id: deniedProductId,
       });
 
       expectPermissionDenied(error);
@@ -1624,8 +1627,9 @@ export function registerProductEditTests(requireHarness: () => SecurityFixtureHa
       );
       await database.query("set local role authenticated");
       await database.query("savepoint missing_product_archive");
+      const missingProductId = randomUUID();
       await expect(
-        database.query("select public.archive_product($1::uuid)", [randomUUID()]),
+        database.query("select public.archive_product($1::uuid)", [missingProductId]),
       ).rejects.toMatchObject({ code: "P0002" });
       await database.query("rollback to savepoint missing_product_archive");
       await database.query("savepoint null_product_archive");
@@ -1639,8 +1643,8 @@ export function registerProductEditTests(requireHarness: () => SecurityFixtureHa
         `select count(*)::integer as count
          from public.audit_logs
          where action_type = 'product.archived'
-           and entity_id <> $1::uuid`,
-        [productId],
+           and entity_id = any($1::uuid[])`,
+        [[...deniedProductIds, missingProductId]],
       );
       expect(failedAudit.rows).toEqual([{ count: 0 }]);
     });

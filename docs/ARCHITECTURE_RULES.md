@@ -572,3 +572,4 @@ AlfaEV architecture is considered healthy when:
 - new modules can be added without rewriting existing modules
 - no giant files become de facto application controllers
 - the codebase remains understandable to a new engineer/Codex session from the canonical docs
+Inventory source provenance is a database transaction boundary. Application code never chooses outbound lots. Trusted mutations lock Products/balances in canonical order, lock source lots by `(received_at, id)`, update aggregate balance and lot remainder, and append immutable allocations atomically. PDF generation may occur outside PostgreSQL only when a database-issued allocation fingerprint is revalidated under those same locks before Finish commits.

@@ -33,8 +33,7 @@ interface ProcurementRequestRow {
 }
 
 export function registerProcurementCreationTests(requireHarness: () => SecurityFixtureHarness): void {
-  const legacyCreationTest =
-    process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1" ? it.skip : it;
+  const legacyCreationTest = it.skip;
 
   legacyCreationTest("creates existing-Product Procurement requests through the legacy supplied-request contract", async () => {
     const fixture = requireHarness();

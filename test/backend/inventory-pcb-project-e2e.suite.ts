@@ -3,6 +3,10 @@ import type { PoolClient, QueryResultRow } from "pg";
 import { expect, it } from "vitest";
 
 import { createTestSerialNumber } from "./helpers/serial";
+import {
+  createSupplierSourceFixture,
+  getWorkOrderAllocationFingerprint,
+} from "./helpers/inventory-provenance";
 import type { SecurityFixtureHarness } from "./security-fixtures";
 
 interface ActorRef {
@@ -160,6 +164,11 @@ async function manualAdjustment(
   quantity: string,
   reason: string,
 ) {
+  const source = type === "add"
+    ? await createSupplierSourceFixture(database, admin, productId, {
+      catalogNumber: `TASK151-${productId}-${randomUUID()}`,
+    })
+    : null;
   const rows = await queryAs<{
     movement_id: string;
     quantity_after: string;
@@ -168,9 +177,9 @@ async function manualAdjustment(
     database,
     admin,
     `select * from public.manual_adjust_inventory(
-       $1::uuid, $2::text, $3::bigint, $4::text
+       $1::uuid, $2::text, $3::bigint, $4::text, $5::uuid
      )`,
-    [productId, type, quantity, reason],
+    [productId, type, quantity, reason, source?.productSupplierId ?? null],
   );
   const row = rows[0];
   if (!row) throw new Error("Task 151 manual adjustment returned no row");
@@ -476,12 +485,13 @@ export function registerInventoryPcbProjectE2eTests(
         database,
         producer,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, null, '8'
+           $1::uuid, $2::timestamptz, $3::text, null, $4::text, '8'
          )`,
         [
           primary.work_order_id,
           await workOrderTimestamp(database, primary.work_order_id),
           `final/${primary.work_order_id}/${randomUUID()}.pdf`,
+          "0".repeat(32),
         ],
         "42501",
       );
@@ -683,12 +693,13 @@ export function registerInventoryPcbProjectE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, null, '8'
+           $1::uuid, $2::timestamptz, $3::text, null, $4::text, '8'
          )`,
         [
           primary.work_order_id,
           finalDraftTimestamp,
           `final/${primary.work_order_id}/${randomUUID()}.pdf`,
+          "0".repeat(32),
         ],
         "IVB02",
       );
@@ -712,6 +723,7 @@ export function registerInventoryPcbProjectE2eTests(
       );
 
       const snapshot = await queryAs<{
+        catalog_number: string;
         customer_name_snapshot: string | null;
         production_actual_good_quantity: string;
         production_output_product_id: string;
@@ -723,6 +735,7 @@ export function registerInventoryPcbProjectE2eTests(
         database,
         finisher,
         `select project_name, customer_name_snapshot, product_id, quantity,
+                catalog_number,
                 production_planned_quantity, production_actual_good_quantity,
                 production_output_product_id
          from public.get_work_order_pdf_snapshot(
@@ -730,8 +743,19 @@ export function registerInventoryPcbProjectE2eTests(
          )`,
         [primary.work_order_id, finalDraftTimestamp],
       );
-      expect(snapshot).toHaveLength(3);
-      expect(new Map(snapshot.map((row) => [row.product_id, row.quantity])))
+      expect(snapshot).toHaveLength(4);
+      const quantitiesByProduct = new Map<string, bigint>();
+      for (const row of snapshot) {
+        quantitiesByProduct.set(
+          row.product_id,
+          (quantitiesByProduct.get(row.product_id) ?? 0n) + BigInt(row.quantity),
+        );
+        expect(row.catalog_number).toMatch(/^TASK151-/);
+      }
+      expect(new Map([...quantitiesByProduct].map(([productId, quantity]) => [
+        productId,
+        quantity.toString(),
+      ])))
         .toEqual(new Map([
           [domain.componentAId, "22"],
           [domain.componentBId, "30"],
@@ -745,6 +769,10 @@ export function registerInventoryPcbProjectE2eTests(
       )).toBe(true);
 
       const primaryReference = await addPdfCandidate(database, primary.work_order_id);
+      const primaryFingerprint = await getWorkOrderAllocationFingerprint(
+        database,
+        primary.work_order_id,
+      );
       const primaryFinish = await queryAs<{
         project_completed: boolean;
         work_order_id: string;
@@ -753,9 +781,15 @@ export function registerInventoryPcbProjectE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, $4::text, '8'
+           $1::uuid, $2::timestamptz, $3::text, $4::text, $5::text, '8'
          )`,
-        [primary.work_order_id, finalDraftTimestamp, primaryReference, "a".repeat(64)],
+        [
+          primary.work_order_id,
+          finalDraftTimestamp,
+          primaryReference,
+          "a".repeat(64),
+          primaryFingerprint,
+        ],
       );
       expect(primaryFinish).toEqual([expect.objectContaining({
         project_completed: false,
@@ -883,9 +917,9 @@ export function registerInventoryPcbProjectE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, null, '8'
+           $1::uuid, $2::timestamptz, $3::text, null, $4::text, '8'
          )`,
-        [primary.work_order_id, finalDraftTimestamp, primaryReference],
+        [primary.work_order_id, finalDraftTimestamp, primaryReference, "0".repeat(32)],
         "WOR02",
       );
       expect((await database.query(
@@ -949,13 +983,17 @@ export function registerInventoryPcbProjectE2eTests(
         [domain.outputProductId],
       )).rows[0]?.quantity;
       const generalReference = await addPdfCandidate(database, general.work_order_id);
+      const generalFingerprint = await getWorkOrderAllocationFingerprint(
+        database,
+        general.work_order_id,
+      );
       await queryAs(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, null, '0'
+           $1::uuid, $2::timestamptz, $3::text, null, $4::text, '0'
          )`,
-        [general.work_order_id, generalTimestamp, generalReference],
+        [general.work_order_id, generalTimestamp, generalReference, generalFingerprint],
       );
       const generalRun = await database.query<{
         id: string;

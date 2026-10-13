@@ -359,7 +359,7 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
             'Issued to workshop', 'manual_adjustment', $8::uuid,
             null, $7::uuid, '2026-09-14T12:00:00Z'::timestamptz, null),
            ($3::uuid, $5::uuid, 'manual_correction', 1, 8, 9,
-            'Count corrected', 'manual_adjustment', null,
+            'Count corrected', 'correction_reversal', null,
             null, $7::uuid, '2026-09-14T12:00:00Z'::timestamptz, $1::uuid),
            ($4::uuid, $6::uuid, 'manual_add', 4, 0, 4,
             'Historical receipt', null, null, null, $7::uuid,

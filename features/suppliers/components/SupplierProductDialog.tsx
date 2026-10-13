@@ -27,7 +27,8 @@ interface AddDialogProps extends SharedDialogProps {
   onRetryProducts: () => void;
   onSubmit: (input: {
     productId: string;
-    catalogNumber: string | null;
+    catalogNumber: string;
+    description: string | null;
   }) => Promise<ProductSupplierMutationResult>;
 }
 
@@ -35,8 +36,10 @@ interface EditDialogProps extends SharedDialogProps {
   mode: "edit";
   productName: string;
   initialCatalogNumber: string | null;
+  initialDescription: string | null;
   onSubmit: (input: {
-    catalogNumber: string | null;
+    catalogNumber: string;
+    description: string | null;
   }) => Promise<ProductSupplierMutationResult>;
 }
 
@@ -51,21 +54,24 @@ function SupplierProductDialog(props: SupplierProductDialogProps) {
   const submissionLockRef = useRef(false);
   const [productId, setProductId] = useState("");
   const [catalogNumber, setCatalogNumber] = useState("");
+  const [supplierDescription, setSupplierDescription] = useState("");
   const [productError, setProductError] = useState<string | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const title = props.mode === "add" ? "Add Product Link" : "Edit Catalog Number";
+  const title = props.mode === "add" ? "Add Product Link" : "Edit Supplier Link";
   const initialCatalogNumber = props.mode === "edit"
     ? props.initialCatalogNumber
     : null;
+  const initialDescription = props.mode === "edit" ? props.initialDescription : null;
   const onClose = props.onClose;
 
   const resetForm = useCallback(() => {
     setProductId("");
     setCatalogNumber(initialCatalogNumber ?? "");
+    setSupplierDescription(initialDescription ?? "");
     setProductError(null);
     setSubmissionError(null);
-  }, [initialCatalogNumber]);
+  }, [initialCatalogNumber, initialDescription]);
 
   const closeSafely = useCallback(() => {
     if (submissionLockRef.current) return;
@@ -132,10 +138,15 @@ function SupplierProductDialog(props: SupplierProductDialogProps) {
     setSubmissionError(null);
 
     try {
-      const normalizedCatalogNumber = catalogNumber.trim() || null;
+      const normalizedCatalogNumber = catalogNumber.trim();
+      if (!normalizedCatalogNumber) {
+        setSubmissionError("Catalog Number is required.");
+        return;
+      }
+      const normalizedDescription = supplierDescription.trim() || null;
       const result = props.mode === "add"
-        ? await props.onSubmit({ productId, catalogNumber: normalizedCatalogNumber })
-        : await props.onSubmit({ catalogNumber: normalizedCatalogNumber });
+        ? await props.onSubmit({ productId, catalogNumber: normalizedCatalogNumber, description: normalizedDescription })
+        : await props.onSubmit({ catalogNumber: normalizedCatalogNumber, description: normalizedDescription });
 
       if (!result.ok) {
         setSubmissionError(result.error.message);
@@ -170,7 +181,7 @@ function SupplierProductDialog(props: SupplierProductDialogProps) {
         <p id={descriptionId} className="mt-2 text-sm leading-6 text-zinc-500">
           {props.mode === "add"
             ? "Link an active Product to this Supplier."
-            : `Update the Catalog Number for ${props.productName}.`}
+            : `Update the Supplier Catalog Number and description for ${props.productName}.`}
         </p>
 
         <form className="mt-6 space-y-5" noValidate onSubmit={(event) => void submit(event)}>
@@ -222,7 +233,7 @@ function SupplierProductDialog(props: SupplierProductDialogProps) {
 
           <div>
             <label htmlFor="supplier-product-catalog-number" className="block text-sm font-semibold text-zinc-800">
-              Catalog Number <span className="font-normal text-zinc-500">(optional)</span>
+              Catalog Number
             </label>
             <input
               ref={props.mode === "edit"
@@ -233,7 +244,22 @@ function SupplierProductDialog(props: SupplierProductDialogProps) {
               value={catalogNumber}
               onChange={(event) => setCatalogNumber(event.target.value)}
               disabled={isSubmitting}
+              required
               className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="supplier-product-description" className="block text-sm font-semibold text-zinc-800">
+              Description <span className="font-normal text-zinc-500">(optional)</span>
+            </label>
+            <textarea
+              id="supplier-product-description"
+              rows={3}
+              value={supplierDescription}
+              onChange={(event) => setSupplierDescription(event.target.value)}
+              disabled={isSubmitting}
+              className="mt-2 w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
             />
           </div>
 

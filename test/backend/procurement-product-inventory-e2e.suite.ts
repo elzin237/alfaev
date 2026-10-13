@@ -98,10 +98,7 @@ async function readRequest(
 export function registerProcurementProductInventoryE2eTests(
   requireHarness: () => SecurityFixtureHarness,
 ): void {
-  const legacySuppliedRequestTest =
-    process.env.PROCUREMENT_OPTIONAL_SUPPLIER_MIGRATION === "1" ? it.skip : it;
-
-  legacySuppliedRequestTest("validates the legacy supplied-request Nabavka to Product, Supplier, Inventory, and Archive lifecycle", async () => {
+  it("validates a historical supplied-request Nabavka to Product, Supplier, Inventory, and Archive lifecycle", async () => {
     const fixture = requireHarness();
     const admin = fixture.actors.admin;
     const worker = await fixture.createTemporaryProfile(
@@ -162,13 +159,19 @@ export function registerProcurementProductInventoryE2eTests(
       await setAuthenticatedActor(database, worker);
       const createdRequest = await database.query<{ request_id: string }>(
         `select public.create_procurement_request_for_new_component(
-           $1::text, $2::uuid, $3::bigint
+           $1::text, $2::bigint
          ) as request_id`,
-        [`  ${requestedName}  `, supplierId, 20],
+        [`  ${requestedName}  `, 20],
       );
       await database.query("reset role");
       const requestId = createdRequest.rows[0]?.request_id;
       if (!requestId) throw new Error("Task 150 request creation returned no ID");
+      await database.query(
+        `update public.procurement_requests
+         set supplier_id = $2::uuid
+         where id = $1::uuid`,
+        [requestId, supplierId],
+      );
 
       expect(await readRequest(database, requestId)).toMatchObject({
         created_by_user_id: worker.profileId,
@@ -189,9 +192,9 @@ export function registerProcurementProductInventoryE2eTests(
         fixture.actors.unpermitted,
         "task150_unpermitted_create",
         `select public.create_procurement_request_for_new_component(
-           'Denied request', $1::uuid, 1
+           'Denied request', 1
          )`,
-        [supplierId],
+        [],
         "42501",
       );
       await expectActorFailure(
@@ -210,9 +213,9 @@ export function registerProcurementProductInventoryE2eTests(
         fixture.actors.brandManager,
         "task150_inventory_cannot_procure",
         `select public.create_procurement_request_for_new_component(
-           'Inventory permission bypass', $1::uuid, 1
+           'Inventory permission bypass', 1
          )`,
-        [supplierId],
+        [],
         "42501",
       );
       await expectActorFailure(
@@ -409,9 +412,10 @@ export function registerProcurementProductInventoryE2eTests(
         quantity_before: string;
       }>(
         `select * from public.manual_adjust_inventory(
-           $1::uuid, 'add'::text, 12::bigint, 'Task 150 received stock'::text
+           $1::uuid, 'add'::text, 12::bigint,
+           'Task 150 received stock'::text, $2::uuid
          )`,
-        [product.product_id],
+        [product.product_id, relation.rows[0]?.id],
       );
       await database.query("reset role");
       expect(adjustment.rows).toEqual([{
@@ -429,9 +433,9 @@ export function registerProcurementProductInventoryE2eTests(
         worker,
         "task150_worker_inventory_adjustment",
         `select * from public.manual_adjust_inventory(
-           $1::uuid, 'add'::text, 1::bigint, 'Denied receipt'::text
+           $1::uuid, 'add'::text, 1::bigint, 'Denied receipt'::text, $2::uuid
          )`,
-        [product.product_id],
+        [product.product_id, relation.rows[0]?.id],
         "42501",
       );
 
@@ -700,13 +704,26 @@ export function registerProcurementProductInventoryE2eTests(
       await setAuthenticatedActor(database, admin);
       const productResult = await database.query<{ product_id: string }>(
         `select product_id from public.create_product_from_procurement_request(
-           $1::uuid, 'Task 150 stock rollback Product', 'Components', null, null
+           $1::uuid, 'Task 150 stock rollback Product', 'Components', null,
+           'TASK150-ROLLBACK'
          )`,
         [successfulRequestId],
       );
       await database.query("reset role");
       const productId = productResult.rows[0]?.product_id;
       if (!productId) throw new Error("Task 150 rollback Product is unavailable");
+      const productSupplierId = (await database.query<{ id: string }>(
+        `select relationship.id
+         from public.product_suppliers as relationship
+         where relationship.product_id = $1::uuid
+           and relationship.is_active
+         order by relationship.created_at, relationship.id
+         limit 1`,
+        [productId],
+      )).rows[0]?.id;
+      if (!productSupplierId) {
+        throw new Error("Task 150 rollback Product supplier source is unavailable");
+      }
 
       await database.query(
         `create function public.test_task150_reject_inventory_audit()
@@ -731,9 +748,9 @@ export function registerProcurementProductInventoryE2eTests(
         admin,
         "task150_inventory_atomic_failure",
         `select * from public.manual_adjust_inventory(
-           $1::uuid, 'add', 12, 'Must roll back stock'
+           $1::uuid, 'add', 12, 'Must roll back stock', $2::uuid
          )`,
-        [productId],
+        [productId, productSupplierId],
         "T1502",
       );
       expect((await database.query<{ quantity: string }>(

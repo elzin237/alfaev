@@ -40,6 +40,10 @@ const materialRow = {
   serial_number: "0000123",
   product_name: "Archived Relay Module",
   quantity: "9223372036854775807",
+  source_kind: "supplier",
+  supplier_name: "IBP",
+  catalog_number: "CAT-100",
+  supplier_description: "Archived source snapshot",
 };
 
 const movementRow = {
@@ -127,11 +131,19 @@ describe("finishedWorkOrderService", () => {
         serialNumber: "0000123",
         productName: "Archived Relay Module",
         quantity: "9223372036854775807",
+        sourceKind: "supplier",
+        supplierName: "IBP",
+        catalogNumber: "CAT-100",
+        supplierDescription: "Archived source snapshot",
       }, {
         productId: "00000000-0000-4000-8000-000000000031",
         serialNumber: "0000124",
         productName: "Archived Relay Module",
         quantity: "1",
+        sourceKind: "supplier",
+        supplierName: "IBP",
+        catalogNumber: "CAT-100",
+        supplierDescription: "Archived source snapshot",
       }],
     });
     expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(

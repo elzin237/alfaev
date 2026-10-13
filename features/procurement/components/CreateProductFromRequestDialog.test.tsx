@@ -159,7 +159,7 @@ describe("CreateProductFromRequestDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("submits only normalized editable fields plus request ID and accepts blank optionals", async () => {
+  it("requires a Catalog Number when the request has a Supplier", async () => {
     const { onSubmit, onClose, onSucceeded } = renderDialog();
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "  Final Relay  " },
@@ -172,12 +172,24 @@ describe("CreateProductFromRequestDialog", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
 
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Catalog Number is required for the Supplier relationship.",
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onSucceeded).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
+      target: { value: "  CAT-77  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
+
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
       requestId: request.requestId,
       name: "Final Relay",
       category: "Control Components",
       brandId: null,
-      catalogNumber: null,
+      catalogNumber: "CAT-77",
     }));
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).not.toHaveProperty("supplierId");
@@ -255,6 +267,9 @@ describe("CreateProductFromRequestDialog", () => {
     });
     fireEvent.change(screen.getByLabelText("Category"), {
       target: { value: "Components" },
+    });
+    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
+      target: { value: "CAT-FAIL" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(

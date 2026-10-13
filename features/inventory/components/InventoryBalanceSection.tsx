@@ -5,6 +5,7 @@ import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
 import { useInventoryBalance } from "../hooks/useInventoryBalance";
 import { useInventoryCommitments, useProductProjectCommitments } from "../hooks/useInventoryCommitments";
+import { useInventorySourceChoices } from "../hooks/useInventorySources";
 import InventoryAdjustmentDialog from "./InventoryAdjustmentDialog";
 
 export interface InventoryBalanceSectionProps {
@@ -18,6 +19,7 @@ function InventoryBalanceSection({
 }: InventoryBalanceSectionProps) {
   const { isAdmin } = useAuth();
   const { balanceQuery, adjust } = useInventoryBalance(productId);
+  const sourceChoicesQuery = useInventorySourceChoices(productId, isAdmin && productIsActive);
   const commitmentsQuery = useInventoryCommitments();
   const [showProjects, setShowProjects] = useState(false);
   const projectQuery = useProductProjectCommitments(productId, showProjects);
@@ -145,6 +147,12 @@ function InventoryBalanceSection({
         <InventoryAdjustmentDialog
           open={isDialogOpen}
           currentQuantity={balance.quantity}
+          sourceChoices={sourceChoicesQuery.data?.ok ? sourceChoicesQuery.data.value : []}
+          isSourceChoicesLoading={sourceChoicesQuery.isPending}
+          sourceChoicesError={sourceChoicesQuery.isError || sourceChoicesQuery.data?.ok === false
+            ? sourceChoicesQuery.data?.ok === false ? sourceChoicesQuery.data.error.message : "Inventory source choices could not be loaded."
+            : null}
+          onRetrySourceChoices={() => void sourceChoicesQuery.refetch()}
           onClose={() => setIsDialogOpen(false)}
           onSubmit={adjust}
           onSucceeded={(adjustment) => {

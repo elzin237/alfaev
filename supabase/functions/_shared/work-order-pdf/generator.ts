@@ -96,7 +96,7 @@ export function buildWorkOrderPdfDefinition(
   }));
   const materialRows = snapshot.materials.map((material) => [
     textCell(material.position, { alignment: "center" }),
-    textCell(material.serialNumber, { alignment: "center" }),
+    textCell(material.catalogNumber, { alignment: "center" }),
     textCell(material.productName),
     textCell("", { alignment: "center" }),
     textCell(material.quantity, { alignment: "right", fontSize: 6 }),

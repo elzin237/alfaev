@@ -236,6 +236,7 @@ Physical stock entry is handled separately through Admin Inventory adjustment.
    - email.
 5. Link Products through ProductSupplier relationships.
 6. Store supplier-specific Catalog Number on that relationship.
+   - Active relationships require it; optional Supplier/Product description is stored on the relationship.
 7. Audit meaningful changes.
 
 Referenced Suppliers are archived rather than hard-deleted.
@@ -300,6 +301,9 @@ Admin-only.
 7. Atomically:
    - update InventoryBalance
    - create InventoryMovement
+   - for Add/upward Correction, create one Supplier source lot from the exact selected ProductSupplier
+   - for Remove/downward Correction, allocate and decrement existing source lots FIFO
+   - create immutable outbound allocation rows and verify lot/balance reconciliation
    - create AuditLog.
 8. UI refreshes current quantity/history.
 
@@ -386,13 +390,15 @@ Trusted backend transaction:
 3. re-check the frozen PCB/BOM/Product identities, every supplemental Product, and every physical Inventory quantity
 4. deduct all frozen BOM quantities plus all persisted supplemental quantities, aggregating a shared Product exactly once
 5. create negative InventoryMovement rows
-6. add actual-good quantity to PCB finished-goods Product
-7. create a positive output movement only when actual good is greater than zero
-8. create PcbProductionRun
-9. link optional Project
-10. finish the Work Order and link its official PDF
-11. append `work_order.finished` and `pcb_production.completed`
-12. commit atomically without automatically completing Project
+6. allocate each persisted material quantity across locked source lots FIFO; split-source allocations remain distinct historical rows
+7. bind the PDF snapshot allocation fingerprint to the same allocation plan committed by Finish
+8. add actual-good quantity to PCB finished-goods Product
+9. create a positive output movement only when actual good is greater than zero
+10. create PcbProductionRun
+11. link optional Project
+12. finish the Work Order and link its official PDF
+13. append `work_order.finished` and `pcb_production.completed`
+14. commit atomically without automatically completing Project
 
 After success:
 - finished PCB stock increases

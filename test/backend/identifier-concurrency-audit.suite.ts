@@ -340,7 +340,7 @@ export function registerIdentifierConcurrencyAuditTests(
             ),
             procurementCreator.query<ProductCreationRow>(
               `select * from public.create_product_from_procurement_request(
-                 $1::uuid, $2::text, $3::text, null::uuid, null::text
+                 $1::uuid, $2::text, $3::text, null::uuid, 'TASK147-CAT'::text
                )`,
               [requestId, "Task 147 Concurrent Procurement", "Task 147"],
             ),

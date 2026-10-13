@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { PoolClient, QueryResultRow } from "pg";
 import { expect, it } from "vitest";
 
+import {
+  createSupplierSourceFixture,
+  getWorkOrderAllocationFingerprint,
+} from "./helpers/inventory-provenance";
 import type { SecurityFixtureHarness } from "./security-fixtures";
 
 interface ActorRef {
@@ -156,6 +160,11 @@ async function adjustInventory(
   quantity: string,
   reason: string,
 ) {
+  const source = adjustmentType === "add"
+    ? await createSupplierSourceFixture(database, admin, productId, {
+      catalogNumber: `TASK152-${productId}-${randomUUID()}`,
+    })
+    : null;
   const rows = await queryAs<{
     movement_id: string;
     quantity_after: string;
@@ -168,9 +177,9 @@ async function adjustInventory(
        adjusted.quantity_before::text as quantity_before,
        adjusted.quantity_after::text as quantity_after
      from public.manual_adjust_inventory(
-       $1::uuid, $2::text, $3::bigint, $4::text
+       $1::uuid, $2::text, $3::bigint, $4::text, $5::uuid
      ) as adjusted`,
-    [productId, adjustmentType, quantity, reason],
+    [productId, adjustmentType, quantity, reason, source?.productSupplierId ?? null],
   );
   const row = rows[0];
   if (!row) throw new Error("Task 152 Inventory adjustment returned no row");
@@ -262,9 +271,15 @@ async function finishWorkOrder(
        finished.project_completed,
        finished.work_order_pdf_id
      from public.finish_work_order(
-       $1::uuid, $2::timestamptz, $3::text, $4::text
+       $1::uuid, $2::timestamptz, $3::text, $4::text, $5::text
      ) as finished`,
-    [workOrderId, expectedUpdatedAt, storageReference, "a".repeat(64)],
+    [
+      workOrderId,
+      expectedUpdatedAt,
+      storageReference,
+      "a".repeat(64),
+      await getWorkOrderAllocationFingerprint(database, workOrderId),
+    ],
   );
   const row = rows[0];
   if (!row) throw new Error("Task 152 Finish returned no row");
@@ -611,9 +626,15 @@ export function registerProjectWorkOrderPdfE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, $4::text
+           $1::uuid, $2::timestamptz, $3::text, $4::text, $5::text
          )`,
-        [rollbackCandidate.workOrderId, rollbackSaved.updated_at, rollbackReference, "b".repeat(64)],
+        [
+          rollbackCandidate.workOrderId,
+          rollbackSaved.updated_at,
+          rollbackReference,
+          "b".repeat(64),
+          await getWorkOrderAllocationFingerprint(database, rollbackCandidate.workOrderId),
+        ],
         "22023",
       );
       expect((await database.query(
@@ -667,9 +688,15 @@ export function registerProjectWorkOrderPdfE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, $4::text
+           $1::uuid, $2::timestamptz, $3::text, $4::text, $5::text
          )`,
-        [primary.workOrderId, primarySaved.updated_at, primaryReference, "a".repeat(64)],
+        [
+          primary.workOrderId,
+          primarySaved.updated_at,
+          primaryReference,
+          "a".repeat(64),
+          "b".repeat(32),
+        ],
         "IVB02",
       );
       expect((await database.query(
@@ -688,13 +715,14 @@ export function registerProjectWorkOrderPdfE2eTests(
       )).toMatchObject({ quantity_before: "1", quantity_after: "5" });
 
       const snapshot = await queryAs<{
+        catalog_number: string;
         customer_name_snapshot: string;
         description: string;
         material_position: string;
         product_id: string;
         project_name: string;
         quantity: string;
-        serial_number: string;
+        product_name: string;
         snapshot_updated_at: string;
         work_order_id: string;
         work_order_number: string;
@@ -706,14 +734,14 @@ export function registerProjectWorkOrderPdfE2eTests(
                 snapshot.description,
                 snapshot.snapshot_updated_at::text as snapshot_updated_at,
                 snapshot.material_position, snapshot.product_id,
-                snapshot.serial_number, snapshot.quantity
+                snapshot.catalog_number, snapshot.product_name, snapshot.quantity
          from public.get_work_order_pdf_snapshot(
            $1::uuid, $2::timestamptz
          ) as snapshot`,
         [primary.workOrderId, primarySaved.updated_at],
       );
-      expect(snapshot).toHaveLength(3);
-      expect(snapshot.map((row) => row.material_position)).toEqual(["1", "2", "3"]);
+      expect(snapshot).toHaveLength(4);
+      expect(snapshot.map((row) => row.material_position)).toEqual(["1", "2", "3", "4"]);
       expect(snapshot.every((row) => (
         row.work_order_id === primary.workOrderId
         && row.work_order_number === primary.workOrderNumber
@@ -722,7 +750,19 @@ export function registerProjectWorkOrderPdfE2eTests(
         && row.description === "Task 152 field work"
         && row.snapshot_updated_at === primarySaved.updated_at
       ))).toBe(true);
-      expect(new Map(snapshot.map((row) => [row.product_id, row.quantity])))
+      const quantitiesByProduct = new Map<string, bigint>();
+      for (const row of snapshot) {
+        quantitiesByProduct.set(
+          row.product_id,
+          (quantitiesByProduct.get(row.product_id) ?? 0n) + BigInt(row.quantity),
+        );
+        expect(row.catalog_number).toMatch(/^TASK152-/);
+        expect(row.product_name).toContain("Task 152");
+      }
+      expect(new Map([...quantitiesByProduct].map(([productId, quantity]) => [
+        productId,
+        quantity.toString(),
+      ])))
         .toEqual(new Map([
           [productA.productId, "8"],
           [productB.productId, "3"],
@@ -890,15 +930,28 @@ export function registerProjectWorkOrderPdfE2eTests(
         document_version: 1,
       });
       const finishedMaterials = await queryAs<{
+        catalog_number: string;
         product_id: string;
         quantity: string;
       }>(
         database,
         viewer,
-        "select product_id, quantity from public.list_finished_work_order_materials($1::uuid)",
+        `select product_id, catalog_number, quantity
+         from public.list_finished_work_order_materials($1::uuid)`,
         [primary.workOrderId],
       );
-      expect(new Map(finishedMaterials.map((row) => [row.product_id, row.quantity])))
+      const finishedQuantitiesByProduct = new Map<string, bigint>();
+      for (const row of finishedMaterials) {
+        finishedQuantitiesByProduct.set(
+          row.product_id,
+          (finishedQuantitiesByProduct.get(row.product_id) ?? 0n) + BigInt(row.quantity),
+        );
+        expect(row.catalog_number).toMatch(/^TASK152-/);
+      }
+      expect(new Map([...finishedQuantitiesByProduct].map(([productId, quantity]) => [
+        productId,
+        quantity.toString(),
+      ])))
         .toEqual(new Map([
           [productA.productId, "8"],
           [productB.productId, "3"],
@@ -981,9 +1034,15 @@ export function registerProjectWorkOrderPdfE2eTests(
         database,
         finisher,
         `select * from public.finish_work_order(
-           $1::uuid, $2::timestamptz, $3::text, $4::text
+           $1::uuid, $2::timestamptz, $3::text, $4::text, $5::text
          )`,
-        [primary.workOrderId, primaryFinish.finished_at, primaryReference, "a".repeat(64)],
+        [
+          primary.workOrderId,
+          primaryFinish.finished_at,
+          primaryReference,
+          "a".repeat(64),
+          "0".repeat(32),
+        ],
         "WOR02",
       );
       expect((await database.query(

@@ -31,9 +31,10 @@ function snapshotRows() {
     description: "Install the control cabinet.",
     work_order_created_at: "2026-09-29T22:30:00.123456+00:00",
     snapshot_updated_at: expectedUpdatedAt,
+    allocation_fingerprint: "a".repeat(32),
     material_position: "1",
     product_id: productId,
-    serial_number: "0000123",
+    catalog_number: "CAT-100",
     product_name: "Control relay",
     quantity: "9007199254740993",
   }];
@@ -234,7 +235,10 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
     expect(testHarness.hash).toHaveBeenCalledWith(pdfBytes);
     expect(testHarness.rpcCalls[1]).toEqual({
       name: "finish_work_order",
-      parameters: expect.objectContaining({ p_pdf_content_hash: expectedHash }),
+      parameters: expect.objectContaining({
+        p_pdf_content_hash: expectedHash,
+        p_allocation_fingerprint: "a".repeat(32),
+      }),
     });
     await expect(sha256Hex(new TextEncoder().encode("abc"))).resolves.toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
@@ -377,6 +381,7 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
           p_expected_updated_at: expectedUpdatedAt,
           p_pdf_storage_reference: `final/${workOrderId}/${finalId}.pdf`,
           p_pdf_content_hash: expectedHash,
+          p_allocation_fingerprint: "a".repeat(32),
         },
       }]);
     expect(testHarness.removals).toEqual([
@@ -390,6 +395,7 @@ describe("Task 122 safe Work Order finalization Edge orchestrator", () => {
     ["WOR02", 409, "work_order_already_finished"],
     ["WOR07", 422, "work_order_incomplete"],
     ["WOR08", 409, "project_unavailable"],
+    ["WOR11", 409, "inventory_sources_changed"],
     ["PRD05", 409, "product_unavailable"],
     ["IVB01", 409, "inventory_balance_unavailable"],
     ["IVB02", 409, "insufficient_inventory"],

@@ -395,11 +395,12 @@ Fields:
 - `id`
 - `product_id`
 - `supplier_id`
+- `description` nullable; trimmed nonblank Supplier/Product-specific text
 - `catalog_number`
-  - nullable
+  - required and nonblank while the relationship is active
+  - nullable only for archived legacy history
   - supplier-specific
-  - trimmed when provided
-  - blank stored as `NULL`
+  - trimmed
   - entered casing preserved
   - not globally unique
 - `is_active`
@@ -440,6 +441,37 @@ Rules:
 - General Product-table reads remain restricted to an active Admin or `inventory.view`; the narrow ProductSupplier read boundary does not broaden Product RLS.
 - Add/edit/archive uses one trusted backend authority and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, regardless of whether the operation originates from Product detail or Supplier detail.
 - No separate ProductSupplier permission key exists.
+- Active rows require a nonblank normalized `catalog_number`; archived legacy rows may remain readable with no Catalog Number.
+
+## 7.3 InventorySourceLot
+
+Immutable inbound-stock provenance:
+
+- `id`
+- `product_id`
+- `source_kind`: `supplier`, `legacy_unknown`, or `internal_production`
+- optional `product_supplier_id` and `supplier_id` for Supplier stock
+- immutable Supplier name, Catalog Number, and ProductSupplier description snapshots
+- `received_quantity`
+- trusted-decrement-only `remaining_quantity`
+- optional originating InventoryMovement for non-legacy receipts
+- `received_at`
+- optional trusted actor for non-legacy receipts
+
+Supplier lots require an exact matching ProductSupplier/Product/Supplier relationship and a frozen nonblank Catalog Number. Legacy and internal-production lots cannot claim Supplier metadata. Existing pre-provenance positive balances are backfilled as explicit legacy lots at migration time without rewriting old InventoryMovement history.
+
+## 7.4 InventorySourceAllocation
+
+Immutable outbound attribution:
+
+- `id`
+- `outbound_inventory_movement_id`
+- `source_lot_id`
+- `product_id`
+- positive `allocated_quantity`
+- `created_at`
+
+The trusted Inventory boundary consumes lots in `(received_at ASC, id ASC)` order while holding balance and lot row locks. Allocation Product must match both the outbound movement and source lot. Source-lot remaining quantities and InventoryBalance are updated atomically and reconcile at transaction end.
 
 ---
 
@@ -841,7 +873,7 @@ Trusted workflow:
 4. validate an optional supplied Brand exists and is active
 5. derive Supplier only from `ProcurementRequest.supplier_id`; when non-null, require it still exists and is active
 6. allocate the next permanent 7-digit Serial Number server-side and create exactly one active Product with `product_kind = 'component'`
-7. when Supplier is non-null, create exactly one active ProductSupplier relation to it and normalize optional Catalog Number by trimming, storing blank as `NULL`, and preserving nonblank casing; when Supplier is null, create neither a ProductSupplier relation nor Catalog Number
+7. when Supplier is non-null, require a nonblank normalized Catalog Number and create exactly one active ProductSupplier relation to it; when Supplier is null, create neither a ProductSupplier relation nor Catalog Number
 8. set only `ProcurementRequest.product_id`; preserve requested name, Supplier, requested/delivered quantities, status, resolution metadata, and creation metadata
 9. create immutable audit history for Product creation, any ProductSupplier creation, and Procurement linking
 10. commit all domain mutations and required audits atomically

@@ -33,6 +33,8 @@ const directSelectTables = [
 
 const trustedOnlyTables = [
   "audit_logs",
+  "inventory_source_allocations",
+  "inventory_source_lots",
   "pcb_production_work_orders",
   "permission_definitions",
   "user_permissions",
@@ -211,14 +213,18 @@ export function registerRlsPolicyMatrixTests(
           arguments: string;
           authenticated_execute: boolean;
           function_name: string;
+          function_owner: string;
           public_execute: boolean;
           result_type: string;
           settings: string[] | null;
+          volatility: string;
         }>(
           `select
              routine.proname as function_name,
+             pg_catalog.pg_get_userbyid(routine.proowner) as function_owner,
              pg_catalog.pg_get_function_identity_arguments(routine.oid) as arguments,
              pg_catalog.pg_get_function_result(routine.oid) as result_type,
+             routine.provolatile as volatility,
              routine.proconfig as settings,
              pg_catalog.has_function_privilege(
                'anon', routine.oid, 'execute'
@@ -238,20 +244,70 @@ export function registerRlsPolicyMatrixTests(
              pg_catalog.pg_get_function_identity_arguments(routine.oid)`,
         );
 
-        expect(functions.rows).toHaveLength(133);
-        const publicOrAnonymous = functions.rows.filter(
+        const rlsEventTriggerHelpers = functions.rows.filter((routine) =>
+          routine.function_name === "rls_auto_enable"
+          && routine.arguments === ""
+          && routine.result_type === "event_trigger"
+        );
+        expect(rlsEventTriggerHelpers.length).toBeLessThanOrEqual(1);
+
+        const applicationFunctions = functions.rows.filter(
+          (routine) => !rlsEventTriggerHelpers.includes(routine),
+        );
+        expect(applicationFunctions).toHaveLength(142);
+        const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
-        expect(publicOrAnonymous).toEqual([expect.objectContaining({
-          function_name: "rls_auto_enable",
-          result_type: "event_trigger",
-          settings: ["search_path=pg_catalog"],
-        })]);
-        for (const routine of functions.rows) {
-          if (routine.function_name === "rls_auto_enable") continue;
+        expect(publicOrAnonymous).toEqual([]);
+        for (const routine of applicationFunctions) {
           expect(routine.settings).toEqual(['search_path=""']);
           expect(routine.public_execute).toBe(false);
           expect(routine.anonymous_execute).toBe(false);
+        }
+
+        if (rlsEventTriggerHelpers.length === 1) {
+          expect(rlsEventTriggerHelpers[0]).toMatchObject({
+            anonymous_execute: true,
+            authenticated_execute: true,
+            function_name: "rls_auto_enable",
+            function_owner: "postgres",
+            public_execute: true,
+            result_type: "event_trigger",
+            settings: ["search_path=pg_catalog"],
+            volatility: "v",
+          });
+
+          const eventTrigger = await database.query<{
+            enabled: string;
+            event: string;
+            event_owner: string;
+            function_identity: string;
+            tags: string[];
+          }>(
+            `select
+               event.evtevent as event,
+               event.evtenabled as enabled,
+               pg_catalog.pg_get_userbyid(event.evtowner) as event_owner,
+               event.evtfoid::pg_catalog.regprocedure::text as function_identity,
+               event.evttags as tags
+             from pg_catalog.pg_event_trigger as event
+             where event.evtname = 'ensure_rls'`,
+          );
+          expect(eventTrigger.rows).toEqual([{
+            enabled: "O",
+            event: "ddl_command_end",
+            event_owner: "postgres",
+            function_identity: "rls_auto_enable()",
+            tags: ["CREATE TABLE", "CREATE TABLE AS", "SELECT INTO"],
+          }]);
+
+          await database.query("savepoint direct_rls_event_trigger_call");
+          await database.query("set local role authenticated");
+          await expect(
+            database.query("select public.rls_auto_enable()"),
+          ).rejects.toMatchObject({ code: "0A000" });
+          await database.query("rollback to savepoint direct_rls_event_trigger_call");
+          await database.query("reset role");
         }
 
         for (const internalName of [
@@ -260,10 +316,12 @@ export function registerRlsPolicyMatrixTests(
           "allocate_work_order_number_for_year",
           "append_audit_log",
           "apply_inventory_delta",
+          "check_inventory_source_lot_allocation_accounting",
+          "check_inventory_source_lot_balance",
           "produce_pcb",
           "set_documentation_pdf_reference_admin",
         ]) {
-          const matches = functions.rows.filter(
+          const matches = applicationFunctions.filter(
             (routine) => routine.function_name === internalName,
           );
           expect(matches.length).toBeGreaterThan(0);
