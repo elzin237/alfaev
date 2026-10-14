@@ -9,7 +9,6 @@ const hookMocks = vi.hoisted(() => ({
   listActiveProductChoices: vi.fn(),
   listSupplierProducts: vi.fn(),
   createProductSupplier: vi.fn(),
-  updateProductSupplier: vi.fn(),
   archiveProductSupplier: vi.fn(),
 }));
 
@@ -21,7 +20,6 @@ vi.mock("../../inventory/services/productSupplierService", () => ({
   listActiveProductChoices: hookMocks.listActiveProductChoices,
   listSupplierProducts: hookMocks.listSupplierProducts,
   createProductSupplier: hookMocks.createProductSupplier,
-  updateProductSupplier: hookMocks.updateProductSupplier,
   archiveProductSupplier: hookMocks.archiveProductSupplier,
 }));
 
@@ -54,10 +52,6 @@ beforeEach(() => {
   hookMocks.listActiveProductChoices.mockResolvedValue({ ok: true, value: [] });
   hookMocks.listSupplierProducts.mockResolvedValue({ ok: true, value: [] });
   hookMocks.createProductSupplier.mockResolvedValue({
-    ok: true,
-    value: { relationId: "relation-1" },
-  });
-  hookMocks.updateProductSupplier.mockResolvedValue({
     ok: true,
     value: { relationId: "relation-1" },
   });
@@ -149,31 +143,27 @@ describe("useSupplierProducts", () => {
     ])).toBeDefined();
   });
 
-  it("reuses Task 054 mutations and invalidates only the exact Supplier-side list", async () => {
+  it("uses link-only mutations and invalidates only the exact Supplier-side list", async () => {
     const { result, queryClient } = renderSupplierProductsHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     await waitFor(() => expect(result.current.relationQuery.isSuccess).toBe(true));
 
     await act(async () => {
-      await result.current.create({ productId: "product-1", catalogNumber: "CAT-1", description: null });
-      await result.current.update("relation-1", { catalogNumber: "CAT-2", description: null });
+      await result.current.create({ productId: "product-1" });
       await result.current.archive("relation-1");
     });
 
     expect(hookMocks.createProductSupplier).toHaveBeenCalledWith({
       supplierId: "supplier-1",
       productId: "product-1",
-      catalogNumber: "CAT-1",
-      description: null,
     });
     const expected = {
       queryKey: ["suppliers", "product-suppliers", "profile-1", "supplier-1"],
       exact: true,
     };
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
     expect(invalidateQueries).toHaveBeenNthCalledWith(1, expected);
     expect(invalidateQueries).toHaveBeenNthCalledWith(2, expected);
-    expect(invalidateQueries).toHaveBeenNthCalledWith(3, expected);
   });
 
   it("does not invalidate after a failed mutation", async () => {
@@ -186,7 +176,7 @@ describe("useSupplierProducts", () => {
     await waitFor(() => expect(result.current.relationQuery.isSuccess).toBe(true));
 
     await act(async () => {
-      await result.current.create({ productId: "product-1", catalogNumber: "", description: null });
+      await result.current.create({ productId: "product-1" });
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();

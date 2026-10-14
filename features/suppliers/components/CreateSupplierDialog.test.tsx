@@ -9,6 +9,8 @@ afterEach(cleanup);
 function renderDialog(
   onSubmit: (input: {
     name: string;
+    catalogNumber: string;
+    description: string | null;
     country: string;
     contactPersonName: string | null;
     contactPhone: string | null;
@@ -35,18 +37,22 @@ function fillRequiredFields() {
   fireEvent.change(screen.getByLabelText("Supplier Name"), {
     target: { value: "  Bosch  " },
   });
+  fireEvent.change(screen.getByLabelText("Catalog Number"), {
+    target: { value: "  BOSCH-26  " },
+  });
   fireEvent.change(screen.getByLabelText("Country"), {
     target: { value: "  Germany  " },
   });
 }
 
 describe("CreateSupplierDialog", () => {
-  it("validates required Supplier Name and Country", async () => {
+  it("validates required Supplier Name, Catalog Number, and Country", async () => {
     const { onSubmit } = renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));
 
     expect(await screen.findByText("Supplier Name is required.")).toBeInTheDocument();
+    expect(screen.getByText("Catalog Number is required.")).toBeInTheDocument();
     expect(screen.getByText("Country is required.")).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -78,6 +84,9 @@ describe("CreateSupplierDialog", () => {
     fireEvent.change(screen.getByLabelText("Phone"), {
       target: { value: "   " },
     });
+    fireEvent.change(screen.getByLabelText(/Description/), {
+      target: { value: "   " },
+    });
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "  MIRA@BOSCH.EXAMPLE  " },
     });
@@ -86,6 +95,8 @@ describe("CreateSupplierDialog", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
       name: "Bosch",
+      catalogNumber: "BOSCH-26",
+      description: null,
       country: "Germany",
       contactPersonName: "Mira Marić",
       contactPhone: null,

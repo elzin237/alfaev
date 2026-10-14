@@ -2,6 +2,7 @@ import { supabase } from "../../../lib/supabase/client";
 
 export interface InventorySourceChoice {
   productSupplierId: string;
+  supplierId: string;
   supplierName: string;
   catalogNumber: string;
   description: string | null;
@@ -57,11 +58,13 @@ export async function listInventorySourceChoices(productId: string): Promise<Inv
     for (const row of data) {
       if (typeof row !== "object" || row === null ||
         !uuidPattern.test(String(row.product_supplier_id)) ||
+        !uuidPattern.test(String(row.supplier_id)) ||
         !normalizedText(row.supplier_name) ||
         !normalizedText(row.catalog_number) ||
         !normalizedOptionalText(row.description)) throw new Error();
       value.push({
         productSupplierId: row.product_supplier_id,
+        supplierId: row.supplier_id,
         supplierName: row.supplier_name,
         catalogNumber: row.catalog_number,
         description: row.description,

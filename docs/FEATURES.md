@@ -253,8 +253,8 @@ Products/components and Suppliers have a many-to-many relationship:
 
 - one product/component may be purchased from multiple Suppliers
 - one Supplier may supply multiple products/components
-- Catalog Number belongs to the specific Product–Supplier relationship
-- the same product may therefore have different Catalog Numbers from different Suppliers
+- Catalog Number and optional Description belong to Supplier master data
+- ProductSupplier records only whether a Supplier supplies a Product
 - Catalog Number remains non-unique
 
 Supplier records should be reusable by Nabavka and product/component workflows.
@@ -283,7 +283,7 @@ At minimum:
 - Serial Number / Šifra
 - Name
 - Category
-- Catalog Number
+- live Supplier Catalog Number in Supplier relationship displays
 - Quantity
 
 ### Serial Number / Šifra
@@ -309,9 +309,9 @@ Locked rules:
 
 - separate from Serial Number / Šifra
 - supplier-related reference
-- stored on the Product–Supplier relationship rather than as one global Product field
+- stored on Supplier rather than Product or ProductSupplier
 - a product may have multiple Suppliers
-- each Supplier may use a different Catalog Number for the same product
+- each Supplier exposes its own master Catalog Number across eligible Product relationships
 - not unique
 - two different products/components may share the same Catalog Number
 - must never be used as the primary identifier

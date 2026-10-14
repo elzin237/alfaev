@@ -539,8 +539,8 @@ describe.skipIf(!enabled)(
           throw new Error("Task 148 local runner is not targeting loopback Supabase");
         }
         pool = new Pool({ connectionString: databaseUrl, max: 15 });
-        expectedLatest = "20261013110000";
-        expectedMigrationCount = "118";
+        expectedLatest = "20261013113000";
+        expectedMigrationCount = "119";
       } else {
         const accessToken = (
           process.env.SUPABASE_ACCESS_TOKEN ??

@@ -68,10 +68,10 @@ export function registerInventorySourceProvenanceTests(
           );
           await database.query(
             `insert into public.suppliers (
-               id, name, country, created_by_user_id, updated_by_user_id
+               id, name, catalog_number, description, country, created_by_user_id, updated_by_user_id
              ) values
-               ($1::uuid, 'Provenance Supplier A', 'BA', $3::uuid, $3::uuid),
-               ($2::uuid, 'Provenance Supplier B', 'BA', $3::uuid, $3::uuid)`,
+               ($1::uuid, 'Provenance Supplier A', 'SUP-A-CAT', 'Supplier A description', 'BA', $3::uuid, $3::uuid),
+               ($2::uuid, 'Provenance Supplier B', 'SUP-B-CAT', 'Supplier B description', 'BA', $3::uuid, $3::uuid)`,
             [supplierAId, supplierBId, actor.profileId],
           );
           await database.query(
@@ -119,16 +119,16 @@ export function registerInventorySourceProvenanceTests(
           );
           expect(lotsAfterRemoval.rows).toEqual([
             {
-              catalog_number_snapshot: "CAT-A",
-              description: "Supplier A relay",
+              catalog_number_snapshot: "SUP-A-CAT",
+              description: "Supplier A description",
               received_quantity: "5",
               remaining_quantity: "0",
               source_kind: "supplier",
               supplier_name_snapshot: "Provenance Supplier A",
             },
             {
-              catalog_number_snapshot: "CAT-B",
-              description: null,
+              catalog_number_snapshot: "SUP-B-CAT",
+              description: "Supplier B description",
               received_quantity: "7",
               remaining_quantity: "4",
               source_kind: "supplier",
@@ -146,8 +146,8 @@ export function registerInventorySourceProvenanceTests(
             [removal.rows[0]?.movement_id],
           );
           expect(removalAllocations.rows).toEqual([
-            { allocated_quantity: "5", catalog_number_snapshot: "CAT-A" },
-            { allocated_quantity: "3", catalog_number_snapshot: "CAT-B" },
+            { allocated_quantity: "5", catalog_number_snapshot: "SUP-A-CAT" },
+            { allocated_quantity: "3", catalog_number_snapshot: "SUP-B-CAT" },
           ]);
 
           await database.query(
@@ -182,6 +182,109 @@ export function registerInventorySourceProvenanceTests(
         });
       });
 
+      it("freezes Supplier catalog and description per receipt across later Supplier edits", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const actor = fixture.actors.admin;
+          const productId = randomUUID();
+          const supplierId = randomUUID();
+          const relationId = randomUUID();
+
+          await database.query(
+            `insert into public.products (
+               id, serial_number, name, category, product_kind,
+               created_by_user_id, updated_by_user_id
+             ) values (
+               $1::uuid, $2::text, 'Supplier Snapshot Product', 'Components', 'component',
+               $3::uuid, $3::uuid
+             )`,
+            [productId, createTestSerialNumber(), actor.profileId],
+          );
+          await database.query(
+            `insert into public.suppliers (
+               id, name, catalog_number, description, country,
+               created_by_user_id, updated_by_user_id
+             ) values (
+               $1::uuid, 'Supplier Snapshot Source', 'CAT-A', 'Description A', 'BA',
+               $2::uuid, $2::uuid
+             )`,
+            [supplierId, actor.profileId],
+          );
+          await database.query(
+            `insert into public.product_suppliers (
+               id, product_id, supplier_id, catalog_number, description,
+               created_by_user_id, updated_by_user_id
+             ) values (
+               $1::uuid, $2::uuid, $3::uuid, 'LEGACY-RELATIONSHIP-CATALOG',
+               'Legacy relationship description', $4::uuid, $4::uuid
+             )`,
+            [relationId, productId, supplierId, actor.profileId],
+          );
+          await database.query(
+            "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+            [actor.authUserId],
+          );
+
+          const firstMovementId = (await database.query<{ movement_id: string }>(
+            `select movement_id from public.manual_adjust_inventory(
+               $1::uuid, 'add', 2, 'Receipt before Supplier edit', $2::uuid
+             )`,
+            [productId, relationId],
+          )).rows[0]?.movement_id;
+          await database.query(
+            `select public.update_supplier(
+               $1::uuid, 'Supplier Snapshot Source', 'CAT-B', 'BA',
+               'Description B', null, null, null
+             )`,
+            [supplierId],
+          );
+          const secondMovementId = (await database.query<{ movement_id: string }>(
+            `select movement_id from public.manual_adjust_inventory(
+               $1::uuid, 'add', 3, 'Receipt after Supplier edit', $2::uuid
+             )`,
+            [productId, relationId],
+          )).rows[0]?.movement_id;
+          if (!firstMovementId || !secondMovementId) {
+            throw new Error("Supplier snapshot movements were not created");
+          }
+
+          const lots = await database.query<{
+            catalog_number_snapshot: string;
+            originating_inventory_movement_id: string;
+            supplier_description_snapshot: string;
+          }>(
+            `select originating_inventory_movement_id,
+                    catalog_number_snapshot,
+                    supplier_description_snapshot
+             from public.inventory_source_lots
+             where originating_inventory_movement_id = any($1::uuid[])
+             order by case originating_inventory_movement_id
+               when $2::uuid then 1 else 2 end`,
+            [[firstMovementId, secondMovementId], firstMovementId],
+          );
+          expect(lots.rows).toEqual([
+            {
+              catalog_number_snapshot: "CAT-A",
+              originating_inventory_movement_id: firstMovementId,
+              supplier_description_snapshot: "Description A",
+            },
+            {
+              catalog_number_snapshot: "CAT-B",
+              originating_inventory_movement_id: secondMovementId,
+              supplier_description_snapshot: "Description B",
+            },
+          ]);
+          expect((await database.query(
+            `select catalog_number, description
+             from public.product_suppliers where id = $1::uuid`,
+            [relationId],
+          )).rows).toEqual([{
+            catalog_number: "LEGACY-RELATIONSHIP-CATALOG",
+            description: "Legacy relationship description",
+          }]);
+        });
+      });
+
       it("rejects missing, mismatched, archived, and inactive inbound sources atomically", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -208,11 +311,11 @@ export function registerInventorySourceProvenanceTests(
           );
           await database.query(
             `insert into public.suppliers (
-               id, name, country, is_active, created_by_user_id, updated_by_user_id,
+               id, name, catalog_number, country, is_active, created_by_user_id, updated_by_user_id,
                archived_at, archived_by_user_id
              ) values
-               ($1::uuid, 'Source Supplier', 'BA', true, $3::uuid, $3::uuid, null, null),
-               ($2::uuid, 'Inactive Source Supplier', 'BA', false, $3::uuid, $3::uuid,
+               ($1::uuid, 'Source Supplier', 'SOURCE-CAT', 'BA', true, $3::uuid, $3::uuid, null, null),
+               ($2::uuid, 'Inactive Source Supplier', 'INACTIVE-CAT', 'BA', false, $3::uuid, $3::uuid,
                 pg_catalog.now(), $3::uuid)`,
             [supplierId, inactiveSupplierId, actor.profileId],
           );
@@ -277,7 +380,7 @@ export function registerInventorySourceProvenanceTests(
           );
           expect(balance.rows).toEqual([{ quantity: "2" }]);
           expect(lots.rows).toEqual([expect.objectContaining({
-            catalog_number_snapshot: "VALID",
+            catalog_number_snapshot: "SOURCE-CAT",
             received_quantity: "2",
             remaining_quantity: "2",
           })]);

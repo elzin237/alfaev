@@ -18,6 +18,7 @@ describe("inventorySourceService", () => {
     }], error: null });
     await expect(listInventorySourceChoices("product-1")).resolves.toEqual({ ok: true, value: [{
       productSupplierId: "10000000-0000-4000-8000-000000000001",
+      supplierId: "20000000-0000-4000-8000-000000000001",
       supplierName: "IBP",
       catalogNumber: "CAT-100",
       description: "Control relay",

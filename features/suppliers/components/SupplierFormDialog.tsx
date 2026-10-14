@@ -30,6 +30,8 @@ export interface SupplierFormDialogProps {
 
 const emptyValues: SupplierCreateFormInput = {
   name: "",
+  catalogNumber: "",
+  description: "",
   country: "",
   contactPersonName: "",
   contactPhone: "",
@@ -48,6 +50,8 @@ function SupplierFormDialog({
   const descriptionId = useId();
   const nameErrorId = useId();
   const countryErrorId = useId();
+  const catalogNumberErrorId = useId();
+  const descriptionErrorId = useId();
   const emailErrorId = useId();
   const nameInputRef = useRef<HTMLInputElement>(null);
   const submitButtonRef = useRef<HTMLButtonElement>(null);
@@ -55,6 +59,8 @@ function SupplierFormDialog({
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const formValues = useMemo<SupplierCreateFormInput>(() => ({
     name: initialValues?.name ?? "",
+    catalogNumber: initialValues?.catalogNumber ?? "",
+    description: initialValues?.description ?? "",
     country: initialValues?.country ?? "",
     contactPersonName: initialValues?.contactPersonName ?? "",
     contactPhone: initialValues?.contactPhone ?? "",
@@ -64,6 +70,8 @@ function SupplierFormDialog({
     initialValues?.contactPersonName,
     initialValues?.contactPhone,
     initialValues?.country,
+    initialValues?.catalogNumber,
+    initialValues?.description,
     initialValues?.name,
   ]);
   const {
@@ -167,8 +175,8 @@ function SupplierFormDialog({
         </h2>
         <p id={descriptionId} className="mt-2 text-sm leading-6 text-zinc-500">
           {isCreate
-            ? "Add a Supplier and its optional contact details."
-            : "Update this active Supplier's contact details."}
+            ? "Add a Supplier, its Catalog Number, and optional details."
+            : "Update this active Supplier's master data and contact details."}
         </p>
 
         <form
@@ -196,6 +204,22 @@ function SupplierFormDialog({
                 className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
               />
               {errors.name && <p id={nameErrorId} className="mt-2 text-sm text-red-600">{errors.name.message}</p>}
+            </div>
+
+            <div>
+              <label htmlFor="supplier-catalog-number" className="block text-sm font-semibold text-zinc-800">
+                Catalog Number
+              </label>
+              <input
+                {...register("catalogNumber")}
+                id="supplier-catalog-number"
+                type="text"
+                disabled={isSubmitting}
+                aria-invalid={Boolean(errors.catalogNumber)}
+                aria-describedby={errors.catalogNumber ? catalogNumberErrorId : undefined}
+                className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+              />
+              {errors.catalogNumber && <p id={catalogNumberErrorId} className="mt-2 text-sm text-red-600">{errors.catalogNumber.message}</p>}
             </div>
 
             <div>
@@ -242,6 +266,22 @@ function SupplierFormDialog({
                 className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
               />
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="supplier-description" className="block text-sm font-semibold text-zinc-800">
+              Description <span className="font-normal text-zinc-500">(optional)</span>
+            </label>
+            <textarea
+              {...register("description")}
+              id="supplier-description"
+              rows={3}
+              disabled={isSubmitting}
+              aria-invalid={Boolean(errors.description)}
+              aria-describedby={errors.description ? descriptionErrorId : undefined}
+              className="mt-2 w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
+            />
+            {errors.description && <p id={descriptionErrorId} className="mt-2 text-sm text-red-600">{errors.description.message}</p>}
           </div>
 
           <div>

@@ -7,6 +7,8 @@ const suppliers: Supplier[] = [
   {
     id: "supplier-1",
     name: "Bosch",
+    catalogNumber: "BOSCH-26",
+    description: "Industrial controls",
     country: "Germany",
     contactPersonName: "Mira Marić",
     contactPhone: "+387 61 111 222",
@@ -19,6 +21,8 @@ const suppliers: Supplier[] = [
   {
     id: "supplier-2",
     name: "ABB",
+    catalogNumber: null,
+    description: null,
     country: "Switzerland",
     contactPersonName: null,
     contactPhone: null,
@@ -31,7 +35,15 @@ const suppliers: Supplier[] = [
 ];
 
 describe("filterSuppliers", () => {
-  it.each(["bosch", " GERMANY ", "mira marić", "MIRA@BOSCH", "+387 61"])(
+  it.each([
+    "bosch",
+    "BOSCH-26",
+    "industrial controls",
+    " GERMANY ",
+    "mira marić",
+    "MIRA@BOSCH",
+    "+387 61",
+  ])(
     "matches the displayed Supplier fields case-insensitively for %s",
     (search) => {
       expect(filterSuppliers(suppliers, search)).toEqual([suppliers[0]]);

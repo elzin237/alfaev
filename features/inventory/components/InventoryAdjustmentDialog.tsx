@@ -172,7 +172,7 @@ function InventoryAdjustmentDialog({
     const requiresSource = input.adjustmentType === "add" ||
       (input.adjustmentType === "correction" && input.quantity > currentQuantity);
     if (requiresSource && !productSupplierId) {
-      setSubmissionError("Select the Supplier Catalog Source for inbound stock.");
+      setSubmissionError("Select the Supplier for inbound stock.");
       return;
     }
     submissionLockRef.current = true;
@@ -276,7 +276,7 @@ function InventoryAdjustmentDialog({
           {sourceRequired && (
             <div>
               <label htmlFor="inventory-product-supplier-source" className="block text-sm font-semibold text-zinc-800">
-                Supplier Catalog Source
+                Supplier
               </label>
               {isSourceChoicesLoading ? (
                 <p role="status" className="mt-2 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600">Loading source choices...</p>
@@ -294,7 +294,7 @@ function InventoryAdjustmentDialog({
                   required
                   className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
                 >
-                  <option value="">Select a Supplier Catalog Source</option>
+                  <option value="">Select a Supplier</option>
                   {sourceChoices.map((source) => (
                     <option key={source.productSupplierId} value={source.productSupplierId}>
                       {source.supplierName} — {source.catalogNumber}{source.description ? ` — ${source.description}` : ""}

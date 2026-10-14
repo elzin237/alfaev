@@ -68,7 +68,6 @@ export interface CreateProductFromProcurementRequestInput {
   name: string;
   category: string;
   brandId: string | null;
-  catalogNumber: string | null;
 }
 
 export interface CreatedProductFromProcurementRequest {
@@ -832,7 +831,6 @@ export async function createProductFromProcurementRequest(
         p_name: input.name.trim(),
         p_category: input.category.trim(),
         p_brand_id: input.brandId?.trim() || null,
-        p_catalog_number: input.catalogNumber?.trim() || null,
       },
     );
 

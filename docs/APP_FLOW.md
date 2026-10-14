@@ -194,7 +194,7 @@ The Project detail page provides traceability back to the original operation.
 4. Trusted backend:
    - allocates next 7-digit Serial Number
    - creates Product
-   - links Supplier/Catalog Number only when the historical request already has a Supplier
+   - links the Product to the historical request's Supplier only when one exists; Catalog Number/Description already belong to that Supplier
    - links request to Product
    - audits operation.
 5. Request remains in its procurement lifecycle until resolved.
@@ -230,13 +230,14 @@ Physical stock entry is handled separately through Admin Inventory adjustment.
 3. Create Supplier when allowed.
 4. Enter:
    - name
+   - Catalog Number
+   - optional Description
    - country
    - contact person
    - phone
    - email.
 5. Link Products through ProductSupplier relationships.
-6. Store supplier-specific Catalog Number on that relationship.
-   - Active relationships require it; optional Supplier/Product description is stored on the relationship.
+6. Link eligible Products through ProductSupplier without entering relationship Catalog/Description metadata.
 7. Audit meaningful changes.
 
 Referenced Suppliers are archived rather than hard-deleted.
@@ -253,8 +254,7 @@ Referenced Suppliers are archived rather than hard-deleted.
    - Name
    - Category
    - Brand where applicable
-   - Supplier links
-   - supplier-specific Catalog Number(s).
+   - Supplier links selected from existing Supplier master records.
 4. User does not enter Serial Number manually.
 5. Trusted backend allocates the next 7-digit Serial Number.
 6. Product is created.
@@ -301,7 +301,7 @@ Admin-only.
 7. Atomically:
    - update InventoryBalance
    - create InventoryMovement
-   - for Add/upward Correction, create one Supplier source lot from the exact selected ProductSupplier
+   - for Add/upward Correction, validate the exact selected ProductSupplier, read Catalog Number/Description from its active Supplier, and freeze those Supplier values in one source lot
    - for Remove/downward Correction, allocate and decrement existing source lots FIFO
    - create immutable outbound allocation rows and verify lot/balance reconciliation
    - create AuditLog.

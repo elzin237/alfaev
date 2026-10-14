@@ -114,6 +114,8 @@ describe("useSuppliers", () => {
     await act(async () => {
       await result.current.create({
         name: "Bosch",
+        catalogNumber: "BOSCH-26",
+        description: null,
         country: "Germany",
         contactPersonName: null,
         contactPhone: null,
@@ -134,6 +136,8 @@ describe("useSuppliers", () => {
     await act(async () => {
       await result.current.create({
         name: "ABB",
+        catalogNumber: "ABB-26",
+        description: null,
         country: "Switzerland",
         contactPersonName: null,
         contactPhone: null,

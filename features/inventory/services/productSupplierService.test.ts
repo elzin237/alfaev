@@ -17,7 +17,6 @@ import {
   listActiveSupplierChoices,
   listProductSuppliers,
   listSupplierProducts,
-  updateProductSupplier,
 } from "./productSupplierService";
 
 beforeEach(() => {
@@ -262,14 +261,12 @@ describe("productSupplierService", () => {
     );
   });
 
-  it("creates through the trusted RPC with normalized Catalog Number only", async () => {
+  it("creates a relationship through the trusted RPC without browser-owned Supplier data", async () => {
     serviceMocks.rpc.mockResolvedValue({ data: "relation-1", error: null });
 
     await expect(createProductSupplier({
       productId: "product-1",
       supplierId: "supplier-1",
-      catalogNumber: "  AbC-42  ",
-      description: "  Control relay  ",
     })).resolves.toEqual({
       ok: true,
       value: { relationId: "relation-1" },
@@ -277,23 +274,7 @@ describe("productSupplierService", () => {
     expect(serviceMocks.rpc).toHaveBeenCalledWith("create_product_supplier", {
       p_product_id: "product-1",
       p_supplier_id: "supplier-1",
-      p_catalog_number: "AbC-42",
-      p_description: "Control relay",
     });
-  });
-
-  it("forwards blank Catalog Number for trusted rejection and normalizes optional description", async () => {
-    serviceMocks.rpc.mockResolvedValue({ data: "relation-1", error: null });
-
-    await updateProductSupplier("relation-1", { catalogNumber: "   ", description: "   " });
-
-    expect(serviceMocks.rpc).toHaveBeenCalledWith("update_product_supplier", {
-      p_product_supplier_id: "relation-1",
-      p_catalog_number: "",
-      p_description: null,
-    });
-    expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_product_id");
-    expect(serviceMocks.rpc.mock.calls[0]?.[1]).not.toHaveProperty("p_supplier_id");
   });
 
   it.each([
@@ -311,33 +292,11 @@ describe("productSupplierService", () => {
     const result = await createProductSupplier({
       productId: "product-1",
       supplierId: "supplier-1",
-      catalogNumber: "CAT-1",
-      description: null,
     });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe(expectedCode);
     expect(JSON.stringify(result)).not.toContain("raw provider details");
-  });
-
-  it.each([
-    ["PSR01", "relationship_archived"],
-    ["PSR04", "relationship_duplicate"],
-    ["P0002", "relationship_not_found"],
-    ["unexpected", "relationship_update_failed"],
-  ] as const)("maps update error %s safely", async (providerCode, expectedCode) => {
-    serviceMocks.rpc.mockResolvedValue({
-      data: null,
-      error: { code: providerCode, message: "raw provider details" },
-    });
-
-    const result = await updateProductSupplier("relation-1", {
-      catalogNumber: "CAT-1",
-      description: null,
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.code).toBe(expectedCode);
   });
 
   it("archives only through the trusted archive RPC and maps known failures", async () => {

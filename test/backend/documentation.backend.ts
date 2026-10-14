@@ -9,6 +9,21 @@ import { createSecurityFixtureHarness, type SecurityFixtureHarness } from "./sec
 const environment = loadBackendTestEnvironment();
 let harness: SecurityFixtureHarness | undefined;
 
+interface OrderedAuditRow {
+  action_type: string;
+  actor_user_id: string;
+  audit_log_id: string;
+  created_at: string;
+}
+
+function expectTiedAuditsInCanonicalOrder(rows: OrderedAuditRow[]): void {
+  expect(new Set(rows.map((row) => row.created_at))).toHaveLength(1);
+
+  for (let index = 1; index < rows.length; index += 1) {
+    expect(rows[index - 1]!.audit_log_id > rows[index]!.audit_log_id).toBe(true);
+  }
+}
+
 function fixture(): SecurityFixtureHarness {
   if (!harness) throw new Error("Security fixtures are not ready");
   return harness;
@@ -153,13 +168,15 @@ describe("Documentation backend security", () => {
         expect(await change(second, null, fixture().actors.admin.authUserId)).toBe(id);
         current = await database.query("select pdf_storage_path from public.documentation_records where id=$1", [id]);
         expect(current.rows[0]?.pdf_storage_path).toBeNull();
-        const audits = await database.query<{ action_type: string; actor_user_id: string }>(
-          "select action_type,actor_user_id from public.audit_logs where entity_id=$1 and action_type like $2 order by created_at",
+        const audits = await database.query<OrderedAuditRow>(
+          "select id as audit_log_id,action_type,actor_user_id,created_at::text from public.audit_logs where entity_id=$1 and action_type like $2 order by created_at desc,id desc",
           [id, "documentation.pdf_%"],
         );
-        expect(audits.rows.map((row) => row.action_type)).toEqual([
+        expect(audits.rows).toHaveLength(3);
+        expectTiedAuditsInCanonicalOrder(audits.rows);
+        expect(audits.rows.map((row) => row.action_type)).toEqual(expect.arrayContaining([
           "documentation.pdf_attached", "documentation.pdf_replaced", "documentation.pdf_removed",
-        ]);
+        ]));
         expect(audits.rows.every((row) => row.actor_user_id === fixture().actors.admin.profileId)).toBe(true);
       });
     } finally {
@@ -198,12 +215,14 @@ describe("Documentation backend security", () => {
         "select name,amount::text,is_active,archived_by_user_id from public.documentation_records where id=$1", [id],
       );
       expect(result.rows[0]).toMatchObject({ name: "Revised", amount: "0", is_active: false, archived_by_user_id: fixture().actors.admin.profileId });
-      const audits = await database.query<{ action_type: string; actor_user_id: string }>(
-        "select action_type,actor_user_id from public.audit_logs where entity_id=$1 order by created_at", [id],
+      const audits = await database.query<OrderedAuditRow>(
+        "select id as audit_log_id,action_type,actor_user_id,created_at::text from public.audit_logs where entity_id=$1 order by created_at desc,id desc", [id],
       );
-      expect(audits.rows.map((audit) => audit.action_type)).toEqual([
+      expect(audits.rows).toHaveLength(3);
+      expectTiedAuditsInCanonicalOrder(audits.rows);
+      expect(audits.rows.map((audit) => audit.action_type)).toEqual(expect.arrayContaining([
         "documentation.created", "documentation.updated", "documentation.archived",
-      ]);
+      ]));
       expect(audits.rows.every((audit) => audit.actor_user_id === fixture().actors.admin.profileId)).toBe(true);
 
       await database.query("savepoint archived_edit");

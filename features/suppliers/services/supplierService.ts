@@ -3,6 +3,8 @@ import { supabase } from "../../../lib/supabase/client";
 interface SupplierRow {
   id: string;
   name: string;
+  catalog_number: string | null;
+  description: string | null;
   country: string;
   contact_person_name: string | null;
   contact_phone: string | null;
@@ -16,6 +18,8 @@ interface SupplierRow {
 export interface Supplier {
   id: string;
   name: string;
+  catalogNumber: string | null;
+  description: string | null;
   country: string;
   contactPersonName: string | null;
   contactPhone: string | null;
@@ -28,6 +32,8 @@ export interface Supplier {
 
 export interface SupplierMutationInput {
   name: string;
+  catalogNumber: string;
+  description: string | null;
   country: string;
   contactPersonName: string | null;
   contactPhone: string | null;
@@ -68,7 +74,7 @@ export type SupplierUpdateResult = SupplierCreateResult;
 export type SupplierArchiveResult = SupplierCreateResult;
 
 const supplierFields =
-  "id,name,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at";
+  "id,name,catalog_number,description,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at";
 
 function isDateTime(value: string): boolean {
   return Number.isFinite(Date.parse(value));
@@ -82,6 +88,10 @@ function isSupplierRow(value: unknown): value is SupplierRow {
     typeof value.id === "string" &&
     "name" in value &&
     typeof value.name === "string" &&
+    "catalog_number" in value &&
+    (typeof value.catalog_number === "string" || value.catalog_number === null) &&
+    "description" in value &&
+    (typeof value.description === "string" || value.description === null) &&
     "country" in value &&
     typeof value.country === "string" &&
     "contact_person_name" in value &&
@@ -113,6 +123,8 @@ function mapSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,
     name: row.name,
+    catalogNumber: row.catalog_number,
+    description: row.description,
     country: row.country,
     contactPersonName: row.contact_person_name,
     contactPhone: row.contact_phone,
@@ -180,6 +192,14 @@ function mutationFailure(
         error: {
           code: "supplier_email_invalid",
           message: "Enter a valid Supplier email address.",
+        },
+      };
+    case "SUP04":
+      return {
+        ok: false,
+        error: {
+          code: "supplier_invalid",
+          message: "Catalog Number is required for an active Supplier.",
         },
       };
     case "22023":
@@ -334,6 +354,8 @@ export async function createSupplier(
       null;
     const { data, error } = await supabase.rpc("create_supplier", {
       p_name: input.name.trim(),
+      p_catalog_number: input.catalogNumber.trim(),
+      p_description: normalizeOptional(input.description),
       p_country: input.country.trim(),
       p_contact_person_name: normalizeOptional(input.contactPersonName),
       p_contact_phone: normalizeOptional(input.contactPhone),
@@ -359,6 +381,8 @@ export async function updateSupplier(
     const { data, error } = await supabase.rpc("update_supplier", {
       p_supplier_id: supplierId,
       p_name: input.name.trim(),
+      p_catalog_number: input.catalogNumber.trim(),
+      p_description: normalizeOptional(input.description),
       p_country: input.country.trim(),
       p_contact_person_name: normalizeOptional(input.contactPersonName),
       p_contact_phone: normalizeOptional(input.contactPhone),

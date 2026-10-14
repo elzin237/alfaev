@@ -13,6 +13,8 @@ interface SupplierRow {
   contact_email: string | null;
   contact_person_name: string | null;
   contact_phone: string | null;
+  catalog_number: string | null;
+  description: string | null;
   country: string;
   created_at: Date;
   created_by_user_id: string;
@@ -50,11 +52,15 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $2::text,
            $3::text,
            $4::text,
-           $5::text
+           $5::text,
+           $6::text,
+           $7::text
          ) as supplier_id`,
         [
           `  ${supplierName}  `,
+          "  SUP-CAT-1  ",
           "  Bosnia and Herzegovina  ",
+          "  Automation supplier  ",
           "  Ada Lovelace  ",
           "  +387 (0)33 ext. 42  ",
           `  ${duplicateEmail.toUpperCase()}  `,
@@ -66,11 +72,15 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $2::text,
            $3::text,
            $4::text,
-           $5::text
+           $5::text,
+           $6::text,
+           $7::text
          ) as supplier_id`,
         [
           `Second ${randomUUID()}`,
+          "SECOND-CAT",
           " Croatia ",
+          "   ",
           "   ",
           "   ",
           ` ${duplicateEmail} `,
@@ -109,10 +119,12 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       expect(createdSupplier).toMatchObject({
         archived_at: null,
         archived_by_user_id: null,
+        catalog_number: "SUP-CAT-1",
         contact_email: duplicateEmail,
         contact_person_name: "Ada Lovelace",
         contact_phone: "+387 (0)33 ext. 42",
         country: "Bosnia and Herzegovina",
+        description: "Automation supplier",
         created_by_user_id: fixture.actors.admin.profileId,
         is_active: true,
         name: supplierName,
@@ -121,9 +133,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       expect(createdSupplier?.created_at).toEqual(createdSupplier?.updated_at);
       expect(secondSupplier).toMatchObject({
         contact_email: duplicateEmail,
+        catalog_number: "SECOND-CAT",
         contact_person_name: null,
         contact_phone: null,
         country: "Croatia",
+        description: null,
       });
       expect(audit.rows).toEqual([
         {
@@ -131,9 +145,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
           actor_user_id: fixture.actors.admin.profileId,
           after_data: {
             contact_email: duplicateEmail,
+            catalog_number: "SUP-CAT-1",
             contact_person_name: "Ada Lovelace",
             contact_phone: "+387 (0)33 ext. 42",
             country: "Bosnia and Herzegovina",
+            description: "Automation supplier",
             is_active: true,
             name: supplierName,
           },
@@ -147,8 +163,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       await database.query("set local role authenticated");
       await expect(
         database.query(
-          "select public.create_supplier($1::text, $2::text)",
-          [` ${supplierName.toUpperCase()} `, "Germany"],
+          "select public.create_supplier($1::text, $2::text, $3::text)",
+          [` ${supplierName.toUpperCase()} `, "DUP-CAT", "Germany"],
         ),
       ).rejects.toMatchObject({ code: "SUP02" });
       await database.query("rollback to savepoint duplicate_supplier");
@@ -173,11 +189,13 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
     });
 
     for (const [input, expectedCode] of [
-      [{ p_name: "   ", p_country: "Germany" }, "22023"],
-      [{ p_name: `Name ${randomUUID()}`, p_country: "   " }, "22023"],
+      [{ p_name: "   ", p_catalog_number: "CAT", p_country: "Germany" }, "22023"],
+      [{ p_name: `Name ${randomUUID()}`, p_catalog_number: "CAT", p_country: "   " }, "22023"],
+      [{ p_name: `Name ${randomUUID()}`, p_catalog_number: "   ", p_country: "Germany" }, "SUP04"],
       [
         {
           p_name: `Name ${randomUUID()}`,
+          p_catalog_number: "CAT",
           p_country: "Germany",
           p_contact_email: "not-an-email",
         },
@@ -209,9 +227,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $2::text,
            $3::text,
            $4::text,
-           $5::text
+           $5::text,
+           $6::text,
+           $7::text
          ) as supplier_id`,
-        [originalName, "Germany", "Grace Hopper", "+49 30 123", "GRACE@EXAMPLE.COM"],
+        [originalName, "LIFE-CAT", "Germany", "Lifecycle source", "Grace Hopper", "+49 30 123", "GRACE@EXAMPLE.COM"],
       );
       await database.query("reset role");
       const supplierId = created.rows[0]?.supplier_id;
@@ -232,12 +252,16 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $3::text,
            $4::text,
            $5::text,
-           $6::text
+           $6::text,
+           $7::text,
+           $8::text
          )`,
         [
           supplierId,
           ` ${originalName} `,
+          " LIFE-CAT ",
           " Germany ",
+          " Lifecycle source ",
           " Grace Hopper ",
           " +49 30 123 ",
           " grace@example.com ",
@@ -267,9 +291,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $3::text,
            $4::text,
            $5::text,
-           $6::text
+           $6::text,
+           $7::text,
+           $8::text
          )`,
-        [supplierId, updatedName, "Austria", "   ", " +43 / flexible ", "NEW@EXAMPLE.COM"],
+        [supplierId, updatedName, "LIFE-CAT-B", "Austria", "   ", "   ", " +43 / flexible ", "NEW@EXAMPLE.COM"],
       );
       await database.query("reset role");
 
@@ -288,9 +314,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
 
       expect(updated.rows[0]).toMatchObject({
         contact_email: "new@example.com",
+        catalog_number: "LIFE-CAT-B",
         contact_person_name: null,
         contact_phone: "+43 / flexible",
         country: "Austria",
+        description: null,
         created_by_user_id: fixture.actors.admin.profileId,
         is_active: true,
         name: updatedName,
@@ -303,16 +331,20 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
           actor_user_id: fixture.actors.admin.profileId,
           after_data: {
             contact_email: "new@example.com",
+            catalog_number: "LIFE-CAT-B",
             contact_person_name: null,
             contact_phone: "+43 / flexible",
             country: "Austria",
+            description: null,
             name: updatedName,
           },
           before_data: {
             contact_email: "grace@example.com",
+            catalog_number: "LIFE-CAT",
             contact_person_name: "Grace Hopper",
             contact_phone: "+49 30 123",
             country: "Germany",
+            description: "Lifecycle source",
             name: originalName,
           },
           entity_id: supplierId,
@@ -337,8 +369,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       await database.query("set local role authenticated");
       await expect(
         database.query(
-          "select public.update_supplier($1::uuid, $2::text, $3::text)",
-          [supplierId, `${updatedName} Forbidden`, "Austria"],
+          "select public.update_supplier($1::uuid, $2::text, $3::text, $4::text)",
+          [supplierId, `${updatedName} Forbidden`, "LIFE-CAT-B", "Austria"],
         ),
       ).rejects.toMatchObject({ code: "SUP01" });
       await database.query("rollback to savepoint archived_supplier_edit");
@@ -372,8 +404,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       );
       await database.query("set local role authenticated");
       const created = await database.query<{ supplier_id: string }>(
-        "select public.create_supplier($1::text, $2::text) as supplier_id",
-        [originalName, "Slovenia"],
+        "select public.create_supplier($1::text, $2::text, $3::text) as supplier_id",
+        [originalName, "DELEGATED-CAT", "Slovenia"],
       );
       await database.query("reset role");
       const supplierId = created.rows[0]?.supplier_id;
@@ -388,8 +420,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       );
       await database.query("set local role authenticated");
       await database.query(
-        "select public.update_supplier($1::uuid, $2::text, $3::text)",
-        [supplierId, updatedName, "Slovenia"],
+        "select public.update_supplier($1::uuid, $2::text, $3::text, $4::text)",
+        [supplierId, updatedName, "DELEGATED-CAT-B", "Slovenia"],
       );
       await database.query("reset role");
 
@@ -428,12 +460,13 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       {
         p_supplier_id: randomUUID(),
         p_name: `Denied ${randomUUID()}`,
+        p_catalog_number: "DENIED-CAT",
         p_country: "Germany",
       },
     );
     const editOnlyCreate = await fixture.actors.supplierEditor.client.rpc(
       "create_supplier",
-      { p_name: `Denied ${randomUUID()}`, p_country: "Germany" },
+      { p_name: `Denied ${randomUUID()}`, p_catalog_number: "DENIED-CAT", p_country: "Germany" },
     );
 
     expectPermissionDenied(createOnlyEdit.error);
@@ -455,11 +488,15 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            $2::text,
            $3::text,
            $4::text,
-           $5::text
+           $5::text,
+           $6::text,
+           $7::text
          ) as supplier_id`,
         [
           supplierName,
+          "ARCHIVE-CAT",
           "Germany",
+          "Archive source",
           "Archive Contact",
           "+49 30 123",
           "archive@example.com",
@@ -552,8 +589,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       await database.query("set local role authenticated");
       await expect(
         database.query(
-          "select public.update_supplier($1::uuid, $2::text, $3::text)",
-          [supplierId, `${supplierName} Edited`, "Austria"],
+          "select public.update_supplier($1::uuid, $2::text, $3::text, $4::text)",
+          [supplierId, `${supplierName} Edited`, "ARCHIVE-CAT", "Austria"],
         ),
       ).rejects.toMatchObject({ code: "SUP01" });
       await database.query("rollback to savepoint archived_supplier_update");
@@ -599,8 +636,8 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       );
       await database.query("set local role authenticated");
       const created = await database.query<{ supplier_id: string }>(
-        "select public.create_supplier($1::text, $2::text) as supplier_id",
-        [supplierName, "Austria"],
+        "select public.create_supplier($1::text, $2::text, $3::text) as supplier_id",
+        [supplierName, "DELEGATED-ARCHIVE-CAT", "Austria"],
       );
       await database.query("reset role");
       const supplierId = created.rows[0]?.supplier_id;
@@ -683,11 +720,13 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
     ]) {
       const createResult = await client.rpc("create_supplier", {
         p_name: `Denied ${randomUUID()}`,
+        p_catalog_number: "DENIED-CAT",
         p_country: "Germany",
       });
       const updateResult = await client.rpc("update_supplier", {
         p_supplier_id: randomUUID(),
         p_name: `Denied ${randomUUID()}`,
+        p_catalog_number: "DENIED-CAT",
         p_country: "Germany",
       });
 
@@ -705,6 +744,7 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
         `insert into public.suppliers (
            id,
            name,
+           catalog_number,
            country,
            is_active,
            created_by_user_id,
@@ -713,10 +753,11 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
            archived_by_user_id
          )
          values
-           ($1::uuid, $2::text, 'Germany', true, $5::uuid, $5::uuid, null, null),
+           ($1::uuid, $2::text, 'READ-ACTIVE', 'Germany', true, $5::uuid, $5::uuid, null, null),
            (
              $3::uuid,
              $4::text,
+             null,
              'Austria',
              false,
              $5::uuid,
@@ -793,6 +834,7 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
       .from("suppliers")
       .insert({
         name: `Direct ${randomUUID()}`,
+        catalog_number: "DIRECT-CAT",
         country: "Germany",
         created_by_user_id: fixture.actors.supplierCreator.profileId,
         updated_by_user_id: fixture.actors.supplierCreator.profileId,
@@ -896,15 +938,20 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
         "updated_by_user_id",
         "archived_at",
         "archived_by_user_id",
+        "catalog_number",
+        "description",
       ]);
       expect(constraints.rows.map((constraint) => constraint.constraint_name))
         .toEqual(expect.arrayContaining([
           "suppliers_archive_state_consistent",
+          "suppliers_active_catalog_required",
+          "suppliers_catalog_number_normalized",
           "suppliers_contact_email_basic_format",
           "suppliers_contact_email_normalized",
           "suppliers_contact_person_normalized",
           "suppliers_contact_phone_normalized",
           "suppliers_country_trimmed_nonblank",
+          "suppliers_description_normalized",
           "suppliers_name_trimmed_nonblank",
           "suppliers_pkey",
         ]));
@@ -928,24 +975,29 @@ export function registerSuppliersTests(requireHarness: () => SecurityFixtureHarn
         });
       }
 
-      for (const [name, country, email] of [
-        ["   ", "Germany", null],
-        [`Constraint ${randomUUID()}`, "   ", null],
-        [`Constraint ${randomUUID()}`, "Germany", "invalid-email"],
-        [`Constraint ${randomUUID()}`, "Germany", "UPPER@EXAMPLE.COM"],
+      for (const [name, catalogNumber, country, description, email] of [
+        ["   ", "CAT", "Germany", null, null],
+        [`Constraint ${randomUUID()}`, "CAT", "   ", null, null],
+        [`Constraint ${randomUUID()}`, "   ", "Germany", null, null],
+        [`Constraint ${randomUUID()}`, " CAT ", "Germany", null, null],
+        [`Constraint ${randomUUID()}`, "CAT", "Germany", " untrimmed ", null],
+        [`Constraint ${randomUUID()}`, "CAT", "Germany", null, "invalid-email"],
+        [`Constraint ${randomUUID()}`, "CAT", "Germany", null, "UPPER@EXAMPLE.COM"],
       ] as const) {
         await database.query("savepoint invalid_supplier_constraint");
         await expect(
           database.query(
             `insert into public.suppliers (
                name,
+               catalog_number,
                country,
+               description,
                contact_email,
                created_by_user_id,
                updated_by_user_id
              )
-             values ($1::text, $2::text, $3::text, $4::uuid, $4::uuid)`,
-            [name, country, email, fixture.actors.admin.profileId],
+             values ($1::text, $2::text, $3::text, $4::text, $5::text, $6::uuid, $6::uuid)`,
+            [name, catalogNumber, country, description, email, fixture.actors.admin.profileId],
           ),
         ).rejects.toMatchObject({ code: "23514" });
         await database.query("rollback to savepoint invalid_supplier_constraint");

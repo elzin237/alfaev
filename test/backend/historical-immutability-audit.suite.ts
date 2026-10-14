@@ -203,16 +203,9 @@ export function registerHistoricalImmutabilityAuditTests(
 
           await actAs(database, admin);
           await database.query(
-            "select public.update_product_supplier($1::uuid, $2::text, $3::text)",
-            [
-              source.productSupplierId,
-              "TASK149-CATALOG-NEW",
-              "Task 149 changed source description",
-            ],
-          );
-          await database.query(
             `select public.update_supplier(
-               $1::uuid, 'Task 149 Renamed Supplier', 'Bosnia and Herzegovina',
+               $1::uuid, 'Task 149 Renamed Supplier', 'TASK149-CATALOG-NEW',
+               'Bosnia and Herzegovina', 'Task 149 changed source description',
                null, null, null
              )`,
             [source.supplierId],
@@ -258,12 +251,12 @@ export function registerHistoricalImmutabilityAuditTests(
           });
           expect((await database.query(
             `select catalog_number, description, is_active
-             from public.product_suppliers where id = $1::uuid`,
-            [source.productSupplierId],
+             from public.suppliers where id = $1::uuid`,
+            [source.supplierId],
           )).rows).toEqual([{
             catalog_number: "TASK149-CATALOG-NEW",
             description: "Task 149 changed source description",
-            is_active: false,
+            is_active: true,
           }]);
           expect((await database.query<{ allocated_quantity: string; id: string }>(
             `select id, allocated_quantity::text

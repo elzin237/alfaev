@@ -10,6 +10,8 @@ export function filterSuppliers(
   return suppliers.filter((supplier) =>
     [
       supplier.name,
+      supplier.catalogNumber,
+      supplier.description,
       supplier.country,
       supplier.contactPersonName,
       supplier.contactEmail,

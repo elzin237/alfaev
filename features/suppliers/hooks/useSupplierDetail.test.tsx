@@ -205,6 +205,8 @@ describe("useSupplierDetail", () => {
     await act(async () => {
       await result.current.update({
         name: "Bosch Rexroth",
+        catalogNumber: "BR-26",
+        description: null,
         country: "Germany",
         contactPersonName: null,
         contactPhone: null,
@@ -235,6 +237,8 @@ describe("useSupplierDetail", () => {
     await act(async () => {
       await result.current.update({
         name: "Bosch",
+        catalogNumber: "BOSCH-26",
+        description: null,
         country: "Germany",
         contactPersonName: null,
         contactPhone: null,

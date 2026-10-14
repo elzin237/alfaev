@@ -37,6 +37,8 @@ describe("supplierService", () => {
         {
           id: "supplier-4",
           name: "Zeta",
+          catalog_number: null,
+          description: null,
           country: "Germany",
           contact_person_name: null,
           contact_phone: null,
@@ -49,6 +51,8 @@ describe("supplierService", () => {
         {
           id: "supplier-2",
           name: "bosch",
+          catalog_number: "BOSCH-26",
+          description: "Industrial controls",
           country: "Germany",
           contact_person_name: "Mira Marić",
           contact_phone: "+387 61 111 222",
@@ -61,6 +65,8 @@ describe("supplierService", () => {
         {
           id: "supplier-1",
           name: "ABB",
+          catalog_number: "ABB-26",
+          description: null,
           country: "Switzerland",
           contact_person_name: null,
           contact_phone: null,
@@ -73,6 +79,8 @@ describe("supplierService", () => {
         {
           id: "supplier-3",
           name: "Alpha Archived",
+          catalog_number: null,
+          description: null,
           country: "Austria",
           contact_person_name: null,
           contact_phone: null,
@@ -90,7 +98,7 @@ describe("supplierService", () => {
 
     expect(supplierServiceMocks.from).toHaveBeenCalledWith("suppliers");
     expect(supplierServiceMocks.select).toHaveBeenCalledWith(
-      "id,name,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at",
+      "id,name,catalog_number,description,country,contact_person_name,contact_phone,contact_email,is_active,created_at,updated_at,archived_at",
     );
     expect(result).toEqual({
       ok: true,
@@ -146,6 +154,8 @@ describe("supplierService", () => {
       data: {
         id: "supplier-1",
         name: "Bosch",
+        catalog_number: "BOSCH-26",
+        description: "Industrial controls",
         country: "Germany",
         contact_person_name: "Mira Marić",
         contact_phone: "+387 61 111 222",
@@ -163,6 +173,8 @@ describe("supplierService", () => {
       value: {
         id: "supplier-1",
         name: "Bosch",
+        catalogNumber: "BOSCH-26",
+        description: "Industrial controls",
         country: "Germany",
         contactPersonName: "Mira Marić",
         contactPhone: "+387 61 111 222",
@@ -229,6 +241,8 @@ describe("supplierService", () => {
     await expect(
       createSupplier({
         name: "  Bosch  ",
+        catalogNumber: "  Bosch-26  ",
+        description: "  Industrial controls  ",
         country: "  Germany ",
         contactPersonName: "  Mira Marić  ",
         contactPhone: "  +387 61 111 222 ",
@@ -241,6 +255,8 @@ describe("supplierService", () => {
 
     expect(supplierServiceMocks.rpc).toHaveBeenCalledWith("create_supplier", {
       p_name: "Bosch",
+      p_catalog_number: "Bosch-26",
+      p_description: "Industrial controls",
       p_country: "Germany",
       p_contact_person_name: "Mira Marić",
       p_contact_phone: "+387 61 111 222",
@@ -254,6 +270,8 @@ describe("supplierService", () => {
 
     await createSupplier({
       name: "ABB",
+      catalogNumber: "  ABB-26  ",
+      description: "   ",
       country: "Switzerland",
       contactPersonName: "   ",
       contactPhone: null,
@@ -262,6 +280,8 @@ describe("supplierService", () => {
 
     expect(supplierServiceMocks.rpc).toHaveBeenCalledWith("create_supplier", {
       p_name: "ABB",
+      p_catalog_number: "ABB-26",
+      p_description: null,
       p_country: "Switzerland",
       p_contact_person_name: null,
       p_contact_phone: null,
@@ -273,6 +293,7 @@ describe("supplierService", () => {
     ["42501", "access_denied", "You do not have permission to create Suppliers."],
     ["SUP02", "supplier_duplicate", "A Supplier with this name already exists."],
     ["SUP03", "supplier_email_invalid", "Enter a valid Supplier email address."],
+    ["SUP04", "supplier_invalid", "Catalog Number is required for an active Supplier."],
     ["22023", "supplier_invalid", "Enter valid required Supplier details."],
     ["XX000", "supplier_create_failed", "The Supplier could not be created. Please try again."],
   ])("maps %s create failures without exposing raw backend details", async (backendCode, code, message) => {
@@ -284,6 +305,8 @@ describe("supplierService", () => {
     await expect(
       createSupplier({
         name: "Bosch",
+        catalogNumber: "BOSCH-26",
+        description: null,
         country: "Germany",
         contactPersonName: null,
         contactPhone: null,
@@ -300,6 +323,8 @@ describe("supplierService", () => {
 
     await expect(updateSupplier("supplier-1", {
       name: "  Bosch Rexroth  ",
+      catalogNumber: "  BR-26  ",
+      description: "  Automation supplier  ",
       country: "  Germany  ",
       contactPersonName: "  Mira Marić ",
       contactPhone: "   ",
@@ -312,6 +337,8 @@ describe("supplierService", () => {
     expect(supplierServiceMocks.rpc).toHaveBeenCalledWith("update_supplier", {
       p_supplier_id: "supplier-1",
       p_name: "Bosch Rexroth",
+      p_catalog_number: "BR-26",
+      p_description: "Automation supplier",
       p_country: "Germany",
       p_contact_person_name: "Mira Marić",
       p_contact_phone: null,
@@ -325,6 +352,7 @@ describe("supplierService", () => {
     ["SUP01", "supplier_archived", "Archived Suppliers cannot be edited."],
     ["SUP02", "supplier_duplicate", "A Supplier with this name already exists."],
     ["SUP03", "supplier_email_invalid", "Enter a valid Supplier email address."],
+    ["SUP04", "supplier_invalid", "Catalog Number is required for an active Supplier."],
     ["22023", "supplier_invalid", "Enter valid required Supplier details."],
     ["P0002", "supplier_not_found", "The Supplier could not be found."],
     ["XX000", "supplier_update_failed", "The Supplier could not be updated. Please try again."],
@@ -336,6 +364,8 @@ describe("supplierService", () => {
 
     await expect(updateSupplier("supplier-1", {
       name: "Bosch",
+      catalogNumber: "BOSCH-26",
+      description: null,
       country: "Germany",
       contactPersonName: null,
       contactPhone: null,

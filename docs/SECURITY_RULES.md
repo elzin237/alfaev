@@ -128,6 +128,7 @@ Supplier authorization:
 - Supplier archive requires Admin access or `suppliers.archive`
 - direct client mutation is not authoritative authorization
 - trusted backend/database operations must re-check Supplier mutation authorization and current lifecycle state
+- trusted Supplier create/update operations require a normalized nonblank Supplier `catalog_number` for active Suppliers and normalize optional Supplier `description` to trimmed text or `NULL`
 
 Product authorization:
 
@@ -148,21 +149,22 @@ Product authorization:
 ProductSupplier authorization:
 
 - ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required
-- trusted Product-side ProductSupplier read operations may expose only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship to those authorized readers
+- trusted Product-side ProductSupplier read operations may expose only the related Supplier ID, Supplier Name, live Supplier Catalog Number, optional Supplier Description, and Supplier active/archive state needed to display the relationship to those authorized readers
 - a trusted minimal Supplier-choice lookup for creating ProductSupplier relationships may return only active Supplier IDs and Names, and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
 - these narrow cross-domain reads do not grant general Supplier-table access or expose Supplier Country, Contact Person, Phone, Email, or other Supplier details; normal Supplier reads continue to require an active Admin or `suppliers.view`
 - trusted Supplier-side ProductSupplier read operations may expose only the related Product ID, Serial Number, Name, and active/archive state needed to display the relationship to those authorized readers
 - a trusted minimal Product-choice lookup for creating ProductSupplier relationships may return only active Product IDs, Serial Numbers, and Names, and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
 - these narrow cross-domain reads do not grant general Product-table access or expose Product Category, Brand, lifecycle timestamps/actors, or other Product details; normal Product reads continue to require an active Admin or `inventory.view`
 - direct client ProductSupplier mutation is not authoritative authorization
-- trusted ProductSupplier add/edit/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`
+- trusted ProductSupplier add/archive requires an active Admin, `inventory.products.edit`, or `suppliers.edit`; current relationships have no per-link Catalog Number or Description editor
 - one shared trusted backend authority applies regardless of whether the operation originates from Product detail or Supplier detail
 - new relationships must re-check that both the Product and Supplier are active
 - archived relationships are immutable, historically readable where authorized, and cannot be hard-deleted or reactivated through normal workflows
 - Product or Supplier archive must not delete or cascade historical ProductSupplier relationships
 - no separate ProductSupplier permission key is added
-- active ProductSupplier creation/update requires a normalized nonblank Catalog Number; optional description is normalized to trimmed text or `NULL`
+- ProductSupplier is eligibility/traceability only; deprecated relationship Catalog/Description columns are not authoritative and no live application read or write path may use them as Supplier master data
 - Inventory Add and upward Correction remain Admin-only and additionally require an exact active ProductSupplier source belonging to the target active Product and active Supplier
+- Inventory Add/upward Correction must derive Catalog Number and optional Description from the locked active Supplier row; the browser cannot submit either value as authority
 - source-lot and allocation tables grant no browser writes; all receipt, FIFO consumption, allocation, and balance reconciliation occurs through trusted database functions
 - narrow Inventory provenance reads may expose frozen Supplier name, Catalog Number, optional description, exact quantities, receipt date, and actor full name only; they do not broaden Supplier or UserProfile access
 
@@ -220,7 +222,7 @@ At minimum, trusted backend/database operations are required for:
 - account activation/deactivation
 - Brand create/edit/archive
 - Supplier create/edit/archive
-- ProductSupplier add/edit/archive
+- ProductSupplier add/archive
 
 These operations must re-check authorization and current state at execution time.
 
@@ -615,8 +617,8 @@ Resolution metadata must remain equivalent to lifecycle state: `status = 'resolv
 - when that Supplier is non-null, requires it to still exist and be active; any supplied Brand must also exist and be active
 - validates a required trimmed, nonblank Product Name and Category; Product Name may differ from the historical `requested_name` snapshot
 - creates exactly one active `component` Product and allocates its permanent 7-digit Serial Number server-side; the client cannot choose it
-- when Supplier is non-null, requires a normalized nonblank Catalog Number and creates exactly one active ProductSupplier relation to it
-- when Supplier is null, creates the Product without a ProductSupplier relation or Catalog Number
+- when Supplier is non-null, requires that active Supplier to already own a normalized nonblank Catalog Number and creates exactly one active ProductSupplier relation without accepting Catalog/Description input
+- when Supplier is null, creates the Product without a ProductSupplier relation
 - links `ProcurementRequest.product_id` without modifying its requested-name snapshot, Supplier, quantities, status, resolution metadata, or creation metadata
 - creates the required immutable Product and Procurement-link AuditLog history plus ProductSupplier history only when a relationship is created
 - commits Product creation, optional ProductSupplier creation, Procurement linking, and all required audits atomically

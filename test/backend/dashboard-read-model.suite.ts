@@ -459,8 +459,8 @@ export function registerDashboardReadModelTests(
           );
           await database.query(
             `insert into public.suppliers (
-               id, name, country, created_by_user_id, updated_by_user_id
-             ) values ($1::uuid, $2::text, 'BA', $3::uuid, $3::uuid)`,
+               id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::text, 'DASHBOARD-CAT', 'BA', $3::uuid, $3::uuid)`,
             [supplierId, `Dashboard Supplier ${suffix}`, adminId],
           );
           await database.query(

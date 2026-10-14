@@ -32,13 +32,7 @@ export interface ProductSupplierProductChoice {
   productName: string;
 }
 
-export interface ProductSupplierMutationInput {
-  catalogNumber: string;
-  description: string | null;
-}
-
-export interface CreateProductSupplierInput
-  extends ProductSupplierMutationInput {
+export interface CreateProductSupplierInput {
   productId: string;
   supplierId: string;
 }
@@ -56,7 +50,6 @@ export interface ProductSupplierServiceError {
     | "product_link_list_failed"
     | "product_choice_list_failed"
     | "relationship_create_failed"
-    | "relationship_update_failed"
     | "relationship_archive_failed";
   message: string;
 }
@@ -303,7 +296,7 @@ function productChoiceListFailure(): ProductSupplierProductChoiceListResult {
 }
 
 function mutationFailure(
-  operation: "create" | "update" | "archive",
+  operation: "create" | "archive",
   providerCode?: string,
 ): ProductSupplierMutationResult {
   if (providerCode === "42501") {
@@ -312,16 +305,6 @@ function mutationFailure(
       error: {
         code: "access_denied",
         message: "You do not have permission to manage Supplier links.",
-      },
-    };
-  }
-
-  if (providerCode === "PSR01") {
-    return {
-      ok: false,
-      error: {
-        code: "relationship_archived",
-        message: "Archived Supplier links cannot be changed.",
       },
     };
   }
@@ -356,14 +339,22 @@ function mutationFailure(
     };
   }
 
-  if (providerCode === "PSR05" || providerCode === "22023") {
+  if (providerCode === "PSR01") {
     return {
       ok: false,
       error: {
-        code: operation === "create"
-          ? "relationship_create_failed"
-          : "relationship_update_failed",
-        message: "Catalog Number is required for an active Supplier link.",
+        code: "relationship_archived",
+        message: "Archived Supplier links cannot be changed.",
+      },
+    };
+  }
+
+  if (providerCode === "22023") {
+    return {
+      ok: false,
+      error: {
+        code: "relationship_create_failed",
+        message: "Select a valid Product and Supplier.",
       },
     };
   }
@@ -383,10 +374,6 @@ function mutationFailure(
       code: "relationship_create_failed" as const,
       message: "The Supplier link could not be added. Please try again.",
     },
-    update: {
-      code: "relationship_update_failed" as const,
-      message: "The Supplier link could not be updated. Please try again.",
-    },
     archive: {
       code: "relationship_archive_failed" as const,
       message: "The Supplier link could not be archived. Please try again.",
@@ -394,15 +381,6 @@ function mutationFailure(
   }[operation];
 
   return { ok: false, error: fallback };
-}
-
-function normalizeCatalogNumber(value: string): string {
-  return value.trim();
-}
-
-function normalizeDescription(value: string | null): string | null {
-  const normalized = value?.trim() ?? "";
-  return normalized || null;
 }
 
 export async function listProductSuppliers(
@@ -523,8 +501,6 @@ export async function createProductSupplier(
     const { data, error } = await supabase.rpc("create_product_supplier", {
       p_product_id: input.productId,
       p_supplier_id: input.supplierId,
-      p_catalog_number: normalizeCatalogNumber(input.catalogNumber),
-      p_description: normalizeDescription(input.description ?? null),
     });
 
     if (error) return mutationFailure("create", error.code);
@@ -535,28 +511,6 @@ export async function createProductSupplier(
     return { ok: true, value: { relationId: data } };
   } catch {
     return mutationFailure("create");
-  }
-}
-
-export async function updateProductSupplier(
-  relationId: string,
-  input: ProductSupplierMutationInput,
-): Promise<ProductSupplierMutationResult> {
-  try {
-    const { data, error } = await supabase.rpc("update_product_supplier", {
-      p_product_supplier_id: relationId,
-      p_catalog_number: normalizeCatalogNumber(input.catalogNumber),
-      p_description: normalizeDescription(input.description ?? null),
-    });
-
-    if (error) return mutationFailure("update", error.code);
-    if (typeof data !== "string" || data.length === 0) {
-      return mutationFailure("update");
-    }
-
-    return { ok: true, value: { relationId: data } };
-  } catch {
-    return mutationFailure("update");
   }
 }
 

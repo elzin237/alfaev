@@ -26,13 +26,10 @@ function SupplierProductsSection({
     canManage,
     canAdd,
     create,
-    update,
     archive,
   } = useSupplierProducts(supplierId, supplierIsActive);
   const archiveLockRef = useRef(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editingRelation, setEditingRelation] =
-    useState<SupplierProductRelation | null>(null);
   const [archivingRelation, setArchivingRelation] =
     useState<SupplierProductRelation | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -80,7 +77,7 @@ function SupplierProductsSection({
             Products
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Product-specific Catalog Numbers for {supplierName}.
+            Products currently or historically supplied by {supplierName}.
           </p>
         </div>
         {canAdd && (
@@ -135,8 +132,6 @@ function SupplierProductsSection({
                 <tr>
                   <th scope="col" className="px-4 py-3">Serial Number</th>
                   <th scope="col" className="px-4 py-3">Product</th>
-                  <th scope="col" className="px-4 py-3">Catalog Number</th>
-                  <th scope="col" className="px-4 py-3">Description</th>
                   <th scope="col" className="px-4 py-3">Relationship</th>
                   <th scope="col" className="px-4 py-3">Product status</th>
                   {canManage && <th scope="col" className="px-4 py-3 text-right">Actions</th>}
@@ -154,10 +149,6 @@ function SupplierProductsSection({
                         <span className="ml-2 font-normal text-zinc-500">(archived)</span>
                       )}
                     </td>
-                    <td className="px-4 py-4 font-mono text-zinc-700">
-                      {relation.catalogNumber ?? "—"}
-                    </td>
-                    <td className="px-4 py-4 text-zinc-700">{relation.description ?? "—"}</td>
                     <td className="px-4 py-4">
                       <StatusBadge
                         label={relation.isActive ? "Active" : "Archived"}
@@ -174,17 +165,6 @@ function SupplierProductsSection({
                       <td className="px-4 py-4 text-right">
                         {relation.isActive && (
                           <div className="flex justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSuccessMessage(null);
-                                setActionError(null);
-                                setEditingRelation(relation);
-                              }}
-                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              Edit
-                            </button>
                             <button
                               type="button"
                               onClick={() => {
@@ -210,7 +190,6 @@ function SupplierProductsSection({
 
       <SupplierProductDialog
         open={isAddOpen}
-        mode="add"
         products={products}
         isProductsLoading={productsQuery.isPending}
         productLoadError={productLoadError}
@@ -219,19 +198,6 @@ function SupplierProductsSection({
         onSubmit={create}
         onSucceeded={() => setSuccessMessage("Product link added.")}
       />
-
-      {editingRelation && (
-        <SupplierProductDialog
-          open
-          mode="edit"
-          productName={editingRelation.productName}
-          initialCatalogNumber={editingRelation.catalogNumber}
-          initialDescription={editingRelation.description ?? null}
-          onClose={() => setEditingRelation(null)}
-          onSubmit={(input) => update(editingRelation.relationId, input)}
-          onSucceeded={() => setSuccessMessage("Catalog Number updated.")}
-        />
-      )}
 
       <ConfirmDialog
         open={Boolean(archivingRelation)}

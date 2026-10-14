@@ -36,7 +36,6 @@ const input = {
   name: "Relay",
   category: "Components",
   brandId: null,
-  catalogNumber: null,
 };
 
 beforeEach(() => {

@@ -73,10 +73,10 @@ export function registerProcurementCreationTests(requireHarness: () => SecurityF
       );
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
          ) values
-           ($1, 'Active Request Supplier', 'BiH', $3, $3),
-           ($2, 'Archived Request Supplier', 'BiH', $3, $3)`,
+           ($1, 'Active Request Supplier', 'REQUEST-ACTIVE-CAT', 'BiH', $3, $3),
+           ($2, 'Archived Request Supplier', 'REQUEST-ARCHIVED-CAT', 'BiH', $3, $3)`,
         [supplierIds[0], supplierIds[1], admin.profileId],
       );
       const serials = await database.query<{ serial_number: string }>(
@@ -601,10 +601,10 @@ export function registerProcurementCreationTests(requireHarness: () => SecurityF
       );
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
          ) values
-           ($1, 'New Component Supplier', 'BiH', $3, $3),
-           ($2, 'Archived New Component Supplier', 'BiH', $3, $3)`,
+           ($1, 'New Component Supplier', 'COMPONENT-ACTIVE-CAT', 'BiH', $3, $3),
+           ($2, 'Archived New Component Supplier', 'COMPONENT-ARCHIVED-CAT', 'BiH', $3, $3)`,
         [supplierIds[0], supplierIds[1], admin.profileId],
       );
       await database.query(

@@ -56,8 +56,8 @@ export function registerInventoryReadsTests(requireHarness: () => SecurityFixtur
       );
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1::uuid, $2::text, 'Germany', $3::uuid, $3::uuid)`,
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1::uuid, $2::text, 'SEARCH-CAT', 'Germany', $3::uuid, $3::uuid)`,
         [supplierId, `Search Supplier ${token}`, actorId],
       );
       await database.query(

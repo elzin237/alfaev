@@ -33,6 +33,7 @@ function renderDialog(options: {
       currentQuantity={options.currentQuantity ?? 10}
       sourceChoices={[{
         productSupplierId: "relation-1",
+        supplierId: "supplier-1",
         supplierName: "IBP",
         catalogNumber: "CAT-100",
         description: "Control relay",
@@ -67,7 +68,7 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(within(dialog).getByLabelText("Quantity"), {
       target: { value: "3" },
     });
-    fireEvent.change(within(dialog).getByLabelText("Supplier Catalog Source"), {
+    fireEvent.change(within(dialog).getByLabelText("Supplier"), {
       target: { value: "relation-1" },
     });
     enterReason();
@@ -134,7 +135,7 @@ describe("InventoryAdjustmentDialog", () => {
     }));
   });
 
-  it("shows the exact ProductSupplier source only for Add and upward Correction", async () => {
+  it("shows the exact Supplier source only for Add and upward Correction", async () => {
     const { onSubmit } = renderDialog();
     expect(screen.getByRole("option", {
       name: "IBP — CAT-100 — Control relay",
@@ -145,7 +146,7 @@ describe("InventoryAdjustmentDialog", () => {
     enterReason("Inbound");
     fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Select the Supplier Catalog Source for inbound stock.",
+      "Select the Supplier for inbound stock.",
     );
     expect(onSubmit).not.toHaveBeenCalled();
 
@@ -155,8 +156,8 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), {
       target: { value: "12" },
     });
-    expect(screen.getByLabelText("Supplier Catalog Source")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+    expect(screen.getByLabelText("Supplier")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Supplier"), {
       target: { value: "relation-1" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
@@ -175,11 +176,11 @@ describe("InventoryAdjustmentDialog", () => {
       target: { value: "correction" },
     });
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "8" } });
-    expect(screen.queryByLabelText("Supplier Catalog Source")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Supplier")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Adjustment Type"), {
       target: { value: "remove" },
     });
-    expect(screen.queryByLabelText("Supplier Catalog Source")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Supplier")).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
     enterReason("Outbound");
     fireEvent.click(screen.getByRole("button", { name: "Adjust Inventory" }));
@@ -235,7 +236,7 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), {
       target: { value: "1" },
     });
-    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+    fireEvent.change(screen.getByLabelText("Supplier"), {
       target: { value: "relation-1" },
     });
     enterReason("Delivery");
@@ -261,7 +262,7 @@ describe("InventoryAdjustmentDialog", () => {
     fireEvent.change(screen.getByLabelText("Quantity"), {
       target: { value: "1" },
     });
-    fireEvent.change(screen.getByLabelText("Supplier Catalog Source"), {
+    fireEvent.change(screen.getByLabelText("Supplier"), {
       target: { value: "relation-1" },
     });
     fireEvent.change(screen.getByLabelText("Reason"), {

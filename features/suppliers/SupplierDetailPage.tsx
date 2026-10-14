@@ -127,6 +127,14 @@ function SupplierDetailPage() {
 
             <dl className="mt-8 grid gap-6 sm:grid-cols-2">
               <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Catalog Number</dt>
+                <dd className="mt-2 font-mono text-sm font-medium text-zinc-900">{supplier.catalogNumber ?? "Not provided"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Description</dt>
+                <dd className="mt-2 whitespace-pre-wrap text-sm font-medium text-zinc-900">{valueOrUnavailable(supplier.description)}</dd>
+              </div>
+              <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Country</dt>
                 <dd className="mt-2 text-sm font-medium text-zinc-900">{supplier.country}</dd>
               </div>
@@ -186,6 +194,8 @@ function SupplierDetailPage() {
           mode="edit"
           initialValues={{
             name: supplier.name,
+            catalogNumber: supplier.catalogNumber ?? "",
+            description: supplier.description,
             country: supplier.country,
             contactPersonName: supplier.contactPersonName,
             contactPhone: supplier.contactPhone,

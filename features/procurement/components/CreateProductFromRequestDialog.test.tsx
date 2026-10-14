@@ -133,7 +133,6 @@ describe("CreateProductFromRequestDialog", () => {
       name: request.requestedName,
       category: "Components",
       brandId: null,
-      catalogNumber: null,
     }));
   });
 
@@ -159,7 +158,7 @@ describe("CreateProductFromRequestDialog", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("requires a Catalog Number when the request has a Supplier", async () => {
+  it("uses the request Supplier without asking for relationship metadata", async () => {
     const { onSubmit, onClose, onSucceeded } = renderDialog();
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "  Final Relay  " },
@@ -167,21 +166,7 @@ describe("CreateProductFromRequestDialog", () => {
     fireEvent.change(screen.getByLabelText("Category"), {
       target: { value: "  Control Components  " },
     });
-    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
-      target: { value: "   " },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Catalog Number is required for the Supplier relationship.",
-    );
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(onSucceeded).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
-      target: { value: "  CAT-77  " },
-    });
+    expect(screen.queryByLabelText(/Catalog Number/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({
@@ -189,7 +174,6 @@ describe("CreateProductFromRequestDialog", () => {
       name: "Final Relay",
       category: "Control Components",
       brandId: null,
-      catalogNumber: "CAT-77",
     }));
     const payload = onSubmit.mock.calls[0]?.[0];
     expect(payload).not.toHaveProperty("supplierId");
@@ -203,7 +187,7 @@ describe("CreateProductFromRequestDialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it("preserves Catalog Number casing, submits an active Brand, and blocks duplicates", async () => {
+  it("submits an active Brand and blocks duplicates", async () => {
     let finish: ((result: ProcurementProductCreationResult) => void) | undefined;
     const pending = new Promise<ProcurementProductCreationResult>((resolve) => {
       finish = resolve;
@@ -216,9 +200,7 @@ describe("CreateProductFromRequestDialog", () => {
     fireEvent.change(screen.getByLabelText(/Brand/), {
       target: { value: "brand-active" },
     });
-    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
-      target: { value: "  CaT-AbC  " },
-    });
+    expect(screen.queryByLabelText(/Catalog Number/)).not.toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Create Component" });
     fireEvent.click(submit);
     fireEvent.click(submit);
@@ -226,7 +208,6 @@ describe("CreateProductFromRequestDialog", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce());
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       brandId: "brand-active",
-      catalogNumber: "CaT-AbC",
     }));
     expect(submit).toBeDisabled();
     finish?.({
@@ -267,9 +248,6 @@ describe("CreateProductFromRequestDialog", () => {
     });
     fireEvent.change(screen.getByLabelText("Category"), {
       target: { value: "Components" },
-    });
-    fireEvent.change(screen.getByLabelText(/Catalog Number/), {
-      target: { value: "CAT-FAIL" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Create Component" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(

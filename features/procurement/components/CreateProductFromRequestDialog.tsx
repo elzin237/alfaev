@@ -61,7 +61,6 @@ function CreateProductFromRequestDialog({
       name: request?.requestedName ?? "",
       category: "",
       brandId: "",
-      catalogNumber: "",
     },
   });
   const nameRegistration = register("name");
@@ -71,7 +70,6 @@ function CreateProductFromRequestDialog({
       name: request?.requestedName ?? "",
       category: "",
       brandId: "",
-      catalogNumber: "",
     });
   }, [request?.requestedName, reset]);
 
@@ -130,20 +128,12 @@ function CreateProductFromRequestDialog({
       brandLoadError
     ) return;
 
-    if (request.supplierId !== null && input.catalogNumber === null) {
-      setSubmissionError("Catalog Number is required for the Supplier relationship.");
-      return;
-    }
-
     submissionLockRef.current = true;
     setSubmissionError(null);
 
     try {
       const result = await onSubmit({
         ...input,
-        catalogNumber: request.supplierId === null
-          ? null
-          : input.catalogNumber,
         requestId: request.requestId,
       });
       if (!result.ok) {
@@ -268,7 +258,7 @@ function CreateProductFromRequestDialog({
               <p className="text-sm font-semibold text-zinc-800">Supplier</p>
               <p className="mt-1 text-sm text-zinc-600">Not assigned</p>
               <p className="mt-2 text-xs text-zinc-500">
-                The Component will be created without a Product-Supplier relationship or Catalog Number.
+                  The Component will be created without a Product-Supplier relationship.
               </p>
             </div>
           ) : (
@@ -287,20 +277,6 @@ function CreateProductFromRequestDialog({
                 <p className="mt-2 text-xs text-zinc-500">
                   The Supplier is fixed by the Procurement request.
                 </p>
-              </div>
-
-              <div>
-                <label htmlFor="request-product-catalog-number" className="block text-sm font-semibold text-zinc-800">
-                  Catalog Number
-                </label>
-                <input
-                  {...register("catalogNumber")}
-                  id="request-product-catalog-number"
-                  type="text"
-                  required
-                  disabled={isSubmitting}
-                  className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm text-zinc-900 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                />
               </div>
             </>
           )}

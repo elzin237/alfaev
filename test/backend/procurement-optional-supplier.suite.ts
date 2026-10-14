@@ -75,10 +75,10 @@ export function registerProcurementOptionalSupplierTests(
         );
         await database.query(
           `insert into public.suppliers (
-             id, name, country, created_by_user_id, updated_by_user_id
+             id, name, catalog_number, country, created_by_user_id, updated_by_user_id
            ) values (
              $1, 'Historical Procurement Supplier',
-             'Bosnia and Herzegovina', $2, $2
+             'PROC-OPTIONAL-CAT', 'Bosnia and Herzegovina', $2, $2
            )`,
           [existingSupplierId, admin.profileId],
         );
@@ -205,21 +205,12 @@ export function registerProcurementOptionalSupplierTests(
         await database.query("rollback to savepoint invalid_supplier_fk");
 
         await actAs(database, admin);
-        await database.query("savepoint catalog_without_supplier");
-        await expect(database.query(
-          `select * from public.create_product_from_procurement_request(
-             $1, 'Catalog misuse', 'Component', null, 'SHOULD-NOT-PERSIST'
-           )`,
-          [newRequestId],
-        )).rejects.toMatchObject({ code: "22023" });
-        await database.query("rollback to savepoint catalog_without_supplier");
-
         const productResult = await database.query<{
           product_id: string;
           serial_number: string;
         }>(
           `select * from public.create_product_from_procurement_request(
-             $1, 'Supplier-free final Product', 'Component', null, null
+             $1, 'Supplier-free final Product', 'Component', null
            )`,
           [newRequestId],
         );

@@ -88,7 +88,7 @@ function SuppliersPage() {
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by name, country, or contact details"
+            placeholder="Search by name, Catalog Number, description, country, or contact details"
             className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           />
         </div>

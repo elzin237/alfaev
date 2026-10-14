@@ -443,7 +443,6 @@ describe("procurementService", () => {
       name: "  Final Relay Name  ",
       category: "  Control Components  ",
       brandId: "  00000000-0000-4000-8000-000000000005  ",
-      catalogNumber: "  CaT-AbC  ",
     })).resolves.toEqual({
       ok: true,
       value: {
@@ -458,7 +457,6 @@ describe("procurementService", () => {
         p_name: "Final Relay Name",
         p_category: "Control Components",
         p_brand_id: "00000000-0000-4000-8000-000000000005",
-        p_catalog_number: "CaT-AbC",
       },
     );
     const payload = procurementServiceMocks.rpc.mock.calls[0]?.[1];
@@ -486,19 +484,17 @@ describe("procurementService", () => {
       name: "Relay",
       category: "Components",
       brandId: null,
-      catalogNumber: "   ",
     });
     expect(procurementServiceMocks.rpc).toHaveBeenNthCalledWith(
       1,
       "create_product_from_procurement_request",
-      expect.objectContaining({ p_brand_id: null, p_catalog_number: null }),
+      expect.objectContaining({ p_brand_id: null }),
     );
     await expect(createProductFromProcurementRequest({
       requestId: requestRow.request_id,
       name: "Relay",
       category: "Components",
       brandId: null,
-      catalogNumber: null,
     })).resolves.toEqual({
       ok: false,
       error: {
@@ -531,7 +527,6 @@ describe("procurementService", () => {
       name: "Relay",
       category: "Components",
       brandId: null,
-      catalogNumber: null,
     });
 
     expect(result.ok).toBe(false);

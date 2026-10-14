@@ -97,18 +97,18 @@ export async function createSupplierSourceFixture(
   await setDatabaseActor(database, actor);
   const supplier = await database.query<IdRow>(
     `select public.create_supplier(
-       $1::text, 'Bosnia and Herzegovina', null, null, null
+       $1::text, $2::text, 'Bosnia and Herzegovina', $3::text, null, null, null
      ) as id`,
-    [supplierName],
+    [supplierName, catalogNumber, description],
   );
   const supplierId = supplier.rows[0]?.id;
   if (!supplierId) throw new Error("Trusted Supplier fixture creation returned no ID");
 
   const relationship = await database.query<IdRow>(
     `select public.create_product_supplier(
-       $1::uuid, $2::uuid, $3::text, $4::text
+       $1::uuid, $2::uuid
      ) as id`,
-    [productId, supplierId, catalogNumber, description],
+    [productId, supplierId],
   );
   const productSupplierId = relationship.rows[0]?.id;
   await database.query("reset role");

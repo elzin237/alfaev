@@ -33,8 +33,8 @@ export function registerProcurementReadsTests(requireHarness: () => SecurityFixt
       );
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1, $2, 'BiH', $3, $3)`,
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'PROC-READ-CAT', 'BiH', $3, $3)`,
         [supplierId, `Procurement Supplier ${supplierId}`, actorId],
       );
       await database.query(
@@ -345,8 +345,8 @@ export function registerProcurementReadsTests(requireHarness: () => SecurityFixt
     await fixture.withRollbackDatabaseTransaction(async (database) => {
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1, $2, 'BiH', $3, $3)`,
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'PROC-READ-DETAIL-CAT', 'BiH', $3, $3)`,
         [
           supplierId,
           `Procurement Read Supplier ${supplierId}`,
@@ -514,8 +514,8 @@ export function registerProcurementReadsTests(requireHarness: () => SecurityFixt
       await database.query("delete from public.procurement_requests");
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1, $2, 'BiH', $3, $3)`,
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1, $2, 'PROC-BADGE-CAT', 'BiH', $3, $3)`,
         [
           supplierId,
           `Procurement Badge Supplier ${supplierId}`,
@@ -730,10 +730,10 @@ export function registerProcurementReadsTests(requireHarness: () => SecurityFixt
       );
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
          ) values
-           ($1, $2, 'BiH', $5, $5),
-           ($3, $4, 'BiH', $5, $5)`,
+           ($1, $2, 'PROC-ARCHIVED-CAT', 'BiH', $5, $5),
+           ($3, $4, 'PROC-ACTIVE-CAT', 'BiH', $5, $5)`,
         [
           supplierIds[0],
           `Archived Procurement Supplier ${supplierIds[0]}`,

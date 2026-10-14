@@ -12,8 +12,6 @@ import {
   createProductSupplier,
   listActiveSupplierChoices,
   listProductSuppliers,
-  updateProductSupplier,
-  type ProductSupplierMutationInput,
 } from "../services/productSupplierService";
 
 export function useProductSuppliers(
@@ -91,21 +89,8 @@ export function useProductSuppliers(
     });
   }
 
-  async function create(input: {
-    supplierId: string;
-    catalogNumber: string;
-    description: string | null;
-  }) {
+  async function create(input: { supplierId: string }) {
     const result = await createProductSupplier({ productId, ...input });
-    if (result.ok) await invalidateRelations();
-    return result;
-  }
-
-  async function update(
-    relationId: string,
-    input: ProductSupplierMutationInput,
-  ) {
-    const result = await updateProductSupplier(relationId, input);
     if (result.ok) await invalidateRelations();
     return result;
   }
@@ -122,7 +107,6 @@ export function useProductSuppliers(
     canManage,
     canAdd,
     create,
-    update,
     archive,
   };
 }

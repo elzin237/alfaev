@@ -122,10 +122,10 @@ export function registerProcurementProductInventoryE2eTests(
         [worker.profileId, admin.profileId],
       );
       await database.query(
-        `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1::uuid, $2::text, 'BiH', $3::uuid, $3::uuid)`,
-        [supplierId, `Task 150 Supplier ${supplierId}`, admin.profileId],
+         `insert into public.suppliers (
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1::uuid, $2::text, $3::text, 'BiH', $4::uuid, $4::uuid)`,
+        [supplierId, `Task 150 Supplier ${supplierId}`, catalogNumber, admin.profileId],
       );
 
       await setAuthenticatedActor(database, worker);
@@ -267,7 +267,7 @@ export function registerProcurementProductInventoryE2eTests(
         worker,
         "task150_worker_product_creation",
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Denied Product', 'Components', null, null
+           $1::uuid, 'Denied Product', 'Components', null
          )`,
         [requestId],
         "42501",
@@ -277,7 +277,7 @@ export function registerProcurementProductInventoryE2eTests(
         fixture.actors.supplierViewer,
         "task150_supplier_view_product_creation",
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Denied Product', 'Components', null, null
+           $1::uuid, 'Denied Product', 'Components', null
          )`,
         [requestId],
         "42501",
@@ -297,9 +297,9 @@ export function registerProcurementProductInventoryE2eTests(
         serial_number: string;
       }>(
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, $2::text, 'Components'::text, null, $3::text
+           $1::uuid, $2::text, 'Components'::text, null
          )`,
-        [requestId, `  ${productName}  `, `  ${catalogNumber}  `],
+        [requestId, `  ${productName}  `],
       );
       await database.query("reset role");
       const product = createdProduct.rows[0];
@@ -374,7 +374,7 @@ export function registerProcurementProductInventoryE2eTests(
         database,
         worker,
         "task150_worker_supplier_link",
-        "select public.create_product_supplier($1::uuid, $2::uuid, 'FORGED')",
+        "select public.create_product_supplier($1::uuid, $2::uuid)",
         [product.product_id, supplierId],
         "42501",
       );
@@ -391,7 +391,7 @@ export function registerProcurementProductInventoryE2eTests(
         admin,
         "task150_duplicate_product_retry",
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Retry Product', 'Components', null, null
+           $1::uuid, 'Retry Product', 'Components', null
          )`,
         [requestId],
         "PRQ05",
@@ -650,8 +650,8 @@ export function registerProcurementProductInventoryE2eTests(
     await fixture.withRollbackDatabaseTransaction(async (database) => {
       await database.query(
         `insert into public.suppliers (
-           id, name, country, created_by_user_id, updated_by_user_id
-         ) values ($1::uuid, 'Task 150 rollback Supplier', 'BiH', $2::uuid, $2::uuid)`,
+           id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+         ) values ($1::uuid, 'Task 150 rollback Supplier', 'TASK150-ROLLBACK-CAT', 'BiH', $2::uuid, $2::uuid)`,
         [supplierId, admin.profileId],
       );
       await database.query(
@@ -685,7 +685,7 @@ export function registerProcurementProductInventoryE2eTests(
         admin,
         "task150_supplier_atomic_failure",
         `select * from public.create_product_from_procurement_request(
-           $1::uuid, 'Must Roll Back', 'Components', null, 'T150-FAIL'
+           $1::uuid, 'Must Roll Back', 'Components', null
          )`,
         [failedRequestId],
         "T1501",
@@ -704,8 +704,7 @@ export function registerProcurementProductInventoryE2eTests(
       await setAuthenticatedActor(database, admin);
       const productResult = await database.query<{ product_id: string }>(
         `select product_id from public.create_product_from_procurement_request(
-           $1::uuid, 'Task 150 stock rollback Product', 'Components', null,
-           'TASK150-ROLLBACK'
+           $1::uuid, 'Task 150 stock rollback Product', 'Components', null
          )`,
         [successfulRequestId],
       );

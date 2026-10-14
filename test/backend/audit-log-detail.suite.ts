@@ -530,9 +530,9 @@ export function registerAuditLogDetailTests(
           );
           await database.query(
             `insert into public.suppliers (
-               id, name, country, created_by_user_id, updated_by_user_id
+               id, name, catalog_number, country, created_by_user_id, updated_by_user_id
              ) values (
-               $1::uuid, $2::text, 'Bosnia and Herzegovina', $3::uuid, $3::uuid
+               $1::uuid, $2::text, 'TASK138-CAT', 'Bosnia and Herzegovina', $3::uuid, $3::uuid
              )`,
             [supplierId, `Task 138 Context Supplier ${randomUUID()}`, actorId],
           );

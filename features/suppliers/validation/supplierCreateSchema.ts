@@ -9,6 +9,12 @@ const optionalText = z
 export const supplierCreateSchema = z
   .object({
     name: z.string().trim().min(1, "Supplier Name is required."),
+    catalogNumber: z.string().trim()
+      .min(1, "Catalog Number is required.")
+      .max(200, "Catalog Number must not exceed 200 characters."),
+    description: z.string().trim()
+      .max(2000, "Description must not exceed 2000 characters.")
+      .transform((value) => value || null),
     country: z.string().trim().min(1, "Country is required."),
     contactPersonName: optionalText,
     contactPhone: optionalText,

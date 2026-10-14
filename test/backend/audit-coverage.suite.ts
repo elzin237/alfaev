@@ -56,11 +56,11 @@ const auditedMutations: readonly AuditContract[] = [
   { signature: "public.update_brand(uuid,text)", actions: ["brand.updated"], entityTypes: ["brand"] },
   { signature: "public.archive_brand(uuid)", actions: ["brand.archived"], entityTypes: ["brand"] },
   {
-    signature: "public.create_supplier(text,text,text,text,text)",
+    signature: "public.create_supplier(text,text,text,text,text,text,text)",
     actions: ["supplier.created"], entityTypes: ["supplier"],
   },
   {
-    signature: "public.update_supplier(uuid,text,text,text,text,text)",
+    signature: "public.update_supplier(uuid,text,text,text,text,text,text,text)",
     actions: ["supplier.updated"], entityTypes: ["supplier"],
   },
   { signature: "public.archive_supplier(uuid)", actions: ["supplier.archived"], entityTypes: ["supplier"] },
@@ -78,12 +78,8 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["product.bulk_imported"], entityTypes: ["product"],
   },
   {
-    signature: "public.create_product_supplier(uuid,uuid,text,text)",
+    signature: "public.create_product_supplier(uuid,uuid)",
     actions: ["product_supplier.created"], entityTypes: ["product_supplier"],
-  },
-  {
-    signature: "public.update_product_supplier(uuid,text,text)",
-    actions: ["product_supplier.updated"], entityTypes: ["product_supplier"],
   },
   {
     signature: "public.archive_product_supplier(uuid)",
@@ -148,7 +144,7 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["procurement.resolved"], entityTypes: ["procurement_request"],
   },
   {
-    signature: "public.create_product_from_procurement_request(uuid,text,text,uuid,text)",
+    signature: "public.create_product_from_procurement_request(uuid,text,text,uuid)",
     actions: ["procurement.product_linked"], entityTypes: ["procurement_request"],
     delegates: ["public.create_product", "public.create_product_supplier"],
   },
@@ -270,9 +266,8 @@ const normalizedNoOpContracts = [
   ["public.set_user_admin_status_admin(uuid,boolean)", "target_profile.is_admin = p_is_admin"],
   ["public.set_user_permission_admin(uuid,text,boolean)", "if changed_rows = 0 then"],
   ["public.update_brand(uuid,text)", "return current_brand.id;"],
-  ["public.update_supplier(uuid,text,text,text,text,text)", "return current_supplier.id;"],
+  ["public.update_supplier(uuid,text,text,text,text,text,text,text)", "return current_supplier.id;"],
   ["public.update_product(uuid,text,text,uuid)", "return current_product.id;"],
-  ["public.update_product_supplier(uuid,text,text)", "return current_relation.id;"],
   ["public.update_project(uuid,text,text,date,date,text)", "return current_project.id;"],
   ["public.update_project_product(uuid,text)", "return v_current.id;"],
   ["public.update_project_product_component(uuid,uuid,bigint)", "return v_current.id;"],

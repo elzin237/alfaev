@@ -175,7 +175,7 @@ export function registerIdentifierConcurrencyAuditTests(
 
         const procurement = await database.query<{ definition: string }>(
           `select pg_catalog.lower(pg_catalog.pg_get_functiondef(
-             'public.create_product_from_procurement_request(uuid,text,text,uuid,text)'
+             'public.create_product_from_procurement_request(uuid,text,text,uuid)'
                ::pg_catalog.regprocedure
            )) as definition`,
         );
@@ -312,8 +312,8 @@ export function registerIdentifierConcurrencyAuditTests(
         try {
           await coordinator.query(
             `insert into public.suppliers (
-               id, name, country, created_by_user_id, updated_by_user_id
-             ) values ($1::uuid, $2::text, 'BA', $3::uuid, $3::uuid)`,
+               id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+             ) values ($1::uuid, $2::text, 'TASK147-CAT', 'BA', $3::uuid, $3::uuid)`,
             [supplierId, `Task 147 Supplier ${supplierId}`, fixture.actors.admin.profileId],
           );
           await coordinator.query(
@@ -340,7 +340,7 @@ export function registerIdentifierConcurrencyAuditTests(
             ),
             procurementCreator.query<ProductCreationRow>(
               `select * from public.create_product_from_procurement_request(
-                 $1::uuid, $2::text, $3::text, null::uuid, 'TASK147-CAT'::text
+                 $1::uuid, $2::text, $3::text, null::uuid
                )`,
               [requestId, "Task 147 Concurrent Procurement", "Task 147"],
             ),

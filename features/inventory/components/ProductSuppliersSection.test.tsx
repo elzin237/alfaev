@@ -6,7 +6,6 @@ const sectionMocks = vi.hoisted(() => ({
   refetchRelations: vi.fn(),
   refetchSuppliers: vi.fn(),
   create: vi.fn(),
-  update: vi.fn(),
   archive: vi.fn(),
 }));
 
@@ -80,7 +79,6 @@ function setHookState(options: {
       refetch: sectionMocks.refetchSuppliers,
     },
     create: sectionMocks.create,
-    update: sectionMocks.update,
     archive: sectionMocks.archive,
   });
 }
@@ -99,10 +97,6 @@ beforeEach(() => {
   sectionMocks.create.mockResolvedValue({
     ok: true,
     value: { relationId: "relation-new" },
-  });
-  sectionMocks.update.mockResolvedValue({
-    ok: true,
-    value: { relationId: "relation-active" },
   });
   sectionMocks.archive.mockResolvedValue({
     ok: true,
@@ -195,10 +189,41 @@ describe("ProductSuppliersSection", () => {
     renderSection(false);
     expect(screen.queryByRole("button", { name: "Add Supplier" }))
       .not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
   });
 
-  it("validates Supplier, normalizes Catalog Number, and reports add success", async () => {
+  it("contains keyboard focus, closes on Escape, and resets before reopening", async () => {
+    renderSection();
+    fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));
+    let dialog = screen.getByRole("dialog", { name: "Add Supplier Link" });
+    const supplierSelect = within(dialog).getByLabelText("Supplier");
+    const submit = within(dialog).getByRole("button", { name: "Add Supplier" });
+
+    await waitFor(() => expect(supplierSelect).toHaveFocus());
+
+    submit.focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(supplierSelect).toHaveFocus();
+
+    supplierSelect.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(submit).toHaveFocus();
+
+    fireEvent.change(supplierSelect, { target: { value: "supplier-active" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Add Supplier Link" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));
+    dialog = screen.getByRole("dialog", { name: "Add Supplier Link" });
+    const reopenedSelect = within(dialog).getByLabelText("Supplier");
+    await waitFor(() => expect(reopenedSelect).toHaveFocus());
+    expect(reopenedSelect).toHaveValue("");
+    expect(within(dialog).queryByLabelText(/Catalog Number|Description/))
+      .not.toBeInTheDocument();
+  });
+
+  it("validates Supplier and reports relationship-only add success", async () => {
     renderSection();
     fireEvent.click(screen.getByRole("button", { name: "Add Supplier" }));
     const dialog = screen.getByRole("dialog", { name: "Add Supplier Link" });
@@ -210,21 +235,12 @@ describe("ProductSuppliersSection", () => {
     fireEvent.change(within(dialog).getByLabelText("Supplier"), {
       target: { value: "supplier-active" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
-      target: { value: "CAT-1" },
-    });
-    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
-      target: { value: "  AbC-77  " },
-    });
-    fireEvent.change(within(dialog).getByLabelText(/Description/), {
-      target: { value: "  Supplier relay  " },
-    });
+    expect(within(dialog).queryByLabelText(/Catalog Number/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Description/)).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Add Supplier" }));
 
     await waitFor(() => expect(sectionMocks.create).toHaveBeenCalledWith({
       supplierId: "supplier-active",
-      catalogNumber: "AbC-77",
-      description: "Supplier relay",
     }));
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Supplier link added.",
@@ -247,9 +263,6 @@ describe("ProductSuppliersSection", () => {
     fireEvent.change(within(dialog).getByLabelText("Supplier"), {
       target: { value: "supplier-active" },
     });
-    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
-      target: { value: "CAT-1" },
-    });
     const submit = within(dialog).getByRole("button", { name: "Add Supplier" });
 
     fireEvent.click(submit);
@@ -257,6 +270,9 @@ describe("ProductSuppliersSection", () => {
     await waitFor(() => expect(sectionMocks.create).toHaveBeenCalledOnce());
     expect(within(dialog).getByRole("button", { name: "Saving..." }))
       .toBeDisabled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Add Supplier Link" }))
+      .toBeInTheDocument();
 
     resolveCreate?.({ ok: true, value: { relationId: "relation-new" } });
     await waitFor(() => expect(screen.queryByRole("dialog", {
@@ -264,30 +280,9 @@ describe("ProductSuppliersSection", () => {
     })).not.toBeInTheDocument());
   });
 
-  it("edits only Catalog Number and surfaces a safe backend failure", async () => {
-    sectionMocks.update.mockResolvedValue({
-      ok: false,
-      error: { code: "relationship_duplicate", message: "Safe duplicate error." },
-    });
+  it("does not offer relationship-level Catalog or Description editing", () => {
     renderSection();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const dialog = screen.getByRole("dialog", { name: "Edit Supplier Link" });
-
-    expect(within(dialog).getByText(/ABB/)).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText("Supplier")).not.toBeInTheDocument();
-    expect(within(dialog).getByLabelText(/Catalog Number/)).toHaveValue("AbC-42");
-    fireEvent.change(within(dialog).getByLabelText(/Catalog Number/), {
-      target: { value: "  New-Cat  " },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save Changes" }));
-
-    await waitFor(() => expect(sectionMocks.update).toHaveBeenCalledWith(
-      "relation-active",
-      { catalogNumber: "New-Cat", description: "Control cabinet relay" },
-    ));
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "Safe duplicate error.",
-    );
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("requires archive confirmation, supports Cancel, and reports success", async () => {

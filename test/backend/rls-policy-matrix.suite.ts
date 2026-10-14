@@ -254,7 +254,7 @@ export function registerRlsPolicyMatrixTests(
         const applicationFunctions = functions.rows.filter(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
-        expect(applicationFunctions).toHaveLength(142);
+        expect(applicationFunctions).toHaveLength(141);
         const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
@@ -381,8 +381,8 @@ export function registerRlsPolicyMatrixTests(
         );
         await database.query(
           `insert into public.suppliers (
-             id, name, country, created_by_user_id, updated_by_user_id
-           ) values ($1::uuid, 'Task 145 Supplier', 'BA', $2::uuid, $2::uuid)`,
+             id, name, catalog_number, country, created_by_user_id, updated_by_user_id
+           ) values ($1::uuid, 'Task 145 Supplier', 'TASK145-CAT', 'BA', $2::uuid, $2::uuid)`,
           [supplierId, adminId],
         );
         await database.query(

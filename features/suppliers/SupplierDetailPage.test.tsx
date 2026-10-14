@@ -30,6 +30,8 @@ import type { Supplier } from "./services/supplierService";
 const activeSupplier: Supplier = {
   id: "supplier-1",
   name: "Bosch",
+  catalogNumber: "BOSCH-26",
+  description: "Industrial controls",
   country: "Germany",
   contactPersonName: "Mira Marić",
   contactPhone: "+387 61 111 222",
@@ -141,6 +143,8 @@ describe("SupplierDetailPage", () => {
     renderDetail();
 
     expect(screen.getByRole("heading", { name: "Bosch" })).toBeInTheDocument();
+    expect(screen.getByText("BOSCH-26")).toBeInTheDocument();
+    expect(screen.getByText("Industrial controls")).toBeInTheDocument();
     expect(screen.getByText("Germany")).toBeInTheDocument();
     expect(screen.getByText("Mira Marić")).toBeInTheDocument();
     expect(screen.getByText("mira@bosch.example")).toBeInTheDocument();
@@ -195,6 +199,8 @@ describe("SupplierDetailPage", () => {
     const dialog = screen.getByRole("dialog", { name: "Edit Supplier" });
 
     expect(within(dialog).getByLabelText("Supplier Name")).toHaveValue("Bosch");
+    expect(within(dialog).getByLabelText("Catalog Number")).toHaveValue("BOSCH-26");
+    expect(within(dialog).getByLabelText(/Description/)).toHaveValue("Industrial controls");
     expect(within(dialog).getByLabelText("Country")).toHaveValue("Germany");
     expect(within(dialog).getByLabelText("Contact Person")).toHaveValue("Mira Marić");
     expect(within(dialog).getByLabelText("Phone")).toHaveValue("+387 61 111 222");
@@ -218,6 +224,8 @@ describe("SupplierDetailPage", () => {
 
     await waitFor(() => expect(detailPageMocks.update).toHaveBeenCalledWith({
       name: "Bosch",
+      catalogNumber: "BOSCH-26",
+      description: "Industrial controls",
       country: "Austria",
       contactPersonName: "Mira Marić",
       contactPhone: "+387 61 111 222",

@@ -616,7 +616,7 @@ Fields:
 - Category: required, trimmed, nonblank free text
 - Brand: optional; active choices only
 - Supplier: when assigned on a historical request, read-only/prefilled and not replaceable in this workflow; otherwise show `Not assigned`
-- Catalog Number: available and required only when the request has a Supplier; trim surrounding whitespace and preserve nonblank casing
+- Catalog Number: read-only Supplier master value when the request has a Supplier; no Catalog/Description input is accepted in this workflow
 
 Serial Number:
 
@@ -659,6 +659,8 @@ Sections:
 
 ### Contact
 - Name
+- Catalog Number
+- Description
 - Country
 - Contact Person
 - Phone
@@ -669,7 +671,8 @@ Table of linked Products:
 
 - Product
 - Serial Number
-- Catalog Number
+- Relationship Status
+- Product Status
 
 Allow authorized user to manage Product-Supplier links.
 
@@ -737,9 +740,8 @@ Fields:
 - Category
 - Brand
 - Supplier(s)
-- Catalog Number per Supplier
-- required Catalog Number for every active relationship
-- optional Supplier/Product-specific Description
+- current Supplier Catalog Number and optional Supplier Description (read-only relationship display)
+- relationship management selects an existing Supplier and does not accept Catalog/Description inputs
 - read-only Supplier Stock History with Date, Supplier, Catalog Number, Description, Received Quantity, Remaining Quantity, and Added By
 
 Serial Number:
@@ -774,7 +776,11 @@ Sections:
 
 ### Suppliers
 - Supplier
-- Catalog Number
+- Supplier Catalog Number
+- Supplier Description
+- Relationship
+- Supplier Status
+- Actions
 
 ### Barcode
 - barcode preview

@@ -353,6 +353,11 @@ Fields:
 
 - `id`
 - `name`
+- `catalog_number`
+  - required and normalized/nonblank while the Supplier is active
+  - casing preserved; not globally unique and not Product identity
+- `description`
+  - nullable; trimmed nonblank Supplier master text
 - `country`
 - `contact_person_name`
 - `contact_phone`
@@ -372,6 +377,7 @@ Rules:
 - `name` is required, trimmed before persistence, nonblank, and case-insensitively unique.
 - Normalized Supplier name defines Supplier identity; capitalization variants such as `Bosch`, `bosch`, and `BOSCH` cannot create separate Supplier records.
 - Country and contact details do not define Supplier identity.
+- Catalog Number and Description are Supplier master data, not ProductSupplier fields for live authority.
 - `country` is required, trimmed before persistence, and nonblank.
 - `contact_person_name` is optional, trimmed when provided, and stored as `NULL` when blank.
 - `contact_phone` is optional, trimmed when provided, and stored as `NULL` when blank. The database boundary does not enforce aggressive phone formatting.
@@ -395,14 +401,7 @@ Fields:
 - `id`
 - `product_id`
 - `supplier_id`
-- `description` nullable; trimmed nonblank Supplier/Product-specific text
-- `catalog_number`
-  - required and nonblank while the relationship is active
-  - nullable only for archived legacy history
-  - supplier-specific
-  - trimmed
-  - entered casing preserved
-  - not globally unique
+- deprecated `description` and `catalog_number` columns may remain temporarily for forward-compatible history, but no live application path reads or writes them as authoritative Supplier data
 - `is_active`
 - `created_at`
 - `created_by_user_id`
@@ -415,14 +414,13 @@ Fields:
 
 Required duplicate-prevention constraint:
 
-- unique `(product_id, supplier_id, catalog_number)` only to prevent accidental duplicate copies of the exact same relation
-- uniqueness must treat two `NULL` Catalog Numbers for the same Product and Supplier as duplicates
-- do NOT make `catalog_number` globally unique
+- at most one active `(product_id, supplier_id)` relationship
+- Supplier `catalog_number` remains non-unique and must not define relationship identity
 
 Rules:
 
 - One Product may have multiple Suppliers.
-- The same Product and Supplier may have multiple relationships when their Catalog Numbers differ.
+- ProductSupplier expresses eligibility only: “Supplier supplies Product.”
 - Different Products may share the same Catalog Number.
 - Catalog Number must never be used as the Product identity.
 - A new ProductSupplier relationship starts active.
@@ -431,9 +429,9 @@ Rules:
 - ProductSupplier relationships are archived/deactivated rather than hard-deleted through normal application workflows.
 - Archived ProductSupplier relationships remain readable for authorized historical use and are immutable.
 - ProductSupplier reactivation/unarchive is not supported in the current scope.
-- Meaningful add/edit/archive changes create immutable AuditLog history; normalized no-op changes do not create audit noise.
+- Meaningful add/archive changes create immutable AuditLog history; per-link metadata editing is not supported.
 - ProductSupplier reads require an active Admin, `inventory.view`, or `suppliers.view`; either view permission is sufficient and both are not required.
-- Trusted Product-side ProductSupplier reads may include only the related Supplier ID, Supplier Name, and Supplier active/archive state needed to display the relationship; they do not expose general Supplier contact/details.
+- Trusted Product-side ProductSupplier reads may include only the related Supplier ID, Supplier Name, live Supplier Catalog Number, optional Supplier Description, and Supplier active/archive state needed to display the relationship; they do not expose Supplier contact details.
 - A trusted ProductSupplier Supplier-choice lookup may return only active Supplier IDs and Names and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`.
 - General Supplier-table reads remain restricted to an active Admin or `suppliers.view`; the narrow ProductSupplier read boundary does not broaden Supplier RLS.
 - Trusted Supplier-side ProductSupplier reads may include only the related Product ID, Serial Number, Name, and Product active/archive state needed to display the relationship; they do not expose Product Category, Brand, lifecycle timestamps/actors, or other Product details.
@@ -441,7 +439,7 @@ Rules:
 - General Product-table reads remain restricted to an active Admin or `inventory.view`; the narrow ProductSupplier read boundary does not broaden Product RLS.
 - Add/edit/archive uses one trusted backend authority and requires an active Admin, `inventory.products.edit`, or `suppliers.edit`, regardless of whether the operation originates from Product detail or Supplier detail.
 - No separate ProductSupplier permission key exists.
-- Active rows require a nonblank normalized `catalog_number`; archived legacy rows may remain readable with no Catalog Number.
+- Active relationships require an active Product and active Supplier at creation. The active Supplier itself must own the normalized nonblank Catalog Number.
 
 ## 7.3 InventorySourceLot
 
@@ -451,14 +449,14 @@ Immutable inbound-stock provenance:
 - `product_id`
 - `source_kind`: `supplier`, `legacy_unknown`, or `internal_production`
 - optional `product_supplier_id` and `supplier_id` for Supplier stock
-- immutable Supplier name, Catalog Number, and ProductSupplier description snapshots
+- immutable Supplier name, Supplier Catalog Number, and Supplier Description snapshots
 - `received_quantity`
 - trusted-decrement-only `remaining_quantity`
 - optional originating InventoryMovement for non-legacy receipts
 - `received_at`
 - optional trusted actor for non-legacy receipts
 
-Supplier lots require an exact matching ProductSupplier/Product/Supplier relationship and a frozen nonblank Catalog Number. Legacy and internal-production lots cannot claim Supplier metadata. Existing pre-provenance positive balances are backfilled as explicit legacy lots at migration time without rewriting old InventoryMovement history.
+Supplier lots require an exact active ProductSupplier/Product/Supplier relationship. The trusted receipt reads the active Supplier's nonblank Catalog Number and optional Description itself and freezes them into the lot; browser-supplied or deprecated ProductSupplier metadata is never authoritative. Legacy and internal-production lots cannot claim Supplier metadata. Existing pre-provenance positive balances are backfilled as explicit legacy lots at migration time without rewriting old InventoryMovement history.
 
 ## 7.4 InventorySourceAllocation
 
@@ -873,7 +871,7 @@ Trusted workflow:
 4. validate an optional supplied Brand exists and is active
 5. derive Supplier only from `ProcurementRequest.supplier_id`; when non-null, require it still exists and is active
 6. allocate the next permanent 7-digit Serial Number server-side and create exactly one active Product with `product_kind = 'component'`
-7. when Supplier is non-null, require a nonblank normalized Catalog Number and create exactly one active ProductSupplier relation to it; when Supplier is null, create neither a ProductSupplier relation nor Catalog Number
+7. when Supplier is non-null, require its nonblank normalized Supplier master Catalog Number and create exactly one active ProductSupplier relation without accepting Catalog/Description input; when Supplier is null, create no ProductSupplier relation
 8. set only `ProcurementRequest.product_id`; preserve requested name, Supplier, requested/delivered quantities, status, resolution metadata, and creation metadata
 9. create immutable audit history for Product creation, any ProductSupplier creation, and Procurement linking
 10. commit all domain mutations and required audits atomically

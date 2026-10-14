@@ -206,12 +206,14 @@ Purpose:
 
 Shows:
 - supplier name
+- Supplier Catalog Number
+- Supplier Description
 - country
 - contact person
 - phone
 - email
 - linked products/components
-- supplier-specific Catalog Numbers
+- linked Product eligibility relationships
 
 Access:
 - same read permission as Suppliers list
@@ -267,7 +269,7 @@ Shows:
 - Brand
 - current quantity
 - Suppliers
-- supplier-specific Catalog Numbers
+- live Supplier Catalog Number/Description for current Supplier relationships
 - barcode
 - Inventory Movement history
 - archive state

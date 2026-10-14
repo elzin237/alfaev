@@ -26,6 +26,8 @@ function SuppliersPageUnderTest() {
 const activeSupplier: Supplier = {
   id: "supplier-active",
   name: "Bosch",
+  catalogNumber: "BOSCH-26",
+  description: "Industrial controls",
   country: "Germany",
   contactPersonName: "Mira Marić",
   contactPhone: "+387 61 111 222",
@@ -39,6 +41,8 @@ const activeSupplier: Supplier = {
 const archivedSupplier: Supplier = {
   id: "supplier-archived",
   name: "ABB",
+  catalogNumber: null,
+  description: null,
   country: "Switzerland",
   contactPersonName: null,
   contactPhone: null,
@@ -118,9 +122,9 @@ describe("SuppliersPage", () => {
     render(<SuppliersPageUnderTest />);
 
     const activeRow = screen.getByRole("row", {
-      name: /Bosch Germany Mira Marić mira@bosch.example \+387 61 111 222 Active/,
+      name: /Bosch BOSCH-26 Germany Mira Marić mira@bosch.example \+387 61 111 222 Active/,
     });
-    const archivedRow = screen.getByRole("row", { name: /ABB Switzerland.*Archived/ });
+    const archivedRow = screen.getByRole("row", { name: /ABB — Switzerland.*Archived/ });
     const rows = screen.getAllByRole("row");
 
     expect(rows.indexOf(activeRow)).toBeLessThan(rows.indexOf(archivedRow));
@@ -167,6 +171,9 @@ describe("SuppliersPage", () => {
     fireEvent.change(screen.getByLabelText("Supplier Name"), {
       target: { value: " Siemens " },
     });
+    fireEvent.change(screen.getByLabelText("Catalog Number"), {
+      target: { value: " SIEMENS-26 " },
+    });
     fireEvent.change(screen.getByLabelText("Country"), {
       target: { value: " Germany " },
     });
@@ -177,6 +184,8 @@ describe("SuppliersPage", () => {
 
     await waitFor(() => expect(suppliersPageMocks.create).toHaveBeenCalledWith({
       name: "Siemens",
+      catalogNumber: "SIEMENS-26",
+      description: null,
       country: "Germany",
       contactPersonName: null,
       contactPhone: null,

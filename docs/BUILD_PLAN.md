@@ -1021,10 +1021,8 @@ Goal:
 Include:
 - many-to-many Product↔Supplier structure
 - history-preserving Product and Supplier foreign keys
-- optional/nullable supplier-specific Catalog Number
-- trim Catalog Number when provided, store blank as `NULL`, and preserve entered casing
-- Catalog Number is not globally unique and is not Product identity
-- exact duplicate prevention on `(product_id, supplier_id, catalog_number)`, including treating two `NULL` Catalog Numbers for the same Product and Supplier as duplicates
+- eligibility-only relationship; Supplier is the final Catalog Number/Description authority
+- at most one active relationship for a Product/Supplier pair
 - canonical active/archive lifecycle and actor/timestamp metadata
 - new relationships start active
 - archived relationships remain historically readable and immutable
@@ -1038,20 +1036,19 @@ Do not add mutation RPCs, UI, hard delete, or restore/reactivation behavior in t
 ## 054 — Add ProductSupplier Backend Operations
 
 Goal:
-- trusted add/edit/archive operations with immutable audit
+- trusted add/archive operations with immutable audit
 
 Requirements:
 - require an active Admin, `inventory.products.edit`, or `suppliers.edit`
 - use one shared backend authority regardless of whether the operation originates from Product detail or Supplier detail
 - require an active Product and active Supplier when creating a new relationship
 - preserve existing historical relationships when a Product or Supplier is archived later
-- normalize Catalog Number by trimming, storing blank as `NULL`, and preserving entered casing
-- prevent exact duplicate relationships, including duplicate `NULL` Catalog Number relationships
+- accept only Product and Supplier identifiers; do not accept Catalog Number or Description metadata
+- prevent duplicate active Product/Supplier relationships
 - archive/deactivate rather than hard-delete
 - archived relationships are immutable
 - no restore/reactivation operation
-- audit meaningful add/edit/archive changes atomically
-- normalized no-op edits create no audit noise
+- audit meaningful add/archive changes atomically
 
 Do not add a ProductSupplier permission key or UI in this task.
 
@@ -1062,10 +1059,10 @@ Do not add a ProductSupplier permission key or UI in this task.
 Goal:
 - Product detail shows/manage:
   - Supplier
-  - Catalog Number
+  - live Supplier Catalog Number and optional Supplier Description
 
 Add the minimal trusted cross-domain read backend required by this Product-side UI:
-- a ProductSupplier relationship read for an active Admin, `inventory.view`, or `suppliers.view`, returning only relationship data plus the related Supplier ID, Name, and active/archive state required for display
+- a ProductSupplier relationship read for an active Admin, `inventory.view`, or `suppliers.view`, returning only relationship data plus the related Supplier ID, Name, live Catalog Number, optional Description, and active/archive state required for display
 - an active-Supplier choice lookup for an active Admin, `inventory.products.edit`, or `suppliers.edit`, returning only Supplier ID and Name
 - do not expose Supplier Country, Contact Person, Phone, Email, or other Supplier details through either operation
 - do not broaden normal Supplier RLS; general Supplier reads remain restricted to an active Admin or `suppliers.view`
@@ -1081,7 +1078,7 @@ Do not mix Inventory quantities into this task.
 ## 056 — Add Product Links to Supplier UI
 
 Goal:
-- Supplier detail shows linked Products and Catalog Numbers
+- Supplier detail shows Supplier master Catalog Number/Description and linked Product eligibility
 
 Add the minimal trusted cross-domain read backend required by this Supplier-side UI:
 - a ProductSupplier relationship read for an active Admin, `inventory.view`, or `suppliers.view`, returning only relationship data plus the related Product ID, Serial Number, Name, and active/archive state required for display
@@ -1639,11 +1636,10 @@ Inputs and validation:
 - required Product Name: trim and reject blank; it may differ from immutable `requested_name`
 - required free-text Category: trim and reject blank
 - optional Brand: `NULL` allowed; otherwise require an existing active Brand
-- optional Catalog Number: trim, store blank as `NULL`, and preserve nonblank casing
 - do not accept Supplier or Serial Number as client choices
 
 Atomic workflow:
-- derive Supplier from the request; when non-null, require it still exists and is active
+- derive Supplier from the request; when non-null, require it still exists, is active, and owns a normalized nonblank Supplier Catalog Number
 - allocate the next permanent 7-digit Serial Number server-side
 - create exactly one active Product with `product_kind = 'component'`
 - when Supplier is non-null, create exactly one active ProductSupplier relation to it; otherwise create none
@@ -1674,7 +1670,7 @@ Fields:
 - required free-text Category
 - optional active Brand
 - read-only/prefilled request Supplier when assigned; otherwise show `Not assigned`
-- optional Catalog Number only when Supplier is assigned
+- read-only Supplier Catalog Number when Supplier is assigned; no Catalog/Description submission
 
 Serial:
 - generated automatically
@@ -3237,18 +3233,22 @@ Verify exact production state after deployment.
 
 Before production frontend deployment:
 
-- require Catalog Number and add optional description on active ProductSupplier relationships
+- require Catalog Number and add optional Description on active Supplier master records
 - backfill existing positive aggregate stock as explicit legacy/unknown source lots without inventing Supplier history
 - add immutable Supplier, legacy, and internal-production source lots plus immutable outbound allocations
 - keep InventoryBalance canonical and enforce transaction-end lot/balance reconciliation
-- require exact ProductSupplier for manual Add/upward Correction; consume FIFO for every outbound mutation
+- require exact ProductSupplier eligibility for manual Add/upward Correction, snapshot the Supplier master Catalog/Description, and consume FIFO for every outbound mutation
 - apply FIFO to generic Work Order and PCB input Finish; create internal-production lots for PCB output
 - bind trusted PDF snapshot allocations to Finish with a revalidated fingerprint
 - render frozen Catalog Number in `KAT. BROJ`, `—` for legacy/internal, and split mixed-source quantities into separate PDF rows
-- update Product/Supplier relationship UI and Product Supplier Stock History
+- update Supplier master and Product/Supplier relationship UI plus Product Supplier Stock History
 - extend security, immutability, migration, and committed concurrency coverage
 
-Do not deploy while any active ProductSupplier lacks an authoritative Catalog Number. Do not invent values or rewrite historical InventoryMovement, Finished Work Order, PDF, or AuditLog records.
+Do not deploy while any active Supplier lacks an authoritative Catalog Number. Do not invent values or rewrite historical InventoryMovement, source-lot snapshots, Finished Work Order, PDF, or AuditLog records.
+
+### Supplier-level Catalog authority correction
+
+The final authority is Supplier master data: every active Supplier owns one required normalized `catalog_number` and an optional normalized `description`. ProductSupplier remains an eligibility/traceability relation only and exposes no Catalog/Description input. Current relationship screens read live Supplier values; trusted Add/upward-Correction operations validate the active ProductSupplier link, then read and freeze Supplier Catalog Number/Description into immutable source lots. Procurement Product creation links the existing Supplier without accepting Catalog metadata. Existing source-lot snapshots, allocations, Finished Work Orders, PDFs, movements, and audits are never recomputed or rewritten after Supplier edits.
 
 ## 160 — Configure Production Frontend Deployment
 

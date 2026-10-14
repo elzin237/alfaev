@@ -20,6 +20,7 @@ function SupplierList({ suppliers }: SupplierListProps) {
             <tr>
               {[
                 "Supplier Name",
+                "Catalog Number",
                 "Country",
                 "Contact Person",
                 "Email",
@@ -47,6 +48,7 @@ function SupplierList({ suppliers }: SupplierListProps) {
                     {supplier.name}
                   </Link>
                 </th>
+                <td className="whitespace-nowrap px-5 py-4 font-mono text-sm text-zinc-700">{valueOrDash(supplier.catalogNumber)}</td>
                 <td className="whitespace-nowrap px-5 py-4 text-sm text-zinc-700">{supplier.country}</td>
                 <td className="whitespace-nowrap px-5 py-4 text-sm text-zinc-700">{valueOrDash(supplier.contactPersonName)}</td>
                 <td className="whitespace-nowrap px-5 py-4 text-sm text-zinc-700">{valueOrDash(supplier.contactEmail)}</td>

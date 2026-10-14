@@ -26,13 +26,10 @@ function ProductSuppliersSection({
     canManage,
     canAdd,
     create,
-    update,
     archive,
   } = useProductSuppliers(productId, productIsActive);
   const archiveLockRef = useRef(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [editingRelation, setEditingRelation] =
-    useState<ProductSupplierRelation | null>(null);
   const [archivingRelation, setArchivingRelation] =
     useState<ProductSupplierRelation | null>(null);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -81,7 +78,7 @@ function ProductSuppliersSection({
             Suppliers
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
-            Supplier-specific Catalog Numbers for {productName}.
+            Suppliers currently or historically linked to {productName}.
           </p>
         </div>
         {canAdd && (
@@ -179,17 +176,6 @@ function ProductSuppliersSection({
                               onClick={() => {
                                 setSuccessMessage(null);
                                 setActionError(null);
-                                setEditingRelation(relation);
-                              }}
-                              className="rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSuccessMessage(null);
-                                setActionError(null);
                                 setArchivingRelation(relation);
                               }}
                               className="rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-50"
@@ -210,7 +196,6 @@ function ProductSuppliersSection({
 
       <ProductSupplierDialog
         open={isAddOpen}
-        mode="add"
         suppliers={suppliers}
         isSuppliersLoading={suppliersQuery.isPending}
         supplierLoadError={supplierLoadError}
@@ -219,19 +204,6 @@ function ProductSuppliersSection({
         onSubmit={create}
         onSucceeded={() => setSuccessMessage("Supplier link added.")}
       />
-
-      {editingRelation && (
-        <ProductSupplierDialog
-          open
-          mode="edit"
-          supplierName={editingRelation.supplierName}
-          initialCatalogNumber={editingRelation.catalogNumber}
-          initialDescription={editingRelation.description ?? null}
-          onClose={() => setEditingRelation(null)}
-          onSubmit={(input) => update(editingRelation.relationId, input)}
-          onSucceeded={() => setSuccessMessage("Catalog Number updated.")}
-        />
-      )}
 
       <ConfirmDialog
         open={Boolean(archivingRelation)}
