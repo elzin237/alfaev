@@ -118,6 +118,11 @@ describe("ProjectPlanningSection", () => {
   it("shows compact requirement totals and starts collapsed", () => {
     render(<ProjectPlanningSection projectId={projectId} status="planned" />);
     const section = screen.getByRole("region", { name: "Products" });
+    const productScroll = screen.getByTestId("project-products-scroll");
+    expect(productScroll).toHaveClass(
+      "max-h-[50rem]", "max-w-full", "overflow-x-hidden", "overflow-y-auto",
+    );
+    expect(productScroll).not.toHaveClass("h-[50rem]", "min-h-[50rem]");
     expect(within(section).getByRole("heading", { name: "B24" })).toBeInTheDocument();
     expect(within(section).getByText("Requirements: 2")).toBeInTheDocument();
     expect(within(section).getByText("Shortages: 1")).toBeInTheDocument();
@@ -125,6 +130,33 @@ describe("ProjectPlanningSection", () => {
     const toggle = within(section).getByRole("button", { name: "Show 2 requirements" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(within(section).queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("keeps the Products header outside a bounded list while rendering every Product card", () => {
+    const manyGroups = Array.from({ length: 8 }, (_, index): ProjectPlanningGroup => ({
+      ...groups[0]!,
+      id: `00000000-0000-4000-8000-${String(index + 30).padStart(12, "0")}`,
+      name: `Product ${index + 1}`,
+      requirements: groups[0]!.requirements.map((requirement, requirementIndex) => ({
+        ...requirement,
+        id: `00000000-0000-4000-8001-${String(index * 10 + requirementIndex).padStart(12, "0")}`,
+      })),
+    }));
+    setPlanningState({ canManage: true, data: { ok: true, value: manyGroups } });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+
+    const section = screen.getByRole("region", { name: "Products" });
+    const productScroll = screen.getByTestId("project-products-scroll");
+    const header = within(section).getByRole("heading", { name: "Products" });
+    const addProduct = within(section).getByRole("button", { name: "Add Product" });
+    expect(productScroll).not.toContainElement(header);
+    expect(productScroll).not.toContainElement(addProduct);
+    for (const group of manyGroups) {
+      expect(within(productScroll).getByRole("heading", { name: group.name }))
+        .toBeInTheDocument();
+    }
+    expect(within(productScroll).queryByRole("button", { name: /next|previous/i }))
+      .not.toBeInTheDocument();
   });
 
   it("expands and collapses the Inventory-style requirements table with authoritative values", () => {
@@ -206,7 +238,10 @@ describe("ProjectPlanningSection", () => {
     setPlanningState({ data: { ok: true, value: [{ ...groups[0]!, requirements }] } });
     render(<ProjectPlanningSection projectId={projectId} status="planned" />);
     fireEvent.click(screen.getByRole("button", { name: "Show 100 requirements" }));
+    const productScroll = screen.getByTestId("project-products-scroll");
     const scroll = screen.getByTestId(`requirements-scroll-${groupId}`);
+    expect(productScroll).toContainElement(scroll);
+    expect(productScroll).toHaveClass("max-h-[50rem]", "overflow-y-auto");
     expect(scroll).toHaveClass("max-h-[28rem]", "max-w-full", "overflow-auto");
     expect(scroll.querySelector("thead")).toHaveClass("sticky", "top-0");
     expect(within(scroll).getAllByRole("row")).toHaveLength(101);

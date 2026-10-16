@@ -547,7 +547,10 @@ export function ProjectPlanningSection({
           description="Add a Project deliverable, then plan its required stock Products."
         />
       ) : (
-        <div className="space-y-4">
+        <div
+          data-testid="project-products-scroll"
+          className="max-h-[50rem] max-w-full space-y-4 overflow-x-hidden overflow-y-auto pr-1"
+        >
           {groups.map((group) => (
             <article key={group.id} className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
               <div className="flex flex-wrap items-start justify-between gap-3">
