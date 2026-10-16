@@ -53,6 +53,21 @@ const archivedSupplier: Supplier = {
   archivedAt: "2026-08-02T00:00:00.000Z",
 };
 
+const provenanceSupplier: Supplier = {
+  id: "022231cd-0000-4000-8000-000000caed25",
+  name: "Provenance Supplier",
+  catalogNumber: "TASK148-b2b16f58-very-long-catalog-number",
+  description: "Internal / provenance supplier",
+  country: "Bosnia and Herzegovina",
+  contactPersonName: null,
+  contactPhone: null,
+  contactEmail: null,
+  isActive: true,
+  createdAt: "2026-10-01T00:00:00.000Z",
+  updatedAt: "2026-10-02T00:00:00.000Z",
+  archivedAt: null,
+};
+
 function setHookState(options: {
   canCreate?: boolean;
   isPending?: boolean;
@@ -118,21 +133,38 @@ describe("SuppliersPage", () => {
     expect(screen.queryByLabelText("Search Suppliers")).not.toBeInTheDocument();
   });
 
-  it("renders active and archived Supplier details and status text", () => {
+  it("matches the approved header, search, and Supplier table hierarchy", () => {
     render(<SuppliersPageUnderTest />);
 
-    const activeRow = screen.getByRole("row", {
-      name: /Bosch BOSCH-26 Germany Mira Marić mira@bosch.example \+387 61 111 222 Active/,
-    });
-    const archivedRow = screen.getByRole("row", { name: /ABB — Switzerland.*Archived/ });
+    expect(screen.getByRole("heading", { name: "Suppliers" })).toBeInTheDocument();
+    expect(screen.getByText("Manage supplier master data and default catalog information."))
+      .toBeInTheDocument();
+    expect(screen.getByPlaceholderText(
+      "Search by supplier name, catalog number, country, or contact details",
+    )).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Supplier" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Description" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Actions" }))
+      .not.toBeInTheDocument();
+
+    const activeRow = screen.getByText("Bosch").closest("tr")!;
+    const archivedRow = screen.getByText("ABB").closest("tr")!;
     const rows = screen.getAllByRole("row");
 
     expect(rows.indexOf(activeRow)).toBeLessThan(rows.indexOf(archivedRow));
     expect(within(activeRow).getByText("Active")).toBeInTheDocument();
+    expect(within(activeRow).getByText("Industrial controls")).toBeInTheDocument();
+    expect(within(activeRow).getByText("Mira Marić")).toBeInTheDocument();
+    expect(within(activeRow).getByText("mira@bosch.example")).toBeInTheDocument();
+    expect(within(activeRow).getByText("+387 61 111 222")).toBeInTheDocument();
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
+    expect(within(archivedRow).getByText("No contact details")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Bosch" })).toHaveAttribute(
       "href",
       "/suppliers/supplier-active",
+    );
+    expect(screen.getByText(/Showing/).parentElement).toHaveTextContent(
+      "Showing 2 of 2 suppliers",
     );
   });
 
@@ -152,6 +184,71 @@ describe("SuppliersPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
     expect(screen.getByText("Bosch")).toBeInTheDocument();
     expect(screen.getByText("ABB")).toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "industrial controls" } });
+    expect(screen.getByText("Bosch")).toBeInTheDocument();
+    expect(screen.queryByText("ABB")).not.toBeInTheDocument();
+    expect(screen.getByText(/Showing/).parentElement).toHaveTextContent(
+      "Showing 1 of 2 suppliers",
+    );
+  });
+
+  it("copies the exact Catalog Number without changing Supplier data", async () => {
+    const originalClipboard = navigator.clipboard;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    try {
+      render(<SuppliersPageUnderTest />);
+      const catalog = screen.getByText("BOSCH-26");
+      expect(catalog.parentElement).toHaveAttribute("title", "BOSCH-26");
+
+      fireEvent.click(screen.getByRole("button", {
+        name: "Copy Catalog Number BOSCH-26",
+      }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledExactlyOnceWith("BOSCH-26"));
+      expect(screen.getByRole("button", {
+        name: "Catalog Number copied for Bosch",
+      })).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: originalClipboard,
+      });
+    }
+  });
+
+  it("uses the accessible Supplier name link as the only row navigation control", () => {
+    render(<SuppliersPageUnderTest />);
+    const supplierLink = screen.getByRole("link", { name: "Bosch" });
+
+    expect(supplierLink).toHaveAttribute("href", "/suppliers/supplier-active");
+    supplierLink.focus();
+    expect(supplierLink).toHaveFocus();
+    expect(screen.queryByRole("button", { name: /Supplier actions/i }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("uses lower-noise provenance presentation while preserving exact values", () => {
+    setHookState({ data: { ok: true, value: [provenanceSupplier] } });
+    render(<SuppliersPageUnderTest />);
+
+    const row = screen.getByText("Provenance Supplier").closest("tr")!;
+    expect(within(row).getByText("ID 022231cd…caed25")).toHaveAttribute(
+      "title",
+      provenanceSupplier.id,
+    );
+    const catalog = within(row).getByText(provenanceSupplier.catalogNumber!);
+    expect(catalog.parentElement).toHaveAttribute(
+      "title",
+      provenanceSupplier.catalogNumber,
+    );
+    expect(within(row).getByText("No contact details")).toBeInTheDocument();
+    expect(within(row).getByText("Internal / provenance supplier"))
+      .toBeInTheDocument();
   });
 
   it("hides Add Supplier for a view-only or unresolved create permission", () => {
