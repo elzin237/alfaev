@@ -16,6 +16,7 @@ export interface ProjectMaterialUsage {
   quantity: string;
   sourceType: ProjectMaterialUsageSourceType;
   sourceId: string;
+  sourceWorkOrderId: string | null;
   sourceLabel: string;
   consumedAt: string;
 }
@@ -42,6 +43,7 @@ const allowedKeys = new Set([
   "quantity",
   "source_type",
   "source_id",
+  "source_work_order_id",
   "source_label",
   "consumed_at",
 ]);
@@ -106,13 +108,24 @@ function parseUsageRow(
     (value.source_type !== "work_order" && value.source_type !== "pcb_production") ||
     typeof value.source_id !== "string" ||
     !isProjectId(value.source_id) ||
+    !(value.source_work_order_id === null ||
+      (typeof value.source_work_order_id === "string" &&
+        isWorkOrderId(value.source_work_order_id))) ||
     !isTrimmedNonblank(value.source_label) ||
     !isTimestamp(value.consumed_at)
   ) return null;
 
   if (
     value.source_type === "work_order" &&
-    (!isWorkOrderId(value.source_id) || !isWorkOrderNumber(value.source_label))
+    (!isWorkOrderId(value.source_id) ||
+      value.source_work_order_id !== value.source_id ||
+      !isWorkOrderNumber(value.source_label))
+  ) return null;
+
+  if (
+    value.source_type === "pcb_production" &&
+    value.source_work_order_id !== null &&
+    !isWorkOrderNumber(value.source_label)
   ) return null;
 
   const quantity = parsePositiveBigintText(value.quantity);
@@ -127,6 +140,7 @@ function parseUsageRow(
     quantity,
     sourceType: value.source_type,
     sourceId: value.source_id,
+    sourceWorkOrderId: value.source_work_order_id,
     sourceLabel: value.source_label,
     consumedAt: value.consumed_at,
   };

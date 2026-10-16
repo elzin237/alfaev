@@ -18,6 +18,7 @@ const row = {
   quantity: "9007199254740993",
   source_type: "work_order",
   source_id: "00000000-0000-4000-8000-000000000004",
+  source_work_order_id: "00000000-0000-4000-8000-000000000004",
   source_label: "RN-2026-0041",
   consumed_at: "2026-09-30T12:34:56.123456+00:00",
 };
@@ -48,6 +49,7 @@ describe("projectMaterialUsageService", () => {
           quantity: "9007199254740993",
           sourceType: "work_order",
           sourceId: row.source_id,
+          sourceWorkOrderId: row.source_work_order_id,
           sourceLabel: "RN-2026-0041",
           consumedAt: row.consumed_at,
         },
@@ -77,6 +79,10 @@ describe("projectMaterialUsageService", () => {
     ["zero quantity", { ...row, quantity: "0" }],
     ["overflow quantity", { ...row, quantity: "9223372036854775808" }],
     ["malformed Work Order", { ...row, source_label: "WO-41" }],
+    ["mismatched Work Order source", {
+      ...row,
+      source_work_order_id: "00000000-0000-4000-8000-000000000099",
+    }],
     ["unknown source type", { ...row, source_type: "manual_adjustment" }],
     ["blank PCB label", { ...row, source_type: "pcb_production", source_label: " " }],
     ["extra field", { ...row, internal_actor: "secret" }],
@@ -120,12 +126,36 @@ describe("projectMaterialUsageService", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it("maps Project-linked PCB Production with exact source identity", async () => {
+  it("maps PCB Production to a narrow Work Order source when one exists", async () => {
+    const workOrderId = "00000000-0000-4000-8000-000000000007";
     mocks.rpc.mockResolvedValue({
       data: [{
         ...row,
         source_type: "pcb_production",
         source_id: "00000000-0000-4000-8000-000000000006",
+        source_work_order_id: workOrderId,
+        source_label: "RN-2026-0026",
+      }],
+      error: null,
+    });
+    await expect(listProjectMaterialUsage(projectId)).resolves.toMatchObject({
+      ok: true,
+      value: [{
+        sourceType: "pcb_production",
+        sourceId: "00000000-0000-4000-8000-000000000006",
+        sourceWorkOrderId: workOrderId,
+        sourceLabel: "RN-2026-0026",
+      }],
+    });
+  });
+
+  it("preserves the PCB Card source label for a legacy production run", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...row,
+        source_type: "pcb_production",
+        source_id: "00000000-0000-4000-8000-000000000006",
+        source_work_order_id: null,
         source_label: "Controller PCB A",
       }],
       error: null,
@@ -135,6 +165,7 @@ describe("projectMaterialUsageService", () => {
       value: [{
         sourceType: "pcb_production",
         sourceId: "00000000-0000-4000-8000-000000000006",
+        sourceWorkOrderId: null,
         sourceLabel: "Controller PCB A",
       }],
     });

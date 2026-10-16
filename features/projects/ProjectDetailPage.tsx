@@ -27,21 +27,6 @@ const timestampFormatter = new Intl.DateTimeFormat("en-GB", {
   timeStyle: "short",
 });
 
-const relatedPlaceholders = [
-  {
-    title: "Related Work Orders",
-    description: "Project work orders will appear here when that module is connected.",
-  },
-  {
-    title: "PCB Production",
-    description: "Project PCB production will appear here when that module is connected.",
-  },
-  {
-    title: "Activity",
-    description: "Project activity will appear here when audit history is connected.",
-  },
-] as const;
-
 function formatProjectDate(value: string): string {
   return projectDateFormatter.format(new Date(`${value}T00:00:00.000Z`));
 }
@@ -262,16 +247,12 @@ function ProjectDetailPage() {
 
         <ProjectMaterialUsageSection projectId={project.id} />
 
-        <div className="grid gap-6 xl:grid-cols-2">
-          {relatedPlaceholders.map((placeholder) => (
-            <section key={placeholder.title} aria-label={placeholder.title}>
-              <EmptyState
-                title={placeholder.title}
-                description={placeholder.description}
-              />
-            </section>
-          ))}
-        </div>
+        <section aria-label="Activity">
+          <EmptyState
+            title="Activity"
+            description="Project activity will appear here when audit history is connected."
+          />
+        </section>
 
         <ProjectEditDialog
           open={isEditOpen}

@@ -66,10 +66,10 @@ export function ProjectMaterialUsageSection({ projectId }: { projectId: string }
                   {row.sourceType === "work_order" ? "Work Order" : "PCB Production"}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
-                  {row.sourceType === "work_order" && canViewWorkOrders
+                  {row.sourceWorkOrderId && canViewWorkOrders
                     ? (
                       <Link
-                        to={`/work-orders/${row.sourceId}`}
+                        to={`/work-orders/${row.sourceWorkOrderId}`}
                         className="font-semibold text-zinc-900 underline decoration-zinc-300 underline-offset-4 transition hover:decoration-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:ring-offset-2"
                       >
                         {row.sourceLabel}

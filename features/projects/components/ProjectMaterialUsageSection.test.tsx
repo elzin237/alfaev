@@ -20,6 +20,7 @@ const usage = {
   quantity: "9007199254740993",
   sourceType: "work_order" as const,
   sourceId: "00000000-0000-4000-8000-000000000004",
+  sourceWorkOrderId: "00000000-0000-4000-8000-000000000004",
   sourceLabel: "RN-2026-0041",
   consumedAt: "2026-09-30T12:34:56.123456+00:00",
 };
@@ -80,7 +81,8 @@ describe("ProjectMaterialUsageSection", () => {
       .toHaveAttribute("href", `/work-orders/${usage.sourceId}`);
   });
 
-  it("keeps PCB Production sources plain because no individual run route exists", () => {
+  it("links PCB Production to its canonical Work Order while preserving the source type", () => {
+    const workOrderId = "00000000-0000-4000-8000-000000000098";
     setState({
       canViewWorkOrders: true,
       data: {
@@ -89,6 +91,28 @@ describe("ProjectMaterialUsageSection", () => {
           ...usage,
           sourceType: "pcb_production",
           sourceId: "00000000-0000-4000-8000-000000000099",
+          sourceWorkOrderId: workOrderId,
+          sourceLabel: "RN-2026-0026",
+        }],
+      },
+    });
+    renderSection();
+    expect(screen.getByText("PCB Production")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "RN-2026-0026" }))
+      .toHaveAttribute("href", `/work-orders/${workOrderId}`);
+    expect(screen.queryByText("Controller PCB A")).not.toBeInTheDocument();
+  });
+
+  it("keeps the PCB Card label as plain truthful fallback for legacy production", () => {
+    setState({
+      canViewWorkOrders: true,
+      data: {
+        ok: true,
+        value: [{
+          ...usage,
+          sourceType: "pcb_production",
+          sourceId: "00000000-0000-4000-8000-000000000099",
+          sourceWorkOrderId: null,
           sourceLabel: "Controller PCB A",
         }],
       },

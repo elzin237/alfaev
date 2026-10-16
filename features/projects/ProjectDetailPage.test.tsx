@@ -121,19 +121,22 @@ describe("ProjectDetailPage", () => {
       .toBeInTheDocument();
   });
 
-  it("shows real Material Usage and honest placeholders for remaining related domains", () => {
+  it("shows real Material Usage without obsolete connected-module placeholders", () => {
     renderDetail();
 
     expect(screen.getByRole("heading", { name: "Material Usage" }))
       .toBeInTheDocument();
     expect(screen.getByText("Material usage read")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Related Work Orders" }))
-      .toBeInTheDocument();
-    expect(screen.getByText(
+    expect(screen.queryByRole("heading", { name: "Related Work Orders" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(
       "Project work orders will appear here when that module is connected.",
-    )).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "PCB Production" }))
-      .toBeInTheDocument();
+    )).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "PCB Production" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText(
+      "Project PCB production will appear here when that module is connected.",
+    )).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Activity" }))
       .toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();

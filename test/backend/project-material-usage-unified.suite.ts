@@ -12,6 +12,10 @@ const migrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20260930140000_add_unified_project_material_usage_read.sql",
 );
+const sourceMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20261016110000_add_pcb_work_order_source_to_project_material_usage.sql",
+);
 
 interface UnifiedUsageFixture {
   archivedInputId: string;
@@ -382,6 +386,22 @@ export function registerUnifiedProjectMaterialUsageTests(
       expect(sql).toContain("from public, anon, authenticated");
       expect(sql).toContain("to authenticated");
     });
+
+    it("resolves Work Order-backed PCB source records without losing the legacy PCB Card fallback", () => {
+      const sql = readFileSync(sourceMigrationPath, "utf8");
+      expect(sql).toContain("source_work_order_id uuid");
+      expect(sql).toContain("production_run.work_order_id as source_work_order_id");
+      expect(sql).toContain("left join public.work_orders as production_work_order");
+      expect(sql).toContain("production_work_order.id = production_run.work_order_id");
+      expect(sql).toContain("production_work_order.work_order_number");
+      expect(sql).toContain("pcb_card.name");
+      expect(sql).toContain("coalesce(");
+      expect(sql).not.toContain("pg_catalog.coalesce(");
+      expect(sql).toContain("order by usage.consumed_at desc, usage.movement_id desc");
+      expect(sql).toContain("public.has_permission('projects.view')");
+      expect(sql).not.toContain("public.has_permission('work_orders.view')");
+      expect(sql).not.toMatch(/user_profiles|audit_logs|supplier/i);
+    });
   });
 
   describe.skipIf(process.env.TASK130_MIGRATION !== "1")(
@@ -424,6 +444,7 @@ export function registerUnifiedProjectMaterialUsageTests(
           expect(Object.keys(rows[0]!).sort()).toEqual([
             "consumed_at", "movement_id", "product_id", "product_name", "project_id",
             "quantity", "serial_number", "source_id", "source_label", "source_type",
+            "source_work_order_id",
           ]);
           expect(rows.map((row) => row.movement_id)).toEqual([
             state.workOrderMovementIds[0],
@@ -437,6 +458,7 @@ export function registerUnifiedProjectMaterialUsageTests(
               product_name: "Archived Project PCB Input",
               quantity: "9007199254740993",
               source_id: state.linkedRunId,
+              source_work_order_id: null,
               source_label: "Linked Controller PCB",
             }),
           ]);
@@ -445,12 +467,14 @@ export function registerUnifiedProjectMaterialUsageTests(
               product_id: state.linkedOutputId,
               quantity: "1",
               source_id: state.workOrderId,
+              source_work_order_id: state.workOrderId,
               source_label: state.workOrderNumber,
             }),
             expect.objectContaining({
               product_id: state.generalOutputId,
               quantity: "2",
               source_id: state.workOrderId,
+              source_work_order_id: state.workOrderId,
               source_label: state.workOrderNumber,
             }),
           ]);
@@ -538,6 +562,86 @@ export function registerUnifiedProjectMaterialUsageTests(
             is_security_definer: true,
             public_execute: false,
             search_path: ["search_path=\"\""],
+          });
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.PROJECT_MATERIAL_USAGE_SOURCE_MIGRATION !== "1")(
+    "Project Material Usage PCB Work Order source (requires deployed migration)",
+    () => {
+      it("returns the linked Work Order number and retains the legacy PCB Card fallback", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const state = await createUnifiedUsageFixture(database, fixture.actors.admin.profileId);
+          const run = (await database.query<{
+            bom_version_id: string;
+            pcb_card_id: string;
+          }>(
+            `select pcb_card_id, bom_version_id
+             from public.pcb_production_runs
+             where id = $1::uuid`,
+            [state.linkedRunId],
+          )).rows[0]!;
+          const linkedWorkOrderRunId = randomUUID();
+          await database.query(
+            `insert into public.pcb_production_runs (
+               id, work_order_id, pcb_card_id, bom_version_id, project_id,
+               quantity_produced, produced_by_user_id, completed_at
+             ) values (
+               $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+               1, $6::uuid, '2026-09-30T15:30:00Z'
+             )`,
+            [
+              linkedWorkOrderRunId,
+              state.workOrderId,
+              run.pcb_card_id,
+              run.bom_version_id,
+              state.projectId,
+              fixture.actors.admin.profileId,
+            ],
+          );
+          const linkedMovementId = randomUUID();
+          await insertMovement(database, [
+            linkedMovementId,
+            state.archivedInputId,
+            "pcb_production_input",
+            "-1",
+            "1",
+            "0",
+            null,
+            "pcb_production_input",
+            linkedWorkOrderRunId,
+            state.projectId,
+            fixture.actors.admin.profileId,
+            "2026-09-30T16:00:00Z",
+            null,
+          ]);
+
+          const rows = await callUsageAs<Record<string, unknown>>(
+            database,
+            fixture.actors.admin,
+            state.projectId,
+          );
+          expect(rows).toHaveLength(4);
+          expect(rows.map((row) => row.movement_id)).toEqual([
+            linkedMovementId,
+            ...state.workOrderMovementIds,
+            state.linkedPcbMovementId,
+          ]);
+          expect(new Set(rows.map((row) => row.movement_id)).size).toBe(rows.length);
+          expect(rows.find((row) => row.movement_id === linkedMovementId)).toMatchObject({
+            source_type: "pcb_production",
+            source_id: linkedWorkOrderRunId,
+            source_work_order_id: state.workOrderId,
+            source_label: state.workOrderNumber,
+          });
+          expect(rows.find((row) => row.movement_id === state.linkedPcbMovementId)).toMatchObject({
+            source_type: "pcb_production",
+            source_id: state.linkedRunId,
+            source_work_order_id: null,
+            source_label: "Linked Controller PCB",
           });
         });
       });
