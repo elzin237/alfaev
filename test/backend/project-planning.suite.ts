@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient, QueryResultRow } from "pg";
-import { expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { SecurityActor } from "./security-fixtures";
 import { expectPermissionDenied } from "./helpers/assertions";
 import type { SecurityFixtureHarness } from "./security-fixtures";
@@ -170,6 +170,132 @@ async function insertCommitmentMovement(
 }
 
 export function registerProjectPlanningTests(requireHarness: () => SecurityFixtureHarness): void {
+  describe.skipIf(
+    process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION !== "1",
+  )("Project requirement Inventory context", () => {
+    it("distinguishes an empty group from a real Product with zero commitments", async () => {
+      const fixture = requireHarness();
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        const { projectIds, groupIds, productIds } = await createPlanningRows(
+          database, fixture.actors.admin.profileId,
+        );
+        await database.query(
+          "update public.inventory_balances set quantity = 10 where product_id = $1",
+          [productIds[0]],
+        );
+        await database.query(
+          "insert into public.project_product_components (project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id) values ($1, $2, 5, $3, $3)",
+          [groupIds[3], productIds[0], fixture.actors.admin.profileId],
+        );
+
+        const emptyGroup = await callPlanningAs<Record<string, unknown>>(
+          database,
+          fixture.actors.admin,
+          "select * from public.get_project_planning($1)",
+          [projectIds[0]],
+        );
+        expect(emptyGroup).toEqual([expect.objectContaining({
+          product_id: null,
+          category: null,
+          brand_name: null,
+          physical_quantity: null,
+          committed_to_projects: null,
+          available_after_commitments: null,
+        })]);
+
+        const zeroCommitment = await callPlanningAs<Record<string, unknown>>(
+          database,
+          fixture.actors.admin,
+          "select * from public.get_project_planning($1)",
+          [projectIds[3]],
+        );
+        expect(zeroCommitment).toEqual([expect.objectContaining({
+          product_id: productIds[0],
+          physical_quantity: "10",
+          committed_to_projects: "0",
+          available_after_commitments: "10",
+        })]);
+      });
+    });
+
+    it("returns one permission-aware canonical Inventory projection without widening Product access", async () => {
+      const fixture = requireHarness();
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        const { projectIds, groupIds, productIds } = await createPlanningRows(
+          database, fixture.actors.admin.profileId,
+        );
+        const brandId = randomUUID();
+        await database.query(
+          "insert into public.brands (id, name, created_by_user_id, updated_by_user_id) values ($1, 'Planning Brand', $2, $2)",
+          [brandId, fixture.actors.admin.profileId],
+        );
+        await database.query(
+          "update public.products set brand_id = $2 where id = $1",
+          [productIds[0], brandId],
+        );
+        await database.query(
+          "update public.inventory_balances set quantity = 10 where product_id = $1",
+          [productIds[0]],
+        );
+        await database.query(
+          "insert into public.project_product_components (project_product_id, product_id, required_quantity, created_by_user_id, updated_by_user_id) values ($1, $2, 16, $3, $3)",
+          [groupIds[0], productIds[0], fixture.actors.admin.profileId],
+        );
+
+        const projectOnly = await callPlanningAs<Record<string, unknown>>(
+          database,
+          fixture.actors.permitted,
+          "select * from public.get_project_planning($1)",
+          [projectIds[0]],
+        );
+        expect(projectOnly).toHaveLength(1);
+        expect(projectOnly[0]).toMatchObject({
+          product_id: productIds[0],
+          category: null,
+          brand_name: null,
+          physical_quantity: null,
+          committed_to_projects: null,
+          available_after_commitments: null,
+        });
+        expect(await callPlanningAs<{ id: string }>(
+          database,
+          fixture.actors.permitted,
+          "select id from public.products where id = $1",
+          [productIds[0]],
+        )).toEqual([]);
+
+        await database.query(
+          "insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id) values ($1, $2, $3)",
+          [
+            fixture.actors.permitted.profileId,
+            fixture.permissionDefinitionIds.inventoryView,
+            fixture.actors.admin.profileId,
+          ],
+        );
+        const authorized = await callPlanningAs<Record<string, unknown>>(
+          database,
+          fixture.actors.permitted,
+          "select * from public.get_project_planning($1)",
+          [projectIds[0]],
+        );
+        expect(authorized).toEqual([expect.objectContaining({
+          product_id: productIds[0],
+          category: "Planning",
+          brand_name: "Planning Brand",
+          physical_quantity: "10",
+          committed_to_projects: "16",
+          available_after_commitments: "-6",
+        })]);
+        expect(Object.keys(authorized[0] ?? {}).sort()).toEqual([
+          "available_after_commitments", "brand_name", "category",
+          "committed_to_projects", "component_id", "physical_quantity",
+          "product_id", "product_kind", "product_name", "project_product_id",
+          "project_product_name", "required_quantity", "serial_number",
+        ]);
+      });
+    });
+  });
+
   it("enforces the Project planning schema, references, quantities, and non-mutating baseline", async () => {
     const fixture = requireHarness();
 
@@ -1279,6 +1405,15 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           product_name: null,
           product_kind: null,
           required_quantity: null,
+          ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
+            ? {
+                category: null,
+                brand_name: null,
+                physical_quantity: null,
+                committed_to_projects: null,
+                available_after_commitments: null,
+              }
+            : {}),
         }]);
         for (const index of [3, 4]) {
           const historical = await callPlanningAs<{
@@ -1293,7 +1428,17 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
             required_quantity: String(index - 1),
           });
           expect(Object.keys(historical[0] ?? {}).sort()).toEqual([
-            "component_id", "product_id", "product_kind", "product_name",
+            ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
+              ? [
+                  "available_after_commitments", "brand_name", "category",
+                  "committed_to_projects",
+                ]
+              : []),
+            "component_id",
+            ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
+              ? ["physical_quantity"]
+              : []),
+            "product_id", "product_kind", "product_name",
             "project_product_id", "project_product_name", "required_quantity",
             "serial_number",
           ]);

@@ -3,13 +3,22 @@ import { isProjectId } from "./projectService";
 
 export type PlanningProductKind = "component" | "pcb_finished_good";
 
+export interface ProjectRequirementInventoryContext {
+  category: string;
+  brandName: string | null;
+  physicalQuantity: bigint;
+  committedToProjects: bigint;
+  availableAfterCommitments: bigint;
+}
+
 export interface ProjectRequirement {
   id: string;
   productId: string;
   serialNumber: string;
   productName: string;
   productKind: PlanningProductKind;
-  requiredQuantity: number;
+  requiredQuantity: bigint;
+  inventoryContext: ProjectRequirementInventoryContext | null;
 }
 
 export interface ProjectPlanningGroup {
@@ -60,9 +69,44 @@ function isProductKind(value: unknown): value is PlanningProductKind {
   return value === "component" || value === "pcb_finished_good";
 }
 
-function isPositiveSafeQuantity(value: unknown): value is number {
-  return typeof value === "number" &&
-    Number.isSafeInteger(value) && value > 0;
+function whole(value: unknown): bigint | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? BigInt(value) : null;
+  }
+  return typeof value === "string" && /^-?(0|[1-9][0-9]*)$/.test(value)
+    ? BigInt(value)
+    : null;
+}
+
+function parseInventoryContext(
+  row: Record<string, unknown>,
+): ProjectRequirementInventoryContext | null | undefined {
+  const contextValues = [
+    row.category,
+    row.brand_name,
+    row.physical_quantity,
+    row.committed_to_projects,
+    row.available_after_commitments,
+  ];
+  if (contextValues.every((value) => value === null)) return null;
+  if (!isName(row.category) ||
+    !(row.brand_name === null || isName(row.brand_name))) return undefined;
+  const physicalQuantity = whole(row.physical_quantity);
+  const committedToProjects = whole(row.committed_to_projects);
+  const availableAfterCommitments = whole(row.available_after_commitments);
+  if (physicalQuantity === null || committedToProjects === null ||
+    availableAfterCommitments === null || physicalQuantity < 0n ||
+    committedToProjects < 0n ||
+    availableAfterCommitments !== physicalQuantity - committedToProjects) {
+    return undefined;
+  }
+  return {
+    category: row.category,
+    brandName: row.brand_name,
+    physicalQuantity,
+    committedToProjects,
+    availableAfterCommitments,
+  };
 }
 
 function failure(code: PlanningError["code"]): PlanningError {
@@ -133,16 +177,22 @@ export async function getProjectPlanning(
     if (row.component_id === null) {
       if (row.product_id !== null || row.serial_number !== null ||
         row.product_name !== null || row.product_kind !== null ||
-        row.required_quantity !== null) {
+        row.required_quantity !== null || row.category !== null ||
+        row.brand_name !== null || row.physical_quantity !== null ||
+        row.committed_to_projects !== null ||
+        row.available_after_commitments !== null) {
         return { ok: false, error: failure("load_failed") };
       }
     } else {
+      const inventoryContext = parseInventoryContext(row);
+      const requiredQuantity = whole(row.required_quantity);
       if (!isProjectId(String(row.component_id)) ||
         !isProjectId(String(row.product_id)) ||
         !isSerial(row.serial_number) ||
         !isName(row.product_name) ||
         !isProductKind(row.product_kind) ||
-        !isPositiveSafeQuantity(row.required_quantity) ||
+        requiredQuantity === null || requiredQuantity <= 0n ||
+        inventoryContext === undefined ||
         requirementIds.has(row.component_id as string)) {
         return { ok: false, error: failure("load_failed") };
       }
@@ -153,7 +203,8 @@ export async function getProjectPlanning(
         serialNumber: row.serial_number,
         productName: row.product_name,
         productKind: row.product_kind,
-        requiredQuantity: row.required_quantity,
+        requiredQuantity,
+        inventoryContext,
       });
     }
     groups.set(groupId, group);

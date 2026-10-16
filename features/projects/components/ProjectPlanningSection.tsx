@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 import ConfirmDialog from "../../../shared/components/ConfirmDialog";
 import EmptyState from "../../../shared/components/EmptyState";
@@ -30,9 +31,140 @@ const primaryClass =
   "rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 disabled:opacity-60";
 const inputClass =
   "mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
+const compactActionClass =
+  "whitespace-nowrap rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300";
 
 function kindLabel(kind: ProjectRequirement["productKind"]): string {
   return kind === "pcb_finished_good" ? "Finished PCB Product" : "Component";
+}
+
+function requirementCountLabel(count: number): string {
+  return `${count} ${count === 1 ? "requirement" : "requirements"}`;
+}
+
+function RequirementSummary({ requirements }: {
+  requirements: ProjectRequirement[];
+}) {
+  const hasInventoryContext = requirements.length > 0 &&
+    requirements.every((requirement) => requirement.inventoryContext !== null);
+  const shortages = hasInventoryContext
+    ? requirements.filter(
+        (requirement) => requirement.inventoryContext!.availableAfterCommitments < 0n,
+      ).length
+    : null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-600">
+      <span>Requirements: {requirements.length}</span>
+      {shortages !== null && (
+        <>
+          <span>Shortages: {shortages}</span>
+          <span>Covered: {requirements.length - shortages}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RequirementsTable({
+  group,
+  canManage,
+  onEdit,
+  onRemove,
+}: {
+  group: ProjectPlanningGroup;
+  canManage: boolean;
+  onEdit: (requirement: ProjectRequirement) => void;
+  onRemove: (requirement: ProjectRequirement) => void;
+}) {
+  return (
+    <div
+      data-testid={`requirements-scroll-${group.id}`}
+      className="mt-4 max-h-[28rem] max-w-full overflow-auto rounded-2xl border border-zinc-200"
+    >
+      <table className="min-w-[78rem] divide-y divide-zinc-200 text-sm">
+        <caption className="sr-only">Requirements for {group.name}</caption>
+        <thead className="sticky top-0 z-10 bg-zinc-50">
+          <tr>
+            {[
+              "Serial Number", "Product", "Kind", "Category", "Brand",
+              "Required", "Physical Quantity", "Committed to Projects",
+              "Available After Commitments", "Shortage",
+              ...(canManage ? ["Actions"] : []),
+            ].map((heading) => (
+              <th
+                key={heading}
+                scope="col"
+                className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500"
+              >
+                {heading}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100 bg-white">
+          {group.requirements.map((requirement) => {
+            const context = requirement.inventoryContext;
+            const shortage = context && context.availableAfterCommitments < 0n
+              ? -context.availableAfterCommitments
+              : 0n;
+            return (
+              <tr key={requirement.id} className="text-zinc-700">
+                <th scope="row" className="whitespace-nowrap px-3 py-3 text-left font-mono font-semibold text-zinc-900">
+                  {requirement.serialNumber}
+                </th>
+                <td className="px-3 py-3 font-semibold text-zinc-900">
+                  {requirement.productName}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3">{kindLabel(requirement.productKind)}</td>
+                <td className="px-3 py-3">{context?.category ?? "Unavailable"}</td>
+                <td className="px-3 py-3">{context ? context.brandName ?? "—" : "Unavailable"}</td>
+                <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-zinc-900">
+                  {requirement.requiredQuantity.toString()}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                  {context?.physicalQuantity.toString() ?? "Unavailable"}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                  {context?.committedToProjects.toString() ?? "Unavailable"}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                  {context?.availableAfterCommitments.toString() ?? "Unavailable"}
+                </td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                  {context ? shortage > 0n ? (
+                    <span className="inline-flex rounded-lg bg-red-50 px-2 py-1 font-semibold text-red-700">
+                      Shortage: {shortage.toString()}
+                    </span>
+                  ) : "None" : "Unavailable"}
+                </td>
+                {canManage && (
+                  <td className="whitespace-nowrap px-3 py-3">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className={compactActionClass}
+                        onClick={() => onEdit(requirement)}
+                      >
+                        Edit Requirement
+                      </button>
+                      <button
+                        type="button"
+                        className={compactActionClass}
+                        onClick={() => onRemove(requirement)}
+                      >
+                        Remove Requirement
+                      </button>
+                    </div>
+                  </td>
+                )}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function GroupDialog({
@@ -315,6 +447,9 @@ export function ProjectPlanningSection({
   const [removeError, setRemoveError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [choiceSearch, setChoiceSearch] = useState("");
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const planning = useProjectPlanning(
     projectId, status, requirementEditor !== null, choiceSearch,
   );
@@ -331,6 +466,24 @@ export function ProjectPlanningSection({
     setChoiceSearch("");
     setSuccess(null);
     setRequirementEditor(editor);
+  }
+
+  function toggleRequirements(groupId: string) {
+    setExpandedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  function removeRequirementTarget(requirement: ProjectRequirement) {
+    setRemoveError(null);
+    setRemoveTarget({
+      kind: "requirement",
+      id: requirement.id,
+      label: requirement.serialNumber + " " + requirement.productName,
+    });
   }
 
   async function confirmRemove() {
@@ -396,9 +549,12 @@ export function ProjectPlanningSection({
       ) : (
         <div className="space-y-4">
           {groups.map((group) => (
-            <article key={group.id} className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-lg font-bold text-zinc-900">{group.name}</h3>
+            <article key={group.id} className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-900">{group.name}</h3>
+                  <RequirementSummary requirements={group.requirements} />
+                </div>
                 {canManage && (
                   <div className="flex flex-wrap gap-2">
                     <button type="button" className={buttonClass} onClick={() => openRequirement({ mode: "create", group })}>
@@ -421,40 +577,34 @@ export function ProjectPlanningSection({
                   No component requirements planned for this Project Product.
                 </p>
               ) : (
-                <ul className="mt-5 divide-y divide-zinc-100" aria-label={group.name + " requirements"}>
-                  {group.requirements.map((requirement) => (
-                    <li key={requirement.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="font-medium text-zinc-900">
-                          <span className="font-mono text-sm">{requirement.serialNumber}</span>
-                          {" — "}{requirement.productName}
-                        </p>
-                        <p className="mt-1 text-xs text-zinc-500">{kindLabel(requirement.productKind)}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-semibold text-zinc-900">
-                          Required: {requirement.requiredQuantity}
-                        </span>
-                        {canManage && (
-                          <>
-                            <button type="button" className={buttonClass} onClick={() => openRequirement({ mode: "edit", group, requirement })}>
-                              Edit Requirement
-                            </button>
-                            <button type="button" className={buttonClass} onClick={() => {
-                              setRemoveError(null);
-                              setRemoveTarget({
-                                kind: "requirement", id: requirement.id,
-                                label: requirement.serialNumber + " " + requirement.productName,
-                              });
-                            }}>
-                              Remove Requirement
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <button
+                    type="button"
+                    aria-expanded={expandedGroupIds.has(group.id)}
+                    aria-controls={`project-requirements-${group.id}`}
+                    className="mt-4 inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                    onClick={() => toggleRequirements(group.id)}
+                  >
+                    {expandedGroupIds.has(group.id) ? (
+                      <ChevronUp aria-hidden="true" className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown aria-hidden="true" className="h-4 w-4" />
+                    )}
+                    {expandedGroupIds.has(group.id)
+                      ? "Hide requirements"
+                      : `Show ${requirementCountLabel(group.requirements.length)}`}
+                  </button>
+                  {expandedGroupIds.has(group.id) && (
+                    <div id={`project-requirements-${group.id}`}>
+                      <RequirementsTable
+                        group={group}
+                        canManage={canManage}
+                        onEdit={(requirement) => openRequirement({ mode: "edit", group, requirement })}
+                        onRemove={removeRequirementTarget}
+                      />
+                    </div>
+                  )}
+                </>
               )}
             </article>
           ))}

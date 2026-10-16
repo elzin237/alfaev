@@ -35,6 +35,11 @@ describe("projectPlanningService", () => {
           product_name: null,
           product_kind: null,
           required_quantity: null,
+          category: null,
+          brand_name: null,
+          physical_quantity: null,
+          committed_to_projects: null,
+          available_after_commitments: null,
         },
         {
           project_product_id: groupId,
@@ -44,7 +49,12 @@ describe("projectPlanningService", () => {
           serial_number: "0000123",
           product_name: "Historical PCB",
           product_kind: "pcb_finished_good",
-          required_quantity: 50,
+          required_quantity: "50",
+          category: "Finished Goods",
+          brand_name: "AlfaEV",
+          physical_quantity: "9007199254740993",
+          committed_to_projects: "9007199254740999",
+          available_after_commitments: "-6",
         },
       ],
       error: null,
@@ -63,7 +73,14 @@ describe("projectPlanningService", () => {
             serialNumber: "0000123",
             productName: "Historical PCB",
             productKind: "pcb_finished_good",
-            requiredQuantity: 50,
+            requiredQuantity: 50n,
+            inventoryContext: {
+              category: "Finished Goods",
+              brandName: "AlfaEV",
+              physicalQuantity: 9007199254740993n,
+              committedToProjects: 9007199254740999n,
+              availableAfterCommitments: -6n,
+            },
           }],
         },
       ],
@@ -71,6 +88,7 @@ describe("projectPlanningService", () => {
     expect(mocks.rpc).toHaveBeenCalledWith("get_project_planning", {
       p_project_id: projectId,
     });
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -90,7 +108,70 @@ describe("projectPlanningService", () => {
         serial_number: "0000123",
         product_name: "Product",
         product_kind: "component",
-        required_quantity: 1,
+        required_quantity: "1",
+        category: "Control",
+        brand_name: null,
+        physical_quantity: "10",
+        committed_to_projects: "2",
+        available_after_commitments: "8",
+        ...override,
+      }],
+      error: null,
+    });
+    await expect(getProjectPlanning(projectId)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "load_failed" },
+    });
+  });
+
+  it("preserves the base requirement while Inventory context is withheld", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        project_product_id: groupId,
+        project_product_name: "B24",
+        component_id: componentId,
+        product_id: productId,
+        serial_number: "0000123",
+        product_name: "Product",
+        product_kind: "component",
+        required_quantity: "1",
+        category: null,
+        brand_name: null,
+        physical_quantity: null,
+        committed_to_projects: null,
+        available_after_commitments: null,
+      }],
+      error: null,
+    });
+    await expect(getProjectPlanning(projectId)).resolves.toMatchObject({
+      ok: true,
+      value: [{
+        requirements: [{ inventoryContext: null }],
+      }],
+    });
+  });
+
+  it.each([
+    [{ available_after_commitments: "9" }, "inconsistent availability"],
+    [{ physical_quantity: "-1" }, "negative physical quantity"],
+    [{ committed_to_projects: "-1" }, "negative commitment"],
+    [{ category: null }, "partial hidden context"],
+  ])("rejects invalid Inventory context: %s (%s)", async (override, _label) => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        project_product_id: groupId,
+        project_product_name: "B24",
+        component_id: componentId,
+        product_id: productId,
+        serial_number: "0000123",
+        product_name: "Product",
+        product_kind: "component",
+        required_quantity: "1",
+        category: "Control",
+        brand_name: null,
+        physical_quantity: "10",
+        committed_to_projects: "2",
+        available_after_commitments: "8",
         ...override,
       }],
       error: null,
