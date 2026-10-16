@@ -16,6 +16,10 @@ const sourceMigrationPath = resolve(
   process.cwd(),
   "supabase/migrations/20261016110000_add_pcb_work_order_source_to_project_material_usage.sql",
 );
+const aggregateMigrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20261016120000_aggregate_project_material_usage_by_product.sql",
+);
 
 interface UnifiedUsageFixture {
   archivedInputId: string;
@@ -404,6 +408,20 @@ export function registerUnifiedProjectMaterialUsageTests(
     });
   });
 
+  describe("Project Material Usage Product aggregate (static)", () => {
+    it("retains canonical sources while exposing only one narrow Product aggregate", () => {
+      const sql = readFileSync(aggregateMigrationPath, "utf8");
+      expect(sql).toContain("pg_catalog.sum(usage.quantity) as quantity");
+      expect(sql).toContain("group by usage.product_id");
+      expect(sql).toContain("order by product.serial_number asc, product.id asc");
+      expect(sql).toContain("work_order.status = 'finished'");
+      expect(sql).toContain("production_run.status = 'completed'");
+      expect(sql.match(/movement\.quantity_delta < 0/g)).toHaveLength(2);
+      expect(sql).toContain("public.has_permission('projects.view')");
+      expect(sql).not.toMatch(/user_profiles|audit_logs|supplier|source_lot/i);
+    });
+  });
+
   describe.skipIf(process.env.TASK130_MIGRATION !== "1")(
     "Task 130 unified Project material usage (requires deployed migration)",
     () => {
@@ -642,6 +660,167 @@ export function registerUnifiedProjectMaterialUsageTests(
             source_id: state.linkedRunId,
             source_work_order_id: null,
             source_label: "Linked Controller PCB",
+          });
+        });
+      });
+    },
+  );
+
+  describe.skipIf(process.env.PROJECT_MATERIAL_USAGE_AGGREGATE_MIGRATION !== "1")(
+    "Project Material Usage Product aggregate (requires deployed migration)",
+    () => {
+      it("aggregates multiple generic Work Orders and three PCB runs once per Product", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const state = await createUnifiedUsageFixture(database, fixture.actors.admin.profileId);
+          const extraRunIds = [randomUUID(), randomUUID()];
+          await database.query(
+            `insert into public.pcb_production_runs (
+               id, pcb_card_id, bom_version_id, project_id,
+               quantity_produced, produced_by_user_id, completed_at
+             )
+             select candidate.id, source.pcb_card_id, source.bom_version_id,
+                    source.project_id, 1, source.produced_by_user_id, candidate.completed_at
+             from public.pcb_production_runs as source
+             cross join (
+               values
+                 ($2::uuid, '2026-09-30T16:00:00Z'::timestamptz),
+                 ($3::uuid, '2026-09-30T17:00:00Z'::timestamptz)
+             ) as candidate(id, completed_at)
+             where source.id = $1::uuid`,
+            [state.linkedRunId, ...extraRunIds],
+          );
+          await insertMovement(database, [
+            randomUUID(), state.archivedInputId, "pcb_production_input", "-2", "2", "0",
+            null, "pcb_production_input", extraRunIds[0], state.projectId,
+            fixture.actors.admin.profileId, "2026-09-30T16:00:00Z", null,
+          ]);
+          await insertMovement(database, [
+            randomUUID(), state.archivedInputId, "pcb_production_input", "-3", "3", "0",
+            null, "pcb_production_input", extraRunIds[1], state.projectId,
+            fixture.actors.admin.profileId, "2026-09-30T17:00:00Z", null,
+          ]);
+          await insertMovement(database, [
+            randomUUID(), state.archivedInputId, "work_order", "-4", "4", "0",
+            null, "work_order", state.workOrderId, state.projectId,
+            fixture.actors.admin.profileId, "2026-09-30T18:00:00Z", null,
+          ]);
+          const secondWorkOrderId = randomUUID();
+          const [secondWorkOrderNumber] = await allocateWorkOrderNumbers(database, 1);
+          await database.query(
+            `insert into public.work_orders (
+               id, work_order_number, project_id, customer_name_snapshot, description,
+               status, created_by_user_id, updated_by_user_id
+             ) values (
+               $1::uuid, $2::text, $3::uuid, 'Unified Customer',
+               'Second generic aggregate source', 'draft', $4::uuid, $4::uuid
+             )`,
+            [
+              secondWorkOrderId,
+              secondWorkOrderNumber,
+              state.projectId,
+              fixture.actors.admin.profileId,
+            ],
+          );
+          await database.query(
+            `update public.work_orders
+             set status = 'finished',
+                 finished_at = '2026-09-30T19:00:00Z',
+                 finished_by_user_id = $2::uuid,
+                 updated_at = '2026-09-30T19:00:00Z',
+                 updated_by_user_id = $2::uuid
+             where id = $1::uuid`,
+            [secondWorkOrderId, fixture.actors.admin.profileId],
+          );
+          await insertMovement(database, [
+            randomUUID(), state.archivedInputId, "work_order", "-5", "5", "0",
+            null, "work_order", secondWorkOrderId, state.projectId,
+            fixture.actors.admin.profileId, "2026-09-30T19:00:00Z", null,
+          ]);
+
+          const rows = await callUsageAs<Record<string, unknown>>(
+            database,
+            fixture.actors.admin,
+            state.projectId,
+          );
+          expect(rows).toHaveLength(3);
+          expect(rows.every((row) => Object.keys(row).sort().join(",") ===
+            "product_id,product_name,quantity,serial_number")).toBe(true);
+          expect(rows.filter((row) => row.product_id === state.archivedInputId)).toEqual([
+            expect.objectContaining({
+              product_name: "Archived Project PCB Input",
+              quantity: "9007199254741007",
+            }),
+          ]);
+          expect(rows.find((row) => row.product_id === state.linkedOutputId)?.quantity).toBe("1");
+          expect(rows.find((row) => row.product_id === state.generalOutputId)?.quantity).toBe("2");
+          const serialNumbers = rows.map((row) => row.serial_number as string);
+          expect(serialNumbers).toEqual([...serialNumbers].sort());
+        });
+      });
+
+      it("preserves Project-only authorization, metadata, and read-only behavior", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const state = await createUnifiedUsageFixture(database, fixture.actors.admin.profileId);
+          await expect(callUsageAs(database, fixture.actors.admin, state.projectId))
+            .resolves.toHaveLength(3);
+
+          const viewer = fixture.actors.unpermitted;
+          await setOnlyUsagePermission(database, viewer, fixture.actors.admin.profileId, "projects.view");
+          await expect(callUsageAs(database, viewer, state.projectId)).resolves.toHaveLength(3);
+          for (const permission of ["pcb.view", "work_orders.view", "inventory.view", "pcb.produce"]) {
+            await setOnlyUsagePermission(database, viewer, fixture.actors.admin.profileId, permission);
+            await expectUsageRejected(database, viewer, state.projectId, "42501");
+          }
+          await setOnlyUsagePermission(database, fixture.actors.inactive, fixture.actors.admin.profileId, "projects.view");
+          await expectUsageRejected(database, fixture.actors.inactive, state.projectId, "42501");
+          await expectUsageRejected(database, null, state.projectId, "42501");
+          await expectUsageRejected(database, fixture.actors.admin, null, "22023");
+          await expectUsageRejected(database, fixture.actors.admin, randomUUID(), "P0002");
+
+          const snapshotSql = `select
+            (select count(*)::text from public.inventory_balances) as balances,
+            (select count(*)::text from public.inventory_movements) as movements,
+            (select count(*)::text from public.projects) as projects,
+            (select count(*)::text from public.work_orders) as work_orders,
+            (select count(*)::text from public.pcb_production_runs) as production_runs,
+            (select count(*)::text from public.audit_logs) as audits`;
+          const before = (await database.query(snapshotSql)).rows[0];
+          await callUsageAs(database, fixture.actors.admin, state.projectId);
+          expect((await database.query(snapshotSql)).rows[0]).toEqual(before);
+
+          const metadata = (await database.query<{
+            anon_execute: boolean;
+            authenticated_execute: boolean;
+            is_stable: boolean;
+            is_security_definer: boolean;
+            public_execute: boolean;
+            search_path: string[] | null;
+          }>(
+            `select
+               procedure.provolatile = 's' as is_stable,
+               procedure.prosecdef as is_security_definer,
+               procedure.proconfig as search_path,
+               pg_catalog.has_function_privilege('anon', procedure.oid, 'execute') as anon_execute,
+               pg_catalog.has_function_privilege('authenticated', procedure.oid, 'execute') as authenticated_execute,
+               exists (
+                 select 1 from pg_catalog.aclexplode(procedure.proacl) as privilege
+                 where privilege.grantee = 0 and privilege.privilege_type = 'EXECUTE'
+               ) as public_execute
+             from pg_catalog.pg_proc as procedure
+             join pg_catalog.pg_namespace as namespace on namespace.oid = procedure.pronamespace
+             where namespace.nspname = 'public'
+               and procedure.proname = 'list_project_material_usage'
+               and pg_catalog.pg_get_function_identity_arguments(procedure.oid) = 'p_project_id uuid'`,
+          )).rows[0];
+          expect(metadata).toEqual({
+            anon_execute: false,
+            authenticated_execute: true,
+            is_stable: true,
+            is_security_definer: true,
+            public_execute: false,
+            search_path: ["search_path=\"\""],
           });
         });
       });

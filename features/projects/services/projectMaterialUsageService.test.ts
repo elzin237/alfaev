@@ -10,29 +10,22 @@ import { listProjectMaterialUsage } from "./projectMaterialUsageService";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
 const row = {
-  movement_id: "00000000-0000-4000-8000-000000000002",
-  project_id: projectId,
   product_id: "00000000-0000-4000-8000-000000000003",
   serial_number: "0000042",
   product_name: "Archived Control Module",
-  quantity: "9007199254740993",
-  source_type: "work_order",
-  source_id: "00000000-0000-4000-8000-000000000004",
-  source_work_order_id: "00000000-0000-4000-8000-000000000004",
-  source_label: "RN-2026-0041",
-  consumed_at: "2026-09-30T12:34:56.123456+00:00",
+  quantity: "18446744073709551614",
 };
 
 beforeEach(() => vi.resetAllMocks());
 
 describe("projectMaterialUsageService", () => {
-  it("calls the narrow RPC and preserves exact quantity text and backend ordering", async () => {
+  it("calls the narrow RPC and preserves aggregate quantity text and backend ordering", async () => {
     mocks.rpc.mockResolvedValue({
       data: [row, {
         ...row,
-        movement_id: "00000000-0000-4000-8000-000000000005",
+        product_id: "00000000-0000-4000-8000-000000000005",
+        serial_number: "0000043",
         quantity: "9223372036854775807",
-        consumed_at: "2026-09-29T12:34:56Z",
       }],
       error: null,
     });
@@ -41,20 +34,13 @@ describe("projectMaterialUsageService", () => {
       ok: true,
       value: [
         {
-          movementId: row.movement_id,
-          projectId,
           productId: row.product_id,
           serialNumber: "0000042",
           productName: "Archived Control Module",
-          quantity: "9007199254740993",
-          sourceType: "work_order",
-          sourceId: row.source_id,
-          sourceWorkOrderId: row.source_work_order_id,
-          sourceLabel: "RN-2026-0041",
-          consumedAt: row.consumed_at,
+          quantity: "18446744073709551614",
         },
         expect.objectContaining({
-          movementId: "00000000-0000-4000-8000-000000000005",
+          productId: "00000000-0000-4000-8000-000000000005",
           quantity: "9223372036854775807",
         }),
       ],
@@ -74,17 +60,13 @@ describe("projectMaterialUsageService", () => {
   });
 
   it.each([
-    ["cross-Project row", { ...row, project_id: "00000000-0000-4000-8000-000000000099" }],
     ["unsafe numeric quantity", { ...row, quantity: 5 }],
     ["zero quantity", { ...row, quantity: "0" }],
-    ["overflow quantity", { ...row, quantity: "9223372036854775808" }],
-    ["malformed Work Order", { ...row, source_label: "WO-41" }],
-    ["mismatched Work Order source", {
-      ...row,
-      source_work_order_id: "00000000-0000-4000-8000-000000000099",
-    }],
-    ["unknown source type", { ...row, source_type: "manual_adjustment" }],
-    ["blank PCB label", { ...row, source_type: "pcb_production", source_label: " " }],
+    ["negative quantity", { ...row, quantity: "-1" }],
+    ["malformed Product ID", { ...row, product_id: "not-a-product" }],
+    ["malformed serial", { ...row, serial_number: "42" }],
+    ["blank Product name", { ...row, product_name: " " }],
+    ["legacy source field", { ...row, source_type: "work_order" }],
     ["extra field", { ...row, internal_actor: "secret" }],
   ])("fails safely for a malformed %s", async (_label, malformed) => {
     mocks.rpc.mockResolvedValue({ data: [malformed], error: null });
@@ -124,50 +106,5 @@ describe("projectMaterialUsageService", () => {
     await expect(listProjectMaterialUsage("not-a-project")).resolves
       .toMatchObject({ ok: false, error: { code: "invalid_request" } });
     expect(mocks.rpc).not.toHaveBeenCalled();
-  });
-
-  it("maps PCB Production to a narrow Work Order source when one exists", async () => {
-    const workOrderId = "00000000-0000-4000-8000-000000000007";
-    mocks.rpc.mockResolvedValue({
-      data: [{
-        ...row,
-        source_type: "pcb_production",
-        source_id: "00000000-0000-4000-8000-000000000006",
-        source_work_order_id: workOrderId,
-        source_label: "RN-2026-0026",
-      }],
-      error: null,
-    });
-    await expect(listProjectMaterialUsage(projectId)).resolves.toMatchObject({
-      ok: true,
-      value: [{
-        sourceType: "pcb_production",
-        sourceId: "00000000-0000-4000-8000-000000000006",
-        sourceWorkOrderId: workOrderId,
-        sourceLabel: "RN-2026-0026",
-      }],
-    });
-  });
-
-  it("preserves the PCB Card source label for a legacy production run", async () => {
-    mocks.rpc.mockResolvedValue({
-      data: [{
-        ...row,
-        source_type: "pcb_production",
-        source_id: "00000000-0000-4000-8000-000000000006",
-        source_work_order_id: null,
-        source_label: "Controller PCB A",
-      }],
-      error: null,
-    });
-    await expect(listProjectMaterialUsage(projectId)).resolves.toMatchObject({
-      ok: true,
-      value: [{
-        sourceType: "pcb_production",
-        sourceId: "00000000-0000-4000-8000-000000000006",
-        sourceWorkOrderId: null,
-        sourceLabel: "Controller PCB A",
-      }],
-    });
   });
 });
