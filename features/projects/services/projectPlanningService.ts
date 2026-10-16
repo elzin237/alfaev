@@ -290,7 +290,7 @@ export function createProjectRequirement(
 }
 
 export function updateProjectRequirement(
-  id: string, productId: string, quantity: number,
+  id: string, productId: string, quantity: number | string,
 ) {
   return mutate("update_project_product_component", {
     p_component_id: id,

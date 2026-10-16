@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -193,6 +193,121 @@ describe("ProjectPlanningSection", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
+  it("edits Required quantity inline with bigint-safe text and refreshes authoritative context", async () => {
+    const quantity = "9007199254740993";
+    const updatedGroups: ProjectPlanningGroup[] = [{
+      ...groups[0]!,
+      requirements: [{
+        ...groups[0]!.requirements[0]!,
+        requiredQuantity: BigInt(quantity),
+        inventoryContext: {
+          category: "Control",
+          brandName: "Bosch",
+          physicalQuantity: 20n,
+          committedToProjects: 16n,
+          availableAfterCommitments: 4n,
+        },
+      }, groups[0]!.requirements[1]!],
+    }];
+    setPlanningState({ canManage: true });
+    mocks.updateRequirement.mockImplementationOnce(async () => {
+      setPlanningState({ canManage: true, data: { ok: true, value: updatedGroups } });
+      return { ok: true, value: { id: componentId } };
+    });
+    const view = render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit required quantity for Relay" }));
+    const input = screen.getByLabelText("Required quantity for Relay");
+    expect(input).toHaveValue(50);
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: quantity } });
+    fireEvent.submit(input.closest("form")!);
+
+    await waitFor(() => expect(mocks.updateRequirement).toHaveBeenCalledWith(
+      componentId, productId, quantity,
+    ));
+    view.rerender(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    expect(screen.getByRole("button", { name: "Edit required quantity for Relay" }))
+      .toHaveTextContent(quantity);
+    expect(screen.getByRole("status")).toHaveTextContent("Requirement quantity updated.");
+    expect(screen.getByText("Shortages: 0")).toBeInTheDocument();
+    expect(screen.getByText("Covered: 2")).toBeInTheDocument();
+  });
+
+  it("cancels inline quantity editing without mutation and restores trigger focus", async () => {
+    setPlanningState({ canManage: true });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    const trigger = screen.getByRole("button", { name: "Edit required quantity for Relay" });
+    fireEvent.click(trigger);
+    const input = screen.getByLabelText("Required quantity for Relay");
+    fireEvent.change(input, { target: { value: "35" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mocks.updateRequirement).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText("Required quantity for Relay")).not.toBeInTheDocument();
+    const restoredTrigger = screen.getByRole("button", { name: "Edit required quantity for Relay" });
+    await waitFor(() => expect(restoredTrigger).toHaveFocus());
+
+    fireEvent.click(restoredTrigger);
+    fireEvent.keyDown(screen.getByLabelText("Required quantity for Relay").closest("form")!, {
+      key: "Escape",
+    });
+    expect(screen.queryByLabelText("Required quantity for Relay")).not.toBeInTheDocument();
+    expect(mocks.updateRequirement).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid inline quantities and keeps safe failures in edit context", async () => {
+    setPlanningState({ canManage: true });
+    mocks.updateRequirement.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: "mutation_failed",
+        message: "The Project plan could not be changed. Please try again.",
+      },
+    });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit required quantity for Relay" }));
+    const input = screen.getByLabelText("Required quantity for Relay");
+    for (const invalid of ["0", "-1", "1.5", "9223372036854775808"]) {
+      fireEvent.change(input, { target: { value: invalid } });
+      fireEvent.submit(input.closest("form")!);
+      expect(screen.getByRole("alert")).toHaveTextContent("positive whole number");
+      expect(mocks.updateRequirement).not.toHaveBeenCalled();
+    }
+    fireEvent.change(input, { target: { value: "35" } });
+    fireEvent.submit(input.closest("form")!);
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(
+      "The Project plan could not be changed. Please try again.",
+    ));
+    expect(input).toHaveValue(35);
+    expect(screen.queryByText(/postgres|supabase/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Requirement quantity updated.")).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate inline quantity saves while the trusted update is pending", async () => {
+    let resolveUpdate!: (result: { ok: true; value: { id: string } }) => void;
+    mocks.updateRequirement.mockReturnValueOnce(new Promise((resolve) => {
+      resolveUpdate = resolve;
+    }));
+    setPlanningState({ canManage: true });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit required quantity for Relay" }));
+    const input = screen.getByLabelText("Required quantity for Relay");
+    fireEvent.change(input, { target: { value: "35" } });
+    const save = screen.getByRole("button", { name: "Save" });
+    fireEvent.click(save);
+    fireEvent.click(save);
+    expect(mocks.updateRequirement).toHaveBeenCalledTimes(1);
+    expect(save).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await act(async () => resolveUpdate({ ok: true, value: { id: componentId } }));
+    await waitFor(() => expect(screen.queryByLabelText("Required quantity for Relay"))
+      .not.toBeInTheDocument());
+  });
+
   it("shows empty Project and empty requirement states", () => {
     setPlanningState({ data: { ok: true, value: [] } });
     const empty = render(<ProjectPlanningSection projectId={projectId} status="planned" />);
@@ -282,6 +397,7 @@ describe("ProjectPlanningSection", () => {
       expect(screen.queryByRole("button", { name: "Edit Requirement" })).not.toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
       expect(screen.queryByRole("columnheader", { name: "Actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Edit required quantity/ })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Remove Requirement" })).not.toBeInTheDocument();
       view.unmount();
     }

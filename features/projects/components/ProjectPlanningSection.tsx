@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil } from "lucide-react";
 
 import ConfirmDialog from "../../../shared/components/ConfirmDialog";
 import EmptyState from "../../../shared/components/EmptyState";
@@ -33,6 +33,13 @@ const inputClass =
   "mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200";
 const compactActionClass =
   "whitespace-nowrap rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300";
+const postgresBigintMax = "9223372036854775807";
+
+function isPositiveBigintQuantity(value: string): boolean {
+  return /^[1-9][0-9]*$/.test(value) &&
+    (value.length < postgresBigintMax.length ||
+      (value.length === postgresBigintMax.length && value <= postgresBigintMax));
+}
 
 function kindLabel(kind: ProjectRequirement["productKind"]): string {
   return kind === "pcb_finished_good" ? "Finished PCB Product" : "Component";
@@ -70,13 +77,88 @@ function RequirementsTable({
   group,
   canManage,
   onEdit,
+  onUpdateQuantity,
+  onQuantityUpdated,
   onRemove,
 }: {
   group: ProjectPlanningGroup;
   canManage: boolean;
   onEdit: (requirement: ProjectRequirement) => void;
+  onUpdateQuantity: (
+    requirement: ProjectRequirement,
+    quantity: string,
+  ) => Promise<MutationResult>;
+  onQuantityUpdated: () => void;
   onRemove: (requirement: ProjectRequirement) => void;
 }) {
+  const quantityErrorId = useId();
+  const quantityInputRef = useRef<HTMLInputElement>(null);
+  const editTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+  const returnFocusRequirementIdRef = useRef<string | null>(null);
+  const restoreFocusRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const [editingRequirementId, setEditingRequirementId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState("");
+  const [quantityError, setQuantityError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (editingRequirementId) {
+      quantityInputRef.current?.focus();
+    } else if (restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      if (returnFocusRequirementIdRef.current) {
+        editTriggerRefs.current.get(returnFocusRequirementIdRef.current)?.focus();
+      }
+    }
+  }, [editingRequirementId]);
+
+  function beginQuantityEdit(requirement: ProjectRequirement) {
+    returnFocusRequirementIdRef.current = requirement.id;
+    setEditingRequirementId(requirement.id);
+    setQuantity(requirement.requiredQuantity.toString());
+    setQuantityError(null);
+  }
+
+  function closeQuantityEdit() {
+    if (saving) return;
+    restoreFocusRef.current = true;
+    setEditingRequirementId(null);
+    setQuantity("");
+    setQuantityError(null);
+  }
+
+  async function saveQuantity(
+    event: FormEvent<HTMLFormElement>,
+    requirement: ProjectRequirement,
+  ) {
+    event.preventDefault();
+    if (saveLockRef.current) return;
+    if (!isPositiveBigintQuantity(quantity)) {
+      setQuantityError("Required Quantity must be a positive whole number.");
+      return;
+    }
+    saveLockRef.current = true;
+    setSaving(true);
+    setQuantityError(null);
+    try {
+      const result = await onUpdateQuantity(requirement, quantity);
+      if (!result.ok) {
+        setQuantityError(result.error.message);
+        return;
+      }
+      onQuantityUpdated();
+      restoreFocusRef.current = true;
+      setEditingRequirementId(null);
+      setQuantity("");
+    } catch {
+      setQuantityError("The requirement could not be saved. Please try again.");
+    } finally {
+      saveLockRef.current = false;
+      setSaving(false);
+    }
+  }
+
   return (
     <div
       data-testid={`requirements-scroll-${group.id}`}
@@ -120,7 +202,68 @@ function RequirementsTable({
                 <td className="px-3 py-3">{context?.category ?? "Unavailable"}</td>
                 <td className="px-3 py-3">{context ? context.brandName ?? "—" : "Unavailable"}</td>
                 <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-zinc-900">
-                  {requirement.requiredQuantity.toString()}
+                  {canManage && editingRequirementId === requirement.id ? (
+                    <form
+                      className="flex min-w-max items-start gap-2"
+                      aria-busy={saving}
+                      onSubmit={(event) => void saveQuantity(event, requirement)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape" && !saving) {
+                          event.preventDefault();
+                          closeQuantityEdit();
+                        }
+                      }}
+                    >
+                      <div>
+                        <label className="sr-only" htmlFor={`required-quantity-${requirement.id}`}>
+                          Required quantity for {requirement.productName}
+                        </label>
+                        <input
+                          ref={quantityInputRef}
+                          id={`required-quantity-${requirement.id}`}
+                          type="number"
+                          min="1"
+                          step="1"
+                          inputMode="numeric"
+                          value={quantity}
+                          disabled={saving}
+                          aria-invalid={Boolean(quantityError)}
+                          aria-describedby={quantityError ? quantityErrorId : undefined}
+                          className="w-24 rounded-lg border border-zinc-300 px-2 py-1.5 text-sm font-semibold tabular-nums outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                          onChange={(event) => {
+                            setQuantity(event.target.value);
+                            setQuantityError(null);
+                          }}
+                        />
+                        {quantityError && (
+                          <p id={quantityErrorId} role="alert" className="mt-1 max-w-56 whitespace-normal text-xs font-normal text-red-700">
+                            {quantityError}
+                          </p>
+                        )}
+                      </div>
+                      <button type="submit" className={compactActionClass} disabled={saving}>
+                        {saving ? "Saving…" : "Save"}
+                      </button>
+                      <button type="button" className={compactActionClass} disabled={saving} onClick={closeQuantityEdit}>
+                        Cancel
+                      </button>
+                    </form>
+                  ) : canManage ? (
+                    <button
+                      ref={(node) => {
+                        if (node) editTriggerRefs.current.set(requirement.id, node);
+                        else editTriggerRefs.current.delete(requirement.id);
+                      }}
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 font-semibold tabular-nums text-zinc-900 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-300"
+                      aria-label={`Edit required quantity for ${requirement.productName}`}
+                      disabled={saving}
+                      onClick={() => beginQuantityEdit(requirement)}
+                    >
+                      {requirement.requiredQuantity.toString()}
+                      <Pencil aria-hidden="true" className="h-3.5 w-3.5 text-zinc-500" />
+                    </button>
+                  ) : requirement.requiredQuantity.toString()}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 tabular-nums">
                   {context?.physicalQuantity.toString() ?? "Unavailable"}
@@ -603,6 +746,10 @@ export function ProjectPlanningSection({
                         group={group}
                         canManage={canManage}
                         onEdit={(requirement) => openRequirement({ mode: "edit", group, requirement })}
+                        onUpdateQuantity={(requirement, quantity) => planning.updateRequirement(
+                          requirement.id, requirement.productId, quantity,
+                        )}
+                        onQuantityUpdated={() => setSuccess("Requirement quantity updated.")}
                         onRemove={removeRequirementTarget}
                       />
                     </div>

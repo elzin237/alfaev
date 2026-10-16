@@ -143,6 +143,23 @@ describe("useProjectPlanning", () => {
     expect(invalidate).toHaveBeenCalledTimes(2);
     expect(mocks.hasPermission).toHaveBeenCalledWith("projects.edit");
     invalidate.mockClear();
+    await act(async () => {
+      await result.current.updateRequirement(
+        "component-id", "product-id", "9007199254740993",
+      );
+    });
+    expect(mocks.updateProjectRequirement).toHaveBeenCalledWith(
+      "component-id", "product-id", "9007199254740993",
+    );
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectPlanningQueryKey("profile-1", projectId),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledTimes(2);
+    invalidate.mockClear();
     mocks.removeProjectProduct.mockResolvedValueOnce({
       ok: false, error: { code: "children_present", message: "safe" },
     });

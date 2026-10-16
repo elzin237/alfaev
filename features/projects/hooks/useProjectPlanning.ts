@@ -95,7 +95,7 @@ export function useProjectPlanning(
       () => createProjectRequirement(groupId, productId, quantity),
     ),
     updateRequirement: (
-      id: string, productId: string, quantity: number,
+      id: string, productId: string, quantity: number | string,
     ) => changed(
       () => updateProjectRequirement(id, productId, quantity),
     ),

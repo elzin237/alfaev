@@ -225,7 +225,7 @@ describe("projectPlanningService", () => {
     mocks.rpc.mockResolvedValue({ data: groupId, error: null });
     await createProjectProduct(projectId, "  B24  ");
     await createProjectRequirement(groupId, productId, 5);
-    await updateProjectRequirement(componentId, productId, 7);
+    await updateProjectRequirement(componentId, productId, "9007199254740993");
     expect(mocks.rpc.mock.calls).toEqual([
       ["create_project_product", { p_project_id: projectId, p_name: "B24" }],
       ["create_project_product_component", {
@@ -236,7 +236,7 @@ describe("projectPlanningService", () => {
       ["update_project_product_component", {
         p_component_id: componentId,
         p_product_id: productId,
-        p_required_quantity: 7,
+        p_required_quantity: "9007199254740993",
       }],
     ]);
   });
