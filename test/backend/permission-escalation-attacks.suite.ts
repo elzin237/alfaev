@@ -276,7 +276,7 @@ export function registerPermissionEscalationAttackTests(
         );
         const permissionKeys = definitions.rows.map((row) => row.key);
 
-        expect(permissionKeys).toHaveLength(30);
+        expect(permissionKeys).toHaveLength(32);
 
         for (const permissionKey of permissionKeys) {
           for (const target of [attacker, activeTarget, inactiveTarget]) {

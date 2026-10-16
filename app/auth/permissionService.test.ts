@@ -17,8 +17,8 @@ beforeEach(() => {
 
 describe("permissionService", () => {
   it("contains exactly the canonical delegable permission keys", () => {
-    expect(PERMISSION_KEYS).toHaveLength(30);
-    expect(new Set(PERMISSION_KEYS).size).toBe(30);
+    expect(PERMISSION_KEYS).toHaveLength(32);
+    expect(new Set(PERMISSION_KEYS).size).toBe(32);
     expect(PERMISSION_KEYS).not.toContain("users.manage");
     expect(PERMISSION_KEYS).not.toContain("calendar.manage");
     expect(PERMISSION_KEYS).not.toContain("inventory.adjust");

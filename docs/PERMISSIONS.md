@@ -84,10 +84,32 @@ The Admin user-management UI should expose a clear checkbox/toggle matrix for no
 - Create Projects
 - Edit Projects
 - Delete/Archive Projects
+- Send Project Activity Alerts
+- Receive Project Activity Alerts
 
 Project reads require an active Admin or View Projects (`projects.view`). Create uses `projects.create`. Normal field edits and normal status changes use `projects.edit` and handle only `planned`, `in_progress`, and `on_hold`; normal edit can no longer set `completed` or `cancelled`. Project completion is performed atomically by the trusted final-Work-Order Finish flow. Delete/Archive Projects (`projects.archive`) authorizes the separate trusted cancellation transition from `planned`, `in_progress`, or `on_hold` to `cancelled`; it does not authorize hard deletion, Completed Project cancellation, or restoration/reactivation. The only Completed Project reopen is the explicit Admin-only `completed` to `in_progress` operation. No separate cancel/status permission and no additional Project permission key are added.
 
 Project Product and Project component-requirement reads use the same active Admin or `projects.view` authority. Their trusted mutations require an active Admin or `projects.edit`. Completed and Cancelled Projects reject normal planning mutations.
+
+Project Activity reads use the same active Admin or View Projects (`projects.view`)
+authority; no separate Activity-read permission exists. Posting an update requires an
+active Admin or Edit Projects (`projects.edit`) and is allowed only for `planned`,
+`in_progress`, or `on_hold` Projects. Historical Activity on Completed/Cancelled
+Projects remains readable.
+
+`Post & send alert` requires both Activity-post authority and Send Project Activity
+Alerts (`projects.alerts.send`), with Admin bypass applying independently to those
+action checks. Edit Projects alone never authorizes alert sending.
+
+Receive Project Activity Alerts (`projects.alerts.receive`) is an explicit operational
+subscription assignment. Send-time eligibility additionally requires the user to be
+active, have effective `dashboard.view` and `projects.view` access through Admin bypass
+or explicit grants, and not be the sender.
+Admin status alone does not place an Admin in the recipient inbox; an Admin must also
+have an explicit stored `projects.alerts.receive` assignment to be snapshotted as a
+recipient. This recipient-selection rule does not limit Admin's normal system access.
+Historical recipient membership remains stored, but current active state plus current
+effective Dashboard and Project read access still governs notification visibility.
 
 ### Nabavka / Procurement
 

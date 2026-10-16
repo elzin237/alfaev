@@ -64,7 +64,8 @@ Expected dashboard content includes:
 - recent products/components
 - important inventory information
 - active Nabavka information
-- recent system activity
+- recent AuditLog system/business activity
+- Project Activity alerts for explicitly addressed recipients
 - other high-value cross-module summaries
 
 Dashboard access must inherit module permissions:
@@ -75,6 +76,11 @@ Dashboard access must inherit module permissions:
 - Dashboard must never leak data from an unauthorized module
 
 Exact dashboard widgets should be finalized only after the underlying modules exist.
+
+Project Activity alerts are a distinct Dashboard-heading inbox, not the global Topbar
+and not the AuditLog activity widget. Compact rows show Project name, Activity title,
+author, timestamp, and unread/read state only. V1 uses bounded normal fetches and has no
+Realtime subscription, polling, or Mark all as read action.
 
 ---
 
@@ -153,6 +159,46 @@ Locked Project statuses:
 - On Hold
 - Completed
 - Cancelled
+
+### Project Activity collaboration
+
+Project Activity is an append-only human collaboration timeline and is not AuditLog.
+Each update has a Project, retained author, required plain-text title (trimmed,
+1–120), required plain-text description (trimmed, 1–5000 with internal newlines),
+created timestamp, unique client request UUID, and at most one optional immutable
+private image.
+
+Activity is readable by an active Admin or `projects.view`. Posting requires an active
+Admin or `projects.edit` and an open Project (`planned`, `in_progress`, `on_hold`).
+Completed/Cancelled Projects retain readable history but reject new updates. V1 has no
+edit/delete/Admin-delete, attachment replacement/removal, or alert resend.
+
+`Post update` creates Activity only. `Post & send alert` also requires active Admin or
+`projects.alerts.send`; Edit Projects alone is insufficient. It creates one alert and a
+send-time recipient snapshot without copying Activity content into notifications.
+Eligible recipients are active, explicitly assigned `projects.alerts.receive`,
+currently authorized through effective `dashboard.view` and `projects.view` access,
+and are not the sender.
+Admin status by itself is not a recipient subscription. Zero recipients fails the
+entire request.
+
+Later permission changes do not rewrite the recipient snapshot, but current active,
+Dashboard, and Project access governs whether a historical notification can be seen or
+opened. Clicking a notification marks only that recipient row read and opens
+`/projects/<projectId>#activity-<activityId>`; merely opening the panel or Project does
+not mark it read.
+
+Activity and notifications load newest first with keyset pagination, default 20 and
+limit 1–50. Activity uses normal page flow with `Load more`, not a nested scrolling
+timeline. The optional attachment is private JPEG/PNG/WebP only, maximum 5 MiB, with
+trusted content validation, server-selected path, and authorized signed reads.
+
+Posting is idempotent through one client request UUID. Identical retry content/image
+identity/alert intent reconciles to the same Activity; conflicting reuse fails.
+Database Activity, attachment metadata, optional alert/recipients, and narrow AuditLog
+events commit atomically. The AuditLog events are `project_activity.created` and, when
+applicable, `project_activity.alert_sent`; neither stores the full description/image,
+and mark-read is not audited.
 
 ---
 
@@ -680,10 +726,15 @@ Audit coverage includes meaningful changes to:
 - Calendar
 - users
 - permissions
+- Project Activity creation and alert sending through narrow system events
 
 Do not log meaningless UI activity such as opening a menu or clicking a sidebar item.
 
 Audit entries are immutable and cannot be edited or deleted.
+
+AuditLog is not the Project Activity timeline. Human-authored Activity content remains
+in its own immutable Project collaboration domain; only the narrow creation/alert
+events enter Archive.
 
 Archive should support practical searching/filtering because the dataset will grow over time.
 

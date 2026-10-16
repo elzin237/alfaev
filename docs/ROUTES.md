@@ -69,6 +69,7 @@ Early implementation:
 
 Final implementation:
 - permission-aware cross-module overview
+- Project Activity Alerts control on the right side of the Dashboard content heading
 
 Access:
 - Admin: full Dashboard
@@ -76,6 +77,11 @@ Access:
 - widgets/data also inherit permissions of their source modules
 
 Dashboard must never reveal unauthorized module data.
+
+Project Activity alerts are not a Topbar feature. Inbox visibility requires a stored
+send-time recipient row plus current active state, `dashboard.view`, and
+`projects.view` for the target Project. Admin status alone does not create recipient
+membership.
 
 ---
 
@@ -114,10 +120,16 @@ Shows:
 - derived physical material usage and outstanding commitment
 - linked Draft and Finished Work Orders
 - linked PCB production where applicable
-- relevant history/activity
+- append-only human-authored Project Activity
 
 Access:
 - same read permission as Projects list
+
+Deep link:
+- `/projects/<projectId>#activity-<activityId>`
+- uses the same Project route/read authority; the fragment grants no access
+- if the Activity is outside the first timeline page, use an authorized narrow by-ID
+  read before scrolling/focusing it
 
 Rules:
 - Completed Project is read-only
@@ -126,6 +138,9 @@ Rules:
 - finishing the final unfinished Work Order automatically completes the Project
 - planning requirements are editable only while the Project is open and never directly deduct Inventory
 - actual material usage and outstanding commitment are derived; physical usage is not manually edited
+- Activity posting requires Admin or `projects.edit` and is available only while the
+  Project is Planned/In Progress/On Hold
+- Completed/Cancelled historical Activity remains readable but cannot receive new posts
 
 ---
 

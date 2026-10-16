@@ -48,6 +48,7 @@ import { registerProcurementOptionalSupplierTests } from "./procurement-optional
 import { registerProcurementLifecycleTests, registerProcurementProductConcurrencyTests } from "./procurement-lifecycle.suite";
 import { registerPcbTests } from "./pcb.suite";
 import { registerPcbProductionWorkOrderTests } from "./pcb-production-work-orders.suite";
+import { registerProjectActivityFoundationTests } from "./project-activity-foundation.suite";
 
 describe("Supabase security helpers", () => {
   // Register domain suites under one fixture lifecycle to avoid repeated Auth setup.
@@ -101,5 +102,6 @@ describe("Supabase security helpers", () => {
   registerProcurementLifecycleTests(requireHarness);
   registerPcbTests(requireHarness);
   registerPcbProductionWorkOrderTests(requireHarness);
+  registerProjectActivityFoundationTests(requireHarness);
   registerProcurementProductConcurrencyTests(requireHarness);
 });

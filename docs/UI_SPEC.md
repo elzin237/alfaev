@@ -119,7 +119,9 @@ Expected responsibilities:
 
 The Project quick-search uses only the canonical Project name, returns a small
 bounded result set, and opens the existing Project detail route. The Topbar does
-not show placeholder notification or account-menu controls.
+not show placeholder notification or account-menu controls. Project Activity alerts
+belong in the Dashboard content heading and must never be added to Topbar, Project
+search, current-user/Admin identity, or Logout.
 
 Do not overload Topbar with module-specific actions.
 
@@ -406,7 +408,7 @@ Potential sections:
 - recent Work Orders
 - active Nabavka
 - Inventory alerts / recent products
-- recent business activity
+- recent AuditLog business activity
 - Calendar upcoming events
 
 Rules:
@@ -417,6 +419,23 @@ Rules:
 - do not fetch unauthorized data and merely hide the widget
 
 Dashboard should summarize, not duplicate full module pages.
+
+The Dashboard content-heading row reserves its right side for the Project Activity
+Alerts control and unread count. The left side remains:
+
+- `Dashboard`
+- `Overview of the work and projects available to you.`
+
+The future V1 Alerts panel uses bounded internal scrolling and provides loading,
+empty, and error/retry states. It is keyboard accessible and closes by Escape or
+outside click. Notifications are newest first and show only Project name, Activity
+title, author, timestamp, and unread/read state; they do not show the Activity
+description or image.
+
+Opening the panel does not mark alerts read. Clicking a row marks only that recipient
+row read and navigates to `/projects/<projectId>#activity-<activityId>`. V1 has no
+Mark all as read, polling, or Realtime subscription. Refetch on Dashboard load, panel
+open, window focus, successful alert send, mark-read, and explicit retry.
 
 ---
 
@@ -501,7 +520,49 @@ List Finished/Draft Work Orders linked to Project.
 Only Project-linked runs.
 
 ### Activity
-Relevant Audit events.
+
+Project Activity is a human-authored collaboration timeline, separate from AuditLog.
+
+For an active Admin or user with `projects.edit`, an open Project (`planned`,
+`in_progress`, or `on_hold`) shows a composer above the timeline with:
+
+- Title
+- Description
+- optional single image
+- `Post update`
+- `Post & send alert` only when the actor also has Admin or
+  `projects.alerts.send` authority
+
+Title is required trimmed plain text, 1–120 characters. Description is required
+trimmed plain text, 1–5000 characters, preserving internal newlines. The optional
+image accepts JPEG, PNG, or WebP only, maximum 5 MiB. The UI may use the Activity title
+as fallback alt text.
+
+Completed/Cancelled Projects and users without post authority show the readable
+timeline without the composer. Existing Activity remains readable for active Admin or
+`projects.view` users.
+
+Each timeline item shows:
+
+- title
+- description
+- author
+- absolute timestamp
+- optional image
+- `Alert sent` badge when an alert event exists
+
+The timeline is newest first in normal page flow. It loads 20 initially and uses
+`Load more` keyset pagination; do not put it in a constrained nested scroll. A direct
+Activity link not found in the first page uses an authorized by-ID read, renders the
+target, then scrolls/focuses it.
+
+Activity is immutable. Do not provide edit/delete/Admin-delete, attachment
+replace/remove, or alert-resend controls. While submitting, prevent duplicate submits;
+the trusted request UUID/database contract remains the idempotency authority.
+
+When `Post & send alert` has no eligible non-sender recipients, show the clear domain
+error and keep the form content for correction/retry. Never silently downgrade it to
+`Post update`.
 
 Completed Project:
 

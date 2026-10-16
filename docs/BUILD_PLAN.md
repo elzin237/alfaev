@@ -2983,7 +2983,9 @@ Goal:
 - recent authorized business activity
 - upcoming Calendar/company info
 
-Archive activity must respect Archive/module visibility rules.
+Archive activity here means AuditLog business events and must respect Archive/module
+visibility rules. It is distinct from the human-authored Project Activity and alert
+inbox defined in the staged Project Activity/Alerts phase below.
 
 ---
 
@@ -2996,6 +2998,111 @@ Prove:
 - no unauthorized module data leaves backend
 - hidden widgets are not merely client-hidden
 - Admin sees full view
+
+---
+
+# PHASE P1 — Project Activity + Alerts
+
+## Task A — Freeze Canonical Business / Security Rules
+
+Goal:
+- align all canonical documents on the append-only human Project Activity model
+- freeze Activity/alert permissions, recipients, atomicity, idempotency, pagination,
+  private image, Dashboard placement, deep-link, and AuditLog boundaries
+
+Documentation/contract only. Do not create schema, Storage, backend, or UI.
+
+---
+
+## Task B — Permission Definitions + Schema / RLS / Storage Foundation
+
+Goal:
+- add delegable `projects.alerts.send` and `projects.alerts.receive`
+- create Activity, optional attachment, alert event, and recipient tables
+- add only the locked constraints and indexes
+- enable RLS with no broad browser writes
+- create the private image bucket and restrictive policies
+
+Preserve the locked rule that Admin status authorizes system actions but does not by
+itself subscribe an Admin as an alert recipient.
+
+---
+
+## Task C — Trusted Activity / Alert Write + Bounded Activity Reads
+
+Goal:
+- implement authoritative post/send authorization and Project-status locking
+- implement title/description validation and request-UUID idempotency
+- atomically insert Activity, optional attachment metadata, alert, recipient snapshot,
+  and narrow `project_activity.created` / `project_activity.alert_sent` AuditLog events
+- fail the complete alert-intent request when there are zero eligible recipients
+- add newest-first Activity page and authorized by-ID reads
+
+Do not copy full Activity description/image into AuditLog or notification rows.
+
+---
+
+## Task D — Trusted Attachment Upload / Signing Edge Boundary
+
+Goal:
+- validate JPEG/PNG/WebP bytes and decoded image where supported, maximum 5 MiB
+- use server-generated random private object paths and service-role-only mutation
+- provide exact referenced-object authorized signing
+- implement best-effort definitive-orphan cleanup and indeterminate-outcome
+  idempotency reconciliation
+
+Do not expose service-role credentials, public URLs, caller-selected paths, SVG, or
+animated formats.
+
+---
+
+## Task E — Project Activity Composer / Timeline UI
+
+Goal:
+- add the open-Project composer with Title, Description, optional image,
+  `Post update`, and permission-aware `Post & send alert`
+- render append-only Activity newest first in normal page flow, 20 initially, with
+  keyset `Load more`
+- show author, absolute timestamp, optional image, and Alert sent badge
+- keep Completed/Cancelled history readable without posting controls
+
+Do not add edit/delete/resend or a constrained nested timeline scroll.
+
+---
+
+## Task F — Notification Inbox / Read-State Backend
+
+Goal:
+- add bounded newest-first recipient inbox reads with current active/Dashboard/Project
+  authorization rechecks
+- add unread count and per-recipient click-to-read mutation
+- preserve immutable send-time membership while hiding rows when current access is lost
+
+Default 20, allowed 1–50, keyset `(created_at, recipient_row_id)`; no OFFSET,
+unbounded read, Mark all as read, polling, or Realtime.
+
+---
+
+## Task G — Dashboard Heading Alerts Control / Panel
+
+Goal:
+- place Alerts/unread count on the right side of the Dashboard content-heading row
+- add bounded panel loading, empty, error/retry, keyboard, Escape, outside-click, and
+  read/unread behavior
+- show Project name, Activity title, author, and timestamp only
+
+Keep the global Topbar unchanged.
+
+---
+
+## Task H — Deep Link + E2E / Security Hardening
+
+Goal:
+- navigate alert clicks to `/projects/<projectId>#activity-<activityId>`
+- use authorized by-ID loading, scroll, and focus when outside the first page
+- prove RLS/direct-call resistance, recipient snapshot/current-access behavior,
+  sender exclusion, zero-recipient rollback, idempotent retry/conflict, Storage cleanup,
+  pagination, inactive-user denial, and Completed/Cancelled behavior
 
 ---
 
@@ -3464,7 +3571,8 @@ Return only:
 
 # Why This Plan Is Intentionally Granular
 
-This plan has **165 execution tasks**, but they are grouped into coherent phases.
+This plan has **165 numbered execution tasks plus the staged Project Activity/Alerts
+Tasks A–H**, grouped into coherent phases.
 
 The task count is not a sign that AlfaEV is overengineered. It separates work that Codex performs better when it does not have to reason about five unrelated boundaries at once.
 

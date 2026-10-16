@@ -680,6 +680,63 @@ requirements remain planning/reference data rather than an allocation boundary. 
 Order Finish remains the only physical consumption event and must not also deduct
 ProjectProductComponent quantities.
 
+Project Activity is an append-only human collaboration record and is not AuditLog.
+Its title is required trimmed nonblank plain text of 1–120 characters. Its description
+is required trimmed nonblank plain text of 1–5000 characters and preserves internal
+newlines. Frontend checks are UX only; trusted backend validation is authoritative.
+Reading Activity, including a direct deep-linked Activity, requires an active Admin or
+`projects.view`; no separate Activity-read permission exists. Posting requires an
+active Admin or `projects.edit`, and the trusted
+write must lock/re-check that the Project is currently `planned`, `in_progress`, or
+`on_hold`. Completed and Cancelled Projects retain readable historical Activity but
+reject new posts.
+
+`Post & send alert` requires both Activity-post authority and alert-send authority:
+the actor must be an active Admin or have `projects.edit`, and must also be an active
+Admin or have `projects.alerts.send`. Alert recipients are selected explicitly at send
+time. Admin status alone never subscribes a user. Each recipient must be active, have
+an explicit `projects.alerts.receive` assignment, have current effective
+`dashboard.view` and `projects.view` access (through Admin bypass or explicit grants),
+and not be the sender. If that set is empty, the entire operation
+fails; no Activity or partial alert fanout persists.
+
+Recipient membership is snapshotted at send time, but current access still governs
+reads. A stored recipient can see/open the historical notification only while active
+and currently authorized by effective `dashboard.view` and `projects.view` access for
+its Project.
+Permission removal hides rather than deletes the recipient history; restoring access
+may make the historically addressed notification visible again. Marking a notification
+read changes only that recipient's row and occurs only on notification click, not panel
+open or unrelated Project navigation.
+
+All Activity/alert tables must use RLS with no broad browser writes. Trusted functions
+must be `SECURITY DEFINER`, use an empty `search_path`, grant execution only to
+`authenticated`, perform explicit active-user/Project checks, and expose bounded reads.
+Activity and notification history use keyset pagination, default 20 and allowed 1–50;
+OFFSET and unbounded reads are forbidden.
+
+An Activity may have at most one immutable private image attachment. Only JPEG, PNG,
+or WebP is allowed, up to 5 MiB; SVG and animated formats are forbidden. Trusted upload
+handling must validate byte signatures and decoded image data where supported, choose
+a random server-generated object path, permit only signed authorized reads, and prevent
+browser replacement/deletion. Storage mutation is service-role-only. The cross-system
+workflow must clean definitive orphans best-effort and reconcile indeterminate database
+outcomes idempotently without exposing service credentials or arbitrary signing.
+
+Every submission uses one client-generated request UUID. An identical retry for the
+same Project, normalized title/description, image identity/metadata, and alert intent
+must return/reconcile to the same Activity; conflicting reuse must fail. Database
+uniqueness is authoritative. One database transaction must atomically cover Activity,
+optional attachment metadata, optional alert event, recipient snapshot rows, and narrow
+AuditLog events. Database failure leaves none of them committed.
+
+The trusted operation appends `project_activity.created` without copying the full
+description or image into AuditLog. Alert generation additionally appends
+`project_activity.alert_sent` with only safe identifiers/state and recipient count.
+Mark-read creates no AuditLog event. V1 uses bounded refetches on Dashboard load, panel
+open, window focus, send, mark-read, and explicit retry; it has no Realtime subscription
+or polling.
+
 When a Work Order finishes, the trusted transaction must check for other unfinished
 Work Orders on the same Project. If none remain, it atomically completes the Project,
 sets server-owned lifecycle/update metadata, releases unused commitment, and appends

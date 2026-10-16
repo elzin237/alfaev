@@ -146,6 +146,8 @@ Examples of delegable permission keys:
 - `projects.create`
 - `projects.edit`
 - `projects.archive`
+- `projects.alerts.send`
+- `projects.alerts.receive`
 
 ### Nabavka
 - `procurement.view`
@@ -763,6 +765,138 @@ For a PCB produced for general stock with no Project:
 - if that PCB finished good is later consumed by a Project Work Order, the Project sees the finished PCB item as the consumed stock item
 
 This preserves traceability without inventing raw-material attribution after the fact.
+
+---
+
+## 8.6 ProjectActivityUpdate
+
+Immutable human-authored Project collaboration content. It is a domain record distinct
+from AuditLog.
+
+Fields:
+
+- `id`
+- `project_id`
+  - required Project reference with historical preservation
+- `author_user_id`
+  - required retained UserProfile reference with restrictive delete behavior
+- `request_id`
+  - required client-generated UUID
+  - unique idempotency authority
+- `title`
+  - required normalized plain text
+  - 1–120 characters after trimming
+- `description`
+  - required normalized plain text
+  - 1–5000 characters after trimming
+  - preserves internal newlines
+- `created_at`
+  - server-owned timestamp
+
+Rules:
+
+- append-only; V1 has no edit or delete, including no Admin delete
+- corrections are separate Activity updates
+- inactive authors remain resolvable historically, but cannot post
+- Activity read requires active Admin or `projects.view`
+- posting requires active Admin or `projects.edit` and a Project currently in
+  `planned`, `in_progress`, or `on_hold`
+- Completed and Cancelled Projects retain readable Activity but reject posting
+- deterministic newest-first index: `(project_id, created_at DESC, id DESC)`
+- bounded reads use default 20, limit 1–50, and keyset `(created_at, id)`
+
+## 8.7 ProjectActivityAttachment
+
+Optional immutable private image metadata for one Activity update.
+
+Fields:
+
+- `id`
+- `project_activity_id`
+  - required and unique; enforces at most one attachment per Activity
+- `storage_path`
+  - required, server-generated, and unique
+- `mime_type`
+  - exactly `image/jpeg`, `image/png`, or `image/webp`
+- `byte_size`
+  - required, positive, maximum 5 MiB
+- `content_hash`
+  - required trusted content identity used for validation/idempotency
+- `alt_text`
+  - optional normalized plain text
+- `created_at`
+  - server-owned timestamp
+
+Rules:
+
+- no attachment replacement or removal in V1
+- no SVG or animated image format
+- object remains private and is read only through exact authorized signing
+- browser callers never choose arbitrary object paths or directly replace/delete objects
+- the UI may use the Activity title when explicit alt text is absent
+
+## 8.8 ProjectActivityAlert
+
+One optional alert-send event for an Activity update.
+
+Fields:
+
+- `id`
+- `project_activity_id`
+  - required and unique; at most one alert event per Activity
+- `sent_by_user_id`
+  - required retained UserProfile reference
+- `sent_at`
+  - required server-owned timestamp
+
+Rules:
+
+- Activity content is referenced, not duplicated into this row
+- no alert resend in V1
+- sending requires Activity-post authority plus active Admin or
+  `projects.alerts.send`
+- zero eligible recipients fails the whole Activity/alert database transaction
+
+## 8.9 ProjectActivityAlertRecipient
+
+Immutable send-time recipient membership plus per-recipient read state.
+
+Fields:
+
+- `id`
+- `alert_id`
+  - required ProjectActivityAlert reference
+- `recipient_user_id`
+  - required retained UserProfile reference
+- `created_at`
+  - required server-owned timestamp
+- `read_at`
+  - nullable server-owned timestamp
+
+Rules:
+
+- unique `(alert_id, recipient_user_id)`
+- send-time eligibility requires active state, an explicit
+  `projects.alerts.receive` assignment, effective `dashboard.view` and `projects.view`
+  access through Admin bypass or explicit grants, and a user other than the sender
+- Admin status alone does not make a user a recipient
+- membership is frozen; later permission grants/removals do not insert/delete history
+- current active state plus current `dashboard.view` and `projects.view` governs
+  notification visibility/opening
+- only notification click marks that recipient row read; panel open and unrelated
+  Project navigation do not
+- inbox index: `(recipient_user_id, created_at DESC, id DESC)`
+- unread inbox uses a partial index with `read_at IS NULL`
+- bounded reads use default 20, limit 1–50, and keyset
+  `(created_at, recipient_row_id)`
+
+The Activity insert, optional attachment metadata, optional alert event, recipient
+snapshot, and narrow AuditLog inserts form one database transaction. `request_id`
+retries with identical Project, normalized content, image identity/metadata, and alert
+intent return/reconcile to the same Activity; conflicting reuse fails. Storage upload
+cannot share the PostgreSQL transaction and therefore uses trusted private upload,
+best-effort cleanup on definitive failure, and idempotent reconciliation after an
+indeterminate database outcome.
 
 ---
 
@@ -1516,6 +1650,11 @@ Rules:
 - Non-admin widgets must be limited to modules the user has permission to view.
 - Global company information such as Calendar may be shown to all authenticated users.
 - Dashboard itself must not become an authorization bypass.
+- The Project Activity alert inbox is a separate bounded read model over immutable
+  send-time recipient membership. It additionally re-checks current active state and
+  effective `dashboard.view` plus `projects.view` access before returning a row.
+- Admin bypass authorizes Dashboard/Project access but does not substitute for the
+  explicit `projects.alerts.receive` assignment required for recipient membership.
 
 ---
 
@@ -1525,6 +1664,8 @@ Rules:
 UserProfile
   ├─< UserPermission >─ PermissionDefinition
   ├─< AuditLog
+  ├─< ProjectActivityUpdate
+  ├─< ProjectActivityAlertRecipient
   ├─< InventoryMovement
   ├─< ProcurementRequest
   ├─< WorkOrder
@@ -1546,7 +1687,11 @@ Project
   ├─< ProjectProduct
   │    └─< ProjectProductComponent >─ Product
   ├─< WorkOrder
-  └─< PcbProductionRun
+  ├─< PcbProductionRun
+  └─< ProjectActivityUpdate
+       ├─0..1 ProjectActivityAttachment
+       └─0..1 ProjectActivityAlert
+            └─< ProjectActivityAlertRecipient
 
 PcbCard
   ├─1 Product (finished-goods output)
@@ -1592,6 +1737,10 @@ FixedAsset
 | Project | Yes subject to lifecycle | Completed is normally read-only and may be explicitly reopened only by Admin; Cancelled is the historical removal/archive state with no current restore workflow |
 | ProjectProduct | Yes while Project is open | No normal changes after Project Completed/Cancelled |
 | ProjectProductComponent | Yes while Project is open | Planned requirement; never a physical Inventory movement |
+| ProjectActivityUpdate | No | Human-authored append-only Project collaboration; correct with a later update |
+| ProjectActivityAttachment | No | At most one private immutable image per Activity |
+| ProjectActivityAlert | No | At most one send event per Activity; no resend in V1 |
+| ProjectActivityAlertRecipient | Read state only | Recipient membership immutable; only own `read_at` may transition from NULL |
 | ProcurementRequest | Yes until resolved | Resolved is terminal, stays historical, and has no hard-delete, reopen, or reactivation workflow |
 | PcbCard | Yes subject to history | Archive if production history exists |
 | Used PcbBomVersion | No | Immutable |
@@ -1661,6 +1810,20 @@ If PDF byte generation cannot participate in the same database transaction, the 
 - allocate `RN-YYYY-NNNN` safely
 - never duplicate/reuse a number
 - create Draft WorkOrder
+
+## Project Activity post / alert send
+- normalize and validate title/description and optional attachment metadata
+- re-check active actor, Project authority, and writable Project status under lock
+- enforce one client request UUID as the idempotency authority
+- insert Activity and optional attachment metadata
+- for alert intent, re-check both post/send authority and snapshot all eligible
+  non-sender recipients; reject an empty set
+- insert one optional alert event and recipient rows
+- append narrow `project_activity.created` and optional
+  `project_activity.alert_sent` AuditLog events
+- commit all database rows together or none
+- reconcile the separate trusted private-Storage step without exposing service-role
+  credentials or deleting a potentially committed object on an indeterminate outcome
 
 ---
 

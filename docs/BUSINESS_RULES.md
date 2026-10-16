@@ -171,6 +171,62 @@ Admin may explicitly reopen a Completed Project by changing it back to In Progre
 
 Reopening must create an audit event.
 
+### Project Activity and alerts
+
+Project Activity is immutable human-authored collaboration content, separate from the
+immutable trusted system/business-event AuditLog. Each update belongs to one Project
+and stores its retained author, a created timestamp, a unique client request UUID, a
+required title, a required description, and at most one optional immutable image.
+
+The title is trimmed plain text, nonblank, and 1–120 characters. The description is
+trimmed plain text, nonblank, and 1–5000 characters; internal newlines are preserved.
+Frontend validation mirrors these rules, while the trusted backend is authoritative.
+V1 Activity is append-only: there is no edit, delete, Admin delete, attachment replace
+or remove, or alert resend. Corrections are posted as a new update.
+
+An active Admin or active user with `projects.view` may read Activity, including a
+deep-linked item. An active Admin or active user with `projects.edit` may post only
+while the Project is `planned`, `in_progress`, or `on_hold`. Completed and Cancelled
+Projects reject new posts but retain readable historical Activity.
+
+`Post update` creates only Activity. `Post & send alert` creates the same Activity,
+one alert event, and a recipient snapshot without duplicating Activity content into
+notification rows. It requires both Activity-post authority and Admin or
+`projects.alerts.send`. If there are no eligible recipients after excluding the sender,
+the entire request fails rather than silently posting Activity alone.
+
+An eligible recipient must be active, hold an explicit `projects.alerts.receive`
+assignment, have current effective `dashboard.view` and `projects.view` access through
+Admin bypass or explicit grants, and not be the sender.
+Admin status does not itself subscribe a user. The send-time recipient set is frozen:
+later grants do not add historical recipients and later removal does not delete stored
+recipient rows. Current active state plus current Dashboard and Project access still
+controls visibility, so historical alerts never bypass current Project authorization.
+
+Each recipient starts unread. Clicking a notification marks only that recipient row
+read and then opens `/projects/<projectId>#activity-<activityId>`. Opening the panel or
+Project by another path does not mark it read. V1 has no Mark all as read action.
+
+Activity and notifications are newest-first bounded reads with default limit 20,
+allowed limits 1–50, and keyset cursors `(created_at, id)` and
+`(created_at, recipient_row_id)` respectively. Neither uses OFFSET or unbounded reads.
+If a deep-linked Activity is outside the first page, an authorized narrow by-ID read
+loads and focuses it.
+
+The optional image is private JPEG, PNG, or WebP, maximum 5 MiB, with no SVG or animated
+format. Trusted handling validates actual content, chooses the object path, permits only
+authorized signed reads, and treats the attachment as immutable. Alt text is optional;
+the UI may fall back to the Activity title.
+
+One request UUID covers a submission. An identical retry for the same Project,
+normalized content, image identity/metadata, and alert intent returns/reconciles to the
+same Activity; conflicting reuse fails. The database transaction atomically creates
+the Activity, optional alert/recipient rows, attachment metadata, and narrow AuditLog
+events. Storage/database reconciliation follows the trusted idempotent workflow.
+
+V1 has no Realtime notification subscription and no polling. It refetches on Dashboard
+load, panel open, window focus, successful send, mark-read, and explicit retry.
+
 ---
 
 ## 4. Nabavka / Procurement Rules
@@ -872,8 +928,13 @@ Examples:
 - permission changed
 - Documentation/PDF changed
 - Fixed Asset changed
+- Project Activity created (narrow `project_activity.created` event only)
+- Project Activity alert sent (narrow `project_activity.alert_sent` event only)
 
 Do not generate audit noise for pure UI interactions.
+
+Project Activity descriptions and images are collaboration content and must not be
+copied into AuditLog. Marking an Activity alert read creates no AuditLog event.
 
 Pure derived commitment/availability calculations create no AuditLog noise.
 

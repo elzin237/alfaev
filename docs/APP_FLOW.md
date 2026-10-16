@@ -86,8 +86,13 @@ Expected eventual widgets may include:
 - recent Products
 - Inventory warnings/summary
 - active Nabavka
-- recent Audit/activity
+- recent AuditLog business activity
 - company Calendar information
+
+Project Activity alerts appear only in an Alerts control on the right side of the
+Dashboard content-heading row. They do not appear in the global Topbar. The inbox is
+loaded with bounded normal fetches on Dashboard load, panel open, window focus, after
+send/read actions, and explicit retry; V1 has no polling or Realtime subscription.
 
 ---
 
@@ -153,6 +158,41 @@ They derive from:
 - Project-linked PCB production input consumption
 
 The Project detail page provides traceability back to the original operation.
+
+## Project Activity collaboration
+
+1. An active Admin or user with `projects.view` opens the Project detail Activity
+   timeline. It loads the newest 20 immutable human-authored updates, with keyset
+   `Load more` pagination.
+2. If the Project is `planned`, `in_progress`, or `on_hold`, an active Admin or user
+   with `projects.edit` may enter a required title, required description, and at most
+   one optional private JPEG/PNG/WebP image up to 5 MiB.
+3. `Post update` submits one client-generated request UUID and creates Activity only.
+4. `Post & send alert` is shown/accepted only when the actor also has Admin or
+   `projects.alerts.send` authority. The trusted operation excludes the sender and
+   snapshots active users with an explicit `projects.alerts.receive` assignment plus
+   current effective `dashboard.view` and `projects.view` access.
+5. If no eligible recipient remains, the entire alert-intent submission fails and no
+   Activity is saved. Otherwise Activity, attachment metadata, alert, recipients, and
+   narrow AuditLog events commit atomically.
+6. Completed/Cancelled Projects show historical Activity but no composer.
+7. Activity is append-only. A correction is another update; V1 has no edit, delete,
+   Admin delete, image replace/remove, or alert resend.
+
+## Dashboard Activity-alert flow
+
+1. An explicitly addressed active recipient with current `dashboard.view` and
+   `projects.view` opens the Dashboard Alerts control.
+2. The bounded panel shows Project, Activity title, author, timestamp, and unread/read
+   state, newest first; it does not duplicate the description/image.
+3. Opening the panel does not mark anything read.
+4. Clicking one notification marks only that recipient row read, then opens
+   `/projects/<projectId>#activity-<activityId>`.
+5. If the item is outside the first Activity page, an authorized narrow by-ID read
+   renders, scrolls to, and focuses the target.
+6. A stored recipient row is hidden while current active/Dashboard/Project access is
+   absent and may become visible again if that access is restored. Recipient membership
+   itself is never recomputed retroactively.
 
 ---
 
@@ -707,6 +747,8 @@ Examples:
 - Project created/edited/status changed
 - Project Product/component requirement changed
 - Project automatically completed by final Work Order Finish
+- Project Activity created (narrow system event; free text/image excluded)
+- Project Activity alert sent (safe IDs/state and recipient count only)
 - Nabavka created/status changed/resolved
 - Supplier changed
 - Product created/archived
@@ -728,6 +770,7 @@ Do not create audit records for:
 - filtering/searching
 - cosmetic UI interactions.
 - pure derived commitment/availability calculations.
+- marking a Project Activity alert read.
 
 ---
 

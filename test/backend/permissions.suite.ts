@@ -1028,9 +1028,9 @@ export function registerPermissionsTests(requireHarness: () => SecurityFixtureHa
         throw new Error("Admin permission matrix RPC returned invalid data");
       }
 
-      expect(rows).toHaveLength(30);
+      expect(rows).toHaveLength(32);
       expect(rows.map((row) => row.permission_key)).toEqual(PERMISSION_KEYS);
-      expect(new Set(rows.map((row) => row.permission_key)).size).toBe(30);
+      expect(new Set(rows.map((row) => row.permission_key)).size).toBe(32);
 
       for (const row of rows) {
         expect(Object.keys(row).sort()).toEqual([
@@ -1078,7 +1078,7 @@ export function registerPermissionsTests(requireHarness: () => SecurityFixtureHa
       throw new Error("Admin-target permission matrix returned invalid data");
     }
 
-    expect(rows).toHaveLength(30);
+    expect(rows).toHaveLength(32);
     expect(rows.filter((row) => row.granted).map((row) => row.permission_key))
       .toEqual(["projects.view"]);
   });

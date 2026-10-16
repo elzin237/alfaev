@@ -37,6 +37,10 @@ const trustedOnlyTables = [
   "inventory_source_lots",
   "pcb_production_work_orders",
   "permission_definitions",
+  "project_activity_alert_recipients",
+  "project_activity_alerts",
+  "project_activity_attachments",
+  "project_activity_updates",
   "user_permissions",
   "work_order_number_counters",
 ] as const;

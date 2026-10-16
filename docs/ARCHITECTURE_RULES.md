@@ -167,6 +167,10 @@ Canonical shared/domain types should exist for concepts such as:
 - Project
 - ProjectProduct
 - ProjectProductComponent
+- ProjectActivityUpdate
+- ProjectActivityAttachment
+- ProjectActivityAlert
+- ProjectActivityAlertRecipient
 - ProcurementRequest
 - PcbCard
 - PcbBomVersion
@@ -243,6 +247,10 @@ projects.list()
 projects.getById()
 projects.create()
 projects.update()
+projects.listActivity()
+projects.postActivity()
+projects.listAlerts()
+projects.markAlertRead()
 
 inventory.getProduct()
 inventory.adjustStock()
@@ -271,6 +279,7 @@ At minimum:
 - PCB production
 - Work Order Finish
 - Project Product/component planning mutations
+- Project Activity post/alert fanout and per-recipient mark-read
 - Documentation record and private PDF mutations
 - Fixed Asset mutations
 - Work Order number allocation
@@ -291,7 +300,7 @@ These operations must validate:
 
 ## 11. Atomic Transactions
 
-Stock-sensitive workflows must be atomic.
+Critical multi-record workflows must be atomic.
 
 ### PCB production
 Creation is one atomic idempotent Draft-Work-Order transaction with no Inventory or production-run write. Later Work Order Finish is a second atomic transaction in which either all occur:
@@ -315,6 +324,19 @@ unused commitment, and required audit history.
 ### Manual Inventory adjustment
 Balance change, movement record, and audit record belong to one trusted transaction.
 
+### Project Activity post / alert send
+The database transaction must atomically create the Activity, optional attachment
+metadata, optional alert event, snapshotted recipients, and narrow AuditLog events.
+Zero eligible recipients for alert intent fails the whole transaction. One
+client-generated request UUID is the authoritative idempotency key: identical retries
+reconcile to the same Activity and conflicting reuse fails.
+
+Private image upload cannot share the PostgreSQL transaction. Use a trusted Edge
+boundary that validates bytes/decoded image, chooses a random path, uploads with
+service-role authority, invokes the idempotent database operation, removes definite
+orphans best-effort, and reconciles indeterminate outcomes without deleting a possibly
+committed referenced object.
+
 Never allow partial Inventory state.
 
 ---
@@ -335,6 +357,12 @@ Rules:
 - Calendar modification is Admin-only
 - manual Inventory adjustment is Admin-only
 
+Project alert recipient selection is a distinct operational subscription rule, not an
+exception to Admin authorization. Admin can send/read according to normal Admin bypass,
+but Admin status alone does not create inbox membership. A recipient snapshot requires
+an explicit stored `projects.alerts.receive` assignment plus current active state,
+effective `dashboard.view` and `projects.view` access, and excludes the sender.
+
 Permission checks should be reusable and centralized rather than duplicated manually throughout components.
 
 ---
@@ -353,6 +381,25 @@ Audit must capture meaningful business changes without logging useless UI intera
 
 This includes Documentation/PDF changes, Fixed Asset changes, Project planning
 changes, Work Order Finish, and automatic final-Work-Order Project completion.
+
+Project Activity is not AuditLog. Store the human title/description/image in the
+Project Activity domain. Audit only narrow `project_activity.created` and optional
+`project_activity.alert_sent` system events without copying full free text or image
+content. Per-recipient mark-read creates no audit noise.
+
+---
+
+## 13A. Project Activity / Alert Read Architecture
+
+Activity and alert reads use trusted bounded projections, never direct unbounded table
+access. Activity pages use `(created_at, id)` keysets and notification pages use
+`(created_at, recipient_row_id)` keysets, newest first, default 20, allowed 1–50.
+Deep links use a narrow authorized by-ID Activity read when the target is outside the
+first page.
+
+The Dashboard Alerts control belongs to the Dashboard content-heading feature, not
+the global Topbar. V1 uses explicit refetch triggers only—Dashboard load, panel open,
+window focus, send, mark-read, and retry—with no Realtime subscription or polling.
 
 ---
 

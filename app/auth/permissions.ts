@@ -4,6 +4,8 @@ export const PERMISSION_KEYS = [
   "projects.create",
   "projects.edit",
   "projects.archive",
+  "projects.alerts.receive",
+  "projects.alerts.send",
   "procurement.view",
   "procurement.create",
   "procurement.edit",
