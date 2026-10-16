@@ -258,7 +258,7 @@ export function registerRlsPolicyMatrixTests(
         const applicationFunctions = functions.rows.filter(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
-        expect(applicationFunctions).toHaveLength(141);
+        expect(applicationFunctions).toHaveLength(144);
         const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );

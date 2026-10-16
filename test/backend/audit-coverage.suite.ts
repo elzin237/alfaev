@@ -101,6 +101,11 @@ const auditedMutations: readonly AuditContract[] = [
   { signature: "public.cancel_project(uuid)", actions: ["project.cancelled"], entityTypes: ["project"] },
   { signature: "public.reopen_project(uuid)", actions: ["project.reopened"], entityTypes: ["project"] },
   {
+    signature: "public.post_project_activity(uuid,uuid,text,text,boolean)",
+    actions: ["project_activity.created", "project_activity.alert_sent"],
+    entityTypes: ["project_activity", "project_activity_alert"],
+  },
+  {
     signature: "public.create_project_product(uuid,text)",
     actions: ["project_product.created"], entityTypes: ["project_product"],
   },
