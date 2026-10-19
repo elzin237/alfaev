@@ -262,7 +262,7 @@ export function registerRlsPolicyMatrixTests(
         const applicationFunctions = functions.rows.filter(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
-        expect(applicationFunctions).toHaveLength(148);
+        expect(applicationFunctions).toHaveLength(151);
         const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
@@ -330,6 +330,69 @@ export function registerRlsPolicyMatrixTests(
             service_role_execute: true,
             settings: ['search_path=""'],
             volatility: "s",
+          },
+        ]);
+
+        const projectAlertReadFunctions = applicationFunctions.filter(
+          (routine) => [
+            "get_project_alert_unread_count",
+            "list_project_alert_notifications",
+          ].includes(routine.function_name),
+        );
+        expect(projectAlertReadFunctions.map((routine) => ({
+          arguments: routine.arguments,
+          authenticated_execute: routine.authenticated_execute,
+          function_name: routine.function_name,
+          public_execute: routine.public_execute,
+          anonymous_execute: routine.anonymous_execute,
+          result_type: routine.result_type,
+          settings: routine.settings,
+          volatility: routine.volatility,
+        }))).toEqual([
+          {
+            arguments: "",
+            authenticated_execute: true,
+            function_name: "get_project_alert_unread_count",
+            public_execute: false,
+            anonymous_execute: false,
+            result_type: "bigint",
+            settings: ['search_path=""'],
+            volatility: "s",
+          },
+          {
+            arguments: "p_limit integer, p_before_created_at timestamp with time zone, p_before_recipient_id uuid",
+            authenticated_execute: true,
+            function_name: "list_project_alert_notifications",
+            public_execute: false,
+            anonymous_execute: false,
+            result_type: "TABLE(notification_id uuid, alert_id uuid, project_id uuid, project_name text, activity_id uuid, activity_title text, activity_author_full_name text, created_at timestamp with time zone, read_at timestamp with time zone, has_more boolean)",
+            settings: ['search_path=""'],
+            volatility: "s",
+          },
+        ]);
+
+        const projectAlertMarkReadFunctions = applicationFunctions.filter(
+          (routine) => routine.function_name === "mark_project_alert_read",
+        );
+        expect(projectAlertMarkReadFunctions.map((routine) => ({
+          arguments: routine.arguments,
+          authenticated_execute: routine.authenticated_execute,
+          function_name: routine.function_name,
+          public_execute: routine.public_execute,
+          anonymous_execute: routine.anonymous_execute,
+          result_type: routine.result_type,
+          settings: routine.settings,
+          volatility: routine.volatility,
+        }))).toEqual([
+          {
+            arguments: "p_notification_id uuid",
+            authenticated_execute: true,
+            function_name: "mark_project_alert_read",
+            public_execute: false,
+            anonymous_execute: false,
+            result_type: "TABLE(notification_id uuid, read_at timestamp with time zone)",
+            settings: ['search_path=""'],
+            volatility: "v",
           },
         ]);
 
