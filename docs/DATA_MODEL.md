@@ -830,8 +830,11 @@ Fields:
 Rules:
 
 - no attachment replacement or removal in V1
+- only the Activity author may attach in V1, using the Activity's original request UUID
+  and current Activity-post authority while the Project remains writable
 - no SVG or animated image format
 - object remains private and is read only through exact authorized signing
+- authorized signed access expires after five minutes
 - browser callers never choose arbitrary object paths or directly replace/delete objects
 - the UI may use the Activity title when explicit alt text is absent
 

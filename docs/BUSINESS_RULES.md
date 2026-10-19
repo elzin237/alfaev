@@ -218,6 +218,12 @@ format. Trusted handling validates actual content, chooses the object path, perm
 authorized signed reads, and treats the attachment as immutable. Alt text is optional;
 the UI may fall back to the Activity title.
 
+In V1, the Activity author may attach the image only with the Activity's original
+request UUID, while the Activity remains attachment-free and the Project remains
+writable. Admin does not bypass the author requirement. An identical image retry may
+reconcile the immutable attachment after the Project closes. Authorized image reads use
+a private signed URL that expires after five minutes.
+
 One request UUID covers a submission. An identical retry for the same Project,
 normalized content, image identity/metadata, and alert intent returns/reconciles to the
 same Activity; conflicting reuse fails. The database transaction atomically creates

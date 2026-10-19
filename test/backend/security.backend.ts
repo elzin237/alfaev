@@ -50,6 +50,7 @@ import { registerPcbTests } from "./pcb.suite";
 import { registerPcbProductionWorkOrderTests } from "./pcb-production-work-orders.suite";
 import { registerProjectActivityFoundationTests } from "./project-activity-foundation.suite";
 import { registerProjectActivityOperationsTests } from "./project-activity-operations.suite";
+import { registerProjectActivityImageTests } from "./project-activity-images.suite";
 
 describe("Supabase security helpers", () => {
   // Register domain suites under one fixture lifecycle to avoid repeated Auth setup.
@@ -105,5 +106,6 @@ describe("Supabase security helpers", () => {
   registerPcbProductionWorkOrderTests(requireHarness);
   registerProjectActivityFoundationTests(requireHarness);
   registerProjectActivityOperationsTests(requireHarness);
+  registerProjectActivityImageTests(requireHarness);
   registerProcurementProductConcurrencyTests(requireHarness);
 });

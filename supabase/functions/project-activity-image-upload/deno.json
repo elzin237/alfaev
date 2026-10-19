@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.115.0",
+    "./handler": "./handler.ts",
+    "./image-validation": "./image-validation.ts"
+  }
+}

@@ -722,6 +722,10 @@ a random server-generated object path, permit only signed authorized reads, and 
 browser replacement/deletion. Storage mutation is service-role-only. The cross-system
 workflow must clean definitive orphans best-effort and reconcile indeterminate database
 outcomes idempotently without exposing service credentials or arbitrary signing.
+V1 attachment mutation is limited to the active Activity author, using the Activity's
+original request UUID and current Admin-or-`projects.edit` authority while the Project
+is writable; Admin does not bypass authorship. Exact referenced-object reads require
+current active Admin-or-`projects.view` authority and issue a five-minute signed URL.
 
 Every submission uses one client-generated request UUID. An identical retry for the
 same Project, normalized title/description, image identity/metadata, and alert intent

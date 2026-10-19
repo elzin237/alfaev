@@ -336,6 +336,9 @@ boundary that validates bytes/decoded image, chooses a random path, uploads with
 service-role authority, invokes the idempotent database operation, removes definite
 orphans best-effort, and reconciles indeterminate outcomes without deleting a possibly
 committed referenced object.
+The V1 upload boundary binds the verified Edge actor to the immutable Activity author
+and original request UUID. Private reads resolve the exact database reference through a
+server-only helper and return only a five-minute signed URL plus list-safe metadata.
 
 Never allow partial Inventory state.
 

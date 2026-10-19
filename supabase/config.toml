@@ -417,6 +417,18 @@ verify_jwt = true
 import_map = "./functions/work-order-pdf-access/deno.json"
 entrypoint = "./functions/work-order-pdf-access/index.ts"
 
+[functions.project-activity-image-upload]
+enabled = true
+verify_jwt = true
+import_map = "./functions/project-activity-image-upload/deno.json"
+entrypoint = "./functions/project-activity-image-upload/index.ts"
+
+[functions.project-activity-image-access]
+enabled = true
+verify_jwt = true
+import_map = "./functions/project-activity-image-access/deno.json"
+entrypoint = "./functions/project-activity-image-access/index.ts"
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

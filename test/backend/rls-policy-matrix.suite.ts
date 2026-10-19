@@ -220,6 +220,7 @@ export function registerRlsPolicyMatrixTests(
           function_owner: string;
           public_execute: boolean;
           result_type: string;
+          service_role_execute: boolean;
           settings: string[] | null;
           volatility: string;
         }>(
@@ -238,7 +239,10 @@ export function registerRlsPolicyMatrixTests(
              ) as authenticated_execute,
              pg_catalog.has_function_privilege(
                'public', routine.oid, 'execute'
-             ) as public_execute
+             ) as public_execute,
+             pg_catalog.has_function_privilege(
+               'service_role', routine.oid, 'execute'
+             ) as service_role_execute
            from pg_catalog.pg_proc as routine
            join pg_catalog.pg_namespace as namespace
              on namespace.oid = routine.pronamespace
@@ -258,7 +262,7 @@ export function registerRlsPolicyMatrixTests(
         const applicationFunctions = functions.rows.filter(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
-        expect(applicationFunctions).toHaveLength(144);
+        expect(applicationFunctions).toHaveLength(148);
         const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
@@ -268,6 +272,66 @@ export function registerRlsPolicyMatrixTests(
           expect(routine.public_execute).toBe(false);
           expect(routine.anonymous_execute).toBe(false);
         }
+
+        const projectActivityImageHelpers = applicationFunctions.filter(
+          (routine) => [
+            "attach_project_activity_image",
+            "get_project_activity_image_access_context",
+            "prepare_project_activity_image_upload",
+            "reconcile_project_activity_image_upload",
+          ].includes(routine.function_name),
+        );
+        expect(projectActivityImageHelpers.map((routine) => ({
+          arguments: routine.arguments,
+          authenticated_execute: routine.authenticated_execute,
+          function_name: routine.function_name,
+          public_execute: routine.public_execute,
+          anonymous_execute: routine.anonymous_execute,
+          service_role_execute: routine.service_role_execute,
+          settings: routine.settings,
+          volatility: routine.volatility,
+        }))).toEqual([
+          {
+            arguments: "p_project_id uuid, p_activity_id uuid, p_request_id uuid, p_actor_auth_user_id uuid, p_storage_path text, p_mime_type text, p_byte_size bigint, p_content_hash text, p_alt_text text",
+            authenticated_execute: false,
+            function_name: "attach_project_activity_image",
+            public_execute: false,
+            anonymous_execute: false,
+            service_role_execute: true,
+            settings: ['search_path=""'],
+            volatility: "v",
+          },
+          {
+            arguments: "p_project_id uuid, p_activity_id uuid, p_actor_auth_user_id uuid",
+            authenticated_execute: false,
+            function_name: "get_project_activity_image_access_context",
+            public_execute: false,
+            anonymous_execute: false,
+            service_role_execute: true,
+            settings: ['search_path=""'],
+            volatility: "s",
+          },
+          {
+            arguments: "p_project_id uuid, p_activity_id uuid, p_request_id uuid, p_actor_auth_user_id uuid, p_mime_type text, p_byte_size bigint, p_content_hash text, p_alt_text text",
+            authenticated_execute: false,
+            function_name: "prepare_project_activity_image_upload",
+            public_execute: false,
+            anonymous_execute: false,
+            service_role_execute: true,
+            settings: ['search_path=""'],
+            volatility: "v",
+          },
+          {
+            arguments: "p_project_id uuid, p_activity_id uuid, p_request_id uuid, p_storage_path text, p_mime_type text, p_byte_size bigint, p_content_hash text, p_alt_text text",
+            authenticated_execute: false,
+            function_name: "reconcile_project_activity_image_upload",
+            public_execute: false,
+            anonymous_execute: false,
+            service_role_execute: true,
+            settings: ['search_path=""'],
+            volatility: "s",
+          },
+        ]);
 
         if (rlsEventTriggerHelpers.length === 1) {
           expect(rlsEventTriggerHelpers[0]).toMatchObject({
