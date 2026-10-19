@@ -524,7 +524,7 @@ Only Project-linked runs.
 Project Activity is a human-authored collaboration timeline, separate from AuditLog.
 
 For an active Admin or user with `projects.edit`, an open Project (`planned`,
-`in_progress`, or `on_hold`) shows a composer above the timeline with:
+`in_progress`, or `on_hold`) shows a collapsible composer above the timeline with:
 
 - Title
 - Description
@@ -551,10 +551,19 @@ Each timeline item shows:
 - optional image
 - `Alert sent` badge when an alert event exists
 
-The timeline is newest first in normal page flow. It loads 20 initially and uses
-`Load more` keyset pagination; do not put it in a constrained nested scroll. A direct
-Activity link not found in the first page uses an authorized by-ID read, renders the
-target, then scrolls/focuses it.
+Successful posting collapses the composer and leaves a visible success confirmation
+outside it. The `Recent activity` heading also remains outside the scrolling region.
+Only a populated timeline scrolls independently, with a 42rem maximum height and no
+fixed or minimum height. Small lists retain natural height, empty states remain compact,
+and the keyboard-accessible region contains the Activity cards and explicit `Load more`
+control. Posting a new Activity scrolls only this internal timeline to the newest
+authoritative row and must not move the full Project page.
+
+The timeline remains newest first, loads 20 initially, and uses `Load more` keyset
+pagination. Compact image thumbnails appear within cards while the image viewer remains
+viewport-level and must not be clipped by the scrolling region. A direct Activity link
+not found in the first page uses an authorized by-ID read, renders the target, then
+scrolls/focuses it. V1 does not include Project Activity title search.
 
 Activity is immutable. Do not provide edit/delete/Admin-delete, attachment
 replace/remove, or alert-resend controls. While submitting, prevent duplicate submits;

@@ -3061,12 +3061,17 @@ animated formats.
 Goal:
 - add the open-Project composer with Title, Description, optional image,
   `Post update`, and permission-aware `Post & send alert`
-- render append-only Activity newest first in normal page flow, 20 initially, with
-  keyset `Load more`
+- use a collapsible composer and keep the post-success confirmation plus
+  `Recent activity` heading outside the timeline scroll region
+- render append-only Activity newest first, 20 initially, in a keyboard-accessible
+  populated timeline with a 42rem maximum height, natural small-list height, compact
+  empty states, and keyset `Load more` inside the scrolling region
+- after posting, scroll only the internal timeline to the newest authoritative row;
+  keep compact image thumbnails in cards and the image viewer at viewport level
 - show author, absolute timestamp, optional image, and Alert sent badge
 - keep Completed/Cancelled history readable without posting controls
 
-Do not add edit/delete/resend or a constrained nested timeline scroll.
+Do not add edit/delete/resend or Project Activity title search.
 
 ---
 

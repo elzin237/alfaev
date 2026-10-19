@@ -189,9 +189,15 @@ opened. Clicking a notification marks only that recipient row read and opens
 not mark it read.
 
 Activity and notifications load newest first with keyset pagination, default 20 and
-limit 1–50. Activity uses normal page flow with `Load more`, not a nested scrolling
-timeline. The optional attachment is private JPEG/PNG/WebP only, maximum 5 MiB, with
-trusted content validation, server-selected path, and authorized signed reads.
+limit 1–50. Project Activity uses a collapsible composer and keeps its success
+confirmation and `Recent activity` heading outside an independently scrollable
+populated timeline. The timeline has a 42rem maximum height with no fixed or minimum
+height, so small lists retain natural height and empty states remain compact. It is
+keyboard accessible, keeps explicit `Load more` inside the scrolling region, and
+scrolls only that internal region to the newest authoritative row after posting. The
+optional attachment is private JPEG/PNG/WebP only, maximum 5 MiB, with trusted content
+validation, server-selected path, authorized signed reads, compact thumbnails, and a
+viewport-level image viewer. V1 does not include Project Activity title search.
 
 Posting is idempotent through one client request UUID. Identical retry content/image
 identity/alert intent reconciles to the same Activity; conflicting reuse fails.

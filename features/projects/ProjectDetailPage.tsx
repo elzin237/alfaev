@@ -1,13 +1,13 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 
-import EmptyState from "../../shared/components/EmptyState";
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import ProjectEditDialog from "./components/ProjectEditDialog";
+import { ProjectActivitySection } from "./components/ProjectActivitySection";
 import { ProjectMaterialUsageSection } from "./components/ProjectMaterialUsageSection";
 import { ProjectPlanningSection } from "./components/ProjectPlanningSection";
 import { useProjectDetail } from "./hooks/useProjectDetail";
@@ -247,12 +247,11 @@ function ProjectDetailPage() {
 
         <ProjectMaterialUsageSection projectId={project.id} />
 
-        <section aria-label="Activity">
-          <EmptyState
-            title="Activity"
-            description="Project activity will appear here when audit history is connected."
-          />
-        </section>
+        <ProjectActivitySection
+          projectId={project.id}
+          status={project.status}
+          onProjectUnavailable={() => projectQuery.refetch()}
+        />
 
         <ProjectEditDialog
           open={isEditOpen}

@@ -24,6 +24,14 @@ vi.mock("./components/ProjectMaterialUsageSection", () => ({
     </section>
   ),
 }));
+vi.mock("./components/ProjectActivitySection", () => ({
+  ProjectActivitySection: ({ projectId, status }: { projectId: string; status: string }) => (
+    <section aria-label="Project Activity">
+      <h2>Project Activity</h2>
+      <p>{projectId} / {status}</p>
+    </section>
+  ),
+}));
 
 import ProjectDetailPage from "./ProjectDetailPage";
 import type { ProjectDetail } from "./services/projectService";
@@ -137,9 +145,9 @@ describe("ProjectDetailPage", () => {
     expect(screen.queryByText(
       "Project PCB production will appear here when that module is connected.",
     )).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Activity" }))
+    expect(screen.getByRole("heading", { name: "Project Activity" }))
       .toBeInTheDocument();
-    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.getByText(`${projectId} / planned`)).toBeInTheDocument();
   });
 
   it("renders loading without Project content", () => {
