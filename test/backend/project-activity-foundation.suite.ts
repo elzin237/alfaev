@@ -165,6 +165,9 @@ export function registerProjectActivityFoundationTests(
               { column_name: "recipient_user_id", data_type: "uuid", is_nullable: "NO" },
               { column_name: "created_at", data_type: "timestamp with time zone", is_nullable: "NO" },
               { column_name: "read_at", data_type: "timestamp with time zone", is_nullable: "YES" },
+              ...(process.env.PROJECT_ALERT_DISMISSAL_FOUNDATION === "1"
+                ? [{ column_name: "dismissed_at", data_type: "timestamp with time zone", is_nullable: "YES" as const }]
+                : []),
             ],
           };
 
@@ -222,8 +225,20 @@ export function registerProjectActivityFoundationTests(
             .toContain("(project_id, created_at DESC, id DESC)");
           expect(indexes.find((index) => index.index_name === "project_activity_alert_recipients_inbox_idx")?.index_definition)
             .toContain("(recipient_user_id, created_at DESC, id DESC)");
-          expect(indexes.find((index) => index.index_name === "project_activity_alert_recipients_unread_inbox_idx")?.index_definition)
-            .toContain("WHERE (read_at IS NULL)");
+          const inboxIndex = indexes.find(
+            (index) => index.index_name === "project_activity_alert_recipients_inbox_idx",
+          )?.index_definition;
+          const unreadIndex = indexes.find(
+            (index) => index.index_name === "project_activity_alert_recipients_unread_inbox_idx",
+          )?.index_definition;
+          if (process.env.PROJECT_ALERT_DISMISSAL === "1") {
+            expect(inboxIndex).toContain("WHERE (dismissed_at IS NULL)");
+            expect(unreadIndex).toContain(
+              "WHERE ((read_at IS NULL) AND (dismissed_at IS NULL))",
+            );
+          } else {
+            expect(unreadIndex).toContain("WHERE (read_at IS NULL)");
+          }
 
           const security = (await database.query<{
             direct_policies: string;

@@ -15,16 +15,30 @@ const database = new Pool({
 });
 
 interface ConcurrencyFixture {
+  automaticAdminProfileId: string;
   projectId: string;
   requestId: string;
   senderAuthUserId: string;
+  senderProfileId: string;
 }
 
 let fixture: ConcurrencyFixture;
 
-async function callAndCommit(client: PoolClient) {
+async function callAndCommit(
+  client: PoolClient,
+  requestId = fixture.requestId,
+  applicationName?: string,
+) {
   await client.query("begin");
   try {
+    await client.query("set local statement_timeout = '20s'");
+    await client.query("set local lock_timeout = '15s'");
+    if (applicationName) {
+      await client.query(
+        "select pg_catalog.set_config('application_name', $1::text, true)",
+        [applicationName],
+      );
+    }
     await client.query(
       "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
       [fixture.senderAuthUserId],
@@ -40,7 +54,7 @@ async function callAndCommit(client: PoolClient) {
          $1::uuid, $2::uuid, 'Concurrent Activity',
          'One durable result for both callers', true
        )`,
-      [fixture.projectId, fixture.requestId],
+      [fixture.projectId, requestId],
     );
     await client.query("commit");
     return result.rows[0]!;
@@ -48,6 +62,81 @@ async function callAndCommit(client: PoolClient) {
     await client.query("rollback");
     throw error;
   }
+}
+
+async function waitForLockWait(
+  observer: PoolClient,
+  applicationName: string,
+): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const waiting = (await observer.query<{ waiting: boolean }>(
+      `select exists (
+         select 1
+         from pg_catalog.pg_stat_activity as activity
+         where activity.application_name = $1::text
+           and activity.wait_event_type = 'Lock'
+       ) as waiting`,
+      [applicationName],
+    )).rows[0]?.waiting;
+    if (waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Expected ${applicationName} to wait on the recipient profile lock`);
+}
+
+async function getEligibleRecipientIds(client: PoolClient): Promise<string[]> {
+  return (await client.query<{ id: string }>(
+    `select profile.id
+     from public.user_profiles as profile
+     where profile.is_active
+       and (
+         profile.is_admin
+         or (
+           exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'projects.alerts.receive'
+               and definition.is_delegable
+           )
+           and exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'dashboard.view'
+               and definition.is_delegable
+           )
+           and exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'projects.view'
+               and definition.is_delegable
+           )
+         )
+       )
+     order by profile.id`,
+  )).rows.map((row) => row.id);
+}
+
+async function getRecipientIds(
+  client: PoolClient,
+  alertId: string,
+): Promise<string[]> {
+  return (await client.query<{ recipient_user_id: string }>(
+    `select recipient_user_id
+     from public.project_activity_alert_recipients
+     where alert_id = $1::uuid
+     order by recipient_user_id`,
+    [alertId],
+  )).rows.map((row) => row.recipient_user_id);
 }
 
 describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () => {
@@ -71,11 +160,20 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
       password: `TaskC-${randomUUID()}-Aa1!`,
       email_confirm: true,
     });
+    const automaticAdminAuth = await authAdmin.auth.admin.createUser({
+      email: `taskc.admin-recipient.${randomUUID()}@example.com`,
+      password: `TaskC-${randomUUID()}-Aa1!`,
+      email_confirm: true,
+    });
     if (senderAuth.error || !senderAuth.data.user) throw senderAuth.error;
     if (recipientAuth.error || !recipientAuth.data.user) throw recipientAuth.error;
+    if (automaticAdminAuth.error || !automaticAdminAuth.data.user) {
+      throw automaticAdminAuth.error;
+    }
 
     const senderProfileId = randomUUID();
     const recipientProfileId = randomUUID();
+    const automaticAdminProfileId = randomUUID();
     const projectId = randomUUID();
     const requestId = randomUUID();
     await database.query(
@@ -86,7 +184,9 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
          ($1::uuid, $2::uuid, 'Task C concurrency sender', $3::text,
           '1990-01-01'::date, true, true, null),
          ($4::uuid, $5::uuid, 'Task C concurrency recipient', $6::text,
-          '1990-01-01'::date, false, true, $1::uuid)`,
+          '1990-01-01'::date, false, true, $1::uuid),
+         ($7::uuid, $8::uuid, 'Task C automatic Admin recipient', $9::text,
+          '1990-01-01'::date, true, true, $1::uuid)`,
       [
         senderProfileId,
         senderAuth.data.user.id,
@@ -94,6 +194,9 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
         recipientProfileId,
         recipientAuth.data.user.id,
         recipientAuth.data.user.email,
+        automaticAdminProfileId,
+        automaticAdminAuth.data.user.id,
+        automaticAdminAuth.data.user.email,
       ],
     );
     await database.query(
@@ -119,9 +222,11 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
       [projectId, senderProfileId],
     );
     fixture = {
+      automaticAdminProfileId,
       projectId,
       requestId,
       senderAuthUserId: senderAuth.data.user.id,
+      senderProfileId,
     };
   });
 
@@ -133,12 +238,13 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
     const first = await database.connect();
     const second = await database.connect();
     try {
+      const expectedRecipientIds = await getEligibleRecipientIds(first);
       const [firstResult, secondResult] = await Promise.all([
         callAndCommit(first),
         callAndCommit(second),
       ]);
       expect(secondResult).toEqual(firstResult);
-      expect(firstResult.recipient_count).toBe("1");
+      expect(firstResult.recipient_count).toBe(String(expectedRecipientIds.length));
 
       const counts = (await database.query<{
         activities: string;
@@ -164,12 +270,77 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
       expect(counts).toEqual({
         activities: "1",
         alerts: "1",
-        recipients: "1",
+        recipients: String(expectedRecipientIds.length),
         audits: "2",
       });
+      expect(await getRecipientIds(first, firstResult.alert_id))
+        .toEqual(expectedRecipientIds);
+      expect((await database.query<{ count: string }>(
+        `select pg_catalog.count(*)::text as count
+         from public.project_activity_alert_recipients
+         where alert_id = $1::uuid
+           and recipient_user_id = $2::uuid`,
+        [firstResult.alert_id, fixture.senderProfileId],
+      )).rows[0]?.count).toBe("1");
+      expect((await database.query<{ count: string }>(
+        `select pg_catalog.count(*)::text as count
+         from public.project_activity_alert_recipients
+         where alert_id = $1::uuid
+           and recipient_user_id = $2::uuid`,
+        [firstResult.alert_id, fixture.automaticAdminProfileId],
+      )).rows[0]?.count).toBe("1");
     } finally {
       first.release();
       second.release();
+    }
+  });
+
+  it("serializes recipient fanout against trusted Admin demotion without deadlock", async () => {
+    const statusChange = await database.connect();
+    const poster = await database.connect();
+    const observer = await database.connect();
+    const requestId = randomUUID();
+    const applicationName = `task129-${randomUUID().slice(0, 12)}`;
+    try {
+      await statusChange.query("begin");
+      await statusChange.query("set local statement_timeout = '20s'");
+      await statusChange.query(
+        "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+        [fixture.senderAuthUserId],
+      );
+      await statusChange.query("set local role authenticated");
+      await statusChange.query(
+        "select public.set_user_admin_status_admin($1::uuid, false)",
+        [fixture.automaticAdminProfileId],
+      );
+
+      const posted = callAndCommit(poster, requestId, applicationName);
+      await waitForLockWait(observer, applicationName);
+      await statusChange.query("commit");
+      const result = await posted;
+      const expectedRecipientIds = await getEligibleRecipientIds(observer);
+
+      expect(result.recipient_count).toBe(String(expectedRecipientIds.length));
+      expect(await getRecipientIds(observer, result.alert_id))
+        .toEqual(expectedRecipientIds);
+      expect((await observer.query<{ count: string }>(
+        `select pg_catalog.count(*)::text as count
+         from public.project_activity_alert_recipients
+         where alert_id = $1::uuid
+           and recipient_user_id = $2::uuid`,
+        [result.alert_id, fixture.automaticAdminProfileId],
+      )).rows[0]?.count).toBe("0");
+      expect((await observer.query<{ is_admin: boolean }>(
+        "select is_admin from public.user_profiles where id = $1::uuid",
+        [fixture.automaticAdminProfileId],
+      )).rows[0]?.is_admin).toBe(false);
+    } catch (error) {
+      await statusChange.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      statusChange.release();
+      poster.release();
+      observer.release();
     }
   });
 });

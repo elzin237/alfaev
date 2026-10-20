@@ -102,14 +102,18 @@ Alerts (`projects.alerts.send`), with Admin bypass applying independently to tho
 action checks. Edit Projects alone never authorizes alert sending.
 
 Receive Project Activity Alerts (`projects.alerts.receive`) is an explicit operational
-subscription assignment. Send-time eligibility additionally requires the user to be
-active, have effective `dashboard.view` and `projects.view` access through Admin bypass
-or explicit grants, and not be the sender.
-Admin status alone does not place an Admin in the recipient inbox; an Admin must also
-have an explicit stored `projects.alerts.receive` assignment to be snapshotted as a
-recipient. This recipient-selection rule does not limit Admin's normal system access.
+subscription assignment for non-admin users. Non-admin send-time eligibility also
+requires active state plus effective `dashboard.view` and `projects.view` access.
+Every active Admin is included automatically without an explicit receive assignment.
+An alert sender is included in the recipient snapshot whenever that sender satisfies
+the same Admin or non-admin eligibility rules as every other recipient.
 Historical recipient membership remains stored, but current active state plus current
 effective Dashboard and Project read access still governs notification visibility.
+Per-recipient dismissal adds no permission key. The future trusted mutation requires
+the same current active `dashboard.view` and `projects.view` access and strict ownership;
+Admin bypass applies to the access permissions only and never to recipient ownership.
+Current `projects.alerts.receive` is not required to dismiss a historically delivered
+notification.
 
 ### Nabavka / Procurement
 

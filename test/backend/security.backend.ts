@@ -54,6 +54,8 @@ import { registerProjectActivityImageTests } from "./project-activity-images.sui
 import { registerProjectAlertNotificationTests } from "./project-alert-notifications.suite";
 import { registerProjectAlertMarkReadTests } from "./project-alert-mark-read.suite";
 import { registerProjectAlertNotificationE2eTests } from "./project-alert-notification-e2e.suite";
+import { registerProjectAlertDismissalFoundationTests } from "./project-alert-dismissal-foundation.suite";
+import { registerProjectAlertDismissalTests } from "./project-alert-dismissal.suite";
 
 describe("Supabase security helpers", () => {
   // Register domain suites under one fixture lifecycle to avoid repeated Auth setup.
@@ -113,5 +115,7 @@ describe("Supabase security helpers", () => {
   registerProjectAlertNotificationTests(requireHarness);
   registerProjectAlertMarkReadTests(requireHarness);
   registerProjectAlertNotificationE2eTests(requireHarness);
+  registerProjectAlertDismissalFoundationTests(requireHarness);
+  registerProjectAlertDismissalTests(requireHarness);
   registerProcurementProductConcurrencyTests(requireHarness);
 });

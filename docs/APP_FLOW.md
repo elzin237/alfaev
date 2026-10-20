@@ -169,9 +169,11 @@ The Project detail page provides traceability back to the original operation.
    one optional private JPEG/PNG/WebP image up to 5 MiB.
 3. `Post update` submits one client-generated request UUID and creates Activity only.
 4. `Post & send alert` is shown/accepted only when the actor also has Admin or
-   `projects.alerts.send` authority. The trusted operation excludes the sender and
-   snapshots active users with an explicit `projects.alerts.receive` assignment plus
-   current effective `dashboard.view` and `projects.view` access.
+   `projects.alerts.send` authority. The trusted operation snapshots every active
+   Admin automatically. Active non-admin recipients require an explicit
+   `projects.alerts.receive` assignment plus current effective `dashboard.view` and
+   `projects.view` access. An alert sender is included when eligible under the same
+   Admin or non-admin rules.
 5. If no eligible recipient remains, the entire alert-intent submission fails and no
    Activity is saved. Otherwise Activity, attachment metadata, alert, recipients, and
    narrow AuditLog events commit atomically.
@@ -193,6 +195,11 @@ The Project detail page provides traceability back to the original operation.
 6. A stored recipient row is hidden while current active/Dashboard/Project access is
    absent and may become visible again if that access is restored. Recipient membership
    itself is never recomputed retroactively.
+7. A later Dashboard slice adds a row-level `Dismiss notification` menu action with a
+   confirmation. Successful dismissal keeps the recipient history, preserves `read_at`,
+   removes the row from only that recipient's active inbox/count, and neither navigates
+   nor affects other recipients. D1 establishes only the schema/immutability foundation;
+   D2 owns the trusted backend and D5 owns the Dashboard interaction.
 
 ---
 
@@ -770,7 +777,7 @@ Do not create audit records for:
 - filtering/searching
 - cosmetic UI interactions.
 - pure derived commitment/availability calculations.
-- marking a Project Activity alert read.
+- marking a Project Activity alert read or dismissing one recipient's notification.
 
 ---
 

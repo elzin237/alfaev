@@ -3023,8 +3023,9 @@ Goal:
 - enable RLS with no broad browser writes
 - create the private image bucket and restrictive policies
 
-Preserve the locked rule that Admin status authorizes system actions but does not by
-itself subscribe an Admin as an alert recipient.
+Preserve the locked rule that every active Admin is automatically included in each new
+Project Activity alert recipient snapshot, while non-admin recipients require explicit
+`projects.alerts.receive` plus effective Dashboard and Project access.
 
 ---
 
@@ -3106,8 +3107,22 @@ Goal:
 - navigate alert clicks to `/projects/<projectId>#activity-<activityId>`
 - use authorized by-ID loading, scroll, and focus when outside the first page
 - prove RLS/direct-call resistance, recipient snapshot/current-access behavior,
-  sender exclusion, zero-recipient rollback, idempotent retry/conflict, Storage cleanup,
+  eligible-sender inclusion, zero-recipient rollback, idempotent retry/conflict, Storage cleanup,
   pagination, inactive-user denial, and Completed/Cancelled behavior
+
+---
+
+## Notification Dismissal D1 — Canonical Docs + Schema/Immutability Foundation
+
+Goal:
+- add nullable `dismissed_at` to retained recipient history
+- enforce valid, independent one-way read and dismissal transitions
+- preserve direct-table denial, RLS, and trigger-helper security
+
+D1 does not make dismissal callable or visible. D2 extends the same undeployed forward
+migration with the trusted owner-only mutation, active-inbox/count filtering, and index
+changes. D5 adds the Dashboard three-dot menu and required confirmation dialog. V1 has
+no undo or dismissed-notification archive.
 
 ---
 

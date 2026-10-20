@@ -176,17 +176,22 @@ edit/delete/Admin-delete, attachment replacement/removal, or alert resend.
 `Post update` creates Activity only. `Post & send alert` also requires active Admin or
 `projects.alerts.send`; Edit Projects alone is insufficient. It creates one alert and a
 send-time recipient snapshot without copying Activity content into notifications.
-Eligible recipients are active, explicitly assigned `projects.alerts.receive`,
-currently authorized through effective `dashboard.view` and `projects.view` access,
-and are not the sender.
-Admin status by itself is not a recipient subscription. Zero recipients fails the
-entire request.
+Every active Admin is included automatically. Active non-admin recipients require an
+explicit `projects.alerts.receive` assignment plus effective `dashboard.view` and
+`projects.view` access. An alert sender is included whenever eligible under the same
+Admin or non-admin rules. Zero recipients fails the entire request.
 
 Later permission changes do not rewrite the recipient snapshot, but current active,
 Dashboard, and Project access governs whether a historical notification can be seen or
 opened. Clicking a notification marks only that recipient row read and opens
 `/projects/<projectId>#activity-<activityId>`; merely opening the panel or Project does
 not mark it read.
+
+The notification model also supports permanent per-recipient dismissal as a state
+separate from read status. Dismissed recipient rows remain stored, `read_at` is
+unchanged, and other recipients remain unaffected. The trusted mutation/filtering is a
+later backend slice and the Dashboard menu/confirmation is a later frontend slice; V1
+has no undo or dismissed-notification archive.
 
 Activity and notifications load newest first with keyset pagination, default 20 and
 limit 1–50. Project Activity uses a collapsible composer and keeps its success
@@ -204,7 +209,7 @@ identity/alert intent reconciles to the same Activity; conflicting reuse fails.
 Database Activity, attachment metadata, optional alert/recipients, and narrow AuditLog
 events commit atomically. The AuditLog events are `project_activity.created` and, when
 applicable, `project_activity.alert_sent`; neither stores the full description/image,
-and mark-read is not audited.
+and mark-read or per-recipient dismissal is not audited.
 
 ---
 

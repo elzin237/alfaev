@@ -192,13 +192,14 @@ Projects reject new posts but retain readable historical Activity.
 `Post update` creates only Activity. `Post & send alert` creates the same Activity,
 one alert event, and a recipient snapshot without duplicating Activity content into
 notification rows. It requires both Activity-post authority and Admin or
-`projects.alerts.send`. If there are no eligible recipients after excluding the sender,
-the entire request fails rather than silently posting Activity alone.
+`projects.alerts.send`. If there are no eligible recipients, the entire request fails
+rather than silently posting Activity alone.
 
-An eligible recipient must be active, hold an explicit `projects.alerts.receive`
-assignment, have current effective `dashboard.view` and `projects.view` access through
-Admin bypass or explicit grants, and not be the sender.
-Admin status does not itself subscribe a user. The send-time recipient set is frozen:
+Every active Admin is an eligible recipient automatically. An eligible non-admin
+recipient must be active, hold an explicit `projects.alerts.receive` assignment, and
+have current effective `dashboard.view` and `projects.view` access. An alert sender is
+included in the recipient snapshot whenever that sender satisfies the same Admin or
+non-admin eligibility rules as every other recipient. The send-time recipient set is frozen:
 later grants do not add historical recipients and later removal does not delete stored
 recipient rows. Current active state plus current Dashboard and Project access still
 controls visibility, so historical alerts never bypass current Project authorization.
@@ -206,6 +207,12 @@ controls visibility, so historical alerts never bypass current Project authoriza
 Each recipient starts unread. Clicking a notification marks only that recipient row
 read and then opens `/projects/<projectId>#activity-<activityId>`. Opening the panel or
 Project by another path does not mark it read. V1 has no Mark all as read action.
+
+A recipient may permanently dismiss one of its own Dashboard notifications. Dismissal
+removes it from only that recipient's active inbox and unread count across sessions,
+while retaining the recipient row and leaving `read_at` unchanged. Other recipients and
+the underlying Activity, alert event, image, and AuditLog history are unaffected. V1
+requires confirmation and has no undo or dismissed-notification archive.
 
 Activity and notifications are newest-first bounded reads with default limit 20,
 allowed limits 1–50, and keyset cursors `(created_at, id)` and
@@ -231,7 +238,8 @@ the Activity, optional alert/recipient rows, attachment metadata, and narrow Aud
 events. Storage/database reconciliation follows the trusted idempotent workflow.
 
 V1 has no Realtime notification subscription and no polling. It refetches on Dashboard
-load, panel open, window focus, successful send, mark-read, and explicit retry.
+load, panel open, window focus, successful send, mark-read, dismissal, and explicit
+retry.
 
 ---
 
@@ -940,7 +948,8 @@ Examples:
 Do not generate audit noise for pure UI interactions.
 
 Project Activity descriptions and images are collaboration content and must not be
-copied into AuditLog. Marking an Activity alert read creates no AuditLog event.
+copied into AuditLog. Marking an Activity alert read or dismissing one recipient's
+notification creates no AuditLog event.
 
 Pure derived commitment/availability calculations create no AuditLog noise.
 

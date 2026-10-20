@@ -123,6 +123,29 @@ async function setPermissions(
   );
 }
 
+async function getActiveAdminIds(database: PoolClient): Promise<string[]> {
+  return (await database.query<{ id: string }>(
+    `select id
+     from public.user_profiles
+     where is_active
+       and is_admin
+     order by id`,
+  )).rows.map((row) => row.id);
+}
+
+async function getAlertRecipientIds(
+  database: PoolClient,
+  alertId: string,
+): Promise<string[]> {
+  return (await database.query<{ recipient_user_id: string }>(
+    `select recipient_user_id
+     from public.project_activity_alert_recipients
+     where alert_id = $1::uuid
+     order by recipient_user_id`,
+    [alertId],
+  )).rows.map((row) => row.recipient_user_id);
+}
+
 async function createProject(database: PoolClient, actorId: string) {
   const projectId = randomUUID();
   const projectName = `Task F3 Project ${projectId}`;
@@ -183,10 +206,12 @@ export function registerProjectAlertNotificationE2eTests(
           "dashboard.view",
           "projects.view",
         ]);
-        await setPermissions(database, admin.profileId, admin.profileId, [
-          "projects.alerts.receive",
-        ]);
-
+        const expectedRecipients = [
+          ...await getActiveAdminIds(database),
+          otherRecipient.profileId,
+          recipient.profileId,
+          sender.profileId,
+        ].sort();
         const requestId = randomUUID();
         const posted = (await callAs<PostRow>(database, sender, postSql, [
           projectId,
@@ -199,7 +224,7 @@ export function registerProjectAlertNotificationE2eTests(
           alert_sent: true,
           author_user_id: sender.profileId,
           project_id: projectId,
-          recipient_count: "3",
+          recipient_count: String(expectedRecipients.length),
           request_id: requestId,
         });
         expect((await callAs<PostRow>(database, sender, postSql, [
@@ -210,19 +235,8 @@ export function registerProjectAlertNotificationE2eTests(
           true,
         ]))[0]).toEqual(posted);
 
-        const recipients = (await database.query<{ recipient_user_id: string }>(
-          `select recipient_user_id
-           from public.project_activity_alert_recipients
-           where alert_id = $1::uuid
-           order by recipient_user_id`,
-          [posted.alert_id],
-        )).rows.map((row) => row.recipient_user_id);
-        expect(recipients).toEqual([
-          admin.profileId,
-          otherRecipient.profileId,
-          recipient.profileId,
-        ].sort());
-        expect(recipients).not.toContain(sender.profileId);
+        const recipients = await getAlertRecipientIds(database, posted.alert_id);
+        expect(recipients).toEqual(expectedRecipients);
         expect(recipients).not.toContain(lateRecipient.profileId);
 
         await setPermissions(database, lateRecipient.profileId, admin.profileId, [
@@ -235,7 +249,35 @@ export function registerProjectAlertNotificationE2eTests(
            from public.project_activity_alert_recipients
            where alert_id = $1::uuid`,
           [posted.alert_id],
-        )).rows[0]?.count).toBe("3");
+        )).rows[0]?.count).toBe(String(expectedRecipients.length));
+
+        const senderRows = await callAs<NotificationRow>(
+          database,
+          sender,
+          listSql,
+          [20, null, null],
+        );
+        expect(senderRows).toHaveLength(1);
+        expect(senderRows[0]).toMatchObject({
+          activity_id: posted.activity_id,
+          alert_id: posted.alert_id,
+          project_id: projectId,
+          read_at: null,
+        });
+        expect(await callAs<{ count: string }>(database, sender, countSql))
+          .toEqual([{ count: "1" }]);
+        const senderMark = await callAs<MarkRow>(
+          database,
+          sender,
+          markSql,
+          [senderRows[0]!.notification_id],
+        );
+        expect(senderMark).toEqual([{
+          notification_id: senderRows[0]!.notification_id,
+          read_at: expect.any(Date),
+        }]);
+        expect(await callAs<{ count: string }>(database, sender, countSql))
+          .toEqual([{ count: "0" }]);
 
         const recipientRows = await callAs<NotificationRow>(
           database,
@@ -423,6 +465,67 @@ export function registerProjectAlertNotificationE2eTests(
         ]);
         expect(await callAs<NotificationRow>(database, recipient, listSql, [20, null, null]))
           .toEqual(afterMark);
+      });
+    });
+
+    it("includes an active Admin sender without receive permission and marks it independently", async () => {
+      const fixture = requireHarness();
+      await fixture.withRollbackDatabaseTransaction(async (database) => {
+        const admin = fixture.actors.admin;
+        const otherRecipient = fixture.actors.brandManager;
+        const { projectId } = await createProject(database, admin.profileId);
+
+        await database.query(
+          `delete from public.user_permissions as permission
+           using public.permission_definitions as definition
+           where definition.id = permission.permission_definition_id
+             and definition.key = 'projects.alerts.receive'`,
+        );
+        await setPermissions(database, otherRecipient.profileId, admin.profileId, [
+          "dashboard.view",
+          "projects.view",
+          "projects.alerts.receive",
+        ]);
+        const expectedRecipients = [
+          ...await getActiveAdminIds(database),
+          otherRecipient.profileId,
+        ].sort();
+
+        const posted = (await callAs<PostRow>(database, admin, postSql, [
+          projectId,
+          randomUUID(),
+          "Admin sender alert",
+          "The eligible Admin sender receives this alert",
+          true,
+        ]))[0]!;
+        expect(posted.recipient_count).toBe(String(expectedRecipients.length));
+        expect(await getAlertRecipientIds(database, posted.alert_id))
+          .toEqual(expectedRecipients);
+
+        const adminRows = await callAs<NotificationRow>(
+          database,
+          admin,
+          listSql,
+          [20, null, null],
+        );
+        const ownNotification = adminRows.find((row) => row.alert_id === posted.alert_id);
+        expect(ownNotification).toMatchObject({ read_at: null });
+        expect(await callAs<{ count: string }>(database, admin, countSql))
+          .toEqual([{ count: "1" }]);
+
+        expect(await callAs<MarkRow>(
+          database,
+          admin,
+          markSql,
+          [ownNotification!.notification_id],
+        )).toEqual([{
+          notification_id: ownNotification!.notification_id,
+          read_at: expect.any(Date),
+        }]);
+        expect(await callAs<{ count: string }>(database, admin, countSql))
+          .toEqual([{ count: "0" }]);
+        expect(await callAs<{ count: string }>(database, otherRecipient, countSql))
+          .toEqual([{ count: "1" }]);
       });
     });
   });

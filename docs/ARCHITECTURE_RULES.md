@@ -279,7 +279,7 @@ At minimum:
 - PCB production
 - Work Order Finish
 - Project Product/component planning mutations
-- Project Activity post/alert fanout and per-recipient mark-read
+- Project Activity post/alert fanout and per-recipient mark-read/dismissal
 - Documentation record and private PDF mutations
 - Fixed Asset mutations
 - Work Order number allocation
@@ -360,11 +360,12 @@ Rules:
 - Calendar modification is Admin-only
 - manual Inventory adjustment is Admin-only
 
-Project alert recipient selection is a distinct operational subscription rule, not an
-exception to Admin authorization. Admin can send/read according to normal Admin bypass,
-but Admin status alone does not create inbox membership. A recipient snapshot requires
-an explicit stored `projects.alerts.receive` assignment plus current active state,
-effective `dashboard.view` and `projects.view` access, and excludes the sender.
+Project alert recipient selection is distinct from alert posting authorization. Every
+active Admin is included automatically in each new recipient snapshot. A non-admin
+recipient requires an explicit stored `projects.alerts.receive` assignment plus
+current active state and effective `dashboard.view` and `projects.view` access. An
+alert sender is included whenever that sender satisfies the same Admin or non-admin
+eligibility rules as every other recipient.
 
 Permission checks should be reusable and centralized rather than duplicated manually throughout components.
 
@@ -388,7 +389,7 @@ changes, Work Order Finish, and automatic final-Work-Order Project completion.
 Project Activity is not AuditLog. Store the human title/description/image in the
 Project Activity domain. Audit only narrow `project_activity.created` and optional
 `project_activity.alert_sent` system events without copying full free text or image
-content. Per-recipient mark-read creates no audit noise.
+content. Per-recipient mark-read and dismissal create no audit noise.
 
 ---
 
@@ -403,6 +404,13 @@ first page.
 The Dashboard Alerts control belongs to the Dashboard content-heading feature, not
 the global Topbar. V1 uses explicit refetch triggers only—Dashboard load, panel open,
 window focus, send, mark-read, and retry—with no Realtime subscription or polling.
+
+Recipient read and dismissal timestamps are independent, one-way state transitions on
+the retained recipient row. Direct browser table updates remain forbidden. The trusted
+dismissal mutation must lock in `UserProfile -> recipient row` order, recheck current
+active Dashboard/Project access and ownership after blocking, use server time, and make
+identical retries idempotent. Admin access never bypasses ownership. Client cache
+reconciliation is profile-scoped and occurs only after confirmed backend success.
 
 ---
 

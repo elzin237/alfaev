@@ -5,6 +5,9 @@ import { MemoryRouter } from "react-router";
 const mocks = vi.hoisted(() => ({ refetch: vi.fn(), useDashboard: vi.fn() }));
 
 vi.mock("./hooks/useDashboard", () => ({ useDashboard: mocks.useDashboard }));
+vi.mock("./components/DashboardAlertsControl", () => ({
+  default: () => <button type="button">Alerts test control</button>,
+}));
 
 import DashboardPage from "./DashboardPage";
 import type { DashboardReadModel } from "./services/dashboardService";
@@ -147,6 +150,23 @@ afterEach(() => {
 });
 
 describe("DashboardPage", () => {
+  it("places Alerts in the content heading independently of Dashboard data", () => {
+    mocks.useDashboard.mockReturnValue({
+      data: undefined,
+      isError: false,
+      isPending: true,
+      refetch: mocks.refetch,
+    });
+    renderPage();
+
+    const heading = screen.getByRole("heading", { name: "Dashboard" });
+    const header = heading.closest("header");
+    expect(header).not.toBeNull();
+    expect(within(header!).getByRole("button", { name: "Alerts test control" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Dashboard...");
+  });
+
   it("derives the four summary metrics only from their existing authorized sections", () => {
     const metricProjects = {
       ...projects,

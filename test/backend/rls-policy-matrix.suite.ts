@@ -262,7 +262,9 @@ export function registerRlsPolicyMatrixTests(
         const applicationFunctions = functions.rows.filter(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
-        expect(applicationFunctions).toHaveLength(151);
+        expect(applicationFunctions).toHaveLength(
+          process.env.PROJECT_ALERT_DISMISSAL === "1" ? 152 : 151,
+        );
         const publicOrAnonymous = applicationFunctions.filter(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
@@ -395,6 +397,33 @@ export function registerRlsPolicyMatrixTests(
             volatility: "v",
           },
         ]);
+
+        const projectAlertDismissFunctions = applicationFunctions.filter(
+          (routine) => routine.function_name === "dismiss_project_alert_notification",
+        );
+        expect(projectAlertDismissFunctions.map((routine) => ({
+          arguments: routine.arguments,
+          authenticated_execute: routine.authenticated_execute,
+          function_name: routine.function_name,
+          public_execute: routine.public_execute,
+          anonymous_execute: routine.anonymous_execute,
+          result_type: routine.result_type,
+          settings: routine.settings,
+          volatility: routine.volatility,
+        }))).toEqual(
+          process.env.PROJECT_ALERT_DISMISSAL === "1"
+            ? [{
+              arguments: "p_notification_id uuid",
+              authenticated_execute: true,
+              function_name: "dismiss_project_alert_notification",
+              public_execute: false,
+              anonymous_execute: false,
+              result_type: "TABLE(notification_id uuid, dismissed_at timestamp with time zone)",
+              settings: ['search_path=""'],
+              volatility: "v",
+            }]
+            : [],
+        );
 
         if (rlsEventTriggerHelpers.length === 1) {
           expect(rlsEventTriggerHelpers[0]).toMatchObject({

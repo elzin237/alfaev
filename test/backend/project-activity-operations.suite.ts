@@ -102,6 +102,30 @@ async function grantPermissions(
   );
 }
 
+async function getActiveAdminIds(database: PoolClient): Promise<string[]> {
+  return (await database.query<{ id: string }>(
+    `select id
+     from public.user_profiles
+     where is_active
+       and is_admin
+     order by id`,
+  )).rows.map((row) => row.id);
+}
+
+async function getAlertRecipientIds(
+  database: PoolClient,
+  alertId: string | null,
+): Promise<string[]> {
+  if (!alertId) throw new Error("Expected an alert ID for recipient assertions");
+  return (await database.query<{ recipient_user_id: string }>(
+    `select recipient_user_id
+     from public.project_activity_alert_recipients
+     where alert_id = $1::uuid
+     order by recipient_user_id`,
+    [alertId],
+  )).rows.map((row) => row.recipient_user_id);
+}
+
 async function createProject(
   database: PoolClient,
   actorId: string,
@@ -442,9 +466,6 @@ export function registerProjectActivityOperationsTests(
             "dashboard.view",
             "projects.view",
           ]);
-          await grantPermissions(database, fixture.actors.admin.profileId, adminId, [
-            "projects.alerts.receive",
-          ]);
           await grantPermissions(database, fixture.actors.brandManager.profileId, adminId, [
             "projects.alerts.receive",
           ]);
@@ -468,6 +489,13 @@ export function registerProjectActivityOperationsTests(
             [fixture.actors.productCreator.profileId],
           );
 
+          const activeAdminIds = await getActiveAdminIds(database);
+          const expectedRecipients = [
+            ...activeAdminIds,
+            fixture.actors.permitted.profileId,
+            sender.profileId,
+          ].sort();
+
           const requestId = randomUUID();
           const first = (await callAs<PostRow>(database, sender, postSql, [
             projectId,
@@ -486,26 +514,42 @@ export function registerProjectActivityOperationsTests(
           expect(retry).toEqual(first);
           expect(first).toMatchObject({
             alert_sent: true,
-            recipient_count: "2",
+            recipient_count: String(expectedRecipients.length),
           });
 
-          const recipients = (await database.query<{ recipient_user_id: string }>(
-            `select recipient_user_id
-             from public.project_activity_alert_recipients
-             where alert_id = $1::uuid
-             order by recipient_user_id`,
-            [first.alert_id],
-          )).rows.map((row) => row.recipient_user_id);
-          expect(recipients).toEqual([
-            fixture.actors.admin.profileId,
-            fixture.actors.permitted.profileId,
-          ].sort());
-          expect(recipients).not.toContain(sender.profileId);
+          const recipients = await getAlertRecipientIds(database, first.alert_id);
+          expect(recipients).toEqual(expectedRecipients);
           expect(recipients).not.toContain(fixture.actors.brandManager.profileId);
           expect(recipients).not.toContain(fixture.actors.productEditor.profileId);
           expect(recipients).not.toContain(fixture.actors.supplierCreator.profileId);
           expect(recipients).not.toContain(fixture.actors.inactive.profileId);
-          expect(recipients).not.toContain(fixture.actors.productCreator.profileId);
+
+          await database.query(
+            `delete from public.user_permissions as permission
+             using public.permission_definitions as definition
+             where definition.id = permission.permission_definition_id
+               and permission.user_id = $1::uuid
+               and definition.key = 'projects.alerts.receive'`,
+            [sender.profileId],
+          );
+          const senderWithoutReceive = (await callAs<PostRow>(database, sender, postSql, [
+            projectId,
+            randomUUID(),
+            "Sender without receive",
+            "Other eligible recipients still receive the alert",
+            true,
+          ]))[0]!;
+          const expectedWithoutSender = [
+            ...activeAdminIds,
+            fixture.actors.permitted.profileId,
+          ].sort();
+          expect(senderWithoutReceive.recipient_count)
+            .toBe(String(expectedWithoutSender.length));
+          expect(await getAlertRecipientIds(database, senderWithoutReceive.alert_id))
+            .toEqual(expectedWithoutSender);
+          await grantPermissions(database, sender.profileId, adminId, [
+            "projects.alerts.receive",
+          ]);
 
           await grantPermissions(database, fixture.actors.brandManager.profileId, adminId, [
             "dashboard.view",
@@ -516,7 +560,7 @@ export function registerProjectActivityOperationsTests(
              from public.project_activity_alert_recipients
              where alert_id = $1::uuid`,
             [first.alert_id],
-          )).rows[0]?.count).toBe("2");
+          )).rows[0]?.count).toBe(String(expectedRecipients.length));
 
           const adminSend = (await callAs<PostRow>(
             database,
@@ -526,6 +570,15 @@ export function registerProjectActivityOperationsTests(
           ))[0]!;
           expect(adminSend.alert_sent).toBe(true);
           expect(Number(adminSend.recipient_count)).toBeGreaterThan(0);
+          expect((await database.query<{ recipient_user_id: string }>(
+            `select recipient_user_id
+             from public.project_activity_alert_recipients
+             where alert_id = $1::uuid
+               and recipient_user_id = $2::uuid`,
+            [adminSend.alert_id, fixture.actors.admin.profileId],
+          )).rows).toEqual([{
+            recipient_user_id: fixture.actors.admin.profileId,
+          }]);
 
           const counts = (await database.query<{
             activities: string;
@@ -540,7 +593,12 @@ export function registerProjectActivityOperationsTests(
                (select pg_catalog.count(*)::text from public.audit_logs where entity_id in ($2::uuid, $3::uuid)) as audits`,
             [requestId, first.activity_id, first.alert_id],
           )).rows[0];
-          expect(counts).toEqual({ activities: "1", alerts: "1", recipients: "2", audits: "2" });
+          expect(counts).toEqual({
+            activities: "1",
+            alerts: "1",
+            recipients: String(expectedRecipients.length),
+            audits: "2",
+          });
 
           const auditText = JSON.stringify((await database.query(
             `select action_type, entity_type, summary, before_data, after_data, metadata
@@ -585,6 +643,73 @@ export function registerProjectActivityOperationsTests(
         });
       });
 
+      it("automatically snapshots active Admins across trusted promotion and lifecycle changes", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const candidate = fixture.actors.productCreator;
+          const projectId = await createProject(database, admin.profileId);
+          await database.query(
+            `delete from public.user_permissions as permission
+             using public.permission_definitions as definition
+             where definition.id = permission.permission_definition_id
+               and definition.key in (
+                 'projects.alerts.receive', 'dashboard.view', 'projects.view'
+               )
+               and permission.user_id = any($1::uuid[])`,
+            [[admin.profileId, candidate.profileId]],
+          );
+          const baselineAdminIds = await getActiveAdminIds(database);
+
+          const adminOnly = (await callAs<PostRow>(database, admin, postSql, [
+            projectId,
+            randomUUID(),
+            "Automatic Admin recipient",
+            "An active Admin needs no explicit receive assignment",
+            true,
+          ]))[0]!;
+          expect(adminOnly.recipient_count).toBe(String(baselineAdminIds.length));
+          expect(await getAlertRecipientIds(database, adminOnly.alert_id))
+            .toEqual(baselineAdminIds);
+
+          await callAs(database, admin,
+            "select public.set_user_admin_status_admin($1::uuid, true)",
+            [candidate.profileId]);
+          const afterPromotion = (await callAs<PostRow>(database, admin, postSql, [
+            projectId, randomUUID(), "Promoted Admin", "All active Admins receive", true,
+          ]))[0]!;
+          const promotedAdminIds = [...baselineAdminIds, candidate.profileId].sort();
+          expect(afterPromotion.recipient_count).toBe(String(promotedAdminIds.length));
+          expect(await getAlertRecipientIds(database, afterPromotion.alert_id))
+            .toEqual(promotedAdminIds);
+
+          await callAs(database, admin,
+            "select public.set_user_active_state_admin($1::uuid, false)",
+            [candidate.profileId]);
+          const whileInactive = (await callAs<PostRow>(database, admin, postSql, [
+            projectId, randomUUID(), "Inactive Admin", "Inactive users are excluded", true,
+          ]))[0]!;
+          expect(whileInactive.recipient_count).toBe(String(baselineAdminIds.length));
+
+          await callAs(database, admin,
+            "select public.set_user_active_state_admin($1::uuid, true)",
+            [candidate.profileId]);
+          await callAs(database, admin,
+            "select public.set_user_admin_status_admin($1::uuid, false)",
+            [candidate.profileId]);
+          const afterDemotion = (await callAs<PostRow>(database, admin, postSql, [
+            projectId, randomUUID(), "Demoted Admin", "Non-admin rules apply", true,
+          ]))[0]!;
+          expect(afterDemotion.recipient_count).toBe(String(baselineAdminIds.length));
+
+          const preservedSnapshot = await getAlertRecipientIds(
+            database,
+            afterPromotion.alert_id,
+          );
+          expect(preservedSnapshot).toEqual(promotedAdminIds);
+        });
+      });
+
       it("rolls zero-recipient and late-audit failures back atomically", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -596,7 +721,27 @@ export function registerProjectActivityOperationsTests(
              where definition.id = permission.permission_definition_id
                and definition.key = 'projects.alerts.receive'`,
           );
-          const before = (await database.query<{ value: string }>(
+          const activeAdminIds = await getActiveAdminIds(database);
+          const senderOnly = (await callAs<PostRow>(
+            database,
+            fixture.actors.admin,
+            postSql,
+            [projectId, randomUUID(), "Sender only", "Eligible sender succeeds", true],
+          ))[0]!;
+          expect(senderOnly.recipient_count).toBe(String(activeAdminIds.length));
+          expect(await getAlertRecipientIds(database, senderOnly.alert_id))
+            .toEqual(activeAdminIds);
+          await grantPermissions(database, fixture.actors.permitted.profileId, adminId, [
+            "projects.edit",
+            "projects.alerts.send",
+          ]);
+          await database.query(
+            `update public.user_profiles
+             set is_active = false
+             where is_admin`,
+          );
+
+          const beforeZero = (await database.query<{ value: string }>(
             `select (
                (select pg_catalog.count(*) from public.project_activity_updates)
                + (select pg_catalog.count(*) from public.project_activity_alerts)
@@ -606,7 +751,7 @@ export function registerProjectActivityOperationsTests(
 
           await expectRejected(
             database,
-            fixture.actors.admin,
+            fixture.actors.permitted,
             postSql,
             [projectId, randomUUID(), "No recipients", "Must roll back", true],
             "PAC03",
@@ -618,7 +763,14 @@ export function registerProjectActivityOperationsTests(
                + (select pg_catalog.count(*) from public.project_activity_alert_recipients)
              )::text as value`,
           )).rows[0]!.value;
-          expect(afterZero).toBe(before);
+          expect(afterZero).toBe(beforeZero);
+
+          await database.query(
+            `update public.user_profiles
+             set is_active = true
+             where id = $1::uuid`,
+            [fixture.actors.admin.profileId],
+          );
 
           await grantPermissions(database, fixture.actors.permitted.profileId, adminId, [
             "projects.alerts.receive",
@@ -638,6 +790,18 @@ export function registerProjectActivityOperationsTests(
             before insert on public.audit_logs
             for each row execute function pg_temp.fail_project_activity_alert_audit()`);
 
+          const beforeLateFailure = (await database.query<{
+            activities: string;
+            alerts: string;
+            audits: string;
+            recipients: string;
+          }>(
+            `select
+               (select pg_catalog.count(*)::text from public.project_activity_updates) as activities,
+               (select pg_catalog.count(*)::text from public.project_activity_alerts) as alerts,
+               (select pg_catalog.count(*)::text from public.project_activity_alert_recipients) as recipients,
+               (select pg_catalog.count(*)::text from public.audit_logs) as audits`,
+          )).rows[0]!;
           const failedRequestId = randomUUID();
           await expectRejected(
             database,
@@ -651,11 +815,13 @@ export function registerProjectActivityOperationsTests(
              from public.project_activity_updates where request_id = $1::uuid`,
             [failedRequestId],
           )).rows[0]?.count).toBe("0");
-          expect((await database.query<{ count: string }>(
-            `select pg_catalog.count(*)::text as count
-             from public.audit_logs
-             where action_type in ('project_activity.created', 'project_activity.alert_sent')`,
-          )).rows[0]?.count).toBe("0");
+          expect((await database.query(
+            `select
+               (select pg_catalog.count(*)::text from public.project_activity_updates) as activities,
+               (select pg_catalog.count(*)::text from public.project_activity_alerts) as alerts,
+               (select pg_catalog.count(*)::text from public.project_activity_alert_recipients) as recipients,
+               (select pg_catalog.count(*)::text from public.audit_logs) as audits`,
+          )).rows[0]).toEqual(beforeLateFailure);
         });
       });
 

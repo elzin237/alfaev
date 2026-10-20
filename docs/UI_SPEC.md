@@ -437,6 +437,13 @@ row read and navigates to `/projects/<projectId>#activity-<activityId>`. V1 has 
 Mark all as read, polling, or Realtime subscription. Refetch on Dashboard load, panel
 open, window focus, successful alert send, mark-read, and explicit retry.
 
+A later Dashboard dismissal slice adds a sibling three-dot row menu with
+`Dismiss notification`. It must not be nested inside or trigger the row navigation
+control. The action requires an accessible confirmation dialog, returns focus to its
+trigger on cancel, and permanently removes only the caller's row from the active inbox.
+V1 has no undo or dismissed-notification archive. D1 provides schema/immutability only;
+the current Dashboard does not yet expose dismissal.
+
 ---
 
 # 15. Projects UI
@@ -569,7 +576,7 @@ Activity is immutable. Do not provide edit/delete/Admin-delete, attachment
 replace/remove, or alert-resend controls. While submitting, prevent duplicate submits;
 the trusted request UUID/database contract remains the idempotency authority.
 
-When `Post & send alert` has no eligible non-sender recipients, show the clear domain
+When `Post & send alert` has no eligible recipients, show the clear domain
 error and keep the form content for correction/retry. Never silently downgrade it to
 `Post update`.
 

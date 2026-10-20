@@ -694,10 +694,11 @@ reject new posts.
 `Post & send alert` requires both Activity-post authority and alert-send authority:
 the actor must be an active Admin or have `projects.edit`, and must also be an active
 Admin or have `projects.alerts.send`. Alert recipients are selected explicitly at send
-time. Admin status alone never subscribes a user. Each recipient must be active, have
-an explicit `projects.alerts.receive` assignment, have current effective
-`dashboard.view` and `projects.view` access (through Admin bypass or explicit grants),
-and not be the sender. If that set is empty, the entire operation
+time. Every active Admin is included automatically. Each non-admin recipient must be
+active, have an explicit `projects.alerts.receive` assignment, and have current
+effective `dashboard.view` and `projects.view` access. An alert sender is included in
+the recipient snapshot whenever that sender satisfies the same Admin or non-admin
+eligibility rules as every other recipient. If that set is empty, the entire operation
 fails; no Activity or partial alert fanout persists.
 
 Recipient membership is snapshotted at send time, but current access still governs
@@ -708,6 +709,14 @@ Permission removal hides rather than deletes the recipient history; restoring ac
 may make the historically addressed notification visible again. Marking a notification
 read changes only that recipient's row and occurs only on notification click, not panel
 open or unrelated Project navigation.
+
+An authorized recipient may permanently dismiss only its own Dashboard notification.
+Dismissal is a separate one-way `dismissed_at` transition: it retains the recipient row,
+preserves `read_at`, affects no other recipient, and never deletes or changes Activity,
+alert, image, or AuditLog history. Admin access never bypasses recipient ownership.
+Direct browser table mutation remains forbidden; a narrow trusted owner-only mutation
+must enforce current active `dashboard.view` and `projects.view` access. Dismissal creates
+no AuditLog event and V1 provides no undo or dismissed-notification archive.
 
 All Activity/alert tables must use RLS with no broad browser writes. Trusted functions
 must be `SECURITY DEFINER`, use an empty `search_path`, grant execution only to
@@ -737,9 +746,9 @@ AuditLog events. Database failure leaves none of them committed.
 The trusted operation appends `project_activity.created` without copying the full
 description or image into AuditLog. Alert generation additionally appends
 `project_activity.alert_sent` with only safe identifiers/state and recipient count.
-Mark-read creates no AuditLog event. V1 uses bounded refetches on Dashboard load, panel
-open, window focus, send, mark-read, and explicit retry; it has no Realtime subscription
-or polling.
+Mark-read and per-recipient dismissal create no AuditLog event. V1 uses bounded
+refetches on Dashboard load, panel open, window focus, send, mark-read, dismissal, and
+explicit retry; it has no Realtime subscription or polling.
 
 When a Work Order finishes, the trusted transaction must check for other unfinished
 Work Orders on the same Project. If none remain, it atomically completes the Project,

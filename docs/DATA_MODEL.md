@@ -862,7 +862,8 @@ Rules:
 
 ## 8.9 ProjectActivityAlertRecipient
 
-Immutable send-time recipient membership plus per-recipient read state.
+Immutable send-time recipient membership plus independent per-recipient read and
+dismissal state.
 
 Fields:
 
@@ -875,21 +876,37 @@ Fields:
   - required server-owned timestamp
 - `read_at`
   - nullable server-owned timestamp
+- `dismissed_at`
+  - nullable server-owned timestamp
+  - `NULL` means the notification remains active in that recipient's inbox
+  - non-`NULL` means the notification is permanently dismissed from that recipient's
+    active inbox
 
 Rules:
 
 - unique `(alert_id, recipient_user_id)`
-- send-time eligibility requires active state, an explicit
-  `projects.alerts.receive` assignment, effective `dashboard.view` and `projects.view`
-  access through Admin bypass or explicit grants, and a user other than the sender
-- Admin status alone does not make a user a recipient
+- every active Admin is included automatically at send time
+- non-admin send-time eligibility requires active state, an explicit
+  `projects.alerts.receive` assignment, and effective `dashboard.view` and
+  `projects.view` access
+- an alert sender is included in the recipient snapshot whenever that sender satisfies
+  the same Admin or non-admin eligibility rules as every other recipient
 - membership is frozen; later permission grants/removals do not insert/delete history
+- recipient identity, alert relationship, recipient ownership, and `created_at` are
+  immutable; deletion is forbidden
 - current active state plus current `dashboard.view` and `projects.view` governs
   notification visibility/opening
 - only notification click marks that recipient row read; panel open and unrelated
   Project navigation do not
-- inbox index: `(recipient_user_id, created_at DESC, id DESC)`
-- unread inbox uses a partial index with `read_at IS NULL`
+- `read_at` and `dismissed_at` are independent one-way transitions from `NULL` to a
+  server-owned timestamp; each may be set once and never rewritten or cleared, and
+  both transitions require trusted authorized operations
+- existing recipient rows receive `dismissed_at = NULL` without a historical rewrite
+- dismissal retains the recipient row and does not delete recipient history
+- inbox index: `(recipient_user_id, created_at DESC, id DESC)` where
+  `dismissed_at IS NULL`
+- unread inbox index: `(recipient_user_id, created_at DESC, id DESC)` where
+  `read_at IS NULL AND dismissed_at IS NULL`
 - bounded reads use default 20, limit 1–50, and keyset
   `(created_at, recipient_row_id)`
 
@@ -1656,8 +1673,8 @@ Rules:
 - The Project Activity alert inbox is a separate bounded read model over immutable
   send-time recipient membership. It additionally re-checks current active state and
   effective `dashboard.view` plus `projects.view` access before returning a row.
-- Admin bypass authorizes Dashboard/Project access but does not substitute for the
-  explicit `projects.alerts.receive` assignment required for recipient membership.
+- active Admins are included in new recipient snapshots automatically; non-admin
+  recipient membership requires an explicit `projects.alerts.receive` assignment.
 
 ---
 
@@ -1743,7 +1760,7 @@ FixedAsset
 | ProjectActivityUpdate | No | Human-authored append-only Project collaboration; correct with a later update |
 | ProjectActivityAttachment | No | At most one private immutable image per Activity |
 | ProjectActivityAlert | No | At most one send event per Activity; no resend in V1 |
-| ProjectActivityAlertRecipient | Read state only | Recipient membership immutable; only own `read_at` may transition from NULL |
+| ProjectActivityAlertRecipient | Read/dismiss state only | Recipient identity, alert relationship, recipient ownership, and creation timestamp are immutable; trusted authorized operations may independently set `read_at` and `dismissed_at` once from NULL, but neither timestamp may be rewritten or cleared and deletion is forbidden |
 | ProcurementRequest | Yes until resolved | Resolved is terminal, stays historical, and has no hard-delete, reopen, or reactivation workflow |
 | PcbCard | Yes subject to history | Archive if production history exists |
 | Used PcbBomVersion | No | Immutable |
@@ -1820,7 +1837,8 @@ If PDF byte generation cannot participate in the same database transaction, the 
 - enforce one client request UUID as the idempotency authority
 - insert Activity and optional attachment metadata
 - for alert intent, re-check both post/send authority and snapshot all eligible
-  non-sender recipients; reject an empty set
+  recipients, including every active Admin and the sender when eligible; reject an
+  empty set
 - insert one optional alert event and recipient rows
 - append narrow `project_activity.created` and optional
   `project_activity.alert_sent` AuditLog events

@@ -80,8 +80,9 @@ Dashboard must never reveal unauthorized module data.
 
 Project Activity alerts are not a Topbar feature. Inbox visibility requires a stored
 send-time recipient row plus current active state, `dashboard.view`, and
-`projects.view` for the target Project. Admin status alone does not create recipient
-membership.
+`projects.view` for the target Project. Every active Admin is included automatically in
+new recipient snapshots; non-admin membership requires explicit
+`projects.alerts.receive` at send time.
 
 ---
 
