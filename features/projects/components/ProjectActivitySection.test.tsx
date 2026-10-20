@@ -36,19 +36,53 @@ vi.mock("./ProjectActivityTimeline", () => ({
   default: ({
     labelledBy,
     scrollToActivityId,
+    linkedActivity,
   }: {
     labelledBy: string;
     scrollToActivityId: string | null;
+    linkedActivity?: ProjectActivityItem | null;
   }) => (
     <div role="region" tabIndex={0} aria-labelledby={labelledBy}>
       Timeline history / scroll {scrollToActivityId ?? "none"}
+      {linkedActivity && (
+        <section role="region" aria-label="Linked activity">
+          <p>{linkedActivity.title}</p>
+          <p>{linkedActivity.authorFullName}</p>
+          {linkedActivity.alertSent && <p>Alert sent</p>}
+          {linkedActivity.attachment && (
+            <p>Private image for {linkedActivity.title}</p>
+          )}
+        </section>
+      )}
     </div>
   ),
 }));
+vi.mock("./ProjectActivityImage", () => ({
+  default: ({ title }: { title: string }) => <div>Private image for {title}</div>,
+}));
 
 import { ProjectActivitySection } from "./ProjectActivitySection";
+import type { ProjectActivityHash } from "../projectActivityDeepLink";
+import type { ProjectActivityItem } from "../services/projectActivityService";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
+const linkedActivity: ProjectActivityItem = {
+  activityId: "00000000-0000-4000-8000-000000000009",
+  projectId,
+  authorUserId: "00000000-0000-4000-8000-000000000010",
+  authorFullName: "Historical Author",
+  title: "Linked update",
+  description: "Linked description",
+  createdAt: "2026-10-19T10:00:00.000Z",
+  alertSent: true,
+  attachment: {
+    attachmentId: "00000000-0000-4000-8000-000000000011",
+    mimeType: "image/jpeg",
+    byteSize: 42,
+    altText: "Linked image",
+  },
+};
+const targetRefetch = vi.fn();
 
 beforeEach(() => {
   mocks.useProjectActivityPermissions.mockReturnValue({
@@ -66,6 +100,13 @@ beforeEach(() => {
       fetchNextPage: vi.fn(),
     },
     items: [],
+    linkedActivity: null,
+    targetIsLoaded: false,
+    targetQuery: {
+      isPending: false,
+      data: undefined,
+      refetch: targetRefetch,
+    },
     reconcilePostedActivity: vi.fn().mockResolvedValue({
       activityId: "00000000-0000-4000-8000-000000000009",
     }),
@@ -74,10 +115,17 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe("ProjectActivitySection", () => {
-  function renderSection(status: "planned" | "completed" = "planned") {
+  function renderSection(
+    status: "planned" | "completed" = "planned",
+    activityTarget: ProjectActivityHash = { kind: "none" },
+  ) {
     return render(
       <StrictMode>
-        <ProjectActivitySection projectId={projectId} status={status} />
+        <ProjectActivitySection
+          projectId={projectId}
+          status={status}
+          activityTarget={activityTarget}
+        />
       </StrictMode>,
     );
   }
@@ -147,6 +195,87 @@ describe("ProjectActivitySection", () => {
     expect(screen.getByRole("status")).toHaveClass("inline-flex");
     expect(within(screen.getByRole("region", { name: "Recent activity" }))
       .queryByText("Update posted and alert sent"))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows a malformed Activity hash safely without target retrieval", () => {
+    renderSection("planned", { kind: "invalid" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This Activity link is invalid.",
+    );
+    expect(mocks.useProjectActivity).toHaveBeenCalledWith(projectId, null);
+  });
+
+  it("renders an older direct target as a separate Linked activity with image metadata", () => {
+    mocks.useProjectActivity.mockReturnValue({
+      ...mocks.useProjectActivity(),
+      linkedActivity,
+      targetQuery: {
+        isPending: false,
+        data: { ok: true, value: linkedActivity },
+        refetch: targetRefetch,
+      },
+    });
+    renderSection("planned", {
+      kind: "activity",
+      activityId: linkedActivity.activityId,
+    });
+
+    const linked = screen.getByRole("region", { name: "Linked activity" });
+    expect(within(linked).getByText("Linked update")).toBeInTheDocument();
+    expect(within(linked).getByText(/Historical Author/)).toBeInTheDocument();
+    expect(within(linked).getByText("Alert sent")).toBeInTheDocument();
+    expect(within(linked).getByText("Private image for Linked update"))
+      .toBeInTheDocument();
+    expect(linked.querySelector("ol")).not.toBeInTheDocument();
+  });
+
+  it("shows safe target failures and retries only a transient failure", () => {
+    mocks.useProjectActivity.mockReturnValue({
+      ...mocks.useProjectActivity(),
+      targetQuery: {
+        isPending: false,
+        data: {
+          ok: false,
+          error: {
+            code: "activity_load_failed",
+            message: "Couldn't load the linked Activity.",
+          },
+        },
+        refetch: targetRefetch,
+      },
+    });
+    const target: ProjectActivityHash = {
+      kind: "activity",
+      activityId: linkedActivity.activityId,
+    };
+    const transient = renderSection("planned", target);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn't load the linked Activity.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(targetRefetch).toHaveBeenCalledOnce();
+    transient.unmount();
+
+    mocks.useProjectActivity.mockReturnValue({
+      ...mocks.useProjectActivity(),
+      targetQuery: {
+        isPending: false,
+        data: {
+          ok: false,
+          error: {
+            code: "activity_unavailable",
+            message: "This Project Activity is unavailable.",
+          },
+        },
+        refetch: targetRefetch,
+      },
+    });
+    renderSection("planned", target);
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "This Project Activity is unavailable.",
+    );
+    expect(screen.queryByRole("button", { name: "Try again" }))
       .not.toBeInTheDocument();
   });
 });

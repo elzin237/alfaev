@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CircleCheck } from "lucide-react";
 
+import type { ProjectActivityHash } from "../projectActivityDeepLink";
 import type { ProjectStatus } from "../projectStatus";
 import {
   useProjectActivity,
@@ -12,18 +13,32 @@ import ProjectActivityTimeline from "./ProjectActivityTimeline";
 interface ProjectActivitySectionProps {
   projectId: string;
   status: ProjectStatus;
+  activityTarget?: ProjectActivityHash;
+  activityTargetNavigationKey?: string;
   onProjectUnavailable?: () => Promise<unknown> | unknown;
 }
 
 export function ProjectActivitySection({
   projectId,
   status,
+  activityTarget = { kind: "none" },
+  activityTargetNavigationKey = "default",
   onProjectUnavailable,
 }: ProjectActivitySectionProps) {
   const { canPost, canSendAlert, permissionsPending } =
     useProjectActivityPermissions(status);
-  const { activityQuery, items, reconcilePostedActivity } =
-    useProjectActivity(projectId);
+  const targetActivityId = activityTarget.kind === "activity"
+    ? activityTarget.activityId
+    : null;
+  const {
+    activityQuery,
+    items,
+    linkedActivity,
+    targetIsLoaded,
+    targetQuery,
+    activityProfileId,
+    reconcilePostedActivity,
+  } = useProjectActivity(projectId, targetActivityId);
   const closed = status === "completed" || status === "cancelled";
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [scrollActivityId, setScrollActivityId] = useState<string | null>(null);
@@ -89,10 +104,40 @@ export function ProjectActivitySection({
           >
             Recent activity
           </h3>
+          {activityTarget.kind === "invalid" && (
+            <p role="alert" className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm font-medium text-amber-900">
+              This Activity link is invalid.
+            </p>
+          )}
+          {targetActivityId && !targetIsLoaded && targetQuery.isPending && (
+            <p role="status" className="mb-4 rounded-2xl bg-zinc-50 px-5 py-4 text-sm text-zinc-600">
+              Loading linked Activity...
+            </p>
+          )}
+          {targetActivityId && !targetIsLoaded && targetQuery.data?.ok === false && (
+            <div role="alert" className="mb-4 rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-4">
+              <p className="text-sm text-zinc-700">
+                {targetQuery.data.error.message}
+              </p>
+              {targetQuery.data.error.code === "activity_load_failed" && (
+                <button
+                  type="button"
+                  onClick={() => void targetQuery.refetch()}
+                  className="mt-3 rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                >
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
           <ProjectActivityTimeline
             projectId={projectId}
             labelledBy="project-recent-activity-heading"
             items={items}
+            linkedActivity={linkedActivity}
+            targetActivityId={targetActivityId}
+            targetContextKey={`${activityProfileId ?? ""}:${projectId}`}
+            targetNavigationKey={activityTargetNavigationKey}
             isPending={activityQuery.isPending}
             isError={activityQuery.isError}
             hasNextPage={activityQuery.hasNextPage}

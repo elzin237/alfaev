@@ -523,7 +523,7 @@ export function registerProjectAlertDismissalTests(
         });
       });
 
-      it("uses dismissal-aware indexes for dismissal-heavy inbox/count scans", async () => {
+      it("uses applicable dismissal-aware indexes without prescribing one cost-based plan", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actorId = fixture.actors.admin.profileId;
@@ -590,6 +590,49 @@ export function registerProjectAlertDismissalTests(
           await database.query("analyze public.project_activity_alert_recipients");
           await database.query("set local enable_seqscan = off");
 
+          const indexDefinitions = (await database.query<{
+            index_name: string;
+            definition: string;
+          }>(
+            `select indexname as index_name, indexdef as definition
+             from pg_catalog.pg_indexes
+             where schemaname = 'public'
+               and tablename = 'project_activity_alert_recipients'
+               and indexname in (
+                 'project_activity_alert_recipients_inbox_idx',
+                 'project_activity_alert_recipients_unread_inbox_idx'
+               )
+             order by indexname`,
+          )).rows;
+          expect(indexDefinitions).toEqual([
+            expect.objectContaining({
+              index_name: "project_activity_alert_recipients_inbox_idx",
+              definition: expect.stringContaining(
+                "(recipient_user_id, created_at DESC, id DESC) WHERE (dismissed_at IS NULL)",
+              ),
+            }),
+            expect.objectContaining({
+              index_name: "project_activity_alert_recipients_unread_inbox_idx",
+              definition: expect.stringContaining(
+                "(recipient_user_id, created_at DESC, id DESC) WHERE ((read_at IS NULL) AND (dismissed_at IS NULL))",
+              ),
+            }),
+          ]);
+
+          const activeCounts = (await database.query<{
+            inbox_count: string;
+            unread_count: string;
+          }>(
+            `select
+               pg_catalog.count(*)::text as inbox_count,
+               pg_catalog.count(*) filter (where read_at is null)::text as unread_count
+             from public.project_activity_alert_recipients
+             where recipient_user_id = $1::uuid
+               and dismissed_at is null`,
+            [recipientId],
+          )).rows[0];
+          expect(activeCounts).toEqual({ inbox_count: "200", unread_count: "100" });
+
           const inboxPlan = JSON.stringify((await database.query(
             `explain (analyze, buffers, format json)
              select id from public.project_activity_alert_recipients
@@ -606,7 +649,11 @@ export function registerProjectAlertDismissalTests(
             [recipientId],
           )).rows);
           expect(inboxPlan).toContain("project_activity_alert_recipients_inbox_idx");
-          expect(unreadPlan).toContain("project_activity_alert_recipients_unread_inbox_idx");
+          expect(unreadPlan).not.toContain("Seq Scan");
+          expect(
+            unreadPlan.includes("project_activity_alert_recipients_unread_inbox_idx")
+              || unreadPlan.includes("project_activity_alert_recipients_inbox_idx"),
+          ).toBe(true);
         });
       });
 

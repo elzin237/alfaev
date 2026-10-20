@@ -437,12 +437,13 @@ row read and navigates to `/projects/<projectId>#activity-<activityId>`. V1 has 
 Mark all as read, polling, or Realtime subscription. Refetch on Dashboard load, panel
 open, window focus, successful alert send, mark-read, and explicit retry.
 
-A later Dashboard dismissal slice adds a sibling three-dot row menu with
+The Dashboard dismissal control is a sibling three-dot row menu with
 `Dismiss notification`. It must not be nested inside or trigger the row navigation
 control. The action requires an accessible confirmation dialog, returns focus to its
 trigger on cancel, and permanently removes only the caller's row from the active inbox.
-V1 has no undo or dismissed-notification archive. D1 provides schema/immutability only;
-the current Dashboard does not yet expose dismissal.
+V1 has no undo or dismissed-notification archive. The Dashboard exposes dismissal only
+through the confirmed sibling row action; notification-row activation remains the
+independent mark-read-and-navigate action.
 
 ---
 
@@ -569,8 +570,15 @@ authoritative row and must not move the full Project page.
 The timeline remains newest first, loads 20 initially, and uses `Load more` keyset
 pagination. Compact image thumbnails appear within cards while the image viewer remains
 viewport-level and must not be clipped by the scrolling region. A direct Activity link
-not found in the first page uses an authorized by-ID read, renders the target, then
-scrolls/focuses it. V1 does not include Project Activity title search.
+not found in loaded pages uses an authorized by-ID read and presents the target
+separately as `Linked activity` without changing timeline pagination. Once resolved,
+the exact target is positioned using container-relative geometry, focused with browser
+scroll prevention, and given a subtle 2.5-second border/background highlight with no
+competing focus ring during the transient highlight. The effect
+runs once per React Router navigation entry, including Back/Forward; background data or
+image updates do not repeat it. Reduced-motion users receive immediate scrolling and no
+animated highlight. Real-browser acceptance remains in H4. V1 does not include Project
+Activity title search.
 
 Activity is immutable. Do not provide edit/delete/Admin-delete, attachment
 replace/remove, or alert-resend controls. While submitting, prevent duplicate submits;

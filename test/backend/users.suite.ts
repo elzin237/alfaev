@@ -86,6 +86,62 @@ interface AdminStatusAuditRow {
   metadata: Record<string, unknown>;
 }
 
+const requiredAdminEdgeFunctions = [
+  "admin-invite-user",
+  "admin-update-user-profile",
+  "admin-set-user-active",
+] as const;
+
+let localEdgePreflight: Promise<void> | undefined;
+
+async function requireLocalAdminEdgeRuntime(
+  fixture: SecurityFixtureHarness,
+): Promise<void> {
+  if (environment.projectRef !== "local") return;
+
+  localEdgePreflight ??= (async () => {
+    const sessionResult = await fixture.actors.admin.client.auth.getSession();
+    const accessToken = sessionResult.data.session?.access_token;
+
+    if (sessionResult.error || !accessToken) {
+      throw new Error("Local Edge preflight could not obtain the fixture Admin session");
+    }
+
+    for (const functionName of requiredAdminEdgeFunctions) {
+      const response = await fetch(
+        `${environment.supabaseUrl}/functions/v1/${functionName}`,
+        {
+          method: "GET",
+          headers: {
+            apikey: environment.supabasePublishableKey,
+            authorization: `Bearer ${accessToken}`,
+          },
+        },
+      );
+      const responseText = await response.text();
+
+      if (
+        response.status === 502
+        || response.status === 503
+        || response.status === 504
+      ) {
+        if (/name resolution failed|connection refused|upstream/i.test(responseText)) {
+          throw new Error(
+            `Local Supabase Edge runtime is unavailable for ${functionName}; `
+            + "restore the local Edge service before running Edge integration tests",
+          );
+        }
+        throw new Error(
+          `Local Edge handler ${functionName} is reachable but failed during preflight `
+          + `with HTTP ${response.status}`,
+        );
+      }
+    }
+  })();
+
+  await localEdgePreflight;
+}
+
 export function registerUsersTests(requireHarness: () => SecurityFixtureHarness): void {
   it("allows an active Admin to list only approved User fields", async () => {
     const fixture = requireHarness();
@@ -527,6 +583,7 @@ export function registerUsersTests(requireHarness: () => SecurityFixtureHarness)
   });
   it("denies the invite Edge Function before non-Admin Auth user creation", async () => {
     const fixture = requireHarness();
+    await requireLocalAdminEdgeRuntime(fixture);
     const deniedActors = [fixture.actors.permitted, fixture.actors.inactive];
 
     for (const actor of deniedActors) {
@@ -565,6 +622,7 @@ export function registerUsersTests(requireHarness: () => SecurityFixtureHarness)
   });
   it("denies the profile-update Edge Function before non-Admin mutation", async () => {
     const fixture = requireHarness();
+    await requireLocalAdminEdgeRuntime(fixture);
     const target = fixture.actors.unpermitted;
     const targetEmail = await fixture.getAuthUserEmail(target.authUserId);
 
@@ -603,6 +661,7 @@ export function registerUsersTests(requireHarness: () => SecurityFixtureHarness)
   });
   it("rolls Auth email back when Edge profile finalization fails", async () => {
     const fixture = requireHarness();
+    await requireLocalAdminEdgeRuntime(fixture);
     const target = await fixture.createTemporaryProfile(
       "edge-rollback-target",
       undefined,
@@ -1116,6 +1175,7 @@ export function registerUsersTests(requireHarness: () => SecurityFixtureHarness)
   });
   it("denies non-Admin and inactive callers at the account-state Edge boundary", async () => {
     const fixture = requireHarness();
+    await requireLocalAdminEdgeRuntime(fixture);
     const target = fixture.actors.unpermitted;
 
     for (const actor of [fixture.actors.permitted, fixture.actors.inactive]) {
@@ -1148,6 +1208,7 @@ export function registerUsersTests(requireHarness: () => SecurityFixtureHarness)
   });
   it("returns a safe no-op from the account-state Edge boundary", async () => {
     const fixture = requireHarness();
+    await requireLocalAdminEdgeRuntime(fixture);
     const target = fixture.actors.unpermitted;
     const sessionResult = await fixture.actors.admin.client.auth.getSession();
     const accessToken = sessionResult.data.session?.access_token;

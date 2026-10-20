@@ -11,6 +11,7 @@ import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import {
   projectActivityImageQueryKey,
   projectActivityQueryKey,
+  projectActivityTargetQueryKey,
 } from "../projectActivityQueryKeys";
 import type { ProjectStatus } from "../projectStatus";
 import {
@@ -90,7 +91,10 @@ export function useProjectActivityPermissions(status: ProjectStatus) {
   };
 }
 
-export function useProjectActivity(projectId: string) {
+export function useProjectActivity(
+  projectId: string,
+  targetActivityId: string | null = null,
+) {
   const { profile } = useAuth();
   const queryClient = useQueryClient();
   const queryKey = projectActivityQueryKey(profile?.id, projectId);
@@ -110,6 +114,26 @@ export function useProjectActivity(projectId: string) {
     enabled: Boolean(profile?.id && projectId),
     staleTime: 30_000,
     gcTime: 0,
+  });
+  const items = dedupeProjectActivityPages(activityQuery.data?.pages);
+  const targetIsLoaded = activityQuery.isSuccess && targetActivityId !== null && items.some(
+    (item) => item.activityId.toLowerCase() === targetActivityId.toLowerCase(),
+  );
+  const targetQuery = useQuery({
+    queryKey: projectActivityTargetQueryKey(
+      profile?.id,
+      projectId,
+      targetActivityId ?? "",
+    ),
+    queryFn: () => getProjectActivity(projectId, targetActivityId!),
+    enabled: Boolean(
+      profile?.id && targetActivityId && !activityQuery.isPending &&
+        !targetIsLoaded,
+    ),
+    staleTime: 30_000,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
   });
 
   async function reconcilePostedActivity(activityId: string) {
@@ -148,9 +172,15 @@ export function useProjectActivity(projectId: string) {
 
   return {
     activityQuery,
-    items: dedupeProjectActivityPages(activityQuery.data?.pages),
+    items,
     invalidate: () => queryClient.invalidateQueries({ queryKey, exact: true }),
     reconcilePostedActivity,
+    targetIsLoaded,
+    targetQuery,
+    linkedActivity: !targetIsLoaded && targetQuery.data?.ok
+      ? targetQuery.data.value
+      : null,
+    activityProfileId: profile?.id ?? null,
   };
 }
 

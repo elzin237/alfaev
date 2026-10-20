@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./ProjectActivityImage", () => ({
@@ -6,6 +7,8 @@ vi.mock("./ProjectActivityImage", () => ({
 }));
 
 import ProjectActivityTimeline from "./ProjectActivityTimeline";
+import { PROJECT_ACTIVITY_TARGET_HIGHLIGHT_MS } from "./ProjectActivityTimeline";
+import { projectActivityDomId } from "../projectActivityDeepLink";
 import type { ProjectActivityItem } from "../services/projectActivityService";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
@@ -26,8 +29,25 @@ const items: ProjectActivityItem[] = [{
   },
 }];
 const scrollTo = vi.fn();
+const windowScrollTo = vi.fn();
 const scrollIntoView = vi.fn();
 let reduceMotion = false;
+let containerBounds = makeRect(100, 500);
+const activityBounds = new Map<string, DOMRect>();
+
+function makeRect(top: number, bottom: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    top,
+    bottom,
+    left: 0,
+    right: 600,
+    width: 600,
+    height: bottom - top,
+    toJSON: () => ({}),
+  };
+}
 
 function renderTimeline(overrides: Partial<React.ComponentProps<typeof ProjectActivityTimeline>> = {}) {
   const props: React.ComponentProps<typeof ProjectActivityTimeline> = {
@@ -53,6 +73,8 @@ function renderTimeline(overrides: Partial<React.ComponentProps<typeof ProjectAc
 
 beforeEach(() => {
   reduceMotion = false;
+  containerBounds = makeRect(100, 500);
+  activityBounds.clear();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     value: scrollIntoView,
@@ -64,6 +86,20 @@ beforeEach(() => {
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn(() => ({ matches: reduceMotion })),
+  });
+  Object.defineProperty(window, "scrollTo", {
+    configurable: true,
+    value: windowScrollTo,
+  });
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement) {
+      if (this.getAttribute("role") === "region" &&
+        this.getAttribute("aria-labelledby") === "recent-activity-heading") {
+        return containerBounds;
+      }
+      return activityBounds.get(this.dataset.activityId ?? "") ?? makeRect(150, 250);
+    },
   });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -173,5 +209,329 @@ describe("ProjectActivityTimeline", () => {
       </>,
     );
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it("positions and focuses an exact loaded target inside the nested scroller once", () => {
+    activityBounds.set(items[0]!.activityId, makeRect(450, 530));
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const rendered = renderTimeline({
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "navigation-1",
+    });
+    const target = document.getElementById(projectActivityDomId(
+      projectId,
+      items[0]!.activityId,
+    ));
+
+    expect(target).toHaveAttribute("tabindex", "-1");
+    expect(target).toHaveAttribute(
+      "aria-label",
+      "Project Activity: Commissioning issue by Inactive Historical Author",
+    );
+    expect(target).toHaveClass("border-red-300", "bg-red-50/60");
+    expect(target).not.toHaveClass(
+      "ring-2",
+      "ring-red-300",
+      "focus-visible:ring-2",
+      "focus-visible:ring-red-500",
+      "focus-visible:ring-offset-2",
+    );
+    expect(scrollTo).toHaveBeenCalledExactlyOnceWith({
+      top: 30,
+      behavior: "smooth",
+    });
+    expect(windowScrollTo).not.toHaveBeenCalled();
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    expect(focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+    expect(document.activeElement).toBe(target);
+
+    scrollTo.mockClear();
+    focus.mockClear();
+    const { rerender, ...props } = rendered;
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline {...props} items={[...items]} />
+      </>,
+    );
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    focus.mockRestore();
+  });
+
+  it("renders and targets Linked activity inside the scroller but outside the chronological list", () => {
+    const linked = {
+      ...items[0]!,
+      activityId: "00000000-0000-4000-8000-000000000099",
+      title: "Older linked update",
+    };
+    activityBounds.set(linked.activityId, makeRect(520, 620));
+    renderTimeline({
+      linkedActivity: linked,
+      targetActivityId: linked.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "linked-navigation",
+    });
+
+    const linkedRegion = screen.getByRole("region", { name: "Linked activity" });
+    const linkedTarget = document.getElementById(projectActivityDomId(
+      projectId,
+      linked.activityId,
+    ));
+    expect(linkedTarget).toBe(document.activeElement);
+    expect(linkedRegion).toContainElement(linkedTarget);
+    expect(linkedTarget).toHaveClass("border-red-300", "bg-red-50/60");
+    expect(linkedTarget).not.toHaveClass("ring-2", "ring-red-300");
+    expect(within(screen.getByRole("list", { name: "Project Activity timeline" }))
+      .queryByText("Older linked update")).not.toBeInTheDocument();
+    expect(document.querySelectorAll(`#${projectActivityDomId(
+      projectId,
+      linked.activityId,
+    )}`)).toHaveLength(1);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 120, behavior: "smooth" });
+  });
+
+  it("makes the chronological row canonical after Load more without refocusing", () => {
+    const linked = {
+      ...items[0]!,
+      activityId: "00000000-0000-4000-8000-000000000099",
+      title: "Older linked update",
+    };
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const initial = renderTimeline({
+      linkedActivity: linked,
+      targetActivityId: linked.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "same-navigation",
+      hasNextPage: true,
+    });
+    expect(focus).toHaveBeenCalledOnce();
+    focus.mockClear();
+    scrollTo.mockClear();
+
+    const { rerender, ...props } = initial;
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...props}
+          linkedActivity={null}
+          items={[...items, linked]}
+          hasNextPage={false}
+        />
+      </>,
+    );
+    expect(screen.queryByRole("region", { name: "Linked activity" }))
+      .not.toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Project Activity timeline" }))
+      .getByText("Older linked update")).toBeInTheDocument();
+    expect(document.querySelectorAll(`#${projectActivityDomId(
+      projectId,
+      linked.activityId,
+    )}`)).toHaveLength(1);
+    expect(focus).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+    focus.mockRestore();
+  });
+
+  it("repeats targeting only for a genuine new navigation key", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const initial = renderTimeline({
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "history-entry-1",
+    });
+    expect(focus).toHaveBeenCalledOnce();
+    focus.mockClear();
+    const { rerender, ...props } = initial;
+
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...props}
+          targetNavigationKey="history-entry-2"
+        />
+      </>,
+    );
+    expect(focus).toHaveBeenCalledOnce();
+    focus.mockClear();
+
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...props}
+          targetNavigationKey="history-entry-1"
+        />
+      </>,
+    );
+    expect(focus).toHaveBeenCalledOnce();
+    focus.mockRestore();
+  });
+
+  it("targets a different Activity on a hash-only navigation without remounting", () => {
+    const second = {
+      ...items[0]!,
+      activityId: "00000000-0000-4000-8000-000000000088",
+      title: "Different linked target",
+    };
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const initial = renderTimeline({
+      items: [...items, second],
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "hash-one",
+    });
+    focus.mockClear();
+    const { rerender, ...props } = initial;
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...props}
+          items={[...items, second]}
+          targetActivityId={second.activityId}
+          targetNavigationKey="hash-two"
+        />
+      </>,
+    );
+    expect(document.activeElement).toBe(document.getElementById(
+      projectActivityDomId(projectId, second.activityId),
+    ));
+    expect(focus).toHaveBeenCalledOnce();
+    expect(document.getElementById(projectActivityDomId(
+      projectId,
+      items[0]!.activityId,
+    ))).not.toHaveClass("border-red-300");
+    focus.mockRestore();
+  });
+
+  it("clears a target on hash removal and never focuses invalid or stale Project data", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const initial = renderTimeline({
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "targeted",
+    });
+    const { rerender, ...props } = initial;
+    focus.mockClear();
+    rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...props}
+          targetActivityId={null}
+          targetNavigationKey="hash-cleared"
+        />
+      </>,
+    );
+    expect(focus).not.toHaveBeenCalled();
+    expect(document.querySelector(".border-red-300")).not.toBeInTheDocument();
+
+    cleanup();
+    renderTimeline({
+      projectId: "00000000-0000-4000-8000-000000000050",
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: "profile-2:00000000-0000-4000-8000-000000000050",
+      targetNavigationKey: "stale-project",
+    });
+    expect(focus).not.toHaveBeenCalled();
+    focus.mockRestore();
+  });
+
+  it("expires the restrained highlight and cancels its timer on unmount", () => {
+    vi.useFakeTimers();
+    const clearTimeout = vi.spyOn(window, "clearTimeout");
+    const rendered = renderTimeline({
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "highlight",
+    });
+    const target = document.getElementById(projectActivityDomId(
+      projectId,
+      items[0]!.activityId,
+    ));
+    expect(target).toHaveClass("border-red-300", "bg-red-50/60");
+    expect(target).not.toHaveClass("ring-2", "ring-red-300");
+    expect(document.activeElement).toBe(target);
+    act(() => vi.advanceTimersByTime(PROJECT_ACTIVITY_TARGET_HIGHLIGHT_MS));
+    expect(target).not.toHaveClass("border-red-300", "bg-red-50/60");
+    expect(target).toHaveClass(
+      "border-zinc-200",
+      "bg-white",
+      "focus-visible:ring-2",
+      "focus-visible:ring-red-500",
+      "focus-visible:ring-offset-2",
+    );
+    expect(document.activeElement).toBe(target);
+
+    rendered.rerender(
+      <>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline
+          {...rendered}
+          targetNavigationKey="highlight-again"
+        />
+      </>,
+    );
+    rendered.rerender(<></>);
+    expect(clearTimeout).toHaveBeenCalled();
+    clearTimeout.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it("uses immediate positioning for reduced motion and conditionally adjusts only the outer viewport", () => {
+    reduceMotion = true;
+    containerBounds = makeRect(850, 1_250);
+    activityBounds.set(items[0]!.activityId, makeRect(1_100, 1_180));
+    renderTimeline({
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "reduced-motion",
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(windowScrollTo).toHaveBeenCalledExactlyOnceWith({
+      top: 428,
+      behavior: "auto",
+    });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("focuses only once in StrictMode and image rendering does not retrigger it", () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    const props: React.ComponentProps<typeof ProjectActivityTimeline> = {
+      projectId,
+      labelledBy: "recent-activity-heading",
+      items,
+      targetActivityId: items[0]!.activityId,
+      targetContextKey: `profile-1:${projectId}`,
+      targetNavigationKey: "strict-navigation",
+      isPending: false,
+      isError: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      onRetry: vi.fn(),
+      onLoadMore: vi.fn(),
+    };
+    const rendered = render(
+      <StrictMode>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline {...props} />
+      </StrictMode>,
+    );
+    expect(focus).toHaveBeenCalledOnce();
+    focus.mockClear();
+    rendered.rerender(
+      <StrictMode>
+        <h3 id="recent-activity-heading">Recent activity</h3>
+        <ProjectActivityTimeline {...props} items={[...items]} />
+      </StrictMode>,
+    );
+    expect(screen.getByText("Private image for Commissioning issue"))
+      .toBeInTheDocument();
+    expect(focus).not.toHaveBeenCalled();
+    focus.mockRestore();
   });
 });

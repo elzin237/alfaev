@@ -217,8 +217,11 @@ requires confirmation and has no undo or dismissed-notification archive.
 Activity and notifications are newest-first bounded reads with default limit 20,
 allowed limits 1–50, and keyset cursors `(created_at, id)` and
 `(created_at, recipient_row_id)` respectively. Neither uses OFFSET or unbounded reads.
-If a deep-linked Activity is outside the first page, an authorized narrow by-ID read
-loads and focuses it.
+If a deep-linked Activity is outside loaded pages, an authorized narrow by-ID read
+loads it as a separate `Linked activity` without changing chronological page ordering
+or cursors. If the target later appears in a loaded page, only its normal timeline row
+is shown. Opening or resolving a deep link does not mark, dismiss, or otherwise mutate
+any notification recipient row. Task H3 owns scrolling, highlighting, and focus.
 
 The optional image is private JPEG, PNG, or WebP, maximum 5 MiB, with no SVG or animated
 format. Trusted handling validates actual content, chooses the object path, permits only
@@ -231,11 +234,18 @@ writable. Admin does not bypass the author requirement. An identical image retry
 reconcile the immutable attachment after the Project closes. Authorized image reads use
 a private signed URL that expires after five minutes.
 
-One request UUID covers a submission. An identical retry for the same Project,
-normalized content, image identity/metadata, and alert intent returns/reconciles to the
-same Activity; conflicting reuse fails. The database transaction atomically creates
-the Activity, optional alert/recipient rows, attachment metadata, and narrow AuditLog
-events. Storage/database reconciliation follows the trusted idempotent workflow.
+One request UUID covers a submission and is permanently bound to the original Activity
+author. An identical retry by that author for the same Project, normalized content,
+and alert intent returns the same Activity; conflicting reuse by that author fails.
+Another actor, including an Admin, is denied without learning whether its payload
+matches (`42501`); the original author's conflicting reuse remains `PAC01`. An exact
+historical replay does not append AuditLog, fan out recipients again, modify an
+attachment, or require a completed/cancelled Project to become writable. The database
+transaction atomically creates the Activity, optional
+alert/recipient rows, and narrow AuditLog events. After that transaction succeeds, the
+separate trusted image workflow may upload and attach the optional immutable image by
+using the same author-bound request UUID; an image failure may therefore leave the
+successfully committed text Activity available for retry.
 
 V1 has no Realtime notification subscription and no polling. It refetches on Dashboard
 load, panel open, window focus, successful send, mark-read, dismissal, and explicit

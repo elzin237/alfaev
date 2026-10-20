@@ -109,7 +109,7 @@ An alert sender is included in the recipient snapshot whenever that sender satis
 the same Admin or non-admin eligibility rules as every other recipient.
 Historical recipient membership remains stored, but current active state plus current
 effective Dashboard and Project read access still governs notification visibility.
-Per-recipient dismissal adds no permission key. The future trusted mutation requires
+Per-recipient dismissal adds no permission key. The trusted mutation requires
 the same current active `dashboard.view` and `projects.view` access and strict ownership;
 Admin bypass applies to the access permissions only and never to recipient ownership.
 Current `projects.alerts.receive` is not required to dismiss a historically delivered

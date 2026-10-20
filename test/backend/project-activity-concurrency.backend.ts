@@ -15,8 +15,11 @@ const database = new Pool({
 });
 
 interface ConcurrencyFixture {
+  automaticAdminAuthUserId: string;
   automaticAdminProfileId: string;
   projectId: string;
+  recipientAuthUserId: string;
+  recipientProfileId: string;
   requestId: string;
   senderAuthUserId: string;
   senderProfileId: string;
@@ -24,10 +27,36 @@ interface ConcurrencyFixture {
 
 let fixture: ConcurrencyFixture;
 
+const fixtureProfileNames = [
+  "Task C concurrency sender",
+  "Task C concurrency recipient",
+  "Task C automatic Admin recipient",
+] as const;
+
+async function assertFreshCommittedConcurrencyContext(): Promise<void> {
+  const priorFixtures = (await database.query<{ count: string }>(
+    `select pg_catalog.count(*)::text as count
+     from public.user_profiles
+     where full_name = any($1::text[])`,
+    [[...fixtureProfileNames]],
+  )).rows[0]?.count;
+
+  if (priorFixtures !== "0") {
+    throw new Error(
+      "Task C committed concurrency requires a freshly reset disposable local database; "
+      + "prior immutable Task C history is present, so this campaign will not add more fixtures",
+    );
+  }
+}
+
 async function callAndCommit(
   client: PoolClient,
   requestId = fixture.requestId,
   applicationName?: string,
+  authUserId = fixture.senderAuthUserId,
+  title = "Concurrent Activity",
+  description = "One durable result for both callers",
+  sendAlert = true,
 ) {
   await client.query("begin");
   try {
@@ -41,20 +70,20 @@ async function callAndCommit(
     }
     await client.query(
       "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
-      [fixture.senderAuthUserId],
+      [authUserId],
     );
     await client.query("set local role authenticated");
     const result = await client.query<{
       activity_id: string;
       alert_id: string;
+      author_user_id: string;
       recipient_count: string;
     }>(
-      `select activity_id, alert_id, recipient_count::text
+      `select activity_id, alert_id, author_user_id, recipient_count::text
        from public.post_project_activity(
-         $1::uuid, $2::uuid, 'Concurrent Activity',
-         'One durable result for both callers', true
+         $1::uuid, $2::uuid, $3::text, $4::text, $5::boolean
        )`,
-      [fixture.projectId, requestId],
+      [fixture.projectId, requestId, title, description, sendAlert],
     );
     await client.query("commit");
     return result.rows[0]!;
@@ -144,6 +173,7 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
     if (environment.projectRef !== "local") {
       throw new Error("Task C committed concurrency may run only on local Supabase");
     }
+    await assertFreshCommittedConcurrencyContext();
 
     const authAdmin = createClient(
       environment.supabaseUrl,
@@ -222,8 +252,11 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
       [projectId, senderProfileId],
     );
     fixture = {
+      automaticAdminAuthUserId: automaticAdminAuth.data.user.id,
       automaticAdminProfileId,
       projectId,
+      recipientAuthUserId: recipientAuth.data.user.id,
+      recipientProfileId,
       requestId,
       senderAuthUserId: senderAuth.data.user.id,
       senderProfileId,
@@ -231,6 +264,26 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
   });
 
   afterAll(async () => {
+    if (fixture) {
+      await database.query(
+        `update public.user_profiles
+         set is_active = false,
+             deactivated_at = coalesce(deactivated_at, pg_catalog.statement_timestamp()),
+             deactivated_by_user_id = coalesce(
+               deactivated_by_user_id,
+               $1::uuid
+             )
+         where id = any($2::uuid[])`,
+        [
+          fixture.senderProfileId,
+          [
+            fixture.senderProfileId,
+            fixture.recipientProfileId,
+            fixture.automaticAdminProfileId,
+          ],
+        ],
+      );
+    }
     await database.end();
   });
 
@@ -295,6 +348,76 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
     }
   });
 
+  it("allows exactly one original author when different Admins race for one request UUID", async () => {
+    const first = await database.connect();
+    const second = await database.connect();
+    const requestId = randomUUID();
+    try {
+      const results = await Promise.allSettled([
+        callAndCommit(first, requestId),
+        callAndCommit(
+          second,
+          requestId,
+          undefined,
+          fixture.automaticAdminAuthUserId,
+        ),
+      ]);
+      const fulfilled = results.filter(
+        (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof callAndCommit>>> =>
+          result.status === "fulfilled",
+      );
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]?.reason).toMatchObject({
+        code: "42501",
+        message: "Access denied",
+      });
+      expect([
+        fixture.senderProfileId,
+        fixture.automaticAdminProfileId,
+      ]).toContain(fulfilled[0]!.value.author_user_id);
+
+      const counts = (await database.query<{
+        activities: string;
+        alerts: string;
+        audits: string;
+        recipients: string;
+      }>(
+        `select
+           (select pg_catalog.count(*)::text
+            from public.project_activity_updates
+            where request_id = $1::uuid) as activities,
+           (select pg_catalog.count(*)::text
+            from public.project_activity_alerts
+            where project_activity_id = $2::uuid) as alerts,
+           (select pg_catalog.count(*)::text
+            from public.project_activity_alert_recipients
+            where alert_id = $3::uuid) as recipients,
+           (select pg_catalog.count(*)::text
+            from public.audit_logs
+            where entity_id in ($2::uuid, $3::uuid)) as audits`,
+        [
+          requestId,
+          fulfilled[0]!.value.activity_id,
+          fulfilled[0]!.value.alert_id,
+        ],
+      )).rows[0];
+      expect(counts).toEqual({
+        activities: "1",
+        alerts: "1",
+        audits: "2",
+        recipients: fulfilled[0]!.value.recipient_count,
+      });
+    } finally {
+      first.release();
+      second.release();
+    }
+  });
+
   it("serializes recipient fanout against trusted Admin demotion without deadlock", async () => {
     const statusChange = await database.connect();
     const poster = await database.connect();
@@ -340,6 +463,121 @@ describe.skipIf(!enabled)("Task C committed duplicate-request concurrency", () =
     } finally {
       statusChange.release();
       poster.release();
+      observer.release();
+    }
+  });
+
+  it("rechecks permission revocation and account deactivation after replay waits", async () => {
+    const modifier = await database.connect();
+    const replayer = await database.connect();
+    const observer = await database.connect();
+    try {
+      await observer.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select $1::uuid, definition.id, $2::uuid
+         from public.permission_definitions as definition
+         where definition.key = 'projects.edit'
+         on conflict (user_id, permission_definition_id) do nothing`,
+        [fixture.recipientProfileId, fixture.senderProfileId],
+      );
+
+      for (const mode of ["permission", "active"] as const) {
+        const requestId = randomUUID();
+        const original = await callAndCommit(
+          replayer,
+          requestId,
+          undefined,
+          fixture.recipientAuthUserId,
+          `${mode} replay`,
+          `The ${mode} change must win before replay`,
+          false,
+        );
+        const applicationName = `task131-${mode}-${randomUUID().slice(0, 8)}`;
+
+        await modifier.query("begin");
+        await modifier.query("set local statement_timeout = '20s'");
+        await modifier.query(
+          "select pg_catalog.set_config('request.jwt.claim.sub', $1::text, true)",
+          [fixture.senderAuthUserId],
+        );
+        await modifier.query("set local role authenticated");
+        if (mode === "permission") {
+          await modifier.query(
+            "select public.set_user_permission_admin($1::uuid, 'projects.edit', false)",
+            [fixture.recipientProfileId],
+          );
+        } else {
+          await modifier.query(
+            "select public.set_user_active_state_admin($1::uuid, false)",
+            [fixture.recipientProfileId],
+          );
+        }
+
+        const replay = callAndCommit(
+          replayer,
+          requestId,
+          applicationName,
+          fixture.recipientAuthUserId,
+          `${mode} replay`,
+          `The ${mode} change must win before replay`,
+          false,
+        );
+        await waitForLockWait(observer, applicationName);
+        await modifier.query("commit");
+        await expect(replay).rejects.toMatchObject({
+          code: "42501",
+          message: "Access denied",
+        });
+
+        const counts = (await observer.query<{
+          activities: string;
+          alerts: string;
+          audits: string;
+        }>(
+          `select
+             (select pg_catalog.count(*)::text
+              from public.project_activity_updates
+              where request_id = $1::uuid) as activities,
+             (select pg_catalog.count(*)::text
+              from public.project_activity_alerts
+              where project_activity_id = $2::uuid) as alerts,
+             (select pg_catalog.count(*)::text
+              from public.audit_logs
+              where entity_id = $2::uuid) as audits`,
+          [requestId, original.activity_id],
+        )).rows[0];
+        expect(counts).toEqual({ activities: "1", alerts: "0", audits: "1" });
+
+        if (mode === "permission") {
+          await observer.query(
+            `insert into public.user_permissions (
+               user_id, permission_definition_id, granted_by_user_id
+             )
+             select $1::uuid, definition.id, $2::uuid
+             from public.permission_definitions as definition
+             where definition.key = 'projects.edit'
+             on conflict (user_id, permission_definition_id) do nothing`,
+            [fixture.recipientProfileId, fixture.senderProfileId],
+          );
+        } else {
+          await observer.query(
+            `update public.user_profiles
+             set is_active = true,
+                 deactivated_at = null,
+                 deactivated_by_user_id = null
+             where id = $1::uuid`,
+            [fixture.recipientProfileId],
+          );
+        }
+      }
+    } catch (error) {
+      await modifier.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      modifier.release();
+      replayer.release();
       observer.release();
     }
   });

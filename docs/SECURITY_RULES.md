@@ -691,6 +691,13 @@ write must lock/re-check that the Project is currently `planned`, `in_progress`,
 `on_hold`. Completed and Cancelled Projects retain readable historical Activity but
 reject new posts.
 
+A Project Activity fragment is navigation input only. The client accepts only the
+anchored `#activity-<UUID>` form, normalizes valid UUID hex, and issues no target lookup
+for malformed or unrelated hashes. The trusted by-ID read independently enforces the
+active-user/`projects.view` boundary and exact Project/Activity relationship. Neither
+notification identifiers, recipient identifiers, Storage paths, nor signed image URLs
+belong in the route.
+
 `Post & send alert` requires both Activity-post authority and alert-send authority:
 the actor must be an active Admin or have `projects.edit`, and must also be an active
 Admin or have `projects.alerts.send`. Alert recipients are selected explicitly at send
@@ -736,12 +743,19 @@ original request UUID and current Admin-or-`projects.edit` authority while the P
 is writable; Admin does not bypass authorship. Exact referenced-object reads require
 current active Admin-or-`projects.view` authority and issue a five-minute signed URL.
 
-Every submission uses one client-generated request UUID. An identical retry for the
-same Project, normalized title/description, image identity/metadata, and alert intent
-must return/reconcile to the same Activity; conflicting reuse must fail. Database
-uniqueness is authoritative. One database transaction must atomically cover Activity,
-optional attachment metadata, optional alert event, recipient snapshot rows, and narrow
-AuditLog events. Database failure leaves none of them committed.
+Every submission uses one client-generated request UUID that is permanently owned by
+the original Activity author. An identical retry by that author for the same Project,
+normalized title/description, and alert intent must return the same Activity;
+conflicting reuse by that author must fail with `PAC01`. A different actor, including
+an Admin, is denied with generic `42501` before payload comparison. An exact authorized
+historical replay remains valid after Project completion/cancellation and performs no
+new fanout, AuditLog append, attachment mutation, or history rewrite. Database
+uniqueness is authoritative. One database
+transaction must atomically cover Activity, optional alert event, recipient snapshot
+rows, and narrow AuditLog events. After that succeeds, the separate trusted image
+workflow may upload and attach the optional immutable image with the same author-bound
+request UUID. Database failure leaves no posting rows committed; image failure may
+leave the already committed text Activity available for image retry.
 
 The trusted operation appends `project_activity.created` without copying the full
 description or image into AuditLog. Alert generation additionally appends

@@ -189,9 +189,11 @@ not mark it read.
 
 The notification model also supports permanent per-recipient dismissal as a state
 separate from read status. Dismissed recipient rows remain stored, `read_at` is
-unchanged, and other recipients remain unaffected. The trusted mutation/filtering is a
-later backend slice and the Dashboard menu/confirmation is a later frontend slice; V1
-has no undo or dismissed-notification archive.
+unchanged, and other recipients remain unaffected. The implemented owner-only trusted
+mutation sets `dismissed_at` once. The Dashboard exposes it through a sibling three-dot
+menu and confirmation dialog; active inbox and unread-count reads exclude dismissed
+rows while retaining Activity, alert, and recipient history. V1 has no undo or
+dismissed-notification archive.
 
 Activity and notifications load newest first with keyset pagination, default 20 and
 limit 1–50. Project Activity uses a collapsible composer and keeps its success
@@ -204,10 +206,23 @@ optional attachment is private JPEG/PNG/WebP only, maximum 5 MiB, with trusted c
 validation, server-selected path, authorized signed reads, compact thumbnails, and a
 viewport-level image viewer. V1 does not include Project Activity title search.
 
-Posting is idempotent through one client request UUID. Identical retry content/image
-identity/alert intent reconciles to the same Activity; conflicting reuse fails.
-Database Activity, attachment metadata, optional alert/recipients, and narrow AuditLog
-events commit atomically. The AuditLog events are `project_activity.created` and, when
+Project Activity deep links use the exact
+`/projects/<projectId>#activity-<activityId>` shape. Valid UUID fragments resolve
+through the existing authorized by-ID read only after Project access succeeds. Older
+targets render separately as `Linked activity`; they are never prepended to or used to
+rewrite the chronological page cache. A resolved target gets a stable Project/Activity
+DOM identity, one-shot nested positioning, programmatic focus, and a restrained
+2.5-second highlight. Back/Forward and repeated genuine navigation can reapply that
+presentation without refetching; reduced-motion users receive immediate positioning.
+Real-browser acceptance remains in H4.
+
+Posting is idempotent through one client request UUID permanently bound to the original
+Activity author. That author's identical retry content/alert intent returns the same
+Activity; that author's conflicting reuse fails, and another actor is denied before
+payload comparison. Database Activity, optional alert/recipients, and narrow AuditLog
+events commit atomically. The optional image is uploaded and attached afterward through
+the trusted author-bound workflow, so image failure may leave the committed text
+Activity available for retry. The AuditLog events are `project_activity.created` and, when
 applicable, `project_activity.alert_sent`; neither stores the full description/image,
 and mark-read or per-recipient dismissal is not audited.
 

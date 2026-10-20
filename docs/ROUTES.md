@@ -129,8 +129,11 @@ Access:
 Deep link:
 - `/projects/<projectId>#activity-<activityId>`
 - uses the same Project route/read authority; the fragment grants no access
-- if the Activity is outside the first timeline page, use an authorized narrow by-ID
-  read before scrolling/focusing it
+- accepts only an anchored `#activity-<canonical UUID>` fragment, normalizes UUID hex
+  to lowercase, and makes no Activity request for malformed or unrelated fragments
+- if the Activity is outside loaded timeline pages, use the authorized narrow by-ID
+  read and render a separate `Linked activity` without altering timeline cursors
+- Task H3 owns target scrolling, temporary highlighting, and programmatic focus
 
 Rules:
 - Completed Project is read-only

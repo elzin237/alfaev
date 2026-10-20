@@ -12,3 +12,11 @@ export function projectActivityImageQueryKey(
 ) {
   return ["projects", "activity-image", profileId, projectId, activityId] as const;
 }
+
+export function projectActivityTargetQueryKey(
+  profileId: string | undefined,
+  projectId: string,
+  activityId: string,
+) {
+  return ["projects", "activity-target", profileId, projectId, activityId] as const;
+}

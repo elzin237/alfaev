@@ -84,9 +84,14 @@ export type ProjectActivityPageResult =
   | { ok: true; value: ProjectActivityPage }
   | { ok: false; error: ProjectActivityError<"activity_load_failed"> };
 
+export type ProjectActivityItemErrorCode =
+  | "activity_unavailable"
+  | "access_denied"
+  | "activity_load_failed";
+
 export type ProjectActivityItemResult =
   | { ok: true; value: ProjectActivityItem }
-  | { ok: false; error: ProjectActivityError<"activity_load_failed"> };
+  | { ok: false; error: ProjectActivityError<ProjectActivityItemErrorCode> };
 
 export interface ProjectActivityImageUploadInput {
   projectId: string;
@@ -368,16 +373,40 @@ export async function getProjectActivity(
       p_project_id: projectId,
       p_activity_id: activityId,
     });
-    if (error || !Array.isArray(data) || data.length !== 1) throw new Error();
+    if (error) {
+      if (error.code === "P0002") {
+        return {
+          ok: false,
+          error: {
+            code: "activity_unavailable",
+            message: "This Project Activity is unavailable.",
+          },
+        };
+      }
+      if (error.code === "42501") {
+        return {
+          ok: false,
+          error: {
+            code: "access_denied",
+            message: "You no longer have access to this Project Activity.",
+          },
+        };
+      }
+      throw new Error();
+    }
+    if (!Array.isArray(data) || data.length !== 1) throw new Error();
     const item = parseActivityRow(data[0], false);
-    if (!item) throw new Error();
+    if (
+      !item || item.projectId.toLowerCase() !== projectId.toLowerCase() ||
+      item.activityId.toLowerCase() !== activityId.toLowerCase()
+    ) throw new Error();
     return { ok: true, value: item };
   } catch {
     return {
       ok: false,
       error: {
         code: "activity_load_failed",
-        message: "The posted Project Activity could not be loaded.",
+        message: "Couldn't load the linked Activity.",
       },
     };
   }

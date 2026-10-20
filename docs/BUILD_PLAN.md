@@ -3033,8 +3033,12 @@ Project Activity alert recipient snapshot, while non-admin recipients require ex
 
 Goal:
 - implement authoritative post/send authorization and Project-status locking
-- implement title/description validation and request-UUID idempotency
-- atomically insert Activity, optional attachment metadata, alert, recipient snapshot,
+- implement title/description validation and original-author-bound request-UUID
+  idempotency
+- return exact same-author historical retries without new fanout/audit/attachment
+  mutation; retain `PAC01` for that author's conflicting reuse and return generic
+  `42501` to every other actor before payload comparison
+- atomically insert Activity, alert, recipient snapshot,
   and narrow `project_activity.created` / `project_activity.alert_sent` AuditLog events
 - fail the complete alert-intent request when there are zero eligible recipients
 - add newest-first Activity page and authorized by-ID reads
@@ -3051,6 +3055,8 @@ Goal:
 - provide exact referenced-object authorized signing
 - implement best-effort definitive-orphan cleanup and indeterminate-outcome
   idempotency reconciliation
+- run the image upload/attachment only after the Activity post transaction succeeds,
+  using the same original-author-bound request UUID
 
 Do not expose service-role credentials, public URLs, caller-selected paths, SVG, or
 animated formats.
@@ -3109,6 +3115,13 @@ Goal:
 - prove RLS/direct-call resistance, recipient snapshot/current-access behavior,
   eligible-sender inclusion, zero-recipient rollback, idempotent retry/conflict, Storage cleanup,
   pagination, inactive-user denial, and Completed/Cancelled behavior
+
+H2 implements strict Activity-fragment parsing, a profile-scoped authorized by-ID
+target query, safe target errors, separately rendered `Linked activity`, and
+pagination-preserving deduplication. H3 adds one-shot nested positioning, stable target
+DOM identity, temporary highlight, programmatic focus, reduced-motion behavior, and
+React Router history-entry handling without changing retrieval or pagination. H4/H5
+retain real-browser acceptance and final independent E2E/security review.
 
 ---
 

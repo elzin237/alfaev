@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useLocation, useParams } from "react-router";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
@@ -11,6 +11,7 @@ import { ProjectActivitySection } from "./components/ProjectActivitySection";
 import { ProjectMaterialUsageSection } from "./components/ProjectMaterialUsageSection";
 import { ProjectPlanningSection } from "./components/ProjectPlanningSection";
 import { useProjectDetail } from "./hooks/useProjectDetail";
+import { parseProjectActivityHash } from "./projectActivityDeepLink";
 import {
   getProjectStatusPresentation,
   isProjectEditableStatus,
@@ -37,6 +38,8 @@ function formatTimestamp(value: string): string {
 
 function ProjectDetailPage() {
   const { projectId = "" } = useParams<{ projectId: string }>();
+  const location = useLocation();
+  const activityTarget = parseProjectActivityHash(location.hash);
   const { projectQuery, canEdit, canCancel, canReopen, update, cancel, reopen } =
     useProjectDetail(projectId);
   const cancellationLockRef = useRef(false);
@@ -250,6 +253,8 @@ function ProjectDetailPage() {
         <ProjectActivitySection
           projectId={project.id}
           status={project.status}
+          activityTarget={activityTarget}
+          activityTargetNavigationKey={location.key}
           onProjectUnavailable={() => projectQuery.refetch()}
         />
 

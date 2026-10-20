@@ -73,11 +73,15 @@ async function expectRejected(
   sql: string,
   values: unknown[],
   code: string,
+  message?: string,
 ): Promise<void> {
   await database.query("savepoint rejected_project_activity_call");
   await setActor(database, actor);
   try {
-    await expect(database.query(sql, values)).rejects.toMatchObject({ code });
+    await expect(database.query(sql, values)).rejects.toMatchObject({
+      code,
+      ...(message ? { message } : {}),
+    });
   } finally {
     await database.query("rollback to savepoint rejected_project_activity_call");
     await database.query("release savepoint rejected_project_activity_call");
@@ -109,6 +113,47 @@ async function getActiveAdminIds(database: PoolClient): Promise<string[]> {
      where is_active
        and is_admin
      order by id`,
+  )).rows.map((row) => row.id);
+}
+
+async function getEligibleAlertRecipientIds(database: PoolClient): Promise<string[]> {
+  return (await database.query<{ id: string }>(
+    `select profile.id
+     from public.user_profiles as profile
+     where profile.is_active
+       and (
+         profile.is_admin
+         or (
+           exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'projects.alerts.receive'
+               and definition.is_delegable
+           )
+           and exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'dashboard.view'
+               and definition.is_delegable
+           )
+           and exists (
+             select 1
+             from public.user_permissions as permission
+             join public.permission_definitions as definition
+               on definition.id = permission.permission_definition_id
+             where permission.user_id = profile.id
+               and definition.key = 'projects.view'
+               and definition.is_delegable
+           )
+         )
+       )
+     order by profile.id`,
   )).rows.map((row) => row.id);
 }
 
@@ -643,7 +688,238 @@ export function registerProjectActivityOperationsTests(
         });
       });
 
-      it("automatically snapshots active Admins across trusted promotion and lifecycle changes", async () => {
+      it("binds every request UUID to its original author without weakening historical replay", async () => {
+        const fixture = requireHarness();
+        await fixture.withRollbackDatabaseTransaction(async (database) => {
+          const admin = fixture.actors.admin;
+          const author = fixture.actors.unpermitted;
+          const otherNonAdmin = fixture.actors.permitted;
+          const otherAdmin = fixture.actors.productCreator;
+          const projectId = await createProject(database, admin.profileId);
+          const otherProjectId = await createProject(database, admin.profileId);
+
+          await grantPermissions(database, author.profileId, admin.profileId, [
+            "projects.edit",
+            "projects.alerts.send",
+          ]);
+          await grantPermissions(database, otherNonAdmin.profileId, admin.profileId, [
+            "projects.edit",
+            "projects.alerts.send",
+          ]);
+          await database.query(
+            "update public.user_profiles set is_admin = true where id = $1::uuid",
+            [otherAdmin.profileId],
+          );
+
+          const requestId = randomUUID();
+          const first = (await callAs<PostRow>(database, author, postSql, [
+            projectId,
+            requestId,
+            "Original author title",
+            "Original author description",
+            true,
+          ]))[0]!;
+          const recipients = await getAlertRecipientIds(database, first.alert_id);
+          const before = (await database.query<{
+            activities: string;
+            alerts: string;
+            attachments: string;
+            audits: string;
+            recipients: string;
+          }>(
+            `select
+               (select pg_catalog.count(*)::text
+                from public.project_activity_updates
+                where request_id = $1::uuid) as activities,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_alerts
+                where project_activity_id = $2::uuid) as alerts,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_alert_recipients
+                where alert_id = $3::uuid) as recipients,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_attachments
+                where project_activity_id = $2::uuid) as attachments,
+               (select pg_catalog.count(*)::text
+                from public.audit_logs
+                where entity_id in ($2::uuid, $3::uuid)) as audits`,
+            [requestId, first.activity_id, first.alert_id],
+          )).rows[0]!;
+
+          const exactRetry = (await callAs<PostRow>(database, author, postSql, [
+            projectId,
+            requestId,
+            "  Original author title  ",
+            "  Original author description  ",
+            true,
+          ]))[0]!;
+          expect(exactRetry).toEqual(first);
+
+          for (const values of [
+            [otherProjectId, requestId, "Original author title", "Original author description", true],
+            [projectId, requestId, "Changed title", "Original author description", true],
+            [projectId, requestId, "Original author title", "Changed description", true],
+            [projectId, requestId, "Original author title", "Original author description", false],
+          ]) {
+            await expectRejected(database, author, postSql, values, "PAC01");
+          }
+
+          for (const [actor, values] of [
+            [admin, [projectId, requestId, "Original author title", "Original author description", true]],
+            [admin, [projectId, requestId, "Guessed title", "Guessed description", true]],
+            [otherNonAdmin, [projectId, requestId, "Original author title", "Original author description", true]],
+          ] as const) {
+            await expectRejected(
+              database,
+              actor,
+              postSql,
+              [...values],
+              "42501",
+              "Access denied",
+            );
+          }
+
+          const adminRequestId = randomUUID();
+          const adminPost = (await callAs<PostRow>(database, admin, postSql, [
+            projectId,
+            adminRequestId,
+            "Admin-owned request",
+            "Only the originating Admin may retry it",
+            false,
+          ]))[0]!;
+          await expectRejected(
+            database,
+            otherAdmin,
+            postSql,
+            [
+              projectId,
+              adminRequestId,
+              "Admin-owned request",
+              "Only the originating Admin may retry it",
+              false,
+            ],
+            "42501",
+            "Access denied",
+          );
+          await expectRejected(
+            database,
+            author,
+            postSql,
+            [
+              projectId,
+              adminRequestId,
+              "Admin-owned request",
+              "Only the originating Admin may retry it",
+              false,
+            ],
+            "42501",
+            "Access denied",
+          );
+          expect(adminPost.author_user_id).toBe(admin.profileId);
+
+          for (const status of ["completed", "cancelled"] as const) {
+            const historicalProjectId = await createProject(
+              database,
+              admin.profileId,
+              status,
+            );
+            const historicalRequestId = randomUUID();
+            const historicalActivity = (await database.query<PostRow>(
+              `insert into public.project_activity_updates (
+                 project_id, author_user_id, request_id, title, description
+               ) values ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::text)
+               returning
+                 id as activity_id,
+                 project_id,
+                 request_id,
+                 title,
+                 description,
+                 created_at,
+                 author_user_id,
+                 false as alert_sent,
+                 null::uuid as alert_id,
+                 0::bigint::text as recipient_count`,
+              [
+                historicalProjectId,
+                author.profileId,
+                historicalRequestId,
+                `${status} historical title`,
+                `${status} historical description`,
+              ],
+            )).rows[0]!;
+            const historicalRetry = (await callAs<PostRow>(database, author, postSql, [
+              historicalProjectId,
+              historicalRequestId,
+              historicalActivity.title,
+              historicalActivity.description,
+              false,
+            ]))[0]!;
+            expect(historicalRetry).toEqual(historicalActivity);
+          }
+
+          await database.query(
+            `delete from public.user_permissions as permission
+             using public.permission_definitions as definition
+             where definition.id = permission.permission_definition_id
+               and permission.user_id = $1::uuid
+               and definition.key = 'projects.edit'`,
+            [author.profileId],
+          );
+          await expectRejected(
+            database,
+            author,
+            postSql,
+            [projectId, requestId, first.title, first.description, true],
+            "42501",
+            "Access denied",
+          );
+          await grantPermissions(database, author.profileId, admin.profileId, [
+            "projects.edit",
+          ]);
+          await database.query(
+            "update public.user_profiles set is_active = false where id = $1::uuid",
+            [author.profileId],
+          );
+          await expectRejected(
+            database,
+            author,
+            postSql,
+            [projectId, requestId, first.title, first.description, true],
+            "42501",
+            "Access denied",
+          );
+
+          const after = (await database.query(
+            `select
+               (select pg_catalog.count(*)::text
+                from public.project_activity_updates
+                where request_id = $1::uuid) as activities,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_alerts
+                where project_activity_id = $2::uuid) as alerts,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_alert_recipients
+                where alert_id = $3::uuid) as recipients,
+               (select pg_catalog.count(*)::text
+                from public.project_activity_attachments
+                where project_activity_id = $2::uuid) as attachments,
+               (select pg_catalog.count(*)::text
+                from public.audit_logs
+                where entity_id in ($2::uuid, $3::uuid)) as audits`,
+            [requestId, first.activity_id, first.alert_id],
+          )).rows[0];
+          expect(after).toEqual(before);
+          expect(await getAlertRecipientIds(database, first.alert_id)).toEqual(recipients);
+          expect((await database.query<{ author_user_id: string }>(
+            `select author_user_id
+             from public.project_activity_updates
+             where id = $1::uuid`,
+            [first.activity_id],
+          )).rows[0]?.author_user_id).toBe(author.profileId);
+        });
+      });
+
+      it("snapshots the exact eligible recipients across trusted Admin lifecycle changes", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const admin = fixture.actors.admin;
@@ -659,18 +935,22 @@ export function registerProjectActivityOperationsTests(
                and permission.user_id = any($1::uuid[])`,
             [[admin.profileId, candidate.profileId]],
           );
-          const baselineAdminIds = await getActiveAdminIds(database);
+          const baselineEligibleIds = await getEligibleAlertRecipientIds(database);
+          expect(baselineEligibleIds).toContain(admin.profileId);
+          for (const adminId of await getActiveAdminIds(database)) {
+            expect(baselineEligibleIds).toContain(adminId);
+          }
 
-          const adminOnly = (await callAs<PostRow>(database, admin, postSql, [
+          const baseline = (await callAs<PostRow>(database, admin, postSql, [
             projectId,
             randomUUID(),
             "Automatic Admin recipient",
             "An active Admin needs no explicit receive assignment",
             true,
           ]))[0]!;
-          expect(adminOnly.recipient_count).toBe(String(baselineAdminIds.length));
-          expect(await getAlertRecipientIds(database, adminOnly.alert_id))
-            .toEqual(baselineAdminIds);
+          expect(baseline.recipient_count).toBe(String(baselineEligibleIds.length));
+          expect(await getAlertRecipientIds(database, baseline.alert_id))
+            .toEqual(baselineEligibleIds);
 
           await callAs(database, admin,
             "select public.set_user_admin_status_admin($1::uuid, true)",
@@ -678,10 +958,11 @@ export function registerProjectActivityOperationsTests(
           const afterPromotion = (await callAs<PostRow>(database, admin, postSql, [
             projectId, randomUUID(), "Promoted Admin", "All active Admins receive", true,
           ]))[0]!;
-          const promotedAdminIds = [...baselineAdminIds, candidate.profileId].sort();
-          expect(afterPromotion.recipient_count).toBe(String(promotedAdminIds.length));
+          const promotedEligibleIds = await getEligibleAlertRecipientIds(database);
+          expect(promotedEligibleIds).toContain(candidate.profileId);
+          expect(afterPromotion.recipient_count).toBe(String(promotedEligibleIds.length));
           expect(await getAlertRecipientIds(database, afterPromotion.alert_id))
-            .toEqual(promotedAdminIds);
+            .toEqual(promotedEligibleIds);
 
           await callAs(database, admin,
             "select public.set_user_active_state_admin($1::uuid, false)",
@@ -689,7 +970,11 @@ export function registerProjectActivityOperationsTests(
           const whileInactive = (await callAs<PostRow>(database, admin, postSql, [
             projectId, randomUUID(), "Inactive Admin", "Inactive users are excluded", true,
           ]))[0]!;
-          expect(whileInactive.recipient_count).toBe(String(baselineAdminIds.length));
+          const inactiveEligibleIds = await getEligibleAlertRecipientIds(database);
+          expect(inactiveEligibleIds).not.toContain(candidate.profileId);
+          expect(whileInactive.recipient_count).toBe(String(inactiveEligibleIds.length));
+          expect(await getAlertRecipientIds(database, whileInactive.alert_id))
+            .toEqual(inactiveEligibleIds);
 
           await callAs(database, admin,
             "select public.set_user_active_state_admin($1::uuid, true)",
@@ -700,13 +985,17 @@ export function registerProjectActivityOperationsTests(
           const afterDemotion = (await callAs<PostRow>(database, admin, postSql, [
             projectId, randomUUID(), "Demoted Admin", "Non-admin rules apply", true,
           ]))[0]!;
-          expect(afterDemotion.recipient_count).toBe(String(baselineAdminIds.length));
+          const demotedEligibleIds = await getEligibleAlertRecipientIds(database);
+          expect(demotedEligibleIds).not.toContain(candidate.profileId);
+          expect(afterDemotion.recipient_count).toBe(String(demotedEligibleIds.length));
+          expect(await getAlertRecipientIds(database, afterDemotion.alert_id))
+            .toEqual(demotedEligibleIds);
 
           const preservedSnapshot = await getAlertRecipientIds(
             database,
             afterPromotion.alert_id,
           );
-          expect(preservedSnapshot).toEqual(promotedAdminIds);
+          expect(preservedSnapshot).toEqual(promotedEligibleIds);
         });
       });
 

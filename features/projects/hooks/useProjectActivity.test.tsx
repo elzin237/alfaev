@@ -29,7 +29,10 @@ import {
   useProjectActivityPermissions,
 } from "./useProjectActivity";
 import type { ProjectActivityItem } from "../services/projectActivityService";
-import { projectActivityQueryKey } from "../projectActivityQueryKeys";
+import {
+  projectActivityQueryKey,
+  projectActivityTargetQueryKey,
+} from "../projectActivityQueryKeys";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
 const item = (index: number): ProjectActivityItem => ({
@@ -166,6 +169,138 @@ describe("useProjectActivity", () => {
       { items: [item(2), item(1)], hasMore: true },
       { items: [item(1), item(0)], hasMore: false },
     ])).toEqual([item(2), item(1), item(0)]);
+  });
+
+  it("uses an already-loaded target without a by-ID request", async () => {
+    mocks.listProjectActivity.mockResolvedValue({
+      ok: true,
+      value: { items: [item(2), item(1)], hasMore: true },
+    });
+    const setup = wrapper();
+    const { result } = renderHook(
+      () => useProjectActivity(projectId, item(1).activityId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+    expect(result.current.targetIsLoaded).toBe(true);
+    expect(result.current.linkedActivity).toBeNull();
+    expect(mocks.getProjectActivity).not.toHaveBeenCalled();
+  });
+
+  it("uses a target from cached later pages without a by-ID request", async () => {
+    const setup = wrapper();
+    setup.client.setQueryData(projectActivityQueryKey("profile-1", projectId), {
+      pages: [
+        { items: [item(2), item(1)], hasMore: true },
+        { items: [item(0), item(9)], hasMore: false },
+      ],
+      pageParams: [null, {
+        createdAt: item(1).createdAt,
+        activityId: item(1).activityId,
+      }],
+    });
+    const { result } = renderHook(
+      () => useProjectActivity(projectId, item(9).activityId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.targetIsLoaded).toBe(true));
+    expect(result.current.items).toHaveLength(4);
+    expect(result.current.linkedActivity).toBeNull();
+    expect(mocks.getProjectActivity).not.toHaveBeenCalled();
+  });
+
+  it("fetches one absent target directly without walking timeline pages", async () => {
+    mocks.listProjectActivity.mockResolvedValue({
+      ok: true,
+      value: { items: [item(2), item(1)], hasMore: true },
+    });
+    const setup = wrapper();
+    const { result } = renderHook(
+      () => useProjectActivity(projectId, item(9).activityId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.linkedActivity).toEqual(item(9)));
+    expect(mocks.getProjectActivity).toHaveBeenCalledExactlyOnceWith(
+      projectId,
+      item(9).activityId,
+    );
+    expect(mocks.listProjectActivity).toHaveBeenCalledExactlyOnceWith(
+      projectId,
+      null,
+      20,
+    );
+    expect(setup.client.getQueryData(projectActivityTargetQueryKey(
+      "profile-1",
+      projectId,
+      item(9).activityId,
+    ))).toEqual({ ok: true, value: item(9) });
+  });
+
+  it("hides a directly loaded target when a later chronological page reaches it", async () => {
+    mocks.listProjectActivity
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { items: [item(2), item(1)], hasMore: true },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        value: { items: [item(9), item(0)], hasMore: false },
+      });
+    const setup = wrapper();
+    const { result } = renderHook(
+      () => useProjectActivity(projectId, item(9).activityId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.linkedActivity).toEqual(item(9)));
+
+    await result.current.activityQuery.fetchNextPage();
+    await waitFor(() => expect(result.current.targetIsLoaded).toBe(true));
+    expect(result.current.linkedActivity).toBeNull();
+    expect(result.current.items.map((row) => row.activityId)).toEqual([
+      item(2).activityId,
+      item(1).activityId,
+      item(9).activityId,
+      item(0).activityId,
+    ]);
+    expect(mocks.getProjectActivity).toHaveBeenCalledOnce();
+  });
+
+  it("isolates target data across hash, Project, and profile changes", async () => {
+    const setup = wrapper();
+    let activeProjectId = projectId;
+    let activeTargetId: string | null = item(9).activityId;
+    const { result, rerender } = renderHook(
+      () => useProjectActivity(activeProjectId, activeTargetId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.linkedActivity).toEqual(item(9)));
+
+    activeTargetId = null;
+    rerender();
+    expect(result.current.linkedActivity).toBeNull();
+
+    activeProjectId = "00000000-0000-4000-8000-000000000050";
+    activeTargetId = item(8).activityId;
+    mocks.getProjectActivity.mockResolvedValueOnce({ ok: true, value: item(8) });
+    rerender();
+    await waitFor(() => expect(mocks.getProjectActivity).toHaveBeenLastCalledWith(
+      activeProjectId,
+      item(8).activityId,
+    ));
+
+    mocks.useAuth.mockReturnValue({
+      session: { user: { id: "auth-2" } },
+      profile: { id: "profile-2", isActive: true },
+      isAdmin: false,
+    });
+    mocks.getProjectActivity.mockResolvedValueOnce({ ok: true, value: item(8) });
+    rerender();
+    await waitFor(() => expect(mocks.getProjectActivity).toHaveBeenCalledTimes(3));
+    expect(setup.client.getQueryData(projectActivityTargetQueryKey(
+      "profile-2",
+      activeProjectId,
+      item(8).activityId,
+    ))).toEqual({ ok: true, value: item(8) });
   });
 
   it("prepends the exact posted Activity immediately and reconciles without duplicates", async () => {

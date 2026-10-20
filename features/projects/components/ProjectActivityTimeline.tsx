@@ -1,19 +1,22 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
+import { projectActivityDomId } from "../projectActivityDeepLink";
 import type { ProjectActivityItem } from "../services/projectActivityService";
-import ProjectActivityImage from "./ProjectActivityImage";
+import { ProjectActivityEntry } from "./ProjectActivityEntry";
 
-const activityTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
+export const PROJECT_ACTIVITY_TARGET_HIGHLIGHT_MS = 2_500;
+const outerViewportMargin = 16;
 
 interface ProjectActivityTimelineProps {
   projectId: string;
   labelledBy: string;
   items: ProjectActivityItem[];
+  linkedActivity?: ProjectActivityItem | null;
+  targetActivityId?: string | null;
+  targetContextKey?: string;
+  targetNavigationKey?: string;
   isPending: boolean;
   isError: boolean;
   hasNextPage: boolean;
@@ -28,6 +31,10 @@ function ProjectActivityTimeline({
   projectId,
   labelledBy,
   items,
+  linkedActivity = null,
+  targetActivityId = null,
+  targetContextKey = "",
+  targetNavigationKey = "default",
   isPending,
   isError,
   hasNextPage,
@@ -38,7 +45,26 @@ function ProjectActivityTimeline({
   onScrollComplete,
 }: ProjectActivityTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const itemRefs = useRef(new Map<string, HTMLLIElement>());
+  const itemRefs = useRef(new Map<string, HTMLElement>());
+  const completedTargetEventRef = useRef<string | null>(null);
+  const [highlightedTarget, setHighlightedTarget] = useState<{
+    activityId: string;
+    eventKey: string;
+  } | null>(null);
+  const safeLinkedActivity = linkedActivity?.projectId.toLowerCase() ===
+      projectId.toLowerCase()
+    ? linkedActivity
+    : null;
+  const resolvedTarget = targetActivityId
+    ? items.find((item) =>
+      item.projectId.toLowerCase() === projectId.toLowerCase() &&
+      item.activityId.toLowerCase() === targetActivityId.toLowerCase()
+    ) ?? (
+      safeLinkedActivity?.activityId.toLowerCase() === targetActivityId.toLowerCase()
+        ? safeLinkedActivity
+        : null
+    )
+    : null;
 
   useEffect(() => {
     if (!scrollToActivityId) return;
@@ -55,8 +81,106 @@ function ProjectActivityTimeline({
     onScrollComplete?.();
   }, [items, onScrollComplete, scrollToActivityId]);
 
-  if (isPending) return <LoadingState message="Loading Project Activity..." />;
-  if (isError) {
+  useLayoutEffect(() => {
+    if (!targetActivityId || !resolvedTarget) {
+      setHighlightedTarget(null);
+      return;
+    }
+    const eventKey = [
+      targetContextKey,
+      targetActivityId,
+      targetNavigationKey,
+    ].join(":");
+    if (completedTargetEventRef.current === eventKey) return;
+
+    const element = itemRefs.current.get(targetActivityId);
+    const container = scrollContainerRef.current;
+    if (!element || !container || !container.contains(element)) return;
+
+    const reduceMotion = window.matchMedia?.(
+      "(prefers-reduced-motion: reduce)",
+    ).matches ?? false;
+    const behavior: ScrollBehavior = reduceMotion ? "auto" : "smooth";
+    const containerRect = container.getBoundingClientRect();
+    const elementRect = element.getBoundingClientRect();
+    const containerStyle = window.getComputedStyle(container);
+    const paddingTop = Number.parseFloat(containerStyle.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(containerStyle.paddingBottom) || 0;
+    const visibleTop = containerRect.top + paddingTop;
+    const visibleBottom = containerRect.bottom - paddingBottom;
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    let internalDelta = 0;
+
+    if (elementRect.height > visibleHeight || elementRect.top < visibleTop) {
+      internalDelta = elementRect.top - visibleTop;
+    } else if (elementRect.bottom > visibleBottom) {
+      internalDelta = elementRect.bottom - visibleBottom;
+    }
+
+    let appliedInternalDelta = 0;
+    if (Math.abs(internalDelta) > 1) {
+      const desiredTop = container.scrollTop + internalDelta;
+      const maximumTop = container.scrollHeight > container.clientHeight
+        ? container.scrollHeight - container.clientHeight
+        : desiredTop;
+      const boundedTop = Math.max(0, Math.min(desiredTop, maximumTop));
+      appliedInternalDelta = boundedTop - container.scrollTop;
+      if (Math.abs(appliedInternalDelta) > 1) {
+        container.scrollTo({ top: boundedTop, behavior });
+      }
+    }
+
+    const projectedTop = elementRect.top - appliedInternalDelta;
+    const projectedBottom = elementRect.bottom - appliedInternalDelta;
+    let outerDelta = 0;
+    if (projectedTop < outerViewportMargin) {
+      outerDelta = projectedTop - outerViewportMargin;
+    } else if (projectedBottom > window.innerHeight - outerViewportMargin) {
+      outerDelta = projectedBottom - (window.innerHeight - outerViewportMargin);
+    }
+    if (Math.abs(outerDelta) > 1) {
+      window.scrollTo({
+        top: Math.max(0, window.scrollY + outerDelta),
+        behavior,
+      });
+    }
+
+    completedTargetEventRef.current = eventKey;
+    setHighlightedTarget({ activityId: targetActivityId, eventKey });
+    element.focus({ preventScroll: true });
+  }, [
+    resolvedTarget,
+    targetActivityId,
+    targetContextKey,
+    targetNavigationKey,
+  ]);
+
+  useEffect(() => {
+    if (!highlightedTarget) return;
+    const timeout = window.setTimeout(() => {
+      setHighlightedTarget((current) =>
+        current?.eventKey === highlightedTarget.eventKey ? null : current
+      );
+    }, PROJECT_ACTIVITY_TARGET_HIGHLIGHT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [highlightedTarget]);
+
+  const setItemRef = (activityId: string, element: HTMLElement | null) => {
+    if (element) itemRefs.current.set(activityId, element);
+    else itemRefs.current.delete(activityId);
+  };
+
+  const targetClassName = (activityId: string) =>
+    `rounded-2xl border p-4 shadow-sm focus:outline-none sm:p-5 ${
+      highlightedTarget?.activityId === activityId
+        ? "border-red-300 bg-red-50/60"
+        : "border-zinc-200 bg-white focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+    }`;
+
+  if (isPending && !safeLinkedActivity) {
+    return <LoadingState message="Loading Project Activity..." />;
+  }
+  if (isError && !safeLinkedActivity) {
     return (
       <ErrorState
         title="Unable to load Activity"
@@ -65,7 +189,7 @@ function ProjectActivityTimeline({
       />
     );
   }
-  if (items.length === 0) {
+  if (items.length === 0 && !safeLinkedActivity) {
     return (
       <div className="rounded-2xl border border-dashed border-zinc-300 px-5 py-7 text-center">
         <h3 className="font-semibold text-zinc-900">No project updates yet.</h3>
@@ -81,49 +205,55 @@ function ProjectActivityTimeline({
       aria-labelledby={labelledBy}
       className="max-h-[42rem] max-w-full overflow-x-hidden overflow-y-auto pr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
     >
-      <ol aria-label="Project Activity timeline" className="space-y-3">
+      {safeLinkedActivity && (
+        <section
+          aria-labelledby={`linked-${projectActivityDomId(projectId, safeLinkedActivity.activityId)}`}
+          className="mb-4 rounded-2xl border border-red-200 bg-red-50/40 p-4 sm:p-5"
+        >
+          <h4
+            id={`linked-${projectActivityDomId(projectId, safeLinkedActivity.activityId)}`}
+            className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-red-700"
+          >
+            Linked activity
+          </h4>
+          <article
+            id={projectActivityDomId(projectId, safeLinkedActivity.activityId)}
+            ref={(element) => setItemRef(safeLinkedActivity.activityId, element)}
+            data-activity-id={safeLinkedActivity.activityId}
+            tabIndex={-1}
+            aria-label={`Project Activity: ${safeLinkedActivity.title} by ${safeLinkedActivity.authorFullName}`}
+            className={targetClassName(safeLinkedActivity.activityId)}
+          >
+            <ProjectActivityEntry projectId={projectId} item={safeLinkedActivity} />
+          </article>
+        </section>
+      )}
+      {isError && (
+        <div className="mb-4">
+          <ErrorState
+            title="Unable to load Activity"
+            message="Project Activity could not be loaded."
+            onRetry={onRetry}
+          />
+        </div>
+      )}
+      {items.length > 0 && (
+        <ol aria-label="Project Activity timeline" className="space-y-3">
         {items.map((item) => (
           <li
+            id={projectActivityDomId(projectId, item.activityId)}
             key={item.activityId}
-            ref={(element) => {
-              if (element) itemRefs.current.set(item.activityId, element);
-              else itemRefs.current.delete(item.activityId);
-            }}
+            ref={(element) => setItemRef(item.activityId, element)}
             data-activity-id={item.activityId}
-            className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm sm:p-5"
+            tabIndex={-1}
+            aria-label={`Project Activity: ${item.title} by ${item.authorFullName}`}
+            className={targetClassName(item.activityId)}
           >
-            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <h3 className="break-words text-base font-bold text-zinc-900">
-                  {item.title}
-                </h3>
-                <p className="mt-0.5 text-sm text-zinc-500">
-                  {item.authorFullName} ·{" "}
-                  <time dateTime={item.createdAt}>
-                    {activityTimestampFormatter.format(new Date(item.createdAt))}
-                  </time>
-                </p>
-              </div>
-              {item.alertSent && (
-                <span className="w-fit shrink-0 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-                  Alert sent
-                </span>
-              )}
-            </div>
-            <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-zinc-700">
-              {item.description}
-            </p>
-            {item.attachment && (
-              <ProjectActivityImage
-                projectId={projectId}
-                activityId={item.activityId}
-                title={item.title}
-                altText={item.attachment.altText}
-              />
-            )}
+            <ProjectActivityEntry projectId={projectId} item={item} />
           </li>
         ))}
-      </ol>
+        </ol>
+      )}
       {hasNextPage && (
         <div className="mt-5 flex justify-center">
           <button

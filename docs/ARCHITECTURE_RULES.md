@@ -325,17 +325,21 @@ unused commitment, and required audit history.
 Balance change, movement record, and audit record belong to one trusted transaction.
 
 ### Project Activity post / alert send
-The database transaction must atomically create the Activity, optional attachment
-metadata, optional alert event, snapshotted recipients, and narrow AuditLog events.
-Zero eligible recipients for alert intent fails the whole transaction. One
-client-generated request UUID is the authoritative idempotency key: identical retries
-reconcile to the same Activity and conflicting reuse fails.
+The database transaction must atomically create the Activity, optional alert event,
+snapshotted recipients, and narrow AuditLog events. Zero eligible recipients for alert
+intent fails the whole transaction. One client-generated request UUID is the
+authoritative idempotency key and is permanently bound to the original Activity author:
+that author's identical retry returns the same Activity, that author's conflicting
+reuse fails with `PAC01`, and every other actor is denied with generic `42501` before
+payload comparison. Exact historical replay creates no new fanout, audit, attachment,
+or other mutation and does not reapply writable-Project validation.
 
-Private image upload cannot share the PostgreSQL transaction. Use a trusted Edge
-boundary that validates bytes/decoded image, chooses a random path, uploads with
-service-role authority, invokes the idempotent database operation, removes definite
-orphans best-effort, and reconciles indeterminate outcomes without deleting a possibly
-committed referenced object.
+Private image upload cannot share the PostgreSQL transaction. After the Activity post
+transaction succeeds, use a trusted Edge boundary that validates bytes/decoded image,
+chooses a random path, uploads with service-role authority, invokes the author-bound
+idempotent attachment operation, removes definite orphans best-effort, and reconciles
+indeterminate outcomes without deleting a possibly committed referenced object. A
+failed image step may leave the committed text Activity available for retry.
 The V1 upload boundary binds the verified Edge actor to the immutable Activity author
 and original request UUID. Private reads resolve the exact database reference through a
 server-only helper and return only a five-minute signed URL plus list-safe metadata.
@@ -398,8 +402,20 @@ content. Per-recipient mark-read and dismissal create no audit noise.
 Activity and alert reads use trusted bounded projections, never direct unbounded table
 access. Activity pages use `(created_at, id)` keysets and notification pages use
 `(created_at, recipient_row_id)` keysets, newest first, default 20, allowed 1–50.
-Deep links use a narrow authorized by-ID Activity read when the target is outside the
-first page.
+Deep links use a narrow authorized by-ID Activity read when the target is outside
+loaded pages. Keep that profile/Project/Activity-scoped target query separate from the
+infinite timeline cache: render an older target as a labelled sibling of the
+chronological list, deduplicate it when a normal page contains the same ID, and never
+rewrite pages or cursors to simulate ordering. Strict hash parsing occurs before the
+target query; malformed and unrelated hashes make no target request.
+
+Deep-link presentation is keyed by profile, Project, Activity, and React Router
+navigation entry. After the exact row mounts, use explicit bounded-container geometry
+rather than unqualified `scrollIntoView`, focus the target with `preventScroll`, and
+apply only a temporary non-layout-shifting highlight. The operation is one-shot per
+navigation entry; background timeline/image updates and ordinary pagination must not
+retrigger it. Timers are cleaned up and reduced-motion preferences disable smooth
+positioning. H4 retains real-browser geometry and history acceptance.
 
 The Dashboard Alerts control belongs to the Dashboard content-heading feature, not
 the global Topbar. V1 uses explicit refetch triggers only—Dashboard load, panel open,

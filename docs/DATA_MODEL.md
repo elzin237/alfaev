@@ -783,6 +783,8 @@ Fields:
 - `request_id`
   - required client-generated UUID
   - unique idempotency authority
+  - permanently owned by the original `author_user_id`; another actor, including an
+    Admin, is denied before payload comparison
 - `title`
   - required normalized plain text
   - 1–120 characters after trimming
@@ -910,13 +912,19 @@ Rules:
 - bounded reads use default 20, limit 1–50, and keyset
   `(created_at, recipient_row_id)`
 
-The Activity insert, optional attachment metadata, optional alert event, recipient
-snapshot, and narrow AuditLog inserts form one database transaction. `request_id`
-retries with identical Project, normalized content, image identity/metadata, and alert
-intent return/reconcile to the same Activity; conflicting reuse fails. Storage upload
-cannot share the PostgreSQL transaction and therefore uses trusted private upload,
-best-effort cleanup on definitive failure, and idempotent reconciliation after an
-indeterminate database outcome.
+The Activity insert, optional alert event, recipient snapshot, and narrow AuditLog
+inserts form one database transaction. `request_id` is permanently bound to the
+original author. Exact Project, normalized-content, and alert-intent retries by that
+author return the same Activity without new recipient fanout, AuditLog, attachment, or
+history mutation. Such exact replay remains valid for completed/cancelled Projects when
+the author retains current authorization. Conflicting reuse by that author fails with
+`PAC01`, while another actor is denied with generic `42501` before payload comparison.
+Storage upload cannot share the PostgreSQL
+transaction. After the post succeeds, the trusted private image workflow uploads and
+attaches the optional immutable image using the same author-bound request UUID, with
+best-effort cleanup on definitive failure and idempotent reconciliation after an
+indeterminate outcome. Image failure may leave the committed text Activity available
+for retry.
 
 ---
 
@@ -1832,10 +1840,10 @@ If PDF byte generation cannot participate in the same database transaction, the 
 - create Draft WorkOrder
 
 ## Project Activity post / alert send
-- normalize and validate title/description and optional attachment metadata
+- normalize and validate title/description
 - re-check active actor, Project authority, and writable Project status under lock
-- enforce one client request UUID as the idempotency authority
-- insert Activity and optional attachment metadata
+- enforce one client request UUID as the original author's idempotency authority
+- insert Activity
 - for alert intent, re-check both post/send authority and snapshot all eligible
   recipients, including every active Admin and the sender when eligible; reject an
   empty set
@@ -1843,8 +1851,9 @@ If PDF byte generation cannot participate in the same database transaction, the 
 - append narrow `project_activity.created` and optional
   `project_activity.alert_sent` AuditLog events
 - commit all database rows together or none
-- reconcile the separate trusted private-Storage step without exposing service-role
-  credentials or deleting a potentially committed object on an indeterminate outcome
+- after the post commits, reconcile the separate author-bound trusted private-Storage
+  attachment step without exposing service-role credentials or deleting a potentially
+  committed object on an indeterminate outcome
 
 ---
 

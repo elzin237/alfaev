@@ -167,7 +167,10 @@ The Project detail page provides traceability back to the original operation.
 2. If the Project is `planned`, `in_progress`, or `on_hold`, an active Admin or user
    with `projects.edit` may enter a required title, required description, and at most
    one optional private JPEG/PNG/WebP image up to 5 MiB.
-3. `Post update` submits one client-generated request UUID and creates Activity only.
+3. `Post update` submits one client-generated request UUID, permanently binds it to
+   the Activity author, and creates Activity only. Only that author may replay it;
+   another actor, including an Admin, receives generic `42501` before payload
+   comparison. The author's conflicting reuse remains `PAC01`.
 4. `Post & send alert` is shown/accepted only when the actor also has Admin or
    `projects.alerts.send` authority. The trusted operation snapshots every active
    Admin automatically. Active non-admin recipients require an explicit
@@ -175,9 +178,13 @@ The Project detail page provides traceability back to the original operation.
    `projects.view` access. An alert sender is included when eligible under the same
    Admin or non-admin rules.
 5. If no eligible recipient remains, the entire alert-intent submission fails and no
-   Activity is saved. Otherwise Activity, attachment metadata, alert, recipients, and
-   narrow AuditLog events commit atomically.
-6. Completed/Cancelled Projects show historical Activity but no composer.
+   Activity is saved. Otherwise Activity, alert, recipients, and narrow AuditLog events
+   commit atomically. After that succeeds, the separate trusted image workflow uploads
+   and attaches the optional image with the same author-bound request UUID; an image
+   failure may leave the committed text Activity available for retry.
+6. Completed/Cancelled Projects show historical Activity but no composer. An exact
+   replay by the original author remains valid when current authorization is retained
+   and creates no new recipient, audit, attachment, or other historical mutation.
 7. Activity is append-only. A correction is another update; V1 has no edit, delete,
    Admin delete, image replace/remove, or alert resend.
 
@@ -190,16 +197,23 @@ The Project detail page provides traceability back to the original operation.
 3. Opening the panel does not mark anything read.
 4. Clicking one notification marks only that recipient row read, then opens
    `/projects/<projectId>#activity-<activityId>`.
-5. If the item is outside the first Activity page, an authorized narrow by-ID read
-   renders, scrolls to, and focuses the target.
+5. The Project route strictly validates the Activity UUID fragment. If the item is
+   outside loaded Activity pages, an authorized narrow by-ID read renders it as a
+   separate `Linked activity` without changing timeline cursors or ordering. A target
+   already present in loaded pages uses its normal chronological row. Each genuine
+   navigation event positions the resolved row inside the bounded Activity scroller,
+   makes only the necessary explicit outer-page adjustment, focuses the row without a
+   second browser scroll, and applies a restrained 2.5-second highlight. Reduced-motion
+   users receive immediate positioning without animated emphasis.
 6. A stored recipient row is hidden while current active/Dashboard/Project access is
    absent and may become visible again if that access is restored. Recipient membership
    itself is never recomputed retroactively.
-7. A later Dashboard slice adds a row-level `Dismiss notification` menu action with a
-   confirmation. Successful dismissal keeps the recipient history, preserves `read_at`,
-   removes the row from only that recipient's active inbox/count, and neither navigates
-   nor affects other recipients. D1 establishes only the schema/immutability foundation;
-   D2 owns the trusted backend and D5 owns the Dashboard interaction.
+7. Each Dashboard notification has a sibling three-dot menu with a
+   `Dismiss notification` action. Confirmation is required. Successful dismissal
+   permanently removes the row from only that recipient's active inbox and unread
+   count, retains the Activity, alert, and recipient history, preserves `read_at`, and
+   neither navigates nor affects other recipients. V1 has no undo or
+   dismissed-notification archive.
 
 ---
 

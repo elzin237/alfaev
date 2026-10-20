@@ -170,9 +170,7 @@ async function insertCommitmentMovement(
 }
 
 export function registerProjectPlanningTests(requireHarness: () => SecurityFixtureHarness): void {
-  describe.skipIf(
-    process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION !== "1",
-  )("Project requirement Inventory context", () => {
+  describe("Project requirement Inventory context", () => {
     it("distinguishes an empty group from a real Product with zero commitments", async () => {
       const fixture = requireHarness();
       await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -1405,15 +1403,11 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           product_name: null,
           product_kind: null,
           required_quantity: null,
-          ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
-            ? {
-                category: null,
-                brand_name: null,
-                physical_quantity: null,
-                committed_to_projects: null,
-                available_after_commitments: null,
-              }
-            : {}),
+          category: null,
+          brand_name: null,
+          physical_quantity: null,
+          committed_to_projects: null,
+          available_after_commitments: null,
         }]);
         for (const index of [3, 4]) {
           const historical = await callPlanningAs<{
@@ -1428,16 +1422,10 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
             required_quantity: String(index - 1),
           });
           expect(Object.keys(historical[0] ?? {}).sort()).toEqual([
-            ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
-              ? [
-                  "available_after_commitments", "brand_name", "category",
-                  "committed_to_projects",
-                ]
-              : []),
+            "available_after_commitments", "brand_name", "category",
+            "committed_to_projects",
             "component_id",
-            ...(process.env.PROJECT_REQUIREMENT_INVENTORY_CONTEXT_MIGRATION === "1"
-              ? ["physical_quantity"]
-              : []),
+            "physical_quantity",
             "product_id", "product_kind", "product_name",
             "project_product_id", "project_product_name", "required_quantity",
             "serial_number",

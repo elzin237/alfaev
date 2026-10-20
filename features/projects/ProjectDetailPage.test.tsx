@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router";
 
 const projectDetailPageMocks = vi.hoisted(() => ({
   refetch: vi.fn(),
@@ -25,10 +25,24 @@ vi.mock("./components/ProjectMaterialUsageSection", () => ({
   ),
 }));
 vi.mock("./components/ProjectActivitySection", () => ({
-  ProjectActivitySection: ({ projectId, status }: { projectId: string; status: string }) => (
+  ProjectActivitySection: ({
+    projectId,
+    status,
+    activityTarget,
+    activityTargetNavigationKey,
+  }: {
+    projectId: string;
+    status: string;
+    activityTarget?: { kind: string; activityId?: string };
+    activityTargetNavigationKey?: string;
+  }) => (
     <section aria-label="Project Activity">
       <h2>Project Activity</h2>
       <p>{projectId} / {status}</p>
+      <p>Target {activityTarget?.kind} / {activityTarget?.activityId ?? "none"}</p>
+      <p data-testid="activity-navigation-key">
+        Navigation {activityTargetNavigationKey}
+      </p>
     </section>
   ),
 }));
@@ -47,6 +61,23 @@ const project: ProjectDetail = {
   createdAt: "2026-09-01T08:00:00.000Z",
   updatedAt: "2026-09-10T09:30:00.000Z",
 };
+const activityId = "00000000-0000-4000-8000-000000000009";
+
+function HashNavigationControls() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button type="button" onClick={() => navigate(
+        `/projects/${projectId}#activity-${activityId}`,
+      )}>Open Activity target</button>
+      <button type="button" onClick={() => navigate(`/projects/${projectId}`)}>
+        Clear Activity target
+      </button>
+      <button type="button" onClick={() => navigate(-1)}>History back</button>
+      <button type="button" onClick={() => navigate(1)}>History forward</button>
+    </>
+  );
+}
 
 function setQueryState(options: {
   data?:
@@ -74,9 +105,10 @@ function setQueryState(options: {
   });
 }
 
-function renderDetail(path = `/projects/${projectId}`) {
+function renderDetail(path = `/projects/${projectId}`, withControls = false) {
   return render(
     <MemoryRouter initialEntries={[path]}>
+      {withControls && <HashNavigationControls />}
       <Routes>
         <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
       </Routes>
@@ -202,6 +234,39 @@ describe("ProjectDetailPage", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Project not found");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("parses direct and hash-only Activity targets with distinct navigation events", () => {
+    renderDetail(`/projects/${projectId}#activity-${activityId}`, true);
+    expect(screen.getByText(`Target activity / ${activityId}`)).toBeInTheDocument();
+    const initialNavigationKey = screen.getByTestId("activity-navigation-key")
+      .textContent;
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear Activity target" }));
+    expect(screen.getByText("Target none / none")).toBeInTheDocument();
+    expect(screen.getByTestId("activity-navigation-key").textContent)
+      .not.toBe(initialNavigationKey);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Activity target" }));
+    expect(screen.getByText(`Target activity / ${activityId}`)).toBeInTheDocument();
+    const repeatedTargetKey = screen.getByTestId("activity-navigation-key").textContent;
+    expect(repeatedTargetKey).not.toBe(initialNavigationKey);
+
+    fireEvent.click(screen.getByRole("button", { name: "History back" }));
+    expect(screen.getByText("Target none / none")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "History forward" }));
+    expect(screen.getByText(`Target activity / ${activityId}`)).toBeInTheDocument();
+    expect(screen.getByTestId("activity-navigation-key").textContent)
+      .toBe(repeatedTargetKey);
+  });
+
+  it("passes malformed Activity hashes as safe target errors and ignores unrelated hashes", () => {
+    const malformed = renderDetail(`/projects/${projectId}#activity-not-a-uuid`);
+    expect(screen.getByText("Target invalid / none")).toBeInTheDocument();
+    malformed.unmount();
+
+    renderDetail(`/projects/${projectId}#overview`);
+    expect(screen.getByText("Target unrelated / none")).toBeInTheDocument();
   });
 
   it("is read-only with no later lifecycle or mutation controls", () => {

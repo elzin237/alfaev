@@ -134,6 +134,50 @@ describe("projectActivityService", () => {
     });
   });
 
+  it("maps unavailable, access-denied, and transient target failures safely", async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { code: "P0002" } });
+    await expect(getProjectActivity(projectId, activityId)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "activity_unavailable",
+        message: "This Project Activity is unavailable.",
+      },
+    });
+
+    mocks.rpc.mockResolvedValueOnce({ data: null, error: { code: "42501" } });
+    await expect(getProjectActivity(projectId, activityId)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "access_denied",
+        message: "You no longer have access to this Project Activity.",
+      },
+    });
+
+    mocks.rpc.mockRejectedValueOnce(new Error("private transport details"));
+    await expect(getProjectActivity(projectId, activityId)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "activity_load_failed",
+        message: "Couldn't load the linked Activity.",
+      },
+    });
+  });
+
+  it("rejects a mismatched target identity without exposing the response", async () => {
+    const { has_more: _hasMore, ...exactRow } = activityRow;
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...exactRow,
+        project_id: "00000000-0000-4000-8000-000000000099",
+      }],
+      error: null,
+    });
+    await expect(getProjectActivity(projectId, activityId)).resolves.toMatchObject({
+      ok: false,
+      error: { code: "activity_load_failed" },
+    });
+  });
+
   it("posts the normalized logical submission and preserves exact authoritative identity", async () => {
     mocks.rpc.mockResolvedValue({
       data: [{
