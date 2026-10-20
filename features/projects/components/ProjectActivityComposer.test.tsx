@@ -140,7 +140,11 @@ describe("ProjectActivityComposer", () => {
       description: "First line\nSecond line",
       sendAlert: false,
     });
-    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(activityId, true);
+    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
+      activityId,
+      true,
+      false,
+    );
     expect(onCompleted).toHaveBeenCalledExactlyOnceWith(false);
     const entry = screen.getByRole("button", {
       name: "Share an update or report an issue...",
@@ -167,7 +171,7 @@ describe("ProjectActivityComposer", () => {
 
   it("posts alert intent only through the distinctly authorized action", async () => {
     mocks.postProjectActivity.mockResolvedValue(success(true));
-    const { onCompleted } = renderComposer(true);
+    const { onActivityChanged, onCompleted } = renderComposer(true);
     fillForm();
     expect(screen.getByText(
       "Sends this update to users assigned to receive Project alerts.",
@@ -176,6 +180,11 @@ describe("ProjectActivityComposer", () => {
     await waitFor(() => expect(mocks.postProjectActivity).toHaveBeenCalledWith(
       expect.objectContaining({ sendAlert: true, requestId }),
     ));
+    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
+      activityId,
+      true,
+      true,
+    );
     expect(screen.getByRole("button", {
       name: "Share an update or report an issue...",
     })).toHaveAttribute("aria-expanded", "false");
@@ -250,7 +259,7 @@ describe("ProjectActivityComposer", () => {
         },
       })
       .mockResolvedValueOnce(success(true));
-    renderComposer(true);
+    const { onActivityChanged } = renderComposer(true);
     fillForm();
     fireEvent.click(screen.getByRole("button", { name: "Post & send alert" }));
     expect(await screen.findByRole("button", { name: "Retry same update" }))
@@ -262,6 +271,11 @@ describe("ProjectActivityComposer", () => {
       mocks.postProjectActivity.mock.calls[0],
     );
     expect(crypto.randomUUID).toHaveBeenCalledOnce();
+    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
+      activityId,
+      true,
+      true,
+    );
     expect(screen.getByRole("button", {
       name: "Share an update or report an issue...",
     })).toHaveAttribute("aria-expanded", "false");
@@ -324,7 +338,11 @@ describe("ProjectActivityComposer", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Posting update...");
     resolvePost(success(false));
     expect(await screen.findByText("Uploading image...")).toBeInTheDocument();
-    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(activityId, true);
+    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
+      activityId,
+      true,
+      false,
+    );
     expect(onCompleted).not.toHaveBeenCalled();
 
     resolveUpload({
@@ -337,7 +355,12 @@ describe("ProjectActivityComposer", () => {
       },
     });
     await waitFor(() => expect(onCompleted).toHaveBeenCalledExactlyOnceWith(false));
-    expect(onActivityChanged).toHaveBeenNthCalledWith(2, activityId, false);
+    expect(onActivityChanged).toHaveBeenNthCalledWith(
+      2,
+      activityId,
+      false,
+      false,
+    );
     expect(screen.getByRole("button", {
       name: "Share an update or report an issue...",
     })).toHaveAttribute("aria-expanded", "false");
@@ -425,7 +448,7 @@ describe("ProjectActivityComposer", () => {
           altText: null,
         },
       });
-    const { onCompleted } = renderComposer(true);
+    const { onActivityChanged, onCompleted } = renderComposer(true);
     fillForm();
     fireEvent.change(screen.getByLabelText("Activity image"), {
       target: { files: [new File(["png"], "panel.png", { type: "image/png" })] },
@@ -440,6 +463,14 @@ describe("ProjectActivityComposer", () => {
     expect(screen.queryByRole("button", { name: "Post & send alert" }))
       .not.toBeInTheDocument();
     expect(mocks.postProjectActivity).toHaveBeenCalledOnce();
+    expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
+      activityId,
+      true,
+      true,
+    );
+    expect(onActivityChanged.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.uploadProjectActivityImage.mock.invocationCallOrder[0]!,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Retry image upload" }));
     await waitFor(() => expect(mocks.uploadProjectActivityImage).toHaveBeenCalledTimes(2));
     expect(mocks.postProjectActivity).toHaveBeenCalledOnce();

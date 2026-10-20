@@ -19,7 +19,11 @@ vi.mock("./ProjectActivityComposer", () => ({
   }: {
     canSendAlert: boolean;
     visible: boolean;
-    onActivityChanged: (activityId: string, shouldScroll: boolean) => Promise<unknown>;
+    onActivityChanged: (
+      activityId: string,
+      shouldScroll: boolean,
+      alertSent: boolean,
+    ) => Promise<unknown>;
     onCompleted: (sendAlert: boolean) => void;
   }) => visible ? (
     <div>
@@ -27,6 +31,7 @@ vi.mock("./ProjectActivityComposer", () => ({
       <button type="button" onClick={() => void onActivityChanged(
         "00000000-0000-4000-8000-000000000009",
         true,
+        false,
       ).then(() => onCompleted(false))}>Complete update</button>
       <button type="button" onClick={() => onCompleted(true)}>Complete alert</button>
     </div>

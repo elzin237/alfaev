@@ -14,6 +14,7 @@ import { MemoryRouter } from "react-router";
 
 const sidebarMocks = vi.hoisted(() => ({
   hasPermission: vi.fn(),
+  useProjectAlertUnreadCount: vi.fn(),
   useProcurementSidebarBadge: vi.fn(),
   useAuth: vi.fn(),
 }));
@@ -26,6 +27,9 @@ vi.mock("../auth/permissionService", () => ({
 }));
 vi.mock("../../features/procurement/hooks/useProcurementSidebarBadge", () => ({
   useProcurementSidebarBadge: sidebarMocks.useProcurementSidebarBadge,
+}));
+vi.mock("../../features/dashboard/hooks/useProjectAlerts", () => ({
+  useProjectAlertUnreadCount: sidebarMocks.useProjectAlertUnreadCount,
 }));
 
 import Sidebar from "./Sidebar";
@@ -109,6 +113,17 @@ function renderSidebar(
 beforeEach(() => {
   sidebarMocks.useAuth.mockReturnValue(createAuthState());
   sidebarMocks.useProcurementSidebarBadge.mockReturnValue({ data: undefined });
+  sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+    access: {
+      profileId: createProfile(firstUser).id,
+      canRead: false,
+      permissionsPending: false,
+    },
+    unreadCountQuery: {
+      data: undefined,
+      isError: false,
+    },
+  });
 });
 
 afterEach(() => {
@@ -274,6 +289,206 @@ describe("Sidebar permission visibility", () => {
     ).toHaveBeenLastCalledWith(createProfile(firstUser).id, true));
     expect(screen.getByLabelText("5 unresolved Procurement requests"))
       .toHaveTextContent("5");
+  });
+
+  it.each([
+    ["1", 1n, "alert"],
+    ["99", 99n, "alerts"],
+    ["99+", 100n, "alerts"],
+  ])("shows %s unread Project alerts beside Dashboard", (
+    displayValue,
+    exactValue,
+    noun,
+  ) => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(firstUser).id,
+        canRead: true,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue, displayValue, hasUnread: true },
+        isError: false,
+      },
+    });
+
+    renderSidebar();
+
+    expect(screen.getByLabelText(`${displayValue} unread Project ${noun}`))
+      .toHaveTextContent(displayValue);
+    expect(screen.getByText("Dashboard").closest("a"))
+      .toHaveAttribute("href", "/");
+  });
+
+  it("mounts the existing unread-count hook outside Dashboard and hides zero", () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(firstUser).id,
+        canRead: true,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue: 0n, displayValue: "0", hasUnread: false },
+        isError: false,
+      },
+    });
+
+    renderSidebar();
+
+    expect(sidebarMocks.useProjectAlertUnreadCount).toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Dashboard" }))
+      .toHaveAttribute("href", "/");
+    expect(screen.queryByLabelText(/unread Project alerts/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["permission denial", false, false],
+    ["network error", true, true],
+  ])("hides the Dashboard badge on %s", (_label, canRead, isError) => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(firstUser).id,
+        canRead,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue: 8n, displayValue: "8", hasUnread: true },
+        isError,
+      },
+    });
+
+    renderSidebar();
+
+    expect(screen.queryByLabelText(/unread Project alerts/)).not.toBeInTheDocument();
+  });
+
+  it("removes the previous profile badge immediately on profile switch", () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(firstUser).id,
+        canRead: true,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue: 7n, displayValue: "7", hasUnread: true },
+        isError: false,
+      },
+    });
+    const rendered = renderSidebar();
+    expect(screen.getByLabelText("7 unread Project alerts")).toBeInTheDocument();
+
+    const secondUser: User = { ...firstUser, id: "00000000-0000-0000-0000-000000000002" };
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        session: createSession(secondUser),
+        profile: { ...createProfile(secondUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(secondUser).id,
+        canRead: true,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: undefined,
+        isError: false,
+      },
+    });
+    rendered.rerender(
+      <QueryClientProvider client={rendered.queryClient}>
+        <MemoryRouter>
+          <Sidebar sidebarOpen={true} setSidebarOpen={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByLabelText("7 unread Project alerts")).not.toBeInTheDocument();
+  });
+
+  it("hides the Dashboard badge for an inactive profile", () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isActive: false, isAdmin: true },
+        isAdmin: true,
+        isActive: false,
+      }),
+    );
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: null,
+        canRead: false,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue: 3n, displayValue: "3", hasUnread: true },
+        isError: false,
+      },
+    });
+
+    renderSidebar();
+
+    expect(screen.queryByLabelText(/unread Project alerts/)).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("keeps the Nabavka badge styling and navigation unchanged", () => {
+    sidebarMocks.useAuth.mockReturnValue(
+      createAuthState({
+        profile: { ...createProfile(firstUser), isAdmin: true },
+        isAdmin: true,
+      }),
+    );
+    sidebarMocks.useProcurementSidebarBadge.mockReturnValue({
+      data: { ok: true, value: 5 },
+    });
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: {
+        profileId: createProfile(firstUser).id,
+        canRead: true,
+        permissionsPending: false,
+      },
+      unreadCountQuery: {
+        data: { exactValue: 2n, displayValue: "2", hasUnread: true },
+        isError: false,
+      },
+    });
+
+    renderSidebar();
+
+    const dashboardBadge = screen.getByLabelText("2 unread Project alerts");
+    const procurementBadge = screen.getByLabelText("5 unresolved Procurement requests");
+    expect(dashboardBadge.className).toBe(procurementBadge.className);
+    expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: /Nabavka/ })).toHaveAttribute(
+      "href",
+      "/procurement",
+    );
   });
 
   it("renders a zero badge and fails safely when the badge query fails", () => {

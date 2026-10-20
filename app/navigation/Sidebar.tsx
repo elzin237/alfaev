@@ -11,6 +11,7 @@ import {
 import { useAuth } from "../auth/AuthProvider";
 import { hasPermission } from "../auth/permissionService";
 import { permissionQueryKey } from "../auth/permissionQueryKeys";
+import { useProjectAlertUnreadCount } from "../../features/dashboard/hooks/useProjectAlerts";
 import { useProcurementSidebarBadge } from "../../features/procurement/hooks/useProcurementSidebarBadge";
 import { NAVIGATION } from "./navigation";
 
@@ -76,6 +77,13 @@ function Sidebar({
   const procurementBadgeCount =
     canReadProcurement && procurementBadgeQuery.data?.ok
       ? procurementBadgeQuery.data.value
+      : null;
+  const projectAlertUnreadCount = useProjectAlertUnreadCount();
+  const dashboardAlertBadge =
+    projectAlertUnreadCount.access.canRead &&
+      !projectAlertUnreadCount.unreadCountQuery.isError &&
+      projectAlertUnreadCount.unreadCountQuery.data?.hasUnread
+      ? projectAlertUnreadCount.unreadCountQuery.data.displayValue
       : null;
   const visibleNavigation = NAVIGATION.filter((item) => {
     if (!isAuthenticatedActive) {
@@ -210,6 +218,16 @@ function Sidebar({
             >
               <Icon size={18} />
               <span>{label}</span>
+              {path === "/" && dashboardAlertBadge !== null && (
+                <span
+                  aria-label={`${dashboardAlertBadge} unread Project ${
+                    dashboardAlertBadge === "1" ? "alert" : "alerts"
+                  }`}
+                  className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold tabular-nums text-white"
+                >
+                  {dashboardAlertBadge}
+                </span>
+              )}
               {path === "/procurement" && procurementBadgeCount !== null && (
                 <span
                   aria-label={`${procurementBadgeCount} unresolved Procurement requests`}

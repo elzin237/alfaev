@@ -418,8 +418,19 @@ retrigger it. Timers are cleaned up and reduced-motion preferences disable smoot
 positioning. H4 retains real-browser geometry and history acceptance.
 
 The Dashboard Alerts control belongs to the Dashboard content-heading feature, not
-the global Topbar. V1 uses explicit refetch triggers only—Dashboard load, panel open,
-window focus, send, mark-read, and retry—with no Realtime subscription or polling.
+the global Topbar. Explicit profile-scoped refetches remain authoritative. The
+Realtime database foundation may emit only event `invalidate` on the private
+`project-alert-notifications:<profile-uuid>` topic after a recipient inbox or unread-count
+change. The database supplies `{}` to `realtime.send`; Supabase appends exactly one
+opaque transport `id` UUID. The frontend ignores that payload, which contains no
+business identity or content. Topic SELECT authorization requires the active owner and
+effective Dashboard/Project access; browsers receive no INSERT policy and no direct
+recipient-table access. The signal carries no row, business identifier, count, or content and
+exists only to refetch the trusted inbox/count RPCs. Task 001C2 owns the frontend
+subscription lifecycle: one AppLayout-level channel captures the current profile,
+coalesces in-flight invalidations with at most one trailing reconciliation, reconciles
+after every successful subscribe/reconnect, and tears down plus purges protected cache
+on identity/access loss. Polling remains prohibited.
 
 Recipient read and dismissal timestamps are independent, one-way state transitions on
 the retained recipient row. Direct browser table updates remain forbidden. The trusted

@@ -3105,6 +3105,13 @@ Goal:
 
 Keep the global Topbar unchanged.
 
+The completed V1 navigation follow-up mounts the existing profile-scoped Project
+Activity unread-count hook in the persistent Sidebar and renders a positive Dashboard
+badge (`99+` cap) using the Nabavka badge treatment. Mark-read/dismissal share the same
+React Query cache. No second RPC, polling, or Realtime lifecycle is introduced. Future
+shortage and Issue-resolution notification kinds join this count only after their
+backend slices exist.
+
 ---
 
 ## Task H — Deep Link + E2E / Security Hardening
@@ -3136,6 +3143,37 @@ D1 does not make dismissal callable or visible. D2 extends the same undeployed f
 migration with the trusted owner-only mutation, active-inbox/count filtering, and index
 changes. D5 adds the Dashboard three-dot menu and required confirmation dialog. V1 has
 no undo or dismissed-notification archive.
+
+## Task 001C1 — Private Realtime Alert Invalidation Database Foundation
+
+Goal:
+- call `realtime.send` with `{}` and emit only private event `invalidate` on the exact
+  `project-alert-notifications:<profile-uuid>` topic after recipient insert, initial
+  read, or initial dismissal
+- accept only Supabase's generated `{ "id": "<transport-uuid>" }` delivery payload;
+  treat it solely as transport metadata and ignore it in the frontend
+- authorize topic SELECT only for its active owner with effective Dashboard and
+  Project access; grant browsers no send policy and no recipient-table read
+- retain the trusted inbox/count RPCs as the only notification-data authority
+
+Task 001C1 adds no frontend subscription, polling, recipient publication, or RPC
+change. Task 001C2 owns the profile-scoped subscription lifecycle and authorized cache
+refetch behavior.
+
+## Task 001C2 — Persistent Dashboard Notification Realtime Subscription
+
+Goal:
+- mount one private per-profile Broadcast subscription in the authenticated AppLayout
+- ignore the transport payload and invalidate only the captured profile's trusted
+  inbox/unread-count queries on `invalidate` and every successful subscribe/reconnect
+- coalesce signal bursts without losing the final authoritative reconciliation
+- remove the exact channel and protected cache on logout, profile/access loss, inactive
+  transition, or unmount; ignore callbacks from stale generations
+- preserve Task 001B own-post invalidation and prohibit polling, optimistic counts,
+  direct recipient-table reads, or browser Broadcast sends
+
+Frontend implementation is complete locally. Migration 132 deployment and DEV
+real-browser Realtime acceptance remain separately gated.
 
 ---
 

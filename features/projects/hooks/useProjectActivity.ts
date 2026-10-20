@@ -8,6 +8,7 @@ import {
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
+import { invalidateProjectAlertQueries } from "../../dashboard/hooks/useProjectAlerts";
 import {
   projectActivityImageQueryKey,
   projectActivityQueryKey,
@@ -136,7 +137,14 @@ export function useProjectActivity(
     refetchOnWindowFocus: false,
   });
 
-  async function reconcilePostedActivity(activityId: string) {
+  async function reconcilePostedActivity(
+    activityId: string,
+    alertSent = false,
+  ) {
+    if (alertSent && profile?.id) {
+      await invalidateProjectAlertQueries(queryClient, profile.id);
+    }
+
     const result = await getProjectActivity(projectId, activityId);
     if (!result.ok) {
       void queryClient.invalidateQueries({ queryKey, exact: true });

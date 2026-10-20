@@ -34,6 +34,7 @@ interface ProjectActivityComposerProps {
   onActivityChanged: (
     activityId: string,
     shouldScroll: boolean,
+    alertSent: boolean,
   ) => Promise<unknown> | unknown;
   onCompleted: (sendAlert: boolean) => void;
   onProjectUnavailable?: () => Promise<unknown> | unknown;
@@ -206,7 +207,7 @@ function ProjectActivityComposer({
       setOperationError(result.error.message);
       return;
     }
-    await onActivityChanged(submission.posted.activityId, false);
+    await onActivityChanged(submission.posted.activityId, false, false);
     if (!mountedRef.current) return;
     clearCompletedForm(submission.sendAlert);
   }
@@ -241,7 +242,11 @@ function ProjectActivityComposer({
     }
     const postedSubmission = { ...submission, posted: result.value };
     setAttempt(postedSubmission);
-    await onActivityChanged(result.value.activityId, true);
+    await onActivityChanged(
+      result.value.activityId,
+      true,
+      result.value.alertSent,
+    );
     if (!mountedRef.current) return;
     if (postedSubmission.file) {
       await attachImage(postedSubmission);

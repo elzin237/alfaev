@@ -247,9 +247,17 @@ separate trusted image workflow may upload and attach the optional immutable ima
 using the same author-bound request UUID; an image failure may therefore leave the
 successfully committed text Activity available for retry.
 
-V1 has no Realtime notification subscription and no polling. It refetches on Dashboard
-load, panel open, window focus, successful send, mark-read, dismissal, and explicit
-retry.
+Project-alert Realtime uses only a private content-free cache invalidation: event
+`invalidate` and one `project-alert-notifications:<profile-uuid>` topic per authorized
+active recipient. The database supplies `{}`; Supabase delivers exactly one generated
+transport field, `{ "id": "<transport-uuid>" }`. It is not any business identity, and
+the frontend ignores the payload completely. The signal never carries notification
+content, business identifiers, or counts; trusted inbox/count RPC reads remain authoritative. Task 001C1 establishes
+the database signal and owner-only topic authorization. Task 001C2 adds one persistent
+authorized per-profile application subscription that ignores the payload and triggers
+only trusted inbox/count refetches, including reconciliation after reconnect. Existing
+bounded refetches on Dashboard load, panel open, window focus, successful send,
+mark-read, dismissal, and explicit retry remain valid. Polling is not allowed.
 
 ---
 

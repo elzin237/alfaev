@@ -760,9 +760,24 @@ leave the already committed text Activity available for image retry.
 The trusted operation appends `project_activity.created` without copying the full
 description or image into AuditLog. Alert generation additionally appends
 `project_activity.alert_sent` with only safe identifiers/state and recipient count.
-Mark-read and per-recipient dismissal create no AuditLog event. V1 uses bounded
-refetches on Dashboard load, panel open, window focus, send, mark-read, dismissal, and
-explicit retry; it has no Realtime subscription or polling.
+Mark-read and per-recipient dismissal create no AuditLog event.
+
+Project-alert Realtime is a private, content-free invalidation signal only. The
+database calls `realtime.send` with `{}` and broadcasts event `invalidate` on exactly one
+`project-alert-notifications:<profile-uuid>` topic after that recipient's inbox/count
+state changes. Supabase adds exactly one opaque transport `id` UUID, so the delivered
+payload is exactly `{ "id": "<transport-uuid>" }`. That UUID is not a notification,
+recipient, Project, Activity, or user identity, and the frontend must ignore the entire
+payload. Private-channel authorization requires the active topic owner plus
+current effective `dashboard.view` and `projects.view` access; Admin bypass applies to
+those module permissions, never to topic ownership. There is no client-send policy,
+direct recipient-table read, notification content, count, identifier, or other
+protected business metadata in the message. The trusted inbox/count RPCs remain authoritative.
+Realtime authorization can be connection-cached, so the signal must remain
+content-free. Task 001C2 uses the current JWT to join only the captured profile topic,
+ignores the payload, and refetches through the trusted RPCs. Logout, profile/access loss,
+inactive transition, or unmount removes the channel and protected profile cache; late
+callbacks are ignored. Polling remains forbidden.
 
 When a Work Order finishes, the trusted transaction must check for other unfinished
 Work Orders on the same Project. If none remain, it atomically completes the Project,

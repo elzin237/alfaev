@@ -11,12 +11,20 @@ vi.mock("../../shared/components/Topbar", () => ({
 vi.mock("../navigation/Sidebar", () => ({
   default: () => <aside>Sidebar</aside>,
 }));
+vi.mock("../../features/dashboard/ProjectAlertRuntimeSync", () => ({
+  default: () => <span data-testid="project-alert-runtime-sync" />,
+}));
 
 import AppLayout from "./AppLayout";
 
 afterEach(cleanup);
 
 describe("AppLayout height contract", () => {
+  it("mounts the Project alert runtime sync once in the persistent app shell", () => {
+    render(<AppLayout />);
+    expect(screen.getAllByTestId("project-alert-runtime-sync")).toHaveLength(1);
+  });
+
   it("fills the viewport while allowing the page and main content to grow", () => {
     const { container } = render(<AppLayout />);
     const shell = container.firstElementChild;

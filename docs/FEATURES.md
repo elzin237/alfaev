@@ -80,7 +80,12 @@ Exact dashboard widgets should be finalized only after the underlying modules ex
 Project Activity alerts are a distinct Dashboard-heading inbox, not the global Topbar
 and not the AuditLog activity widget. Compact rows show Project name, Activity title,
 author, timestamp, and unread/read state only. V1 uses bounded normal fetches and has no
-Realtime subscription, polling, or Mark all as read action.
+polling or Mark all as read action. Task 001C1 defines the private content-free
+Realtime invalidation database boundary; Task 001C2 adds one persistent authorized
+per-profile subscription in the authenticated application shell. The persistent Sidebar
+shows the same existing Project Activity unread count beside Dashboard when positive,
+using `99+` above 99 and hiding unauthorized, unavailable, or failed state. It reuses
+the profile-scoped query/cache rather than a separate counter.
 
 ---
 
@@ -194,6 +199,22 @@ mutation sets `dismissed_at` once. The Dashboard exposes it through a sibling th
 menu and confirmation dialog; active inbox and unread-count reads exclude dismissed
 rows while retaining Activity, alert, and recipient history. V1 has no undo or
 dismissed-notification archive.
+
+Notification-state changes may produce one private content-free invalidation on the
+recipient's exact `project-alert-notifications:<profile-uuid>` topic. The event is
+`invalidate`. Supabase turns the database's `{}` input into exactly
+`{ "id": "<transport-uuid>" }`; this opaque UUID is transport metadata only and the
+frontend ignores the payload. It contains no Project, Activity, recipient,
+notification, count, or user identity. Current active Dashboard/Project authorization is
+required to join, and only the trusted inbox/count RPCs return data. The 001C2 runtime
+ignores the payload, coalesces bursts, and invalidates only that profile's inbox/count
+queries on an event and each successful subscribe/reconnect. It tears down and removes
+protected cache on identity/access loss. No polling is introduced. DEV deployment of
+migration 132 and real-browser Realtime acceptance remain pending.
+
+Future shortage-opening/resolution and Issue-resolution notifications may join this
+unified unread count only when their backend features are implemented. They are not
+part of the current Project Activity notification contract.
 
 Activity and notifications load newest first with keyset pagination, default 20 and
 limit 1–50. Project Activity uses a collapsible composer and keeps its success

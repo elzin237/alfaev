@@ -92,7 +92,14 @@ Expected eventual widgets may include:
 Project Activity alerts appear only in an Alerts control on the right side of the
 Dashboard content-heading row. They do not appear in the global Topbar. The inbox is
 loaded with bounded normal fetches on Dashboard load, panel open, window focus, after
-send/read actions, and explicit retry; V1 has no polling or Realtime subscription.
+send/read actions, and explicit retry; polling is not used. Task 001C1 defines a private,
+content-free per-profile Realtime invalidation signal. Task 001C2 mounts one persistent
+authorized subscription in the authenticated application shell; it ignores the payload
+and refetches only the current profile's trusted inbox/count queries after signals and
+successful subscribe/reconnect. The
+persistent Sidebar reuses the same profile-scoped unread-count query and shows its
+positive count beside Dashboard, capped visually at `99+`; it adds no separate count
+RPC or polling lifecycle.
 
 ---
 
@@ -214,6 +221,15 @@ The Project detail page provides traceability back to the original operation.
    count, retains the Activity, alert, and recipient history, preserves `read_at`, and
    neither navigates nor affects other recipients. V1 has no undo or
    dismissed-notification archive.
+8. The Dashboard Sidebar badge uses this same unread count. Mark-read and dismissal
+   reconcile the shared cache, so the badge and panel remain synchronized across app
+   routes. Zero, unauthorized, inactive, unavailable, and failed counts are hidden.
+9. Inbox/count changes may emit only private event `invalidate` on the exact current
+   recipient topic. Supabase appends one opaque transport UUID, so the delivered
+   payload is exactly `{ "id": "<transport-uuid>" }`; the client ignores it completely.
+   The signal authorizes no notification read and only prompts the existing trusted
+   inbox/count RPCs to refetch. Task 001C2 implements that persistent subscription;
+   there is no polling fallback.
 
 ---
 

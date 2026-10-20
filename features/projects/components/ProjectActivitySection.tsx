@@ -46,8 +46,9 @@ export function ProjectActivitySection({
   async function handleActivityChanged(
     activityId: string,
     shouldScroll: boolean,
+    alertSent: boolean,
   ) {
-    const item = await reconcilePostedActivity(activityId);
+    const item = await reconcilePostedActivity(activityId, alertSent);
     if (item && shouldScroll) setScrollActivityId(item.activityId);
   }
 

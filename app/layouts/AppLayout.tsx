@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import AppRouter from "../router/AppRouter";
 import Topbar from "../../shared/components/Topbar";
 import Sidebar from "../navigation/Sidebar";
+import ProjectAlertRuntimeSync from "../../features/dashboard/ProjectAlertRuntimeSync";
 
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -10,6 +11,7 @@ function AppLayout() {
 
   return (
     <div className="flex min-h-screen min-h-dvh bg-[#f4f5f7]">
+      <ProjectAlertRuntimeSync />
       <Sidebar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}

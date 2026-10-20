@@ -1,4 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +37,10 @@ import {
   projectActivityQueryKey,
   projectActivityTargetQueryKey,
 } from "../projectActivityQueryKeys";
+import {
+  projectAlertInboxQueryKey,
+  projectAlertUnreadCountQueryKey,
+} from "../../dashboard/projectAlertQueryKeys";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
 const item = (index: number): ProjectActivityItem => ({
@@ -341,5 +349,135 @@ describe("useProjectActivity", () => {
     await waitFor(() => expect(result.current.items.filter(
       (row) => row.activityId === item(9).activityId,
     )).toHaveLength(1));
+  });
+
+  it("invalidates only the current profile alert inbox and unread count after an alert post", async () => {
+    const setup = wrapper();
+    const unreadKey = projectAlertUnreadCountQueryKey("profile-1");
+    const originalUnread = {
+      exactValue: 4n,
+      displayValue: "4",
+      hasUnread: true,
+    };
+    setup.client.setQueryData(unreadKey, originalUnread);
+    const { result } = renderHook(() => useProjectActivity(projectId), {
+      wrapper: setup.wrapper,
+    });
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+    const invalidate = vi.spyOn(setup.client, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    await act(async () => {
+      await result.current.reconcilePostedActivity(item(9).activityId, true);
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-1"),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: unreadKey,
+      exact: true,
+    });
+    expect(setup.client.getQueryData(unreadKey)).toEqual(originalUnread);
+
+    await act(async () => {
+      await result.current.reconcilePostedActivity(item(9).activityId, true);
+    });
+    expect(setup.client.getQueryData(unreadKey)).toEqual(originalUnread);
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-2"),
+      exact: true,
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertUnreadCountQueryKey("profile-2"),
+      exact: true,
+    });
+
+    invalidate.mockClear();
+    await act(async () => {
+      await result.current.reconcilePostedActivity(item(9).activityId, false);
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-1"),
+      exact: true,
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertUnreadCountQueryKey("profile-1"),
+      exact: true,
+    });
+  });
+
+  it("refetches an active unread-count observer after authoritative alert success", async () => {
+    const setup = wrapper();
+    const unreadKey = projectAlertUnreadCountQueryKey("profile-1");
+    const unreadFetch = vi.fn().mockResolvedValue({
+      exactValue: 1n,
+      displayValue: "1",
+      hasUnread: true,
+    });
+    const observer = new QueryObserver(setup.client, {
+      queryKey: unreadKey,
+      queryFn: unreadFetch,
+      staleTime: 0,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await waitFor(() => expect(unreadFetch).toHaveBeenCalledOnce());
+    const { result } = renderHook(() => useProjectActivity(projectId), {
+      wrapper: setup.wrapper,
+    });
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+
+    await act(async () => {
+      await result.current.reconcilePostedActivity(item(9).activityId, true);
+    });
+
+    await waitFor(() => expect(unreadFetch).toHaveBeenCalledTimes(2));
+    expect(setup.client.getQueryData(unreadKey)).toEqual({
+      exactValue: 1n,
+      displayValue: "1",
+      hasUnread: true,
+    });
+    unsubscribe();
+  });
+
+  it("keeps alert invalidation bound to the profile that completed the post", async () => {
+    const setup = wrapper();
+    const { result, rerender } = renderHook(
+      () => useProjectActivity(projectId),
+      { wrapper: setup.wrapper },
+    );
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+    const reconcileForProfileOne = result.current.reconcilePostedActivity;
+    const invalidate = vi.spyOn(setup.client, "invalidateQueries")
+      .mockResolvedValue(undefined);
+
+    mocks.useAuth.mockReturnValue({
+      session: { user: { id: "auth-2" } },
+      profile: { id: "profile-2", isActive: true },
+      isAdmin: false,
+    });
+    rerender();
+
+    await act(async () => {
+      await reconcileForProfileOne(item(9).activityId, true);
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-1"),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectAlertUnreadCountQueryKey("profile-1"),
+      exact: true,
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-2"),
+      exact: true,
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: projectAlertUnreadCountQueryKey("profile-2"),
+      exact: true,
+    });
   });
 });

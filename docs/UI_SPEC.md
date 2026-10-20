@@ -434,8 +434,13 @@ description or image.
 
 Opening the panel does not mark alerts read. Clicking a row marks only that recipient
 row read and navigates to `/projects/<projectId>#activity-<activityId>`. V1 has no
-Mark all as read, polling, or Realtime subscription. Refetch on Dashboard load, panel
-open, window focus, successful alert send, mark-read, and explicit retry.
+Mark all as read or polling. Refetch on Dashboard load, panel open, window focus,
+successful alert send, mark-read, and explicit retry. Task 001C1 supplies only a
+private content-free `invalidate` database signal per authorized profile; no
+notification content is rendered from it. Supabase supplies exactly one generated
+transport `id` UUID in the delivered payload; the UI must ignore the payload entirely.
+Task 001C2 mounts the application subscription once in the authenticated AppLayout and
+refetches only through the existing trusted RPCs.
 
 The Dashboard dismissal control is a sibling three-dot row menu with
 `Dismiss notification`. It must not be nested inside or trigger the row navigation
@@ -444,6 +449,14 @@ trigger on cancel, and permanently removes only the caller's row from the active
 V1 has no undo or dismissed-notification archive. The Dashboard exposes dismissal only
 through the confirmed sibling row action; notification-row activation remains the
 independent mark-read-and-navigate action.
+
+The persistent Sidebar displays the existing Project Activity unread count beside the
+Dashboard item. Use the same compact red badge styling and alignment as Nabavka, hide
+zero/error/unauthorized state, and display `99+` above 99. The badge uses the existing
+profile-scoped Dashboard alert query and shared mutation reconciliation; it introduces
+no polling, second count query, or extra navigation item. Task 001C2 adds the single
+private per-profile Realtime invalidation subscription without changing the badge's
+trusted RPC data source or rendering any Realtime payload.
 
 ---
 
