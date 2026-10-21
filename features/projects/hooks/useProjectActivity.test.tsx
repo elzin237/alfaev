@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   listProjectActivity: vi.fn(),
   getProjectActivity: vi.fn(),
   getProjectActivityImageAccess: vi.fn(),
+  resolveProjectIssue: vi.fn(),
 }));
 vi.mock("../../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
 vi.mock("../../../app/auth/permissionService", () => ({ hasPermission: mocks.hasPermission }));
@@ -23,6 +24,7 @@ vi.mock("../services/projectActivityService", async (importOriginal) => {
     listProjectActivity: mocks.listProjectActivity,
     getProjectActivity: mocks.getProjectActivity,
     getProjectActivityImageAccess: mocks.getProjectActivityImageAccess,
+    resolveProjectIssue: mocks.resolveProjectIssue,
   };
 });
 
@@ -50,9 +52,11 @@ const item = (index: number): ProjectActivityItem => ({
   authorFullName: "Historical Actor",
   title: `Update ${index}`,
   description: "Description",
+  activityKind: "general",
   createdAt: `2026-10-19T10:${String(index).padStart(2, "0")}:00.000Z`,
   alertSent: false,
   attachment: null,
+  resolution: null,
 });
 
 function wrapper() {
@@ -79,6 +83,21 @@ beforeEach(() => {
     value: { items: [], hasMore: false },
   });
   mocks.getProjectActivity.mockResolvedValue({ ok: true, value: item(9) });
+  mocks.resolveProjectIssue.mockResolvedValue({
+    ok: true,
+    value: {
+      resolutionId: "00000000-0000-4000-8000-000000000090",
+      projectActivityId: item(9).activityId,
+      projectId,
+      requestId: "00000000-0000-4000-8000-000000000091",
+      resolvedByUserId: "00000000-0000-4000-8000-000000000092",
+      resolverFullName: "Resolver",
+      description: "Resolved",
+      resolvedAt: "2026-10-20T12:00:00.000Z",
+      notificationId: "00000000-0000-4000-8000-000000000093",
+      recipientCount: "2",
+    },
+  });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
@@ -96,6 +115,7 @@ describe("useProjectActivity", () => {
     );
     expect(result.current.canPost).toBe(true);
     expect(result.current.canSendAlert).toBe(true);
+    expect(result.current.canResolve).toBe(true);
     expect(mocks.hasPermission).not.toHaveBeenCalled();
   });
 
@@ -112,6 +132,7 @@ describe("useProjectActivity", () => {
     await waitFor(() => expect(editable.result.current.permissionsPending).toBe(false));
     expect(editable.result.current.canPost).toBe(true);
     expect(editable.result.current.canSendAlert).toBe(false);
+    expect(editable.result.current.canResolve).toBe(true);
     expect(mocks.hasPermission).toHaveBeenCalledWith("projects.edit");
     expect(mocks.hasPermission).toHaveBeenCalledWith("projects.alerts.send");
     expect(mocks.hasPermission).not.toHaveBeenCalledWith("projects.alerts.receive");
@@ -125,6 +146,7 @@ describe("useProjectActivity", () => {
     await waitFor(() => expect(closed.result.current.permissionsPending).toBe(false));
     expect(closed.result.current.canPost).toBe(false);
     expect(closed.result.current.canSendAlert).toBe(false);
+    expect(closed.result.current.canResolve).toBe(true);
     closed.unmount();
 
     mocks.useAuth.mockReturnValue({
@@ -138,6 +160,7 @@ describe("useProjectActivity", () => {
     );
     expect(inactive.result.current.canPost).toBe(false);
     expect(inactive.result.current.canSendAlert).toBe(false);
+    expect(inactive.result.current.canResolve).toBe(false);
   });
 
   it("uses 20-row keyset pages and exposes stable Load-more cursor behavior", async () => {
@@ -406,6 +429,82 @@ describe("useProjectActivity", () => {
       queryKey: projectAlertUnreadCountQueryKey("profile-1"),
       exact: true,
     });
+  });
+
+  it("reconciles authoritative Issue resolution and current-profile notification queries", async () => {
+    const openIssue = { ...item(9), activityKind: "issue" as const };
+    const resolvedIssue = {
+      ...openIssue,
+      resolution: {
+        resolutionId: "00000000-0000-4000-8000-000000000090",
+        resolvedByUserId: "00000000-0000-4000-8000-000000000092",
+        resolverFullName: "Resolver",
+        description: "Resolved",
+        resolvedAt: "2026-10-20T12:00:00.000Z",
+        attachment: null,
+      },
+    };
+    mocks.listProjectActivity.mockResolvedValue({
+      ok: true,
+      value: { items: [openIssue], hasMore: false },
+    });
+    mocks.getProjectActivity.mockResolvedValue({ ok: true, value: resolvedIssue });
+    const setup = wrapper();
+    const { result } = renderHook(() => useProjectActivity(projectId), {
+      wrapper: setup.wrapper,
+    });
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+    const invalidate = vi.spyOn(setup.client, "invalidateQueries")
+      .mockResolvedValue(undefined);
+    const input = {
+      activityId: openIssue.activityId,
+      requestId: "00000000-0000-4000-8000-000000000091",
+      description: "Resolved",
+    };
+
+    await act(async () => {
+      await expect(result.current.resolveIssue(input)).resolves.toMatchObject({
+        ok: true,
+      });
+    });
+    expect(mocks.resolveProjectIssue).toHaveBeenCalledExactlyOnceWith(input);
+    expect(mocks.getProjectActivity).toHaveBeenCalledWith(
+      projectId,
+      openIssue.activityId,
+    );
+    await waitFor(() => expect(result.current.items[0]?.resolution)
+      .toEqual(resolvedIssue.resolution));
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectAlertInboxQueryKey("profile-1"),
+      exact: true,
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: projectAlertUnreadCountQueryKey("profile-1"),
+      exact: true,
+    });
+  });
+
+  it("refreshes the Issue after a concurrent already-resolved response", async () => {
+    mocks.resolveProjectIssue.mockResolvedValue({
+      ok: false,
+      error: { code: "already_resolved", message: "This Issue has already been resolved." },
+    });
+    const setup = wrapper();
+    const { result } = renderHook(() => useProjectActivity(projectId), {
+      wrapper: setup.wrapper,
+    });
+    await waitFor(() => expect(result.current.activityQuery.isSuccess).toBe(true));
+    await act(async () => {
+      await result.current.resolveIssue({
+        activityId: item(9).activityId,
+        requestId: "00000000-0000-4000-8000-000000000091",
+        description: "Resolved elsewhere",
+      });
+    });
+    expect(mocks.getProjectActivity).toHaveBeenCalledWith(
+      projectId,
+      item(9).activityId,
+    );
   });
 
   it("refetches an active unread-count observer after authoritative alert success", async () => {

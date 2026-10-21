@@ -1,12 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
 
-import { useProjectActivityImage } from "../hooks/useProjectActivity";
+import {
+  useProjectActivityImage,
+  useProjectIssueResolutionImage,
+} from "../hooks/useProjectActivity";
 
 interface ProjectActivityImageProps {
   projectId: string;
   activityId: string;
   title: string;
   altText: string | null;
+  resolutionId?: string;
 }
 
 function useVisibleOnce() {
@@ -35,9 +39,21 @@ function ProjectActivityImage({
   activityId,
   title,
   altText,
+  resolutionId,
 }: ProjectActivityImageProps) {
   const { elementRef, visible } = useVisibleOnce();
-  const imageQuery = useProjectActivityImage(projectId, activityId, visible);
+  const activityImageQuery = useProjectActivityImage(
+    projectId,
+    activityId,
+    visible && !resolutionId,
+  );
+  const resolutionImageQuery = useProjectIssueResolutionImage(
+    projectId,
+    activityId,
+    resolutionId ?? "",
+    visible && Boolean(resolutionId),
+  );
+  const imageQuery = resolutionId ? resolutionImageQuery : activityImageQuery;
   const [viewerOpen, setViewerOpen] = useState(false);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const titleId = useId();
@@ -79,7 +95,7 @@ function ProjectActivityImage({
       ) : imageUnavailable ? (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4">
           <p role="alert" className="text-sm text-zinc-600">
-            The Activity image could not be loaded.
+            The {resolutionId ? "resolution" : "Activity"} image could not be loaded.
           </p>
           <button
             type="button"

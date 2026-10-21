@@ -429,6 +429,18 @@ verify_jwt = true
 import_map = "./functions/project-activity-image-access/deno.json"
 entrypoint = "./functions/project-activity-image-access/index.ts"
 
+[functions.project-issue-resolution-image-upload]
+enabled = true
+verify_jwt = true
+import_map = "./functions/project-issue-resolution-image-upload/deno.json"
+entrypoint = "./functions/project-issue-resolution-image-upload/index.ts"
+
+[functions.project-issue-resolution-image-access]
+enabled = true
+verify_jwt = true
+import_map = "./functions/project-issue-resolution-image-access/deno.json"
+entrypoint = "./functions/project-issue-resolution-image-access/index.ts"
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

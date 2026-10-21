@@ -792,6 +792,9 @@ Fields:
   - required normalized plain text
   - 1–5000 characters after trimming
   - preserves internal newlines
+- `activity_kind`
+  - required immutable `general` or `issue`
+  - existing rows default to `general`
 - `created_at`
   - server-owned timestamp
 
@@ -806,6 +809,61 @@ Rules:
 - Completed and Cancelled Projects retain readable Activity but reject posting
 - deterministic newest-first index: `(project_id, created_at DESC, id DESC)`
 - bounded reads use default 20, limit 1–50, and keyset `(created_at, id)`
+
+## 8.6A ProjectIssueResolution
+
+One immutable terminal resolution for one Issue Activity.
+
+Fields:
+
+- `id`
+- `project_activity_id`
+  - required and unique retained ProjectActivityUpdate reference
+- `request_id`
+  - required unique resolver-owned idempotency UUID
+- `resolved_by_user_id`
+  - required retained UserProfile reference
+- `description`
+  - required normalized plain text, 1–5000 characters
+- `resolved_at`
+  - required server-owned timestamp
+
+Rules:
+
+- the target must be an `issue`; General updates cannot be resolved
+- exactly one resolution may exist for an Issue
+- active Admin or `projects.edit` may resolve, including on Completed/Cancelled Projects
+- Project status and original Activity/image remain unchanged
+- identical same-resolver replay returns the original row; changed payload fails with
+  `PIR01`, another resolver receives `42501`, and a second request fails
+- direct browser table access, update, and delete are forbidden
+- one optional immutable resolution attachment may be added afterward through the
+  trusted resolver-owned private Storage flow
+
+## 8.6B ProjectIssueResolutionAttachment
+
+Optional immutable private image evidence for one Project Issue resolution.
+
+Fields:
+
+- `id`
+- `project_issue_resolution_id`
+  - required and unique; at most one image per resolution
+- `storage_path`
+  - required, server-generated, unique, and never exposed by Activity reads
+- `mime_type`
+  - exactly `image/jpeg`, `image/png`, or `image/webp`
+- `byte_size`
+  - 1 through 5 MiB
+- `content_hash`
+  - server-derived lowercase SHA-256; never exposed by Activity reads
+- `alt_text`
+  - optional normalized text, 1–500 characters
+- `created_at`
+  - server-owned timestamp
+
+The attachment retains the exact resolution relationship and is never replaced,
+updated, or deleted. Browser roles have no direct table or Storage access.
 
 ## 8.7 ProjectActivityAttachment
 
@@ -840,15 +898,22 @@ Rules:
 - browser callers never choose arbitrary object paths or directly replace/delete objects
 - the UI may use the Activity title when explicit alt text is absent
 
-## 8.8 ProjectActivityAlert
+## 8.8 ProjectActivityAlert / Project notification event
 
-One optional alert-send event for an Activity update.
+The retained physical table stores manual Activity alerts and automatic Project-domain
+notification events while preserving all historical IDs.
 
 Fields:
 
 - `id`
 - `project_activity_id`
-  - required and unique; at most one alert event per Activity
+  - Activity target; required for `activity` and `issue_resolved`
+- `notification_kind`
+  - required `activity`, `issue_resolved`, or reserved future `shortage`
+- `project_id`
+  - used only by the reserved Project-level `shortage` target shape
+- `project_issue_resolution_id`
+  - required and unique only for `issue_resolved`
 - `sent_by_user_id`
   - required retained UserProfile reference
 - `sent_at`
@@ -861,6 +926,9 @@ Rules:
 - sending requires Activity-post authority plus active Admin or
   `projects.alerts.send`
 - zero eligible recipients fails the whole Activity/alert database transaction
+- one manual `activity` event per Activity and one automatic `issue_resolved` event per
+  resolution; strict target constraints reject mixed/dangling shapes
+- Task 002A creates no shortage episode/table or shortage notification rows
 
 ## 8.9 ProjectActivityAlertRecipient
 
@@ -887,10 +955,13 @@ Fields:
 Rules:
 
 - unique `(alert_id, recipient_user_id)`
-- every active Admin is included automatically at send time
-- non-admin send-time eligibility requires active state, an explicit
+- every active Admin is included automatically at send time for both manual and
+  Issue-resolution notifications
+- manual-alert non-admin eligibility requires active state, an explicit
   `projects.alerts.receive` assignment, and effective `dashboard.view` and
   `projects.view` access
+- Issue-resolution non-admin eligibility requires active state plus effective
+  `dashboard.view` and `projects.view`; send/receive alert permissions are irrelevant
 - an alert sender is included in the recipient snapshot whenever that sender satisfies
   the same Admin or non-admin eligibility rules as every other recipient
 - membership is frozen; later permission grants/removals do not insert/delete history

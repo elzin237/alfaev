@@ -21,6 +21,7 @@ interface LogicalSubmission {
   requestId: string;
   title: string;
   description: string;
+  activityKind: "general" | "issue";
   sendAlert: boolean;
   file: File | null;
   altText: string | null;
@@ -71,6 +72,7 @@ function ProjectActivityComposer({
   const altTextId = useId();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [activityKind, setActivityKind] = useState<"general" | "issue">("general");
   const [file, setFile] = useState<File | null>(null);
   const [altText, setAltText] = useState("");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -138,6 +140,7 @@ function ProjectActivityComposer({
     completedSubmissionRef.current = true;
     setTitle("");
     setDescription("");
+    setActivityKind("general");
     setFile(null);
     setAltText("");
     setAttempt(null);
@@ -224,6 +227,7 @@ function ProjectActivityComposer({
       title: submission.title,
       description: submission.description,
       sendAlert: submission.sendAlert,
+      activityKind: submission.activityKind,
     });
     if (!mountedRef.current) return;
     if (!result.ok) {
@@ -265,6 +269,7 @@ function ProjectActivityComposer({
       requestId: crypto.randomUUID(),
       title: normalized.title,
       description: normalized.description,
+      activityKind,
       sendAlert,
       file,
       altText: normalized.altText,
@@ -362,6 +367,41 @@ function ProjectActivityComposer({
 
       {isExpanded && (
         <div id={`${titleId}-composer-fields`} className="mt-4 grid gap-4 border-t border-zinc-200 pt-4">
+        <fieldset disabled={busy || lockedForRetry}>
+          <legend className="text-sm font-semibold text-zinc-800">
+            Activity type
+          </legend>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            {([
+              ["general", "General update", "Share progress or a Project update."],
+              ["issue", "Issue", "Report a problem that requires resolution."],
+            ] as const).map(([value, label, help]) => (
+              <label
+                key={value}
+                className={`cursor-pointer rounded-xl border px-4 py-3 transition focus-within:ring-2 focus-within:ring-red-500 focus-within:ring-offset-2 ${
+                  activityKind === value
+                    ? "border-red-300 bg-red-50/60"
+                    : "border-zinc-200 bg-white hover:border-zinc-300"
+                }`}
+              >
+                <span className="flex items-center gap-2 text-sm font-semibold text-zinc-900">
+                  <input
+                    type="radio"
+                    name={`${titleId}-activity-kind`}
+                    value={value}
+                    checked={activityKind === value}
+                    onChange={() => setActivityKind(value)}
+                    className="size-4 accent-red-600"
+                  />
+                  {label}
+                </span>
+                <span className="mt-1 block pl-6 text-xs leading-5 text-zinc-500">
+                  {help}
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <div>
           <label htmlFor={titleId} className="text-sm font-semibold text-zinc-800">
             Title

@@ -597,6 +597,13 @@ Activity is immutable. Do not provide edit/delete/Admin-delete, attachment
 replace/remove, or alert-resend controls. While submitting, prevent duplicate submits;
 the trusted request UUID/database contract remains the idempotency authority.
 
+The Issue-resolution dialog requires a description and may select one optional
+JPEG/PNG/WebP image up to 5 MiB with a local preview. Resolution text commits first.
+While image upload follows, show explicit progress; if it fails, keep the immutable
+resolution visible and offer an image-only retry using the same request identity.
+Resolved Issues present resolution evidence separately from the original Activity
+image. Do not expose replace/remove controls or a Storage path.
+
 When `Post & send alert` has no eligible recipients, show the clear domain
 error and keep the form content for correction/retry. Never silently downgrade it to
 `Post update`.

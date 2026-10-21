@@ -1,9 +1,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ useProjectActivityImage: vi.fn(), refetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  useProjectActivityImage: vi.fn(),
+  useProjectIssueResolutionImage: vi.fn(),
+  refetch: vi.fn(),
+}));
 vi.mock("../hooks/useProjectActivity", () => ({
   useProjectActivityImage: mocks.useProjectActivityImage,
+  useProjectIssueResolutionImage: mocks.useProjectIssueResolutionImage,
 }));
 
 import ProjectActivityImage from "./ProjectActivityImage";
@@ -21,10 +26,47 @@ beforeEach(() => {
     },
     refetch: mocks.refetch,
   });
+  mocks.useProjectIssueResolutionImage.mockReturnValue({
+    isPending: false,
+    isError: false,
+    data: {
+      signedUrl: "https://storage.example/resolution?token=signed",
+      expiresIn: 300,
+      mimeType: "image/png",
+      byteSize: 42,
+      altText: "Resolution evidence",
+    },
+    refetch: mocks.refetch,
+  });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 describe("ProjectActivityImage", () => {
+  it("uses the resolution-specific authorized signed-read hook for evidence", () => {
+    render(
+      <ProjectActivityImage
+        projectId="00000000-0000-4000-8000-000000000001"
+        activityId="00000000-0000-4000-8000-000000000002"
+        resolutionId="00000000-0000-4000-8000-000000000003"
+        title="Resolution evidence"
+        altText="Evidence"
+      />,
+    );
+    expect(mocks.useProjectActivityImage).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      false,
+    );
+    expect(mocks.useProjectIssueResolutionImage).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000002",
+      "00000000-0000-4000-8000-000000000003",
+      true,
+    );
+    expect(screen.getByRole("img", { name: "Resolution evidence" }))
+      .toHaveAttribute("src", "https://storage.example/resolution?token=signed");
+  });
+
   it("uses title fallback, opens an accessible viewer, traps focus, and closes on Escape", async () => {
     render(
       <ProjectActivityImage

@@ -47,9 +47,11 @@ const activity: ProjectActivityItem = {
   authorFullName: "AlfaEV Admin",
   title: "Status update",
   description: "Immediate timeline update",
+  activityKind: "general",
   createdAt: "2026-10-19T10:00:00.000Z",
   alertSent: false,
   attachment: null,
+  resolution: null,
 };
 
 function wrapper(client: QueryClient, children: ReactNode) {

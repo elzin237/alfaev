@@ -195,6 +195,23 @@ The Project detail page provides traceability back to the original operation.
 7. Activity is append-only. A correction is another update; V1 has no edit, delete,
    Admin delete, image replace/remove, or alert resend.
 
+### Project Issue resolution backend foundation
+
+1. New Activity posting may classify a row as General or Issue; the compatible legacy
+   posting contract always creates General updates.
+2. An active Admin or `projects.edit` employee may resolve an existing Issue with a
+   required description, including after Project completion/cancellation.
+3. Resolution commits one immutable resolution, one automatic notification event,
+   eligible recipient snapshots, and one narrow audit event atomically. Exact retries
+   are resolver-bound and do not duplicate any of those records.
+4. Automatic recipients are all active Admins and active non-Admins with both current
+   Dashboard and Project view access. Manual send/receive alert rules are unchanged.
+5. Task 002B owns the composer, Issue/resolution presentation, confirmation, and
+   resolve interaction. Task 002C optionally uploads one resolver-owned image only
+   after the text resolution commits, then exposes it through an authorized 300-second
+   private signed read. A failed image upload leaves the resolution committed and
+   offers an idempotent image-only retry.
+
 ## Dashboard Activity-alert flow
 
 1. An explicitly addressed active recipient with current `dashboard.view` and

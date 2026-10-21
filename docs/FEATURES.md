@@ -168,6 +168,7 @@ Locked Project statuses:
 ### Project Activity collaboration
 
 Project Activity is an append-only human collaboration timeline and is not AuditLog.
+Its immutable classification is General or Issue; existing history is General.
 Each update has a Project, retained author, required plain-text title (trimmed,
 1–120), required plain-text description (trimmed, 1–5000 with internal newlines),
 created timestamp, unique client request UUID, and at most one optional immutable
@@ -209,12 +210,23 @@ notification, count, or user identity. Current active Dashboard/Project authoriz
 required to join, and only the trusted inbox/count RPCs return data. The 001C2 runtime
 ignores the payload, coalesces bursts, and invalidates only that profile's inbox/count
 queries on an event and each successful subscribe/reconnect. It tears down and removes
-protected cache on identity/access loss. No polling is introduced. DEV deployment of
-migration 132 and real-browser Realtime acceptance remain pending.
+protected cache on identity/access loss. No polling is introduced. Migration 132 is
+deployed on DEV; positive multi-user browser Realtime acceptance remains pending.
 
-Future shortage-opening/resolution and Issue-resolution notifications may join this
-unified unread count only when their backend features are implemented. They are not
-part of the current Project Activity notification contract.
+The Task 002A backend foundation adds automatic Issue-resolution notification events
+to the same recipient inbox/count and Realtime invalidation path. These snapshots use
+active Admin or active Dashboard+Project-view eligibility without manual alert
+send/receive permissions. Existing manual Activity alerts retain their original rules.
+Future shortage events are represented only by a reserved strict notification kind;
+no shortage episode, mutation, or UI is implemented yet.
+
+Issue resolution is an immutable one-time backend operation for active Admin or
+`projects.edit`, including on Completed/Cancelled Projects. It requires a description,
+does not alter the original Activity or Project status, and uses resolver-bound
+idempotency. The resolution dialog may select one private JPEG/PNG/WebP image up to
+5 MiB. Text commits first; image validation/upload follows and can be retried without
+creating another resolution or alert. Resolved Issues display evidence through a
+short-lived authorized signed read. DEV/real-browser acceptance remains Task 002D.
 
 Activity and notifications load newest first with keyset pagination, default 20 and
 limit 1–50. Project Activity uses a collapsible composer and keeps its success

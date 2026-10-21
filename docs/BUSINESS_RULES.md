@@ -177,6 +177,8 @@ Project Activity is immutable human-authored collaboration content, separate fro
 immutable trusted system/business-event AuditLog. Each update belongs to one Project
 and stores its retained author, a created timestamp, a unique client request UUID, a
 required title, a required description, and at most one optional immutable image.
+Each update is permanently classified as a General update or Issue; historical rows
+are General updates.
 
 The title is trimmed plain text, nonblank, and 1–120 characters. The description is
 trimmed plain text, nonblank, and 1–5000 characters; internal newlines are preserved.
@@ -213,6 +215,22 @@ removes it from only that recipient's active inbox and unread count across sessi
 while retaining the recipient row and leaving `read_at` unchanged. Other recipients and
 the underlying Activity, alert event, image, and AuditLog history are unaffected. V1
 requires confirmation and has no undo or dismissed-notification archive.
+
+An Issue has at most one immutable resolution. An active Admin or active employee with
+`projects.edit` may resolve an existing Issue with a required trimmed description even
+when the Project is Completed or Cancelled. Resolution never changes Project status or
+the original Activity/image. Same-resolver exact retries are idempotent; cross-resolver
+request reuse is denied and changed payload or a second resolution is rejected.
+
+Successful resolution atomically creates one automatic `issue_resolved` notification
+and snapshots every active Admin plus every active non-Admin with effective
+`dashboard.view` and `projects.view`. Alert send/receive permissions are not required,
+the resolver is included when eligible, and zero recipients is allowed. Existing
+manual Activity alerts keep their current send/receive rules. One optional resolution
+image may be attached afterward only by the original active resolver who still has
+Admin or `projects.edit`; Completed/Cancelled Project state does not block this
+evidence-only step. The attachment is immutable and an upload retry never recreates
+the resolution, notification, or audit.
 
 Activity and notifications are newest-first bounded reads with default limit 20,
 allowed limits 1–50, and keyset cursors `(created_at, id)` and

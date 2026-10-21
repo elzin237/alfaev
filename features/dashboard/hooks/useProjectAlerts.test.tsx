@@ -59,11 +59,15 @@ function item(index: number): ProjectAlertNotification {
   return {
     notificationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     alertId: `00000000-0000-4000-8001-${String(index).padStart(12, "0")}`,
+    notificationKind: "activity",
     projectId: "00000000-0000-4000-8000-000000000010",
     projectName: "Alert Project",
     activityId: `00000000-0000-4000-8002-${String(index).padStart(12, "0")}`,
     activityTitle: `Activity ${index}`,
     activityAuthorFullName: "Historical Author",
+    resolutionId: null,
+    resolverFullName: null,
+    resolvedAt: null,
     createdAt: `2026-10-19T10:${String(index).padStart(2, "0")}:00.000Z`,
     readAt: null,
   };

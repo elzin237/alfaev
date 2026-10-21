@@ -97,6 +97,17 @@ active Admin or Edit Projects (`projects.edit`) and is allowed only for `planned
 `in_progress`, or `on_hold` Projects. Historical Activity on Completed/Cancelled
 Projects remains readable.
 
+Issue resolution introduces no new permission key. An active Admin or Edit Projects
+(`projects.edit`) may resolve an existing Issue on any Project lifecycle state. The
+automatic resolution notification includes active Admins and active non-Admins with
+effective `dashboard.view` plus `projects.view`; neither Project Activity alert send nor
+receive permission is required. Manual Activity alert permissions remain unchanged.
+
+Resolution-image upload introduces no new permission. It requires the exact original
+active resolver plus current Admin or `projects.edit`, including on Completed/Cancelled
+Projects. Viewing resolution evidence follows Project Activity reads: active Admin or
+`projects.view`. Neither boundary grants direct table or Storage access.
+
 `Post & send alert` requires both Activity-post authority and Send Project Activity
 Alerts (`projects.alerts.send`), with Admin bypass applying independently to those
 action checks. Edit Projects alone never authorizes alert sending.

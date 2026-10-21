@@ -139,6 +139,7 @@ describe("ProjectActivityComposer", () => {
       title: "Status update",
       description: "First line\nSecond line",
       sendAlert: false,
+      activityKind: "general",
     });
     expect(onActivityChanged).toHaveBeenCalledExactlyOnceWith(
       activityId,
@@ -154,6 +155,25 @@ describe("ProjectActivityComposer", () => {
     fireEvent.click(entry);
     expect(screen.getByLabelText("Title")).toHaveValue("");
     expect(screen.getByLabelText("Description")).toHaveValue("");
+    expect(screen.getByRole("radio", { name: /General update/ })).toBeChecked();
+  });
+
+  it("defaults to General update and posts an explicitly selected Issue", async () => {
+    renderComposer();
+    fillForm();
+    const general = screen.getByRole("radio", { name: /General update/ });
+    const issue = screen.getByRole("radio", { name: /^Issue/ });
+    expect(general).toBeChecked();
+    expect(issue).not.toBeChecked();
+    fireEvent.click(issue);
+    expect(issue).toBeChecked();
+    expect(screen.getByText("Report a problem that requires resolution."))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Post update" }));
+    await waitFor(() => expect(mocks.postProjectActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ activityKind: "issue", requestId }),
+    ));
   });
 
   it("keeps validation errors expanded and announces them", () => {

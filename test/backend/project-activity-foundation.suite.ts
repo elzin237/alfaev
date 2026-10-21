@@ -142,6 +142,9 @@ export function registerProjectActivityFoundationTests(
               { column_name: "title", data_type: "text", is_nullable: "NO" },
               { column_name: "description", data_type: "text", is_nullable: "NO" },
               { column_name: "created_at", data_type: "timestamp with time zone", is_nullable: "NO" },
+              ...(process.env.PROJECT_ISSUE_RESOLUTION === "1"
+                ? [{ column_name: "activity_kind", data_type: "text", is_nullable: "NO" as const }]
+                : []),
             ],
             project_activity_attachments: [
               { column_name: "id", data_type: "uuid", is_nullable: "NO" },
@@ -155,9 +158,20 @@ export function registerProjectActivityFoundationTests(
             ],
             project_activity_alerts: [
               { column_name: "id", data_type: "uuid", is_nullable: "NO" },
-              { column_name: "project_activity_id", data_type: "uuid", is_nullable: "NO" },
+              {
+                column_name: "project_activity_id",
+                data_type: "uuid",
+                is_nullable: (process.env.PROJECT_ISSUE_RESOLUTION === "1"
+                  ? "YES"
+                  : "NO") as "YES" | "NO",
+              },
               { column_name: "sent_by_user_id", data_type: "uuid", is_nullable: "NO" },
               { column_name: "sent_at", data_type: "timestamp with time zone", is_nullable: "NO" },
+              ...(process.env.PROJECT_ISSUE_RESOLUTION === "1" ? [
+                { column_name: "notification_kind", data_type: "text", is_nullable: "NO" as const },
+                { column_name: "project_id", data_type: "uuid", is_nullable: "YES" as const },
+                { column_name: "project_issue_resolution_id", data_type: "uuid", is_nullable: "YES" as const },
+              ] : []),
             ],
             project_activity_alert_recipients: [
               { column_name: "id", data_type: "uuid", is_nullable: "NO" },
@@ -207,6 +221,10 @@ export function registerProjectActivityFoundationTests(
             { constraint_name: "project_activity_alert_recipients_alert_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alert_recipients", target_table: "project_activity_alerts" },
             { constraint_name: "project_activity_alert_recipients_user_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alert_recipients", target_table: "user_profiles" },
             { constraint_name: "project_activity_alerts_activity_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "project_activity_updates" },
+            ...(process.env.PROJECT_ISSUE_RESOLUTION === "1" ? [
+              { constraint_name: "project_activity_alerts_project_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "projects" },
+              { constraint_name: "project_activity_alerts_resolution_target_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "project_issue_resolutions" },
+            ] : []),
             { constraint_name: "project_activity_alerts_sender_user_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "user_profiles" },
             { constraint_name: "project_activity_attachments_activity_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_attachments", target_table: "project_activity_updates" },
             { constraint_name: "project_activity_updates_author_user_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_updates", target_table: "user_profiles" },

@@ -395,6 +395,18 @@ Project Activity domain. Audit only narrow `project_activity.created` and option
 `project_activity.alert_sent` system events without copying full free text or image
 content. Per-recipient mark-read and dismissal create no audit noise.
 
+Project Issue resolution is a separate immutable child record, never an update to the
+original Activity. Its trusted transaction locks the request UUID, target Activity,
+Project, active resolver, then eligible recipient profiles; it inserts exactly one
+resolution, one typed notification event, recipient snapshot, and narrow
+`project_activity.issue_resolved` audit. The automatic fanout is independent of manual
+alert send/receive permissions and may validly contain zero recipients. Existing
+five-argument posting/read contracts remain compatible. Resolution evidence uses a
+separate immutable attachment record and `resolution-final/...` namespace in the
+existing private Activity-image bucket. Trusted prepare/attach/reconcile helpers bind
+the original resolver and resolution request UUID; the browser receives only narrow
+metadata and a separately authorized 300-second signed URL, never a Storage path.
+
 ---
 
 ## 13A. Project Activity / Alert Read Architecture

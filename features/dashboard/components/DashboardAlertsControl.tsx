@@ -171,7 +171,9 @@ function DashboardAlertsControl() {
     const sequence = interactionSequenceRef.current + 1;
     interactionSequenceRef.current = sequence;
     const profileId = access.profileId;
-    const destination = `/projects/${item.projectId}#activity-${item.activityId}`;
+    const destination = item.activityId
+      ? `/projects/${item.projectId}#activity-${item.activityId}`
+      : `/projects/${item.projectId}`;
     setRowError(null);
 
     if (item.readAt !== null) {

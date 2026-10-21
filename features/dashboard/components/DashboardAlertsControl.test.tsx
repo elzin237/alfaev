@@ -52,11 +52,15 @@ function notification(
   return {
     notificationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     alertId: `00000000-0000-4000-8001-${String(index).padStart(12, "0")}`,
+    notificationKind: "activity",
     projectId: "00000000-0000-4000-8000-000000000010",
     projectName: `Project ${index}`,
     activityId: `00000000-0000-4000-8002-${String(index).padStart(12, "0")}`,
     activityTitle: `Activity ${index}`,
     activityAuthorFullName: `Author ${index}`,
+    resolutionId: null,
+    resolverFullName: null,
+    resolvedAt: null,
     createdAt: `2026-10-19T10:${String(index).padStart(2, "0")}:00.000Z`,
     readAt,
   };
@@ -254,6 +258,29 @@ describe("DashboardAlertsControl", () => {
     ));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(trigger).not.toHaveFocus();
+  });
+
+  it("renders an Issue resolution safely and marks it read before navigating to the original Issue", async () => {
+    const resolved = {
+      ...notification(1),
+      notificationKind: "issue_resolved" as const,
+      resolutionId: "00000000-0000-4000-8000-000000000090",
+      resolverFullName: "Issue Resolver",
+      resolvedAt: "2026-10-20T12:00:00.000Z",
+    };
+    inbox([resolved]);
+    render(<DashboardAlertsControl />);
+    fireEvent.click(screen.getByRole("button", { name: /Alerts,/ }));
+    expect(screen.getByText("Issue resolved: Activity 1")).toBeInTheDocument();
+    expect(screen.getByText("Issue Resolver")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", {
+      name: /^Issue resolved: Activity 1/,
+    }));
+    expect(mocks.markRead).toHaveBeenCalledExactlyOnceWith(resolved.notificationId);
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(
+      `/projects/${resolved.projectId}#activity-${resolved.activityId}`,
+    ));
   });
 
   it("navigates an already-read row without another mutation", () => {

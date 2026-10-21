@@ -121,6 +121,16 @@ function DashboardAlertsPanel({
             <ol aria-label="Project alert notifications" className="divide-y divide-zinc-100">
               {items.map((item) => {
                 const unread = item.readAt === null;
+                const notificationTitle = item.notificationKind === "issue_resolved"
+                  ? `Issue resolved: ${item.activityTitle ?? "Project Issue"}`
+                  : item.notificationKind === "activity"
+                    ? item.activityTitle ?? "Project update"
+                    : "Project notification";
+                const attribution = item.notificationKind === "issue_resolved"
+                  ? item.resolverFullName
+                  : item.notificationKind === "activity"
+                    ? item.activityAuthorFullName
+                    : null;
                 const pending = pendingNotificationId === item.notificationId;
                 const itemError = rowError?.notificationId === item.notificationId
                   ? rowError.message
@@ -145,7 +155,7 @@ function DashboardAlertsPanel({
                             <p className={`break-words text-sm text-zinc-950 ${
                               unread ? "font-bold" : "font-semibold"
                             }`}>
-                              {item.activityTitle}
+                              {notificationTitle}
                             </p>
                             <p className="mt-1 break-words text-sm font-medium text-zinc-700">
                               {item.projectName}
@@ -165,8 +175,13 @@ function DashboardAlertsPanel({
                           </span>
                         </div>
                         <p className="mt-2 text-xs leading-5 text-zinc-500">
-                          By <span className="font-medium text-zinc-700">{item.activityAuthorFullName}</span>
-                          {" · "}
+                          {attribution && (
+                            <>
+                              {item.notificationKind === "issue_resolved" ? "Resolved by " : "By "}
+                              <span className="font-medium text-zinc-700">{attribution}</span>
+                              {" · "}
+                            </>
+                          )}
                           <time dateTime={item.createdAt}>
                             {alertTimestampFormatter.format(new Date(item.createdAt))}
                           </time>

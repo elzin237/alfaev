@@ -9,10 +9,13 @@ vi.mock("../../../lib/supabase/client", () => ({
 
 import {
   getProjectActivityImageAccess,
+  getProjectIssueResolutionImageAccess,
   getProjectActivity,
   listProjectActivity,
   postProjectActivity,
+  resolveProjectIssue,
   uploadProjectActivityImage,
+  uploadProjectIssueResolutionImage,
 } from "./projectActivityService";
 
 const projectId = "00000000-0000-4000-8000-000000000001";
@@ -29,12 +32,23 @@ const activityRow = {
   author_full_name: "Inactive Historical Actor",
   title: "Site update",
   description: "Line one\nLine two",
+  activity_kind: "general",
   created_at: createdAt,
   alert_sent: true,
   attachment_id: attachmentId,
   attachment_mime_type: "image/png",
   attachment_byte_size: "512",
   attachment_alt_text: null,
+  issue_resolved: false,
+  resolution_id: null,
+  resolved_by_user_id: null,
+  resolver_full_name: null,
+  resolution_description: null,
+  resolved_at: null,
+  resolution_attachment_id: null,
+  resolution_attachment_mime_type: null,
+  resolution_attachment_byte_size: null,
+  resolution_attachment_alt_text: null,
   has_more: true,
 };
 
@@ -55,7 +69,7 @@ describe("projectActivityService", () => {
       resolve(process.cwd(), "features/projects/services/projectActivityService.ts"),
       "utf8",
     );
-    expect(source).toContain('supabase.rpc("list_project_activity"');
+    expect(source).toContain('"list_project_activity_with_issue_resolution"');
     expect(source).toContain('supabase.rpc("post_project_activity"');
     expect(source).toContain('"project-activity-image-upload"');
     expect(source).toContain('"project-activity-image-access"');
@@ -81,6 +95,7 @@ describe("projectActivityService", () => {
           authorFullName: "Inactive Historical Actor",
           title: "Site update",
           description: "Line one\nLine two",
+          activityKind: "general",
           createdAt,
           alertSent: true,
           attachment: {
@@ -89,15 +104,19 @@ describe("projectActivityService", () => {
             byteSize: 512,
             altText: null,
           },
+          resolution: null,
         }],
       },
     });
-    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("list_project_activity", {
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "list_project_activity_with_issue_resolution",
+      {
       p_project_id: projectId,
       p_limit: 20,
       p_before_created_at: createdAt,
       p_before_id: activityId,
-    });
+      },
+    );
   });
 
   it("supports empty pages and rejects extra or malformed fields safely", async () => {
@@ -116,6 +135,46 @@ describe("projectActivityService", () => {
     });
   });
 
+  it("parses an Issue and its exact authoritative resolution projection", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        ...activityRow,
+        activity_kind: "issue",
+        issue_resolved: true,
+        resolution_id: "00000000-0000-4000-8000-000000000021",
+        resolved_by_user_id: "00000000-0000-4000-8000-000000000022",
+        resolver_full_name: "Issue Resolver",
+        resolution_description: "Replaced the damaged contactor.",
+        resolved_at: "2026-10-20T12:00:00.000Z",
+        resolution_attachment_id: "00000000-0000-4000-8000-000000000024",
+        resolution_attachment_mime_type: "image/jpeg",
+        resolution_attachment_byte_size: "2048",
+        resolution_attachment_alt_text: "Resolved contactor",
+      }],
+      error: null,
+    });
+
+    await expect(listProjectActivity(projectId)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          activityKind: "issue",
+          resolution: {
+            resolutionId: "00000000-0000-4000-8000-000000000021",
+            resolverFullName: "Issue Resolver",
+            description: "Replaced the damaged contactor.",
+            attachment: {
+              attachmentId: "00000000-0000-4000-8000-000000000024",
+              mimeType: "image/jpeg",
+              byteSize: 2048,
+              altText: "Resolved contactor",
+            },
+          },
+        }],
+      },
+    });
+  });
+
   it("reads the exact authoritative posted Activity for immediate cache reconciliation", async () => {
     const { has_more: _hasMore, ...exactRow } = activityRow;
     mocks.rpc.mockResolvedValue({ data: [exactRow], error: null });
@@ -128,10 +187,13 @@ describe("projectActivityService", () => {
         createdAt,
       },
     });
-    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("get_project_activity", {
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
+      "get_project_activity_with_issue_resolution",
+      {
       p_project_id: projectId,
       p_activity_id: activityId,
-    });
+      },
+    );
   });
 
   it("maps unavailable, access-denied, and transient target failures safely", async () => {
@@ -200,6 +262,7 @@ describe("projectActivityService", () => {
       title: "Site update",
       description: "Line one\nLine two",
       sendAlert: false,
+      activityKind: "general" as const,
     };
     await expect(postProjectActivity(input)).resolves.toMatchObject({
       ok: true,
@@ -211,6 +274,7 @@ describe("projectActivityService", () => {
       p_title: "Site update",
       p_description: "Line one\nLine two",
       p_send_alert: false,
+      p_activity_kind: "general",
     });
   });
 
@@ -225,6 +289,7 @@ describe("projectActivityService", () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: backend, message: "secret" } });
     const result = await postProjectActivity({
       projectId, requestId, title: "Title", description: "Description", sendAlert: true,
+      activityKind: "issue",
     });
     expect(result).toMatchObject({ ok: false, error: { code: frontend } });
     expect(JSON.stringify(result)).not.toContain("secret");
@@ -234,11 +299,85 @@ describe("projectActivityService", () => {
     mocks.rpc.mockRejectedValue(new Error("network timeout secret"));
     await expect(postProjectActivity({
       projectId, requestId, title: "Title", description: "Description", sendAlert: false,
+      activityKind: "general",
     })).resolves.toEqual({
       ok: false,
       error: {
         code: "post_outcome_unknown",
         message: "The posting result could not be confirmed. Retry this same update.",
+      },
+    });
+  });
+
+  it("resolves an Issue with exact trusted arguments and parses its narrow result", async () => {
+    mocks.rpc.mockResolvedValue({
+      data: [{
+        resolution_id: "00000000-0000-4000-8000-000000000021",
+        project_activity_id: activityId,
+        project_id: projectId,
+        request_id: requestId,
+        resolved_by_user_id: actorId,
+        resolver_full_name: "Issue Resolver",
+        description: "Replaced the damaged contactor.",
+        resolved_at: "2026-10-20T12:00:00.000Z",
+        notification_id: "00000000-0000-4000-8000-000000000023",
+        recipient_count: "4",
+      }],
+      error: null,
+    });
+
+    await expect(resolveProjectIssue({
+      activityId,
+      requestId,
+      description: "Replaced the damaged contactor.",
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        projectActivityId: activityId,
+        requestId,
+        resolverFullName: "Issue Resolver",
+        recipientCount: "4",
+      },
+    });
+    expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith("resolve_project_issue", {
+      p_project_activity_id: activityId,
+      p_request_id: requestId,
+      p_description: "Replaced the damaged contactor.",
+    });
+  });
+
+  it.each([
+    ["22023", "invalid_description"],
+    ["PIR01", "conflicting_request"],
+    ["PIR02", "not_an_issue"],
+    ["PIR03", "already_resolved"],
+    ["P0002", "issue_unavailable"],
+    ["42501", "access_denied"],
+  ])("maps Issue resolution error %s without raw detail", async (backend, frontend) => {
+    mocks.rpc.mockResolvedValue({
+      data: null,
+      error: { code: backend, message: "private SQL detail" },
+    });
+    const result = await resolveProjectIssue({
+      activityId,
+      requestId,
+      description: "Resolution",
+    });
+    expect(result).toMatchObject({ ok: false, error: { code: frontend } });
+    expect(JSON.stringify(result)).not.toContain("private SQL detail");
+  });
+
+  it("keeps an indeterminate resolution outcome retryable with the same caller identity", async () => {
+    mocks.rpc.mockRejectedValue(new Error("transport secret"));
+    await expect(resolveProjectIssue({
+      activityId,
+      requestId,
+      description: "Resolution",
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: "resolution_outcome_unknown",
+        message: "The resolution result could not be confirmed. Retry this same resolution.",
       },
     });
   });
@@ -301,6 +440,44 @@ describe("projectActivityService", () => {
     expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith(
       "project-activity-image-access",
       { body: { projectId, activityId } },
+    );
+  });
+
+  it("uploads resolution evidence with exact immutable resolution/request identity", async () => {
+    mocks.invoke.mockResolvedValue({
+      data: { attachmentId, mimeType: "image/png", byteSize: 4, altText: null },
+      error: null,
+    });
+    const resolutionId = "00000000-0000-4000-8000-000000000021";
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "evidence.png", {
+      type: "image/png",
+    });
+    await expect(uploadProjectIssueResolutionImage({
+      projectId, activityId, resolutionId, requestId, file, altText: null,
+    })).resolves.toMatchObject({ ok: true, value: { attachmentId } });
+    const [name, options] = mocks.invoke.mock.calls[0] as [string, { body: FormData }];
+    expect(name).toBe("project-issue-resolution-image-upload");
+    expect([...options.body.keys()].sort()).toEqual([
+      "activityId", "file", "projectId", "requestId", "resolutionId",
+    ]);
+    expect(options.body.has("storagePath")).toBe(false);
+  });
+
+  it("requests exact resolution image access through the trusted signer", async () => {
+    mocks.invoke.mockResolvedValue({ data: {
+      signedUrl: "https://storage.example/object?token=signed",
+      expiresIn: 300,
+      mimeType: "image/png",
+      byteSize: 42,
+      altText: "Evidence",
+    }, error: null });
+    const resolutionId = "00000000-0000-4000-8000-000000000021";
+    await expect(getProjectIssueResolutionImageAccess(
+      projectId, activityId, resolutionId,
+    )).resolves.toMatchObject({ ok: true, value: { expiresIn: 300 } });
+    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith(
+      "project-issue-resolution-image-access",
+      { body: { projectId, activityId, resolutionId } },
     );
   });
 });

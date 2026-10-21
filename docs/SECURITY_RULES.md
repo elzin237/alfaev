@@ -681,6 +681,9 @@ Order Finish remains the only physical consumption event and must not also deduc
 ProjectProductComponent quantities.
 
 Project Activity is an append-only human collaboration record and is not AuditLog.
+Each Activity has an immutable `activity_kind` of `general` or `issue`; pre-existing
+rows are General updates. The original author, content, classification, optional image,
+and creation metadata never change.
 Its title is required trimmed nonblank plain text of 1–120 characters. Its description
 is required trimmed nonblank plain text of 1–5000 characters and preserves internal
 newlines. Frontend checks are UX only; trusted backend validation is authoritative.
@@ -761,6 +764,30 @@ The trusted operation appends `project_activity.created` without copying the ful
 description or image into AuditLog. Alert generation additionally appends
 `project_activity.alert_sent` with only safe identifiers/state and recipient count.
 Mark-read and per-recipient dismissal create no AuditLog event.
+
+An existing Issue may be resolved exactly once by an active Admin or an active user
+with `projects.edit`, including after its Project is Completed or Cancelled. Resolution
+does not reopen or otherwise mutate the Project. A trusted resolver-bound request UUID,
+required normalized description, server timestamp, and resolver profile are stored in
+one immutable resolution row. Exact same-resolver retries return that row; changed
+payload fails with `PIR01`, another resolver receives generic `42501`, and a second
+resolution fails. The original Activity remains immutable. Optional resolution-image
+evidence uses a separate service-role-only prepare/attach/reconcile boundary tied to
+the exact resolution, original request UUID, and original active resolver with current
+Admin or `projects.edit`. The server validates decoded JPEG/PNG/WebP bytes (maximum
+5 MiB), derives the hash/path, and writes only to the private Activity-image bucket.
+Definite failures remove their candidate; uncertain outcomes reconcile exact immutable
+metadata. Authorized reads revalidate active Admin or `projects.view` and sign only the
+exact attachment for 300 seconds with `private, no-store`.
+
+Issue resolution atomically creates one `issue_resolved` notification event, snapshots
+all active Admins and active non-Admins with effective `dashboard.view` plus
+`projects.view`, and appends one narrow `project_activity.issue_resolved` AuditLog
+event. Neither `projects.alerts.send` nor `projects.alerts.receive` participates in this
+automatic delivery; the resolver is included only when eligible. Zero eligible
+recipients is valid. Manual Activity-alert eligibility and zero-recipient rollback are
+unchanged. Recipient read/dismissal, private Realtime invalidation, current-access
+rechecks, and direct-table denial apply identically to every notification kind.
 
 Project-alert Realtime is a private, content-free invalidation signal only. The
 database calls `realtime.send` with `{}` and broadcasts event `invalidate` on exactly one

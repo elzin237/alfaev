@@ -3,7 +3,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
 import { projectActivityDomId } from "../projectActivityDeepLink";
-import type { ProjectActivityItem } from "../services/projectActivityService";
+import type {
+  ProjectActivityItem,
+  ProjectIssueResolutionInput,
+  ProjectIssueResolutionResult,
+} from "../services/projectActivityService";
 import { ProjectActivityEntry } from "./ProjectActivityEntry";
 
 export const PROJECT_ACTIVITY_TARGET_HIGHLIGHT_MS = 2_500;
@@ -25,6 +29,11 @@ interface ProjectActivityTimelineProps {
   onLoadMore: () => void;
   scrollToActivityId?: string | null;
   onScrollComplete?: () => void;
+  canResolveIssue?: boolean;
+  onResolveIssue?: (
+    input: ProjectIssueResolutionInput,
+  ) => Promise<ProjectIssueResolutionResult>;
+  onResolutionImageAttached?: (activityId: string) => Promise<unknown> | unknown;
 }
 
 function ProjectActivityTimeline({
@@ -43,6 +52,9 @@ function ProjectActivityTimeline({
   onLoadMore,
   scrollToActivityId = null,
   onScrollComplete,
+  canResolveIssue = false,
+  onResolveIssue,
+  onResolutionImageAttached,
 }: ProjectActivityTimelineProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef(new Map<string, HTMLElement>());
@@ -224,7 +236,13 @@ function ProjectActivityTimeline({
             aria-label={`Project Activity: ${safeLinkedActivity.title} by ${safeLinkedActivity.authorFullName}`}
             className={targetClassName(safeLinkedActivity.activityId)}
           >
-            <ProjectActivityEntry projectId={projectId} item={safeLinkedActivity} />
+            <ProjectActivityEntry
+              projectId={projectId}
+              item={safeLinkedActivity}
+              canResolveIssue={canResolveIssue}
+              onResolveIssue={onResolveIssue}
+              onResolutionImageAttached={onResolutionImageAttached}
+            />
           </article>
         </section>
       )}
@@ -249,7 +267,13 @@ function ProjectActivityTimeline({
             aria-label={`Project Activity: ${item.title} by ${item.authorFullName}`}
             className={targetClassName(item.activityId)}
           >
-            <ProjectActivityEntry projectId={projectId} item={item} />
+            <ProjectActivityEntry
+              projectId={projectId}
+              item={item}
+              canResolveIssue={canResolveIssue}
+              onResolveIssue={onResolveIssue}
+              onResolutionImageAttached={onResolutionImageAttached}
+            />
           </li>
         ))}
         </ol>

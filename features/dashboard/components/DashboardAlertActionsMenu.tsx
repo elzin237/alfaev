@@ -110,7 +110,7 @@ function DashboardAlertActionsMenu({
       data-dashboard-alert-layer="menu"
       id={menuId}
       role="menu"
-      aria-label={`Actions for ${item.activityTitle}`}
+      aria-label={`Actions for ${item.activityTitle ?? item.projectName}`}
       onKeyDown={handleMenuKeyDown}
       style={position ? { left: position.left, top: position.top } : undefined}
       className={`fixed z-[70] min-w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl ${
@@ -139,7 +139,7 @@ function DashboardAlertActionsMenu({
       <button
         ref={buttonRef}
         type="button"
-        aria-label={`Actions for ${item.activityTitle}`}
+        aria-label={`Actions for ${item.activityTitle ?? item.projectName}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

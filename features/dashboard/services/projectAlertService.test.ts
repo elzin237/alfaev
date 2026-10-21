@@ -24,12 +24,16 @@ const createdAt = "2026-10-19T10:00:00.123456+02:00";
 function validRow(overrides: Record<string, unknown> = {}) {
   return {
     notification_id: notificationId,
-    alert_id: alertId,
+    event_id: alertId,
+    notification_kind: "activity",
     project_id: projectId,
     project_name: "Project Alpha",
     activity_id: activityId,
     activity_title: "Production update",
     activity_author_full_name: "Historical Author",
+    resolution_id: null,
+    resolver_full_name: null,
+    resolved_at: null,
     created_at: createdAt,
     read_at: null,
     has_more: false,
@@ -49,11 +53,15 @@ describe("projectAlertService inbox", () => {
         items: [{
           notificationId,
           alertId,
+          notificationKind: "activity",
           projectId,
           projectName: "Project Alpha",
           activityId,
           activityTitle: "Production update",
           activityAuthorFullName: "Historical Author",
+          resolutionId: null,
+          resolverFullName: null,
+          resolvedAt: null,
           createdAt,
           readAt: null,
         }],
@@ -61,7 +69,7 @@ describe("projectAlertService inbox", () => {
       },
     });
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
-      "list_project_alert_notifications",
+      "list_project_notifications",
       {
         p_limit: PROJECT_ALERT_PAGE_SIZE,
         p_before_created_at: null,
@@ -72,7 +80,7 @@ describe("projectAlertService inbox", () => {
     mocks.rpc.mockClear();
     await listProjectAlertNotifications({ createdAt, notificationId });
     expect(mocks.rpc).toHaveBeenCalledExactlyOnceWith(
-      "list_project_alert_notifications",
+      "list_project_notifications",
       {
         p_limit: 20,
         p_before_created_at: createdAt,
@@ -162,6 +170,50 @@ describe("projectAlertService inbox", () => {
     expect(result.value.items).toHaveLength(20);
     expect(result.value.items[result.value.items.length - 1]?.notificationId)
       .toBe("00000000-0000-4000-8000-000000000020");
+  });
+
+  it("parses Issue resolution notifications and reserved shortage rows without inventing data", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: [validRow({
+        notification_kind: "issue_resolved",
+        resolution_id: "00000000-0000-4000-8000-000000000090",
+        resolver_full_name: "Issue Resolver",
+        resolved_at: "2026-10-20T12:00:00.000Z",
+      })],
+      error: null,
+    });
+    await expect(listProjectAlertNotifications()).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          notificationKind: "issue_resolved",
+          activityId,
+          resolutionId: "00000000-0000-4000-8000-000000000090",
+          resolverFullName: "Issue Resolver",
+        }],
+      },
+    });
+
+    mocks.rpc.mockResolvedValueOnce({
+      data: [validRow({
+        notification_kind: "shortage",
+        activity_id: null,
+        activity_title: null,
+        activity_author_full_name: null,
+      })],
+      error: null,
+    });
+    await expect(listProjectAlertNotifications()).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          notificationKind: "shortage",
+          activityId: null,
+          activityTitle: null,
+          resolverFullName: null,
+        }],
+      },
+    });
   });
 
   it("maps backend and network failures without exposing raw details", async () => {

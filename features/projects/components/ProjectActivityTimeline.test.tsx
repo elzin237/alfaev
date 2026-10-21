@@ -19,6 +19,7 @@ const items: ProjectActivityItem[] = [{
   authorFullName: "Inactive Historical Author",
   title: "Commissioning issue",
   description: "First line\nSecond line",
+  activityKind: "general",
   createdAt: "2026-10-19T10:00:00.000Z",
   alertSent: true,
   attachment: {
@@ -27,6 +28,7 @@ const items: ProjectActivityItem[] = [{
     byteSize: 42,
     altText: null,
   },
+  resolution: null,
 }];
 const scrollTo = vi.fn();
 const windowScrollTo = vi.fn();
@@ -157,6 +159,68 @@ describe("ProjectActivityTimeline", () => {
     expect(document.querySelector('time[datetime="2026-10-19T10:00:00.000Z"]'))
       .toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /edit|delete|resend/i }))
+      .not.toBeInTheDocument();
+  });
+
+  it("shows Issue status and permission-gates resolution without affecting General updates", () => {
+    const openIssue: ProjectActivityItem = {
+      ...items[0]!,
+      activityKind: "issue",
+      title: "Open issue",
+      alertSent: false,
+      attachment: null,
+    };
+    const general = { ...items[0]!, title: "General update" };
+    const denied = renderTimeline({ items: [openIssue, general] });
+    expect(screen.getByText("Open")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve issue" }))
+      .not.toBeInTheDocument();
+    expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+    denied.rerender(<></>);
+
+    renderTimeline({
+      items: [openIssue, general],
+      canResolveIssue: true,
+      onResolveIssue: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Resolve issue" }))
+      .toBeInTheDocument();
+  });
+
+  it("renders immutable resolver, timestamp, and description for a resolved Issue", () => {
+    const resolvedIssue: ProjectActivityItem = {
+      ...items[0]!,
+      activityKind: "issue",
+      title: "Resolved issue",
+      attachment: null,
+      resolution: {
+        resolutionId: "00000000-0000-4000-8000-000000000011",
+        resolvedByUserId: "00000000-0000-4000-8000-000000000012",
+        resolverFullName: "Resolution Owner",
+        description: "Replaced the damaged contactor.",
+        resolvedAt: "2026-10-20T12:30:00.000Z",
+        attachment: {
+          attachmentId: "00000000-0000-4000-8000-000000000013",
+          mimeType: "image/png",
+          byteSize: 128,
+          altText: "Repaired contactor",
+        },
+      },
+    };
+    renderTimeline({
+      items: [resolvedIssue],
+      canResolveIssue: true,
+      onResolveIssue: vi.fn(),
+    });
+    expect(screen.getByText("Resolved")).toBeInTheDocument();
+    expect(screen.getByText("Replaced the damaged contactor."))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Resolved by/)).toHaveTextContent("Resolution Owner");
+    expect(screen.getByText("Private image for Resolution evidence for Resolved issue"))
+      .toBeInTheDocument();
+    expect(document.querySelector('time[datetime="2026-10-20T12:30:00.000Z"]'))
+      .toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Resolve issue" }))
       .not.toBeInTheDocument();
   });
 

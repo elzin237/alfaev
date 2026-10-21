@@ -11,18 +11,22 @@ import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { invalidateProjectAlertQueries } from "../../dashboard/hooks/useProjectAlerts";
 import {
   projectActivityImageQueryKey,
+  projectIssueResolutionImageQueryKey,
   projectActivityQueryKey,
   projectActivityTargetQueryKey,
 } from "../projectActivityQueryKeys";
 import type { ProjectStatus } from "../projectStatus";
 import {
   getProjectActivityImageAccess,
+  getProjectIssueResolutionImageAccess,
   getProjectActivity,
   listProjectActivity,
   PROJECT_ACTIVITY_PAGE_SIZE,
+  resolveProjectIssue,
   type ProjectActivityCursor,
   type ProjectActivityItem,
   type ProjectActivityPage,
+  type ProjectIssueResolutionInput,
 } from "../services/projectActivityService";
 
 const writableStatuses = new Set<ProjectStatus>([
@@ -39,6 +43,37 @@ export function getNextProjectActivityPageParam(
   return lastItem
     ? { createdAt: lastItem.createdAt, activityId: lastItem.activityId }
     : undefined;
+}
+
+export function useProjectIssueResolutionImage(
+  projectId: string,
+  activityId: string,
+  resolutionId: string,
+  enabled: boolean,
+) {
+  const { profile } = useAuth();
+  return useQuery({
+    queryKey: projectIssueResolutionImageQueryKey(
+      profile?.id,
+      projectId,
+      activityId,
+      resolutionId,
+    ),
+    queryFn: async () => {
+      const result = await getProjectIssueResolutionImageAccess(
+        projectId,
+        activityId,
+        resolutionId,
+      );
+      if (!result.ok) throw new Error(result.error.message);
+      return result.value;
+    },
+    enabled: Boolean(enabled && profile?.id),
+    staleTime: 240_000,
+    gcTime: 300_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
 }
 
 export function dedupeProjectActivityPages(
@@ -86,6 +121,7 @@ export function useProjectActivityPermissions(status: ProjectStatus) {
   return {
     canPost,
     canSendAlert,
+    canResolve: Boolean(canEdit),
     permissionsPending: permissionEnabled && (
       editPermissionQuery.isPending || alertPermissionQuery.isPending
     ),
@@ -178,11 +214,23 @@ export function useProjectActivity(
     return result.value;
   }
 
+  async function resolveIssue(input: ProjectIssueResolutionInput) {
+    const result = await resolveProjectIssue(input);
+    if (result.ok && profile?.id) {
+      await invalidateProjectAlertQueries(queryClient, profile.id);
+    }
+    if (result.ok || result.error.code === "already_resolved") {
+      await reconcilePostedActivity(input.activityId, false);
+    }
+    return result;
+  }
+
   return {
     activityQuery,
     items,
     invalidate: () => queryClient.invalidateQueries({ queryKey, exact: true }),
     reconcilePostedActivity,
+    resolveIssue,
     targetIsLoaded,
     targetQuery,
     linkedActivity: !targetIsLoaded && targetQuery.data?.ok

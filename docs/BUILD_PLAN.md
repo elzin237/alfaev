@@ -3109,8 +3109,8 @@ The completed V1 navigation follow-up mounts the existing profile-scoped Project
 Activity unread-count hook in the persistent Sidebar and renders a positive Dashboard
 badge (`99+` cap) using the Nabavka badge treatment. Mark-read/dismissal share the same
 React Query cache. No second RPC, polling, or Realtime lifecycle is introduced. Future
-shortage and Issue-resolution notification kinds join this count only after their
-backend slices exist.
+shortage notifications join this count only after their backend slice exists; Task 002A
+adds the Issue-resolution notification foundation.
 
 ---
 
@@ -3172,8 +3172,40 @@ Goal:
 - preserve Task 001B own-post invalidation and prohibit polling, optimistic counts,
   direct recipient-table reads, or browser Broadcast sends
 
-Frontend implementation is complete locally. Migration 132 deployment and DEV
-real-browser Realtime acceptance remain separately gated.
+Frontend implementation and DEV migration 132 deployment are complete. Positive
+multi-user real-browser Realtime acceptance remains separately gated.
+
+---
+
+# PHASE P2 — Project Issues + Resolution
+
+## Task 002A — Database Foundation
+
+Goal:
+- add immutable General/Issue Activity classification with historical General default
+- add one immutable text resolution per Issue with resolver-bound idempotency
+- allow authorized resolution across all Project lifecycle states without status mutation
+- generalize retained notification events for manual Activity, Issue resolution, and a
+  strict reserved future shortage target shape
+- atomically fan out resolution notifications to active Admins and active
+  Dashboard+Project viewers without alert send/receive permissions
+- preserve legacy posting/reads, manual alert behavior, recipient state, and Realtime
+
+Backend only. No Issue UI or resolution-image Storage boundary.
+
+## Task 002B — Issue / Resolution UI
+
+Implemented locally: adopt the Issue-aware trusted reads, add General/Issue composer
+choice, resolution confirmation/description, resolved-state presentation, and
+notification kind presentation without changing backend authority.
+
+## Task 002C — Resolution Image Boundary
+
+Implemented locally: one optional immutable private resolution image through trusted
+resolver-owned upload, attachment, reconciliation, and signed-read boundaries. The
+text resolution commits first; failed image attachment remains safely retryable without
+duplicating resolution, notification, or audit history. Do not reuse or mutate the
+original Activity image. Task 002D retains DEV/real-browser acceptance.
 
 ---
 

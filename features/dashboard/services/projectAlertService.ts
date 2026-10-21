@@ -10,11 +10,15 @@ export interface ProjectAlertCursor {
 export interface ProjectAlertNotification {
   notificationId: string;
   alertId: string;
+  notificationKind: "activity" | "issue_resolved" | "shortage";
   projectId: string;
   projectName: string;
-  activityId: string;
-  activityTitle: string;
-  activityAuthorFullName: string;
+  activityId: string | null;
+  activityTitle: string | null;
+  activityAuthorFullName: string | null;
+  resolutionId: string | null;
+  resolverFullName: string | null;
+  resolvedAt: string | null;
   createdAt: string;
   readAt: string | null;
 }
@@ -70,12 +74,16 @@ const timestampPattern =
 const unsignedIntegerPattern = /^(?:0|[1-9]\d*)$/;
 const inboxRowKeys = [
   "notification_id",
-  "alert_id",
+  "event_id",
+  "notification_kind",
   "project_id",
   "project_name",
   "activity_id",
   "activity_title",
   "activity_author_full_name",
+  "resolution_id",
+  "resolver_full_name",
+  "resolved_at",
   "created_at",
   "read_at",
   "has_more",
@@ -165,24 +173,47 @@ function mapRpcError(
 
 function parseInboxRow(value: unknown): ProjectAlertNotification | null {
   if (!isRecord(value) || !hasExactKeys(value, inboxRowKeys) ||
-    !isUuid(value.notification_id) || !isUuid(value.alert_id) ||
+    !isUuid(value.notification_id) || !isUuid(value.event_id) ||
+    !(value.notification_kind === "activity" ||
+      value.notification_kind === "issue_resolved" ||
+      value.notification_kind === "shortage") ||
     !isUuid(value.project_id) || !isTrimmedNonblank(value.project_name) ||
-    !isUuid(value.activity_id) || !isTrimmedNonblank(value.activity_title) ||
-    !isTrimmedNonblank(value.activity_author_full_name) ||
     !isTimestamp(value.created_at) ||
     !(value.read_at === null || isTimestamp(value.read_at)) ||
     typeof value.has_more !== "boolean") {
     return null;
   }
 
+  const activityFieldsValid = isUuid(value.activity_id) &&
+    isTrimmedNonblank(value.activity_title) &&
+    isTrimmedNonblank(value.activity_author_full_name);
+  const activityFieldsNull = value.activity_id === null &&
+    value.activity_title === null && value.activity_author_full_name === null;
+  const resolutionFieldsValid = isUuid(value.resolution_id) &&
+    isTrimmedNonblank(value.resolver_full_name) && isTimestamp(value.resolved_at);
+  const resolutionFieldsNull = value.resolution_id === null &&
+    value.resolver_full_name === null && value.resolved_at === null;
+  if (
+    (value.notification_kind === "activity" &&
+      (!activityFieldsValid || !resolutionFieldsNull)) ||
+    (value.notification_kind === "issue_resolved" &&
+      (!activityFieldsValid || !resolutionFieldsValid)) ||
+    (value.notification_kind === "shortage" &&
+      (!activityFieldsNull || !resolutionFieldsNull))
+  ) return null;
+
   return {
     notificationId: value.notification_id,
-    alertId: value.alert_id,
+    alertId: value.event_id,
+    notificationKind: value.notification_kind,
     projectId: value.project_id,
     projectName: value.project_name,
-    activityId: value.activity_id,
-    activityTitle: value.activity_title,
-    activityAuthorFullName: value.activity_author_full_name,
+    activityId: value.activity_id as string | null,
+    activityTitle: value.activity_title as string | null,
+    activityAuthorFullName: value.activity_author_full_name as string | null,
+    resolutionId: value.resolution_id as string | null,
+    resolverFullName: value.resolver_full_name as string | null,
+    resolvedAt: value.resolved_at as string | null,
     createdAt: value.created_at,
     readAt: value.read_at,
   };
@@ -223,7 +254,7 @@ export async function listProjectAlertNotifications(
 
   let response: { data: unknown; error: RpcErrorLike | null };
   try {
-    response = await supabase.rpc("list_project_alert_notifications", {
+    response = await supabase.rpc("list_project_notifications", {
       p_limit: PROJECT_ALERT_PAGE_SIZE,
       p_before_created_at: cursor?.createdAt ?? null,
       p_before_recipient_id: cursor?.notificationId ?? null,

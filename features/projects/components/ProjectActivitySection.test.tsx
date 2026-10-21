@@ -42,13 +42,16 @@ vi.mock("./ProjectActivityTimeline", () => ({
     labelledBy,
     scrollToActivityId,
     linkedActivity,
+    canResolveIssue,
   }: {
     labelledBy: string;
     scrollToActivityId: string | null;
     linkedActivity?: ProjectActivityItem | null;
+    canResolveIssue?: boolean;
   }) => (
     <div role="region" tabIndex={0} aria-labelledby={labelledBy}>
       Timeline history / scroll {scrollToActivityId ?? "none"}
+      <span>Resolve enabled {String(canResolveIssue)}</span>
       {linkedActivity && (
         <section role="region" aria-label="Linked activity">
           <p>{linkedActivity.title}</p>
@@ -78,6 +81,7 @@ const linkedActivity: ProjectActivityItem = {
   authorFullName: "Historical Author",
   title: "Linked update",
   description: "Linked description",
+  activityKind: "general",
   createdAt: "2026-10-19T10:00:00.000Z",
   alertSent: true,
   attachment: {
@@ -86,6 +90,7 @@ const linkedActivity: ProjectActivityItem = {
     byteSize: 42,
     altText: "Linked image",
   },
+  resolution: null,
 };
 const targetRefetch = vi.fn();
 
@@ -93,6 +98,7 @@ beforeEach(() => {
   mocks.useProjectActivityPermissions.mockReturnValue({
     canPost: true,
     canSendAlert: false,
+    canResolve: true,
     permissionsPending: false,
   });
   mocks.useProjectActivity.mockReturnValue({
@@ -115,6 +121,7 @@ beforeEach(() => {
     reconcilePostedActivity: vi.fn().mockResolvedValue({
       activityId: "00000000-0000-4000-8000-000000000009",
     }),
+    resolveIssue: vi.fn(),
   });
 });
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
@@ -157,12 +164,14 @@ describe("ProjectActivitySection", () => {
     mocks.useProjectActivityPermissions.mockReturnValue({
       canPost: false,
       canSendAlert: false,
+      canResolve: true,
       permissionsPending: false,
     });
     const completed = renderSection("completed");
     expect(screen.queryByText(/Composer/)).not.toBeInTheDocument();
     expect(screen.getByText(/read-only.*history remains available/i)).toBeInTheDocument();
     expect(screen.getByText(/Timeline history/)).toBeInTheDocument();
+    expect(screen.getByText("Resolve enabled true")).toBeInTheDocument();
     completed.unmount();
 
     renderSection();

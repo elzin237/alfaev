@@ -262,12 +262,24 @@ export function registerProjectActivityOperationsTests(
               volatility: "v",
               configuration: ["search_path=\"\""],
             },
+            ...(process.env.PROJECT_ISSUE_RESOLUTION === "1"
+              ? [{
+                function_name: "post_project_activity",
+                arguments: "p_project_id uuid, p_request_id uuid, p_title text, p_description text, p_send_alert boolean, p_activity_kind text",
+                is_security_definer: true,
+                volatility: "v",
+                configuration: ["search_path=\"\""],
+              }]
+              : []),
           ]);
 
           for (const signature of [
             "public.get_project_activity(uuid,uuid)",
             "public.list_project_activity(uuid,integer,timestamp with time zone,uuid)",
             "public.post_project_activity(uuid,uuid,text,text,boolean)",
+            ...(process.env.PROJECT_ISSUE_RESOLUTION === "1"
+              ? ["public.post_project_activity(uuid,uuid,text,text,boolean,text)"]
+              : []),
           ]) {
             for (const [role, allowed] of [
               ["public", false],

@@ -41,9 +41,15 @@ const trustedOnlyTables = [
   "project_activity_alerts",
   "project_activity_attachments",
   "project_activity_updates",
+  ...(process.env.PROJECT_ISSUE_RESOLUTION === "1"
+    ? ["project_issue_resolutions"]
+    : []),
+  ...(process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
+    ? ["project_issue_resolution_attachments"]
+    : []),
   "user_permissions",
   "work_order_number_counters",
-] as const;
+];
 
 const applicationTables = [...directSelectTables, ...trustedOnlyTables].sort();
 
@@ -263,7 +269,11 @@ export function registerRlsPolicyMatrixTests(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
         expect(applicationFunctions).toHaveLength(
-          process.env.PROJECT_ALERT_REALTIME_INVALIDATION === "1"
+          process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
+            ? 162
+            : process.env.PROJECT_ISSUE_RESOLUTION === "1"
+            ? 158
+            : process.env.PROJECT_ALERT_REALTIME_INVALIDATION === "1"
             ? 153
             : process.env.PROJECT_ALERT_DISMISSAL === "1"
             ? 152
@@ -277,6 +287,93 @@ export function registerRlsPolicyMatrixTests(
           expect(routine.settings).toEqual(['search_path=""']);
           expect(routine.public_execute).toBe(false);
           expect(routine.anonymous_execute).toBe(false);
+        }
+
+        if (process.env.PROJECT_ISSUE_RESOLUTION === "1") {
+          const issueFunctions = applicationFunctions.filter((routine) =>
+            [
+              "get_project_activity_with_issue_resolution",
+              "list_project_activity_with_issue_resolution",
+              "list_project_notifications",
+              "post_project_activity",
+              "resolve_project_issue",
+            ].includes(routine.function_name)
+            && (
+              routine.function_name !== "post_project_activity"
+              || routine.arguments.endsWith("p_activity_kind text")
+            )
+          );
+          expect(issueFunctions.map((routine) => ({
+            arguments: routine.arguments,
+            authenticated_execute: routine.authenticated_execute,
+            function_name: routine.function_name,
+            public_execute: routine.public_execute,
+            anonymous_execute: routine.anonymous_execute,
+            settings: routine.settings,
+            volatility: routine.volatility,
+          }))).toEqual([
+            {
+              arguments: "p_project_id uuid, p_activity_id uuid",
+              authenticated_execute: true,
+              function_name: "get_project_activity_with_issue_resolution",
+              public_execute: false,
+              anonymous_execute: false,
+              settings: ['search_path=""'],
+              volatility: "s",
+            },
+            {
+              arguments: "p_project_id uuid, p_limit integer, p_before_created_at timestamp with time zone, p_before_id uuid",
+              authenticated_execute: true,
+              function_name: "list_project_activity_with_issue_resolution",
+              public_execute: false,
+              anonymous_execute: false,
+              settings: ['search_path=""'],
+              volatility: "s",
+            },
+            {
+              arguments: "p_limit integer, p_before_created_at timestamp with time zone, p_before_recipient_id uuid",
+              authenticated_execute: true,
+              function_name: "list_project_notifications",
+              public_execute: false,
+              anonymous_execute: false,
+              settings: ['search_path=""'],
+              volatility: "s",
+            },
+            {
+              arguments: "p_project_id uuid, p_request_id uuid, p_title text, p_description text, p_send_alert boolean, p_activity_kind text",
+              authenticated_execute: true,
+              function_name: "post_project_activity",
+              public_execute: false,
+              anonymous_execute: false,
+              settings: ['search_path=""'],
+              volatility: "v",
+            },
+            {
+              arguments: "p_project_activity_id uuid, p_request_id uuid, p_description text",
+              authenticated_execute: true,
+              function_name: "resolve_project_issue",
+              public_execute: false,
+              anonymous_execute: false,
+              settings: ['search_path=""'],
+              volatility: "v",
+            },
+          ]);
+        }
+
+        if (process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1") {
+          const helpers = applicationFunctions.filter((routine) => [
+            "prepare_project_issue_resolution_image_upload",
+            "attach_project_issue_resolution_image",
+            "reconcile_project_issue_resolution_image_upload",
+            "get_project_issue_resolution_image_access_context",
+          ].includes(routine.function_name));
+          expect(helpers).toHaveLength(4);
+          for (const helper of helpers) {
+            expect(helper.service_role_execute).toBe(true);
+            expect(helper.authenticated_execute).toBe(false);
+            expect(helper.public_execute).toBe(false);
+            expect(helper.anonymous_execute).toBe(false);
+          }
         }
 
         const projectActivityImageHelpers = applicationFunctions.filter(

@@ -3,6 +3,7 @@ import { CircleCheck } from "lucide-react";
 
 import type { ProjectActivityHash } from "../projectActivityDeepLink";
 import type { ProjectStatus } from "../projectStatus";
+import type { ProjectIssueResolutionInput } from "../services/projectActivityService";
 import {
   useProjectActivity,
   useProjectActivityPermissions,
@@ -25,7 +26,7 @@ export function ProjectActivitySection({
   activityTargetNavigationKey = "default",
   onProjectUnavailable,
 }: ProjectActivitySectionProps) {
-  const { canPost, canSendAlert, permissionsPending } =
+  const { canPost, canSendAlert, canResolve, permissionsPending } =
     useProjectActivityPermissions(status);
   const targetActivityId = activityTarget.kind === "activity"
     ? activityTarget.activityId
@@ -38,6 +39,7 @@ export function ProjectActivitySection({
     targetQuery,
     activityProfileId,
     reconcilePostedActivity,
+    resolveIssue,
   } = useProjectActivity(projectId, targetActivityId);
   const closed = status === "completed" || status === "cancelled";
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -50,6 +52,12 @@ export function ProjectActivitySection({
   ) {
     const item = await reconcilePostedActivity(activityId, alertSent);
     if (item && shouldScroll) setScrollActivityId(item.activityId);
+  }
+
+  async function handleResolveIssue(input: ProjectIssueResolutionInput) {
+    const result = await resolveIssue(input);
+    if (result.ok) setSuccessMessage("Issue resolved successfully");
+    return result;
   }
 
   return (
@@ -147,6 +155,10 @@ export function ProjectActivitySection({
             onLoadMore={() => void activityQuery.fetchNextPage()}
             scrollToActivityId={scrollActivityId}
             onScrollComplete={() => setScrollActivityId(null)}
+            canResolveIssue={canResolve}
+            onResolveIssue={handleResolveIssue}
+            onResolutionImageAttached={(activityId) =>
+              reconcilePostedActivity(activityId, false)}
           />
         </div>
       </div>
