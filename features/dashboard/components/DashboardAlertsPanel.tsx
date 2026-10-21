@@ -125,7 +125,9 @@ function DashboardAlertsPanel({
                   ? `Issue resolved: ${item.activityTitle ?? "Project Issue"}`
                   : item.notificationKind === "activity"
                     ? item.activityTitle ?? "Project update"
-                    : "Project notification";
+                    : item.shortageEventType === "opened"
+                      ? "Component shortage detected"
+                      : "Component shortage resolved";
                 const attribution = item.notificationKind === "issue_resolved"
                   ? item.resolverFullName
                   : item.notificationKind === "activity"
@@ -160,6 +162,38 @@ function DashboardAlertsPanel({
                             <p className="mt-1 break-words text-sm font-medium text-zinc-700">
                               {item.projectName}
                             </p>
+                            {item.notificationKind === "shortage" && (
+                              <div className="mt-2 space-y-1 text-xs leading-5 text-zinc-600">
+                                <p className="break-words">
+                                  <span className="font-mono font-semibold text-zinc-800">
+                                    {item.productSerialNumber}
+                                  </span>
+                                  {" · "}
+                                  <span className="font-medium text-zinc-800">
+                                    {item.productName}
+                                  </span>
+                                </p>
+                                <p>
+                                  {item.shortageEventType === "opened" ? (
+                                    <>
+                                      Shared shortage quantity:{" "}
+                                      <span className="font-semibold text-red-700">
+                                        {item.shortageQuantity}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="font-semibold text-emerald-700">
+                                      Resolved
+                                    </span>
+                                  )}
+                                </p>
+                                {item.isBaselineDetection && (
+                                  <p className="font-medium text-amber-700">
+                                    Existing shortage detected
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                           <span
                             role={pending ? "status" : undefined}

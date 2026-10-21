@@ -3108,9 +3108,14 @@ Keep the global Topbar unchanged.
 The completed V1 navigation follow-up mounts the existing profile-scoped Project
 Activity unread-count hook in the persistent Sidebar and renders a positive Dashboard
 badge (`99+` cap) using the Nabavka badge treatment. Mark-read/dismissal share the same
-React Query cache. No second RPC, polling, or Realtime lifecycle is introduced. Future
-shortage notifications join this count only after their backend slice exists; Task 002A
-adds the Issue-resolution notification foundation.
+React Query cache. No second RPC, polling, or Realtime lifecycle is introduced. Task
+003A adds shortage opening/resolution notifications to this count and extends the
+trusted unified inbox with Product display identity, exact global shortage snapshot,
+event kind, and baseline indication. Task 003B renders that trusted projection in the
+existing Alerts panel, labels the quantity as a shared global deficit, and uses safe
+Project-level navigation without an Activity fragment. It does not infer shortage
+context from titles or untrusted text. Task 002A adds the
+Issue-resolution notification foundation.
 
 ---
 
@@ -3186,7 +3191,7 @@ Goal:
 - add one immutable text resolution per Issue with resolver-bound idempotency
 - allow authorized resolution across all Project lifecycle states without status mutation
 - generalize retained notification events for manual Activity, Issue resolution, and a
-  strict reserved future shortage target shape
+  strict shortage target shape reserved for the later Task 003A implementation
 - atomically fan out resolution notifications to active Admins and active
   Dashboard+Project viewers without alert send/receive permissions
 - preserve legacy posting/reads, manual alert behavior, recipient state, and Realtime
@@ -3699,3 +3704,25 @@ For example, PCB production remains one trusted transaction task because splitti
 Similarly, tiny one-file cosmetic changes should not become standalone BUILD_PLAN tasks unless there is a real review boundary.
 
 This plan aims for maximum Codex performance by keeping each prompt focused without destroying architectural coherence.
+
+## Task 003A — Automatic Project shortage alerts backend
+
+- Add forward-only episode/event schema and trusted deferred reconciliation.
+- Cover InventoryBalance, Project requirement, and Project status mutation sources.
+- Reuse global availability and per-Project outstanding commitment calculations.
+- Notify once on opening and once on resolution; retain quantity changes as immutable
+  event history without extra fanout.
+- Run an idempotent existing-shortage baseline only when the migration is explicitly
+  deployed. DEV deployment is pending.
+
+## Task 003B — Automatic Project shortage alerts frontend
+
+- Extend the exact unified notification parser with Product identity/display,
+  `opened`/`resolved`, exact shortage text, and baseline indication.
+- Render opening and resolution rows in the existing Dashboard Alerts panel; identify
+  baseline openings and describe quantity as the shared global Product deficit.
+- Reuse existing mark-read, dismissal, pagination, Sidebar badge, profile-scoped cache,
+  and private Realtime behavior.
+- Navigate shortage rows to `/projects/<projectId>` only; do not invent Activity IDs or
+  row-level Product targeting.
+- Keep DEV/browser acceptance as a separate deployment step.

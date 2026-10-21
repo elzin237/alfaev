@@ -68,6 +68,12 @@ function item(index: number): ProjectAlertNotification {
     resolutionId: null,
     resolverFullName: null,
     resolvedAt: null,
+    productId: null,
+    productSerialNumber: null,
+    productName: null,
+    shortageEventType: null,
+    shortageQuantity: null,
+    isBaselineDetection: null,
     createdAt: `2026-10-19T10:${String(index).padStart(2, "0")}:00.000Z`,
     readAt: null,
   };

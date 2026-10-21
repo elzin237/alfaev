@@ -592,13 +592,21 @@ export function registerProjectIssueResolutionTests(
             `select * from public.list_project_notifications(20, null, null)`,
             [],
           );
-          expect(notifications.some((notification) =>
+          const issueNotification = notifications.find((notification) =>
             notification.event_id === resolution.notification_id
-            && notification.notification_kind === "issue_resolved"
-            && notification.project_id === projectId
-            && notification.activity_id === issueId
-            && notification.resolution_id === resolution.resolution_id
-          )).toBe(true);
+          );
+          expect(issueNotification).toMatchObject({
+            notification_kind: "issue_resolved",
+            project_id: projectId,
+            activity_id: issueId,
+            resolution_id: resolution.resolution_id,
+            product_id: null,
+            product_serial_number: null,
+            product_name: null,
+            shortage_event_type: null,
+            shortage_quantity: null,
+            is_baseline_detection: null,
+          });
           expect(notifications.every((notification) =>
             !("email" in notification) && !("storage_path" in notification)
           )).toBe(true);

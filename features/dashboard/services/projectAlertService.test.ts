@@ -19,6 +19,7 @@ const notificationId = "00000000-0000-4000-8000-000000000001";
 const alertId = "00000000-0000-4000-8000-000000000002";
 const projectId = "00000000-0000-4000-8000-000000000003";
 const activityId = "00000000-0000-4000-8000-000000000004";
+const productId = "00000000-0000-4000-8000-000000000005";
 const createdAt = "2026-10-19T10:00:00.123456+02:00";
 
 function validRow(overrides: Record<string, unknown> = {}) {
@@ -37,6 +38,12 @@ function validRow(overrides: Record<string, unknown> = {}) {
     created_at: createdAt,
     read_at: null,
     has_more: false,
+    product_id: null,
+    product_serial_number: null,
+    product_name: null,
+    shortage_event_type: null,
+    shortage_quantity: null,
+    is_baseline_detection: null,
     ...overrides,
   };
 }
@@ -62,6 +69,12 @@ describe("projectAlertService inbox", () => {
           resolutionId: null,
           resolverFullName: null,
           resolvedAt: null,
+          productId: null,
+          productSerialNumber: null,
+          productName: null,
+          shortageEventType: null,
+          shortageQuantity: null,
+          isBaselineDetection: null,
           createdAt,
           readAt: null,
         }],
@@ -172,7 +185,7 @@ describe("projectAlertService inbox", () => {
       .toBe("00000000-0000-4000-8000-000000000020");
   });
 
-  it("parses Issue resolution notifications and reserved shortage rows without inventing data", async () => {
+  it("parses existing Activity and Issue-resolution shapes with null shortage context", async () => {
     mocks.rpc.mockResolvedValueOnce({
       data: [validRow({
         notification_kind: "issue_resolved",
@@ -190,7 +203,54 @@ describe("projectAlertService inbox", () => {
           activityId,
           resolutionId: "00000000-0000-4000-8000-000000000090",
           resolverFullName: "Issue Resolver",
+          productId: null,
+          shortageEventType: null,
         }],
+      },
+    });
+  });
+
+  it("parses exact opening, resolution, and baseline shortage context without numeric conversion", async () => {
+    mocks.rpc.mockResolvedValueOnce({
+      data: [validRow({
+        notification_kind: "shortage",
+        activity_id: null,
+        activity_title: null,
+        activity_author_full_name: null,
+        product_id: productId,
+        product_serial_number: "1234567",
+        product_name: "Precision Resistor",
+        shortage_event_type: "opened",
+        shortage_quantity: "9007199254740993.1250",
+        is_baseline_detection: true,
+      })],
+      error: null,
+    });
+    await expect(listProjectAlertNotifications()).resolves.toEqual({
+      ok: true,
+      value: {
+        items: [{
+          notificationId,
+          alertId,
+          notificationKind: "shortage",
+          projectId,
+          projectName: "Project Alpha",
+          activityId: null,
+          activityTitle: null,
+          activityAuthorFullName: null,
+          resolutionId: null,
+          resolverFullName: null,
+          resolvedAt: null,
+          productId,
+          productSerialNumber: "1234567",
+          productName: "Precision Resistor",
+          shortageEventType: "opened",
+          shortageQuantity: "9007199254740993.1250",
+          isBaselineDetection: true,
+          createdAt,
+          readAt: null,
+        }],
+        hasMore: false,
       },
     });
 
@@ -200,19 +260,63 @@ describe("projectAlertService inbox", () => {
         activity_id: null,
         activity_title: null,
         activity_author_full_name: null,
+        product_id: productId,
+        product_serial_number: "1234567",
+        product_name: "Precision Resistor",
+        shortage_event_type: "resolved",
+        shortage_quantity: "0",
+        is_baseline_detection: false,
       })],
       error: null,
     });
     await expect(listProjectAlertNotifications()).resolves.toMatchObject({
       ok: true,
-      value: {
-        items: [{
-          notificationKind: "shortage",
-          activityId: null,
-          activityTitle: null,
-          resolverFullName: null,
-        }],
-      },
+      value: { items: [{ shortageEventType: "resolved", shortageQuantity: "0" }] },
+    });
+  });
+
+  it.each([
+    ["missing Product", { product_id: null }],
+    ["untrimmed Product name", { product_name: " Resistor " }],
+    ["unknown event", { shortage_event_type: "increased" }],
+    ["numeric quantity", { shortage_quantity: 12 }],
+    ["zero opening", { shortage_quantity: "0" }],
+    ["nonzero resolution", {
+      shortage_event_type: "resolved",
+      shortage_quantity: "1",
+    }],
+    ["baseline resolution", {
+      shortage_event_type: "resolved",
+      shortage_quantity: "0",
+      is_baseline_detection: true,
+    }],
+    ["Activity shortage field", {
+      notification_kind: "activity",
+      activity_id: activityId,
+      activity_title: "Production update",
+      activity_author_full_name: "Historical Author",
+      product_id: productId,
+    }],
+  ])("rejects malformed kind-specific projection: %s", async (_name, invalid) => {
+    mocks.rpc.mockResolvedValue({
+      data: [validRow({
+        notification_kind: "shortage",
+        activity_id: null,
+        activity_title: null,
+        activity_author_full_name: null,
+        product_id: productId,
+        product_serial_number: "1234567",
+        product_name: "Precision Resistor",
+        shortage_event_type: "opened",
+        shortage_quantity: "12.50",
+        is_baseline_detection: false,
+        ...invalid,
+      })],
+      error: null,
+    });
+    await expect(listProjectAlertNotifications()).resolves.toMatchObject({
+      ok: false,
+      error: { code: "inbox_load_failed" },
     });
   });
 

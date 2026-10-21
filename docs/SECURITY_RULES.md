@@ -1226,3 +1226,19 @@ A protected feature is complete only when:
 - direct API attempts cannot bypass UI restrictions
 - errors fail safely
 - automated tests cover critical security/business paths
+
+## Automatic Project shortage alerts
+
+Shortage detection is a trusted database responsibility. Browser roles cannot read or
+mutate shortage episodes, immutable shortage events, or the reconciliation queue
+directly. Reconciliation uses the canonical global Product availability calculation,
+locks affected Products in UUID order, and evaluates final transaction state through a
+deferred queue. System shortage notifications have no user sender. Recipient snapshots
+contain only active Admins and active non-Admins with effective `dashboard.view` and
+`projects.view`; notification ownership, dismissal, read state, and private Realtime
+isolation remain unchanged. The trusted recipient-owned inbox derives shortage display
+context only through the constrained notification → event → episode → Product chain.
+It exposes only Product ID/name/Serial Number, opening or resolution, the immutable
+global deficit snapshot, and baseline-detection state; it does not expose recipient
+identities, Inventory internals, or unrelated Product fields. Increased/decreased
+events remain internal history and never become Dashboard notifications.

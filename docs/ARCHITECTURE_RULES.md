@@ -670,3 +670,10 @@ AlfaEV architecture is considered healthy when:
 - no giant files become de facto application controllers
 - the codebase remains understandable to a new engineer/Codex session from the canonical docs
 Inventory source provenance is a database transaction boundary. Application code never chooses outbound lots. Trusted mutations lock Products/balances in canonical order, lock source lots by `(received_at, id)`, update aggregate balance and lot remainder, and append immutable allocations atomically. PDF generation may occur outside PostgreSQL only when a database-issued allocation fingerprint is revalidated under those same locks before Finish commits.
+
+Automatic shortage reconciliation is also a database transaction boundary. Source
+triggers enqueue affected Product IDs; one deferred queue processor deduplicates and
+sorts them, locks Product rows in UUID order, and compares the final transaction state
+against active episodes. It reuses `calculate_open_project_commitments` and aggregate
+InventoryBalance rather than defining another availability formula. Episode history and
+recipient membership are immutable snapshots; page queries never reconcile shortages.

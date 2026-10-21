@@ -1047,3 +1047,15 @@ Users with history:
 ### Audit records
 - never edit
 - never delete
+
+### Automatic Project shortage episodes
+
+- A Product shortage is the unclamped global deficit from the existing shared
+  `available_after_commitments` calculation.
+- Every open Project with positive outstanding commitment for that Product has one
+  active episode; duplicate component rows still produce one Project/Product episode.
+- Opening and automatic resolution send one Dashboard notification each. Quantity
+  increases/decreases append history but do not notify.
+- Resolution closes rather than deletes an episode; recurrence creates a new episode.
+- Initial enablement records current shortages as baseline detections without inventing
+  earlier history.

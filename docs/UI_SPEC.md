@@ -426,14 +426,18 @@ Alerts control and unread count. The left side remains:
 - `Dashboard`
 - `Overview of the work and projects available to you.`
 
-The future V1 Alerts panel uses bounded internal scrolling and provides loading,
+The V1 Alerts panel uses bounded internal scrolling and provides loading,
 empty, and error/retry states. It is keyboard accessible and closes by Escape or
-outside click. Notifications are newest first and show only Project name, Activity
-title, author, timestamp, and unread/read state; they do not show the Activity
-description or image.
+outside click. Notifications are newest first. Activity rows show Project name,
+Activity title, author, timestamp, and unread/read state without Activity description
+or image. Issue-resolution rows show their existing resolver context. Shortage rows
+show only trusted Project/Product display context, opening/resolution state, the shared
+global deficit for openings, optional baseline indication, timestamp, and read state.
 
-Opening the panel does not mark alerts read. Clicking a row marks only that recipient
-row read and navigates to `/projects/<projectId>#activity-<activityId>`. V1 has no
+Opening the panel does not mark alerts read. Clicking an Activity or Issue-resolution
+row marks only that recipient row read and navigates to
+`/projects/<projectId>#activity-<activityId>`. Clicking a shortage row marks it read and
+navigates to `/projects/<projectId>` without inventing an Activity target. V1 has no
 Mark all as read or polling. Refetch on Dashboard load, panel open, window focus,
 successful alert send, mark-read, and explicit retry. Task 001C1 supplies only a
 private content-free `invalidate` database signal per authorized profile; no
@@ -1665,3 +1669,15 @@ A feature UI is complete when:
 - no backend/security rule is assumed to be enforced only by the UI
 - `KAT. BROJ` displays the frozen Supplier Catalog Number from the committed source allocation, or `—` for legacy/unknown and internally produced stock; it never substitutes AlfaEV Product Serial Number
 - `OPIS` remains Product name; split-source consumption renders separate material rows with each allocation quantity
+
+## Project shortage notifications
+
+The existing Dashboard Alerts panel presents Task 003A's trusted opening and resolution
+notifications. Opening uses `Component shortage detected`, Product Serial Number /
+Šifra and name, `Shared shortage quantity: <exact value>`, and—when applicable—
+`Existing shortage detected`. Resolution uses `Component shortage resolved` and
+`Resolved`. The quantity is the shared global Product deficit captured by the event,
+never a Project-exclusive allocation. The UI does not calculate deficits, allocate
+shortages among Projects, or create events during reads. Quantity-only changes
+intentionally produce no notification. Rows retain the existing unread/read,
+dismissal, pagination, keyboard, Sidebar badge, and private Realtime behavior.

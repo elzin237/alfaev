@@ -7,21 +7,70 @@ export interface ProjectAlertCursor {
   notificationId: string;
 }
 
-export interface ProjectAlertNotification {
+interface ProjectAlertNotificationBase {
   notificationId: string;
   alertId: string;
-  notificationKind: "activity" | "issue_resolved" | "shortage";
   projectId: string;
   projectName: string;
-  activityId: string | null;
-  activityTitle: string | null;
-  activityAuthorFullName: string | null;
-  resolutionId: string | null;
-  resolverFullName: string | null;
-  resolvedAt: string | null;
   createdAt: string;
   readAt: string | null;
 }
+
+export interface ProjectActivityAlertNotification
+  extends ProjectAlertNotificationBase {
+  notificationKind: "activity";
+  activityId: string;
+  activityTitle: string;
+  activityAuthorFullName: string;
+  resolutionId: null;
+  resolverFullName: null;
+  resolvedAt: null;
+  productId: null;
+  productSerialNumber: null;
+  productName: null;
+  shortageEventType: null;
+  shortageQuantity: null;
+  isBaselineDetection: null;
+}
+
+export interface ProjectIssueResolvedAlertNotification
+  extends ProjectAlertNotificationBase {
+  notificationKind: "issue_resolved";
+  activityId: string;
+  activityTitle: string;
+  activityAuthorFullName: string;
+  resolutionId: string;
+  resolverFullName: string;
+  resolvedAt: string;
+  productId: null;
+  productSerialNumber: null;
+  productName: null;
+  shortageEventType: null;
+  shortageQuantity: null;
+  isBaselineDetection: null;
+}
+
+export interface ProjectShortageAlertNotification
+  extends ProjectAlertNotificationBase {
+  notificationKind: "shortage";
+  activityId: null;
+  activityTitle: null;
+  activityAuthorFullName: null;
+  resolutionId: null;
+  resolverFullName: null;
+  resolvedAt: null;
+  productId: string;
+  productSerialNumber: string;
+  productName: string;
+  shortageEventType: "opened" | "resolved";
+  shortageQuantity: string;
+  isBaselineDetection: boolean;
+}
+
+export type ProjectAlertNotification =
+  | ProjectActivityAlertNotification
+  | ProjectIssueResolvedAlertNotification
+  | ProjectShortageAlertNotification;
 
 export interface ProjectAlertPage {
   items: ProjectAlertNotification[];
@@ -72,6 +121,8 @@ const uuidPattern =
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const unsignedIntegerPattern = /^(?:0|[1-9]\d*)$/;
+const unsignedDecimalPattern = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const zeroDecimalPattern = /^0(?:\.0+)?$/;
 const inboxRowKeys = [
   "notification_id",
   "event_id",
@@ -87,6 +138,12 @@ const inboxRowKeys = [
   "created_at",
   "read_at",
   "has_more",
+  "product_id",
+  "product_serial_number",
+  "product_name",
+  "shortage_event_type",
+  "shortage_quantity",
+  "is_baseline_detection",
 ] as const;
 const markReadRowKeys = ["notification_id", "read_at"] as const;
 const dismissRowKeys = ["notification_id", "dismissed_at"] as const;
@@ -193,29 +250,92 @@ function parseInboxRow(value: unknown): ProjectAlertNotification | null {
     isTrimmedNonblank(value.resolver_full_name) && isTimestamp(value.resolved_at);
   const resolutionFieldsNull = value.resolution_id === null &&
     value.resolver_full_name === null && value.resolved_at === null;
-  if (
-    (value.notification_kind === "activity" &&
-      (!activityFieldsValid || !resolutionFieldsNull)) ||
-    (value.notification_kind === "issue_resolved" &&
-      (!activityFieldsValid || !resolutionFieldsValid)) ||
-    (value.notification_kind === "shortage" &&
-      (!activityFieldsNull || !resolutionFieldsNull))
-  ) return null;
-
-  return {
+  const shortageFieldsNull = value.product_id === null &&
+    value.product_serial_number === null && value.product_name === null &&
+    value.shortage_event_type === null && value.shortage_quantity === null &&
+    value.is_baseline_detection === null;
+  const shortageIdentityValid = isUuid(value.product_id) &&
+    isTrimmedNonblank(value.product_serial_number) &&
+    isTrimmedNonblank(value.product_name);
+  const shortageEventValid =
+    (value.shortage_event_type === "opened" ||
+      value.shortage_event_type === "resolved") &&
+    typeof value.shortage_quantity === "string" &&
+    unsignedDecimalPattern.test(value.shortage_quantity) &&
+    typeof value.is_baseline_detection === "boolean" &&
+    (
+      (value.shortage_event_type === "opened" &&
+        !zeroDecimalPattern.test(value.shortage_quantity)) ||
+      (value.shortage_event_type === "resolved" &&
+        zeroDecimalPattern.test(value.shortage_quantity) &&
+        !value.is_baseline_detection)
+    );
+  const common = {
     notificationId: value.notification_id,
     alertId: value.event_id,
-    notificationKind: value.notification_kind,
     projectId: value.project_id,
     projectName: value.project_name,
-    activityId: value.activity_id as string | null,
-    activityTitle: value.activity_title as string | null,
-    activityAuthorFullName: value.activity_author_full_name as string | null,
-    resolutionId: value.resolution_id as string | null,
-    resolverFullName: value.resolver_full_name as string | null,
-    resolvedAt: value.resolved_at as string | null,
     createdAt: value.created_at,
     readAt: value.read_at,
+  };
+
+  if (value.notification_kind === "activity") {
+    if (!activityFieldsValid || !resolutionFieldsNull || !shortageFieldsNull) return null;
+    return {
+      ...common,
+      notificationKind: "activity",
+      activityId: value.activity_id as string,
+      activityTitle: value.activity_title as string,
+      activityAuthorFullName: value.activity_author_full_name as string,
+      resolutionId: null,
+      resolverFullName: null,
+      resolvedAt: null,
+      productId: null,
+      productSerialNumber: null,
+      productName: null,
+      shortageEventType: null,
+      shortageQuantity: null,
+      isBaselineDetection: null,
+    };
+  }
+
+  if (value.notification_kind === "issue_resolved") {
+    if (!activityFieldsValid || !resolutionFieldsValid || !shortageFieldsNull) return null;
+    return {
+      ...common,
+      notificationKind: "issue_resolved",
+      activityId: value.activity_id as string,
+      activityTitle: value.activity_title as string,
+      activityAuthorFullName: value.activity_author_full_name as string,
+      resolutionId: value.resolution_id as string,
+      resolverFullName: value.resolver_full_name as string,
+      resolvedAt: value.resolved_at as string,
+      productId: null,
+      productSerialNumber: null,
+      productName: null,
+      shortageEventType: null,
+      shortageQuantity: null,
+      isBaselineDetection: null,
+    };
+  }
+
+  if (!activityFieldsNull || !resolutionFieldsNull ||
+    !shortageIdentityValid || !shortageEventValid) return null;
+  return {
+    ...common,
+    notificationKind: "shortage",
+    activityId: null,
+    activityTitle: null,
+    activityAuthorFullName: null,
+    resolutionId: null,
+    resolverFullName: null,
+    resolvedAt: null,
+    productId: value.product_id as string,
+    productSerialNumber: value.product_serial_number as string,
+    productName: value.product_name as string,
+    shortageEventType: value.shortage_event_type as "opened" | "resolved",
+    shortageQuantity: value.shortage_quantity as string,
+    isBaselineDetection: value.is_baseline_detection as boolean,
   };
 }
 

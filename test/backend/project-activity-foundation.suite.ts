@@ -162,15 +162,28 @@ export function registerProjectActivityFoundationTests(
                 column_name: "project_activity_id",
                 data_type: "uuid",
                 is_nullable: (process.env.PROJECT_ISSUE_RESOLUTION === "1"
+                  || process.env.PROJECT_SHORTAGE_ALERTS === "1"
                   ? "YES"
                   : "NO") as "YES" | "NO",
               },
-              { column_name: "sent_by_user_id", data_type: "uuid", is_nullable: "NO" },
+              {
+                column_name: "sent_by_user_id",
+                data_type: "uuid",
+                is_nullable: (process.env.PROJECT_SHORTAGE_ALERTS === "1"
+                  ? "YES"
+                  : "NO") as "YES" | "NO",
+              },
               { column_name: "sent_at", data_type: "timestamp with time zone", is_nullable: "NO" },
               ...(process.env.PROJECT_ISSUE_RESOLUTION === "1" ? [
                 { column_name: "notification_kind", data_type: "text", is_nullable: "NO" as const },
                 { column_name: "project_id", data_type: "uuid", is_nullable: "YES" as const },
                 { column_name: "project_issue_resolution_id", data_type: "uuid", is_nullable: "YES" as const },
+              ] : []),
+              ...(process.env.PROJECT_SHORTAGE_ALERTS === "1" ? [
+                { column_name: "project_shortage_event_id", data_type: "uuid", is_nullable: "YES" as const },
+                { column_name: "product_id", data_type: "uuid", is_nullable: "YES" as const },
+                { column_name: "shortage_event_type", data_type: "text", is_nullable: "YES" as const },
+                { column_name: "shortage_quantity", data_type: "numeric", is_nullable: "YES" as const },
               ] : []),
             ],
             project_activity_alert_recipients: [
@@ -179,9 +192,7 @@ export function registerProjectActivityFoundationTests(
               { column_name: "recipient_user_id", data_type: "uuid", is_nullable: "NO" },
               { column_name: "created_at", data_type: "timestamp with time zone", is_nullable: "NO" },
               { column_name: "read_at", data_type: "timestamp with time zone", is_nullable: "YES" },
-              ...(process.env.PROJECT_ALERT_DISMISSAL_FOUNDATION === "1"
-                ? [{ column_name: "dismissed_at", data_type: "timestamp with time zone", is_nullable: "YES" as const }]
-                : []),
+              { column_name: "dismissed_at", data_type: "timestamp with time zone", is_nullable: "YES" },
             ],
           };
 
@@ -226,6 +237,9 @@ export function registerProjectActivityFoundationTests(
               { constraint_name: "project_activity_alerts_resolution_target_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "project_issue_resolutions" },
             ] : []),
             { constraint_name: "project_activity_alerts_sender_user_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "user_profiles" },
+            ...(process.env.PROJECT_SHORTAGE_ALERTS === "1" ? [
+              { constraint_name: "project_activity_alerts_shortage_event_target_fkey", delete_action: "RESTRICT", source_table: "project_activity_alerts", target_table: "project_shortage_events" },
+            ] : []),
             { constraint_name: "project_activity_attachments_activity_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_attachments", target_table: "project_activity_updates" },
             { constraint_name: "project_activity_updates_author_user_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_updates", target_table: "user_profiles" },
             { constraint_name: "project_activity_updates_project_id_fkey", delete_action: "RESTRICT", source_table: "project_activity_updates", target_table: "projects" },

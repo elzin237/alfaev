@@ -40,7 +40,10 @@ vi.mock("../hooks/useProjectAlerts", async (importOriginal) => {
 
 import DashboardAlertsControl from "./DashboardAlertsControl";
 import { ProjectAlertRequestError } from "../hooks/useProjectAlerts";
-import type { ProjectAlertNotification } from "../services/projectAlertService";
+import type {
+  ProjectActivityAlertNotification,
+  ProjectAlertNotification,
+} from "../services/projectAlertService";
 
 const profileOne = "00000000-0000-4000-8000-000000000001";
 const profileTwo = "00000000-0000-4000-8000-000000000002";
@@ -48,7 +51,7 @@ const profileTwo = "00000000-0000-4000-8000-000000000002";
 function notification(
   index: number,
   readAt: string | null = null,
-): ProjectAlertNotification {
+): ProjectActivityAlertNotification {
   return {
     notificationId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
     alertId: `00000000-0000-4000-8001-${String(index).padStart(12, "0")}`,
@@ -61,8 +64,42 @@ function notification(
     resolutionId: null,
     resolverFullName: null,
     resolvedAt: null,
+    productId: null,
+    productSerialNumber: null,
+    productName: null,
+    shortageEventType: null,
+    shortageQuantity: null,
+    isBaselineDetection: null,
     createdAt: `2026-10-19T10:${String(index).padStart(2, "0")}:00.000Z`,
     readAt,
+  };
+}
+
+function shortageNotification(
+  index: number,
+  eventType: "opened" | "resolved",
+  options: { baseline?: boolean; quantity?: string; readAt?: string | null } = {},
+): ProjectAlertNotification {
+  return {
+    notificationId: `00000000-0000-4000-8003-${String(index).padStart(12, "0")}`,
+    alertId: `00000000-0000-4000-8004-${String(index).padStart(12, "0")}`,
+    notificationKind: "shortage",
+    projectId: "00000000-0000-4000-8000-000000000010",
+    projectName: `Shortage Project ${index}`,
+    activityId: null,
+    activityTitle: null,
+    activityAuthorFullName: null,
+    resolutionId: null,
+    resolverFullName: null,
+    resolvedAt: null,
+    productId: `00000000-0000-4000-8005-${String(index).padStart(12, "0")}`,
+    productSerialNumber: "1234567",
+    productName: `Shared Component ${index}`,
+    shortageEventType: eventType,
+    shortageQuantity: options.quantity ?? (eventType === "opened" ? "12.5000" : "0"),
+    isBaselineDetection: options.baseline ?? false,
+    createdAt: `2026-10-21T10:${String(index).padStart(2, "0")}:00.000Z`,
+    readAt: options.readAt ?? null,
   };
 }
 
@@ -281,6 +318,70 @@ describe("DashboardAlertsControl", () => {
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(
       `/projects/${resolved.projectId}#activity-${resolved.activityId}`,
     ));
+  });
+
+  it("renders a shortage opening with exact shared quantity and baseline indication", () => {
+    const opening = shortageNotification(1, "opened", {
+      baseline: true,
+      quantity: "9007199254740993.1250",
+    });
+    inbox([opening]);
+    render(<DashboardAlertsControl />);
+    fireEvent.click(screen.getByRole("button", { name: /Alerts,/ }));
+
+    const row = screen.getByRole("button", { name: /^Component shortage detected/ });
+    expect(row).toHaveTextContent("Shortage Project 1");
+    expect(row).toHaveTextContent("1234567 · Shared Component 1");
+    expect(row).toHaveTextContent(
+      "Shared shortage quantity: 9007199254740993.1250",
+    );
+    expect(row).toHaveTextContent("Existing shortage detected");
+    expect(row).not.toHaveTextContent(/allocation/i);
+  });
+
+  it("marks a shortage opening read before Project-only navigation", async () => {
+    const opening = shortageNotification(2, "opened");
+    let resolveMark: ((value: unknown) => void) | undefined;
+    mocks.markRead.mockImplementation(() => new Promise((resolve) => {
+      resolveMark = resolve;
+    }));
+    inbox([opening]);
+    render(<DashboardAlertsControl />);
+    fireEvent.click(screen.getByRole("button", { name: /Alerts,/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Component shortage detected/ }));
+
+    expect(mocks.markRead).toHaveBeenCalledExactlyOnceWith(opening.notificationId);
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    resolveMark?.({
+      ok: true,
+      value: {
+        notificationId: opening.notificationId,
+        readAt: "2026-10-21T11:00:00.000Z",
+      },
+    });
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(
+      `/projects/${opening.projectId}`,
+    ));
+    expect(mocks.navigate.mock.calls[0]?.[0]).not.toContain("#activity-");
+  });
+
+  it("renders a resolved shortage and directly opens its Project when already read", () => {
+    const resolution = shortageNotification(3, "resolved", {
+      readAt: "2026-10-21T11:00:00.000Z",
+    });
+    inbox([resolution]);
+    render(<DashboardAlertsControl />);
+    fireEvent.click(screen.getByRole("button", { name: /Alerts,/ }));
+
+    const row = screen.getByRole("button", { name: /^Component shortage resolved/ });
+    expect(row).toHaveTextContent("1234567 · Shared Component 3");
+    expect(row).toHaveTextContent("Resolved");
+    expect(row).not.toHaveTextContent("Shared shortage quantity");
+    fireEvent.click(row);
+    expect(mocks.markRead).not.toHaveBeenCalled();
+    expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith(
+      `/projects/${resolution.projectId}`,
+    );
   });
 
   it("navigates an already-read row without another mutation", () => {

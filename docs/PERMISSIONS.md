@@ -321,3 +321,11 @@ Archive:
 - read-only
 - never editable
 - never deletable through normal application workflows
+
+## 8. Automatic shortage notification recipients
+
+Automatic Project shortage and resolution notifications require no send/receive
+permission. Delivery is snapshotted to all active Admins and active non-Admins who have
+both effective `dashboard.view` and `projects.view`. Inactive users are excluded. This
+does not grant direct access to shortage tables, Inventory, Projects, or other users'
+notification records.

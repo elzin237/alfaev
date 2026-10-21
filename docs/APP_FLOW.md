@@ -247,6 +247,17 @@ The Project detail page provides traceability back to the original operation.
    The signal authorizes no notification read and only prompts the existing trusted
    inbox/count RPCs to refetch. Task 001C2 implements that persistent subscription;
    there is no polling fallback.
+10. Automatic shortage opening/resolution notifications use the same recipient-owned
+    inbox. Their trusted read context contains the authoritative Product ID, Serial
+    Number / Šifra, Product name, event kind, immutable global shortage snapshot, and
+    whether the opening was detected by baseline initialization. Quantity-only
+    increase/decrease history is retained internally but does not enter the inbox.
+    The Dashboard renders opening as `Component shortage detected`, shows Product
+    Serial Number / Šifra and name plus `Shared shortage quantity`, and labels baseline
+    openings `Existing shortage detected`. Resolution renders `Component shortage
+    resolved` with `Resolved`. The quantity is the shared global Product deficit, not
+    a Project-exclusive allocation. Activation marks an unread row first and then
+    opens `/projects/<projectId>` without an Activity fragment.
 
 ---
 
@@ -912,3 +923,13 @@ The application flow is correctly implemented when:
 - Archive is immutable
 - Users is completely Admin-only
 - all critical flows produce appropriate audit history
+
+## Automatic Project shortage flow
+
+1. Inventory quantity, Project requirement, or Project status changes enqueue affected
+   Products inside the same transaction.
+2. Deferred reconciliation reads final authoritative state in stable Product order.
+3. A newly affected Project/Product opens one episode and sends one notification.
+4. An unchanged deficit is a no-op; increases/decreases append history only.
+5. A resolved deficit closes the episode and sends one resolution notification.
+6. A later recurrence opens a new episode. Page views never create shortage history.

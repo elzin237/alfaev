@@ -47,6 +47,13 @@ const trustedOnlyTables = [
   ...(process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
     ? ["project_issue_resolution_attachments"]
     : []),
+  ...(process.env.PROJECT_SHORTAGE_ALERTS === "1"
+    ? [
+      "project_shortage_episodes",
+      "project_shortage_events",
+      "project_shortage_reconciliation_queue",
+    ]
+    : []),
   "user_permissions",
   "work_order_number_counters",
 ];
@@ -269,7 +276,9 @@ export function registerRlsPolicyMatrixTests(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
         expect(applicationFunctions).toHaveLength(
-          process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
+          process.env.PROJECT_SHORTAGE_ALERTS === "1"
+            ? 166
+            : process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
             ? 162
             : process.env.PROJECT_ISSUE_RESOLUTION === "1"
             ? 158
@@ -373,6 +382,24 @@ export function registerRlsPolicyMatrixTests(
             expect(helper.authenticated_execute).toBe(false);
             expect(helper.public_execute).toBe(false);
             expect(helper.anonymous_execute).toBe(false);
+          }
+        }
+
+        if (process.env.PROJECT_SHORTAGE_ALERTS === "1") {
+          const shortageFunctions = applicationFunctions.filter((routine) => [
+            "initialize_project_shortage_alerts",
+            "process_project_shortage_reconciliation_queue",
+            "queue_project_shortage_reconciliation",
+            "reconcile_project_shortages_for_products",
+          ].includes(routine.function_name));
+          expect(shortageFunctions).toHaveLength(4);
+          for (const helper of shortageFunctions) {
+            expect(helper.service_role_execute).toBe(false);
+            expect(helper.authenticated_execute).toBe(false);
+            expect(helper.public_execute).toBe(false);
+            expect(helper.anonymous_execute).toBe(false);
+            expect(helper.settings).toEqual(['search_path=""']);
+            expect(helper.volatility).toBe("v");
           }
         }
 

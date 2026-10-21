@@ -84,6 +84,12 @@ send-time recipient row plus current active state, `dashboard.view`, and
 new recipient snapshots; non-admin membership requires explicit
 `projects.alerts.receive` at send time.
 
+Automatic shortage opening/resolution notifications use the same Alerts control and
+current Dashboard/Project authorization. Activity and Issue-resolution rows retain
+their Activity deep links. Shortage rows mark read through the same owner-only flow and
+open `/projects/<projectId>` without a fragment; the Product is display context, not a
+new route or authorization grant.
+
 ---
 
 # 5. Projects

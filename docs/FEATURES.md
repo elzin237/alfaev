@@ -217,8 +217,17 @@ The Task 002A backend foundation adds automatic Issue-resolution notification ev
 to the same recipient inbox/count and Realtime invalidation path. These snapshots use
 active Admin or active Dashboard+Project-view eligibility without manual alert
 send/receive permissions. Existing manual Activity alerts retain their original rules.
-Future shortage events are represented only by a reserved strict notification kind;
-no shortage episode, mutation, or UI is implemented yet.
+Task 003A implements trusted shortage episodes, immutable quantity-change history, and
+system-owned opening/resolution notifications through the same inbox/count/Realtime
+path. The unified trusted inbox projection derives the minimum shortage context from
+the retained event/episode/Product relationship: Product identity and display fields,
+`opened`/`resolved`, the exact global deficit snapshot at that event, and baseline
+detection. It does not expose recipient identity or Inventory internals. Task 003B
+renders this trusted context in the existing Dashboard Alerts panel. Opening rows show
+`Component shortage detected`, Product Serial Number / Šifra and name, and the exact
+shared global deficit; baseline openings are identified explicitly. Resolution rows
+show `Component shortage resolved` and `Resolved`. They mark read through the existing
+owner-only mutation and navigate to the Project without inventing an Activity target.
 
 Issue resolution is an immutable one-time backend operation for active Admin or
 `projects.edit`, including on Completed/Cancelled Projects. It requires a description,
@@ -885,3 +894,14 @@ Dashboard is the only intentional temporary placeholder.
 - Immutable outbound allocation history for Work Order and PCB consumption
 - Product detail Supplier Stock History
 - Official Work Order PDFs render frozen Supplier Catalog Number allocations and split mixed-source quantities into truthful rows
+
+## Automatic Project shortage alerts
+
+The backend tracks one active shortage episode per affected Project/Product using the
+shared global availability calculation. Opening and resolution notify eligible
+Dashboard users; quantity changes are history-only. Initial enablement detects current
+shortages once. Task 003A adds no page-view side effects. The implemented Task 003B
+presentation uses the
+existing Dashboard Alerts panel, unread badge, dismissal, pagination, and private
+Realtime refresh. It presents the quantity as a shared global deficit and navigates to
+the Project route without an Activity fragment. DEV acceptance remains pending.

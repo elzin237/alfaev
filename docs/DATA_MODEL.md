@@ -909,13 +909,16 @@ Fields:
 - `project_activity_id`
   - Activity target; required for `activity` and `issue_resolved`
 - `notification_kind`
-  - required `activity`, `issue_resolved`, or reserved future `shortage`
+  - required `activity`, `issue_resolved`, or `shortage`
 - `project_id`
-  - used only by the reserved Project-level `shortage` target shape
+  - required only by the Project-level `shortage` target shape
 - `project_issue_resolution_id`
   - required and unique only for `issue_resolved`
+- `project_shortage_event_id`, `product_id`, `shortage_event_type`, `shortage_quantity`
+  - exact immutable shortage-event snapshot; required only for `shortage`
 - `sent_by_user_id`
-  - required retained UserProfile reference
+  - required retained UserProfile reference for user-originated events; NULL for
+    system-owned shortage events
 - `sent_at`
   - required server-owned timestamp
 
@@ -928,7 +931,14 @@ Rules:
 - zero eligible recipients fails the whole Activity/alert database transaction
 - one manual `activity` event per Activity and one automatic `issue_resolved` event per
   resolution; strict target constraints reject mixed/dangling shapes
-- Task 002A creates no shortage episode/table or shortage notification rows
+- one system-owned shortage notification per opening or resolution event; quantity-only
+  changes do not create notifications
+- the trusted unified inbox read derives shortage context only through the retained
+  notification → shortage event → shortage episode → Product relationship and returns
+  Product ID, Serial Number / Šifra, Product name, `opened`/`resolved`, the event's
+  exact global shortage-quantity snapshot, and baseline-detection state
+- shortage-only inbox fields are NULL for Activity and Issue-resolution notifications;
+  no recipient identity, Inventory internals, or unrelated Product data is exposed
 
 ## 8.9 ProjectActivityAlertRecipient
 
@@ -1975,3 +1985,17 @@ The logical model is ready for physical implementation when:
 - Users module remains Admin-only
 - AuditLog is immutable
 - Dashboard can be built as a permission-aware read model
+
+## Project shortage episode history
+
+`ProjectShortageEpisode` stores one current episode identity per Project/Product,
+its global shortage quantity, opening time, and optional one-way resolution time. A
+partial unique index permits only one unresolved episode for the pair.
+
+`ProjectShortageEvent` is immutable and records `opened`, `increased`, `decreased`, or
+`resolved`, the authoritative global quantity, server timestamp, and whether an opening
+was detected by the enablement baseline. Resolved episodes/events are retained.
+
+Shortage notifications reference the exact immutable event and snapshot Project,
+Product, event type, and quantity. System notifications have no sender. Existing
+Activity and Issue-resolution notification targets remain unchanged.
