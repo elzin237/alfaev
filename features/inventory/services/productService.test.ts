@@ -35,6 +35,7 @@ beforeEach(() => {
 });
 
 describe("productService", () => {
+  const warehouseId = "10000000-0000-4000-8000-000000000001";
   it("calls only the trusted create_product RPC with normalized allowed inputs", async () => {
     productServiceMocks.rpc.mockResolvedValue({
       data: [{ product_id: "product-1", serial_number: "0000123" }],
@@ -120,7 +121,7 @@ describe("productService", () => {
       data: [
         {
           id: "product-2",
-          serial_number: "0000010",
+          serial_number: "007",
           name: "Controller",
           category: "Control",
           brand_name: "Legacy Brand",
@@ -157,7 +158,7 @@ describe("productService", () => {
         },
         {
           id: "product-2",
-          serialNumber: "0000010",
+          serialNumber: "007",
           name: "Controller",
           category: "Control",
           brandName: "Legacy Brand",
@@ -168,8 +169,8 @@ describe("productService", () => {
       ],
     });
     expect(productServiceMocks.rpc).toHaveBeenCalledWith(
-      "search_inventory_products",
-      { p_search: "controller" },
+      "search_inventory_products_by_warehouse",
+      { p_search: "controller", p_warehouse_id: warehouseId },
     );
     expect(productServiceMocks.from).not.toHaveBeenCalled();
   });
@@ -182,8 +183,8 @@ describe("productService", () => {
       value: [],
     });
     expect(productServiceMocks.rpc).toHaveBeenCalledWith(
-      "search_inventory_products",
-      { p_search: null },
+      "search_inventory_products_by_warehouse",
+      { p_search: null, p_warehouse_id: warehouseId },
     );
   });
 
@@ -242,24 +243,25 @@ describe("productService", () => {
   });
 
   it("reads and strictly maps one Product detail with lifecycle dates and Brand state", async () => {
-    productServiceMocks.select.mockReturnValue({ eq: productServiceMocks.eq });
-    productServiceMocks.eq.mockReturnValue({
-      maybeSingle: productServiceMocks.maybeSingle,
-    });
-    productServiceMocks.maybeSingle.mockResolvedValue({
-      data: {
-        id: "product-1",
+    productServiceMocks.rpc.mockResolvedValue({
+      data: [{
+        product_id: "product-1",
+        warehouse_id: warehouseId,
+        warehouse_code: "raw_materials",
         serial_number: "0000001",
         name: "Controller",
         category: "Control",
         brand_id: "brand-1",
-        brand: { name: "Legacy Brand", is_active: false },
+        brand_name: "Legacy Brand",
+        brand_is_active: false,
         product_kind: "component",
         is_active: true,
         created_at: "2026-09-01T10:00:00.000Z",
         updated_at: "2026-09-02T11:00:00.000Z",
         archived_at: null,
-      },
+        quantity: "42",
+        balance_updated_at: "2026-09-02T12:00:00.000Z",
+      }],
       error: null,
     });
 
@@ -267,6 +269,10 @@ describe("productService", () => {
       ok: true,
       value: {
         id: "product-1",
+        warehouseId,
+        warehouseCode: "raw_materials",
+        quantity: 42,
+        balanceUpdatedAt: "2026-09-02T12:00:00.000Z",
         serialNumber: "0000001",
         name: "Controller",
         category: "Control",
@@ -280,20 +286,16 @@ describe("productService", () => {
         archivedAt: null,
       },
     });
-    expect(productServiceMocks.select).toHaveBeenCalledWith(
-      "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)",
+    expect(productServiceMocks.rpc).toHaveBeenCalledWith(
+      "get_inventory_product_by_warehouse",
+      { p_product_id: "product-1", p_warehouse_id: warehouseId },
     );
-    expect(productServiceMocks.eq).toHaveBeenCalledWith("id", "product-1");
-    expect(productServiceMocks.maybeSingle).toHaveBeenCalledOnce();
+    expect(productServiceMocks.from).not.toHaveBeenCalled();
   });
 
   it("distinguishes missing Product details from safe read failures", async () => {
-    productServiceMocks.select.mockReturnValue({ eq: productServiceMocks.eq });
-    productServiceMocks.eq.mockReturnValue({
-      maybeSingle: productServiceMocks.maybeSingle,
-    });
-    productServiceMocks.maybeSingle
-      .mockResolvedValueOnce({ data: null, error: null })
+    productServiceMocks.rpc
+      .mockResolvedValueOnce({ data: null, error: { code: "P0002" } })
       .mockResolvedValueOnce({
         data: null,
         error: { code: "XX000", message: "raw provider details" },

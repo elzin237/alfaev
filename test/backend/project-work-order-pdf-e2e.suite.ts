@@ -398,6 +398,7 @@ export function registerProjectWorkOrderPdfE2eTests(
         `select product_id, quantity::text as quantity
          from public.inventory_balances
          where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
          order by product_id`,
         [[productA.productId, productB.productId, productC.productId, productD.productId]],
       );
@@ -596,7 +597,8 @@ export function registerProjectWorkOrderPdfE2eTests(
             where entity_id in ($1::uuid, $2::uuid)
               and action_type in ('work_order.finished', 'project.completed')) as audits,
            (select quantity::text from public.inventory_balances
-            where product_id = $3::uuid) as balance,
+            where product_id = $3::uuid
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as balance,
            (select count(*)::integer from public.inventory_movements
             where source_type = 'work_order' and source_id = $1::uuid) as movements,
            (select count(*)::integer from public.work_order_pdfs
@@ -643,7 +645,8 @@ export function registerProjectWorkOrderPdfE2eTests(
             where entity_id in ($1::uuid, $2::uuid)
               and action_type in ('work_order.finished', 'project.completed')) as audits,
            (select quantity::text from public.inventory_balances
-            where product_id = $3::uuid) as balance,
+            where product_id = $3::uuid
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as balance,
            (select count(*)::integer from public.inventory_movements
             where source_type = 'work_order' and source_id = $1::uuid) as movements,
            (select count(*)::integer from public.work_order_pdfs
@@ -783,6 +786,7 @@ export function registerProjectWorkOrderPdfE2eTests(
         `select product_id, quantity::text as quantity
          from public.inventory_balances
          where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
          order by product_id`,
         [[productA.productId, productB.productId, productC.productId, productD.productId]],
       );
@@ -1075,7 +1079,9 @@ export function registerProjectWorkOrderPdfE2eTests(
       await expectRejected(
         database,
         admin,
-        "update public.inventory_balances set quantity = quantity where product_id = $1::uuid",
+        `update public.inventory_balances set quantity = quantity
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productA.productId],
         "42501",
       );

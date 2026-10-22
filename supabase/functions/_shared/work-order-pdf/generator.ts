@@ -229,7 +229,7 @@ export function buildWorkOrderPdfDefinition(
             widths: [92, "*", 92, "*"],
             body: [
               [
-                textCell("PCB Card", { bold: true, fillColor: subtleFill }),
+                textCell("Finished Product", { bold: true, fillColor: subtleFill }),
                 textCell(snapshot.pcbProduction.pcbCardName),
                 textCell("BOM version", { bold: true, fillColor: subtleFill }),
                 textCell(`v${snapshot.pcbProduction.bomVersionNumber}`),

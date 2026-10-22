@@ -203,20 +203,24 @@ export async function assertInventorySourceInvariant(
          select pg_catalog.sum(lot.remaining_quantity::numeric)::text
          from public.inventory_source_lots as lot
          where lot.product_id = balance.product_id
+           and lot.warehouse_id = balance.warehouse_id
        ), '0') as lot_remaining_quantity,
        coalesce((
          select pg_catalog.sum((-movement.quantity_delta)::numeric)::text
          from public.inventory_movements as movement
          where movement.product_id = balance.product_id
+           and movement.warehouse_id = balance.warehouse_id
            and movement.quantity_delta < 0
        ), '0') as outbound_quantity,
        coalesce((
          select pg_catalog.sum(allocation.allocated_quantity::numeric)::text
          from public.inventory_source_allocations as allocation
          where allocation.product_id = balance.product_id
+           and allocation.warehouse_id = balance.warehouse_id
        ), '0') as allocated_quantity
      from public.inventory_balances as balance
-     where balance.product_id = $1::uuid`,
+     where balance.product_id = $1::uuid
+       and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
     [productId],
   );
   const state = result.rows[0];

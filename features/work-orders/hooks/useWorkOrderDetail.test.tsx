@@ -194,6 +194,31 @@ afterEach(() => {
 });
 
 describe("useWorkOrderDetail", () => {
+  it.each([false, true])("refreshes Inventory and Calculator caches after %s production-context Finish, without invalidating another profile", async production => {
+    allowPermissions({ finish: true });
+    if (production) detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: {
+      workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060",
+      pcbCardName: "Controller", bomVersionId: "00000000-0000-4000-8000-000000000061",
+      bomVersionNumber: "1", plannedQuantity: "1",
+      outputProductId: "00000000-0000-4000-8000-000000000062",
+      outputSerialNumber: "007", outputProductName: "Controller", actualGoodQuantity: null,
+    } });
+    const { result, queryClient } = renderDetailHook();
+    await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
+    const own = ["pcb", "cards", "profile-1"];
+    const foreign = ["pcb", "cards", "profile-2"];
+    const warehouseBalance = ["inventory", "balances", "detail", "profile-1", "finished-warehouse", "output-product"];
+    queryClient.setQueryData(own, 0);
+    queryClient.setQueryData(foreign, 99);
+    queryClient.setQueryData(warehouseBalance, 0);
+    await act(async () => { await result.current.finishDraft({ expectedUpdatedAt: draftDetail.updatedAt }); });
+    expect(queryClient.getQueryState(own)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(warehouseBalance)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(foreign)?.isInvalidated).toBe(false);
+    expect(await queryClient.fetchQuery({ queryKey: own, queryFn: async () => 7 })).toBe(7);
+    expect(queryClient.getQueryData(foreign)).toBe(99);
+  });
+
   it("allows supplemental PCB material editing while preserving frozen header and Finish/Delete permissions", async () => {
     allowPermissions({ deleteDraft: true, editDraft: true, finish: true });
     detailMocks.getPcbProductionWorkOrderContext.mockResolvedValue({ ok: true, value: {
@@ -870,6 +895,13 @@ describe("useWorkOrderDetail", () => {
       exact: true,
     });
     await waitFor(() => expect(result.current.canFinishDraft).toBe(false));
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "balances", "detail", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "detail", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "movements", "product", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory-source-lots", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "cards", "profile-1"], exact: true });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "bom", "profile-1"] });
     expect(result.current.canEditDraft).toBe(false);
     expect(result.current.canDeleteDraft).toBe(false);
   });

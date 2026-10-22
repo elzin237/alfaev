@@ -170,7 +170,7 @@ function RequirementsTable({
           <tr>
             {[
               "Serial Number", "Product", "Kind", "Category", "Brand",
-              "Required", "Physical Quantity", "Committed to Projects",
+              "Required", "Eligible Stock (Raw + Customs)", "Committed to Projects",
               "Available After Commitments", "Shortage",
               ...(canManage ? ["Actions"] : []),
             ].map((heading) => (

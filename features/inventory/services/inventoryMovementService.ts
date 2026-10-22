@@ -2,6 +2,7 @@ import { supabase } from "../../../lib/supabase/client";
 
 export interface InventoryMovement {
   movementId: string;
+  warehouseId?: string;
   createdAt: string;
   movementType: string;
   quantityDelta: number;
@@ -27,6 +28,7 @@ export type InventoryMovementListResult =
 
 interface InventoryMovementRow {
   movement_id: string;
+  warehouse_id: string;
   created_at: string;
   movement_type: string;
   quantity_delta: unknown;
@@ -78,6 +80,8 @@ function isInventoryMovementRow(
     "movement_id" in value &&
     typeof value.movement_id === "string" &&
     value.movement_id.length > 0 &&
+    "warehouse_id" in value &&
+    typeof value.warehouse_id === "string" &&
     "created_at" in value &&
     typeof value.created_at === "string" &&
     Number.isFinite(Date.parse(value.created_at)) &&
@@ -134,6 +138,7 @@ function mapMovement(row: InventoryMovementRow): InventoryMovement | null {
 
   return {
     movementId: row.movement_id,
+    warehouseId: row.warehouse_id,
     createdAt: row.created_at,
     movementType: row.movement_type,
     quantityDelta,
@@ -151,11 +156,12 @@ function mapMovement(row: InventoryMovementRow): InventoryMovement | null {
 
 export async function listInventoryMovements(
   productId: string,
+  warehouseId = "10000000-0000-4000-8000-000000000001",
 ): Promise<InventoryMovementListResult> {
   try {
     const { data, error } = await supabase.rpc(
-      "get_inventory_movements_for_product",
-      { p_product_id: productId },
+      "get_inventory_movements_for_product_by_warehouse",
+      { p_product_id: productId, p_warehouse_id: warehouseId },
     );
 
     if (error || !Array.isArray(data)) return failure();

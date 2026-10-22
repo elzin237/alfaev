@@ -4,51 +4,44 @@ import ConfirmDialog from "../../../shared/components/ConfirmDialog";
 import { buildPcbProductionPreview } from "../domain/buildPcbProductionPreview";
 import type { ProductionSubmission } from "../hooks/usePcbProduction";
 import type { ProducePcbResult } from "../services/pcbProductionService";
-import type { PcbProductionProjectChoice, PcbProductionSource } from "../services/pcbProductionPrecheckService";
+import type { PcbProductionSource } from "../services/pcbProductionPrecheckService";
 
 interface Props {
   source: PcbProductionSource;
-  projects: PcbProductionProjectChoice[];
   isRefreshing: boolean;
   submit: (submission: ProductionSubmission) => Promise<ProducePcbResult>;
   onProduced: (summary: { workOrderId: string; workOrderNumber: string; cardName: string;
     plannedQuantity: string; projectName: string | null }) => void;
 }
 
-const statusLabels = { planned: "Planned", in_progress: "In Progress", on_hold: "On Hold" };
-
-export default function PcbProductionPrecheckForm({ source, projects, isRefreshing, submit, onProduced }: Props) {
+export default function PcbProductionPrecheckForm({ source, isRefreshing, submit, onProduced }: Props) {
   const [quantity, setQuantity] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [confirmation, setConfirmation] = useState<{ quantity: string; projectId: string | null;
-    projectName: string | null; creationRequestId: string } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ quantity: string;
+    creationRequestId: string } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submissionLocked = useRef(false);
-  const creationAttempt = useRef<{ quantity: string; projectId: string | null; requestId: string } | null>(null);
+  const creationAttempt = useRef<{ quantity: string; requestId: string } | null>(null);
   const preview = quantity === "" ? null : buildPcbProductionPreview(source.inputs, quantity, source.outputIsActive);
-  const selectedProject = projects.find((project) => project.projectId === projectId);
   const productsAvailable = source.outputIsActive && source.inputs.every((input) => input.isActive);
-  const canConfirm = preview?.ok === true && productsAvailable && !isRefreshing &&
-    (projectId === "" || Boolean(selectedProject)) && !isSubmitting;
+  const canConfirm = preview?.ok === true && productsAvailable && !isRefreshing && !isSubmitting;
 
   useEffect(() => { setConfirmation(null); }, [source]);
 
   async function confirmProduction() {
     if (!confirmation || submissionLocked.current || isRefreshing || !preview?.ok || !productsAvailable ||
-      quantity !== confirmation.quantity || (projectId || null) !== confirmation.projectId ||
-      (projectId !== "" && selectedProject?.name !== confirmation.projectName)) return;
+      quantity !== confirmation.quantity) return;
     submissionLocked.current = true;
     setIsSubmitting(true);
     try {
       const result = await submit({ pcbCardId: source.cardId,
-        plannedQuantity: confirmation.quantity, projectId: confirmation.projectId,
+        plannedQuantity: confirmation.quantity,
         creationRequestId: confirmation.creationRequestId });
       if (result.ok) {
         creationAttempt.current = null;
         onProduced({ workOrderId: result.value.workOrderId,
           workOrderNumber: result.value.workOrderNumber, cardName: source.cardName,
-          plannedQuantity: confirmation.quantity, projectName: confirmation.projectName });
+          plannedQuantity: confirmation.quantity, projectName: null });
       } else {
         setErrorMessage(result.error.message);
         if (result.error.code !== "unknown_outcome") creationAttempt.current = null;
@@ -65,32 +58,20 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
   function openConfirmation() {
     if (!canConfirm || !preview?.ok || !productsAvailable) return;
     setErrorMessage(null);
-    const normalizedProjectId = projectId || null;
-    if (creationAttempt.current?.quantity !== quantity ||
-      creationAttempt.current.projectId !== normalizedProjectId) {
-      creationAttempt.current = { quantity, projectId: normalizedProjectId, requestId: crypto.randomUUID() };
+    if (creationAttempt.current?.quantity !== quantity) {
+      creationAttempt.current = { quantity, requestId: crypto.randomUUID() };
     }
-    setConfirmation({ quantity, projectId: normalizedProjectId, projectName: selectedProject?.name ?? null,
+    setConfirmation({ quantity,
       creationRequestId: creationAttempt.current.requestId });
   }
 
   return <div className="space-y-6">
     <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="max-w-xl">
         <label className="block text-sm font-semibold text-zinc-800">Planned Production Quantity
           <input type="text" inputMode="numeric" value={quantity} disabled={isSubmitting || Boolean(confirmation)}
             onChange={(event) => { setQuantity(event.target.value); setErrorMessage(null); }}
             className="mt-2 w-full rounded-xl border border-zinc-300 px-3 py-2" aria-describedby="quantity-help" />
-        </label>
-        <label className="block text-sm font-semibold text-zinc-800">Project (optional)
-          <select value={projectId} disabled={isSubmitting || Boolean(confirmation)}
-            onChange={(event) => { setProjectId(event.target.value); setErrorMessage(null); }}
-            className="mt-2 w-full rounded-xl border border-zinc-300 px-3 py-2">
-            <option value="">No Project / General stock</option>
-            {projects.map((project) => <option key={project.projectId} value={project.projectId}>
-              {project.name} — {statusLabels[project.status]}
-            </option>)}
-          </select>
         </label>
       </div>
       <p id="quantity-help" className="mt-3 text-sm text-zinc-500">
@@ -144,7 +125,7 @@ export default function PcbProductionPrecheckForm({ source, projects, isRefreshi
     </button>
     <ConfirmDialog open={Boolean(confirmation)}
       title={`Create production Work Order for ${source.cardName}?`}
-      description={`This creates a Draft Work Order for ${confirmation?.quantity ?? ""} planned cards and freezes the current BOM materials. Inventory will not change until the Work Order is finished.${confirmation?.projectName ? ` Project: ${confirmation.projectName}.` : " General Stock."}`}
+      description={`This creates a Draft Work Order for ${confirmation?.quantity ?? ""} planned cards and freezes the current BOM materials. Inventory will not change until the Work Order is finished. The finished output will be stored in Finished Goods.`}
       confirmLabel="Create Work Order" onConfirm={() => void confirmProduction()}
       onCancel={() => { if (!isSubmitting) setConfirmation(null); }} isSubmitting={isSubmitting} />
   </div>;

@@ -156,7 +156,10 @@ describe("trusted Work Order PDF snapshot model", () => {
       plannedQuantity: "9223372036854775807",
       actualGoodQuantity: "0",
     });
-    expect(JSON.stringify(buildWorkOrderPdfDefinition(parsed).content)).toContain("Actual completed");
+    const serialized = JSON.stringify(buildWorkOrderPdfDefinition(parsed).content);
+    expect(serialized).toContain("Actual completed");
+    expect(serialized).toContain("Finished Product");
+    expect(serialized).not.toContain("PCB Card");
   });
 });
 

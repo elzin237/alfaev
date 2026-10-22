@@ -28,9 +28,14 @@ vi.mock("../services/productService", () => ({
 }));
 
 import { useProductDetail } from "./useProductDetail";
+const warehouseId = "10000000-0000-4000-8000-000000000001";
 
 const activeProduct = {
   id: "product-1",
+  warehouseId,
+  warehouseCode: "raw_materials",
+  quantity: 4,
+  balanceUpdatedAt: "2026-09-02T12:00:00.000Z",
   serialNumber: "0000001",
   name: "Controller",
   category: "Control",
@@ -160,6 +165,7 @@ describe("useProductDetail", () => {
       "products",
       "detail",
       "profile-1",
+      warehouseId,
       "product-1",
     ])).toBeDefined();
     expect(queryClient.getQueryState([
@@ -184,6 +190,7 @@ describe("useProductDetail", () => {
         "products",
         "detail",
         "profile-1",
+        warehouseId,
         "product-1",
       ],
       exact: true,
@@ -231,6 +238,7 @@ describe("useProductDetail", () => {
         "products",
         "detail",
         "profile-1",
+        warehouseId,
         "product-1",
       ],
       exact: true,

@@ -473,8 +473,9 @@ reservations. They never directly change InventoryBalance or create InventoryMov
 The read model computes outstanding commitment independently for each Project/Product
 pair, subtracting only qualifying physical consumption attributed to that same pair,
 then sums the per-Project results by Product. Consumption from one Project never offsets
-another Project's commitment. Derived availability compares physical stock with that
-summed outstanding commitment and may be negative to expose shortages.
+another Project's commitment. Derived availability compares Raw Materials plus Customs
+Warehouse stock (excluding Finished Goods) with that summed outstanding commitment and
+may be negative to expose shortages.
 
 ---
 
@@ -677,3 +678,37 @@ sorts them, locks Product rows in UUID order, and compares the final transaction
 against active episodes. It reuses `calculate_open_project_commitments` and aggregate
 InventoryBalance rather than defining another availability formula. Episode history and
 recipient membership are immutable snapshots; page queries never reconcile shortages.
+
+## Warehouse architecture and production extensions
+
+Tasks 001B–001C introduce the shared warehouse-aware storage foundation, independent
+authorization, scoped reads/adjustments, and transfers while preserving all legacy
+reads and production mutations as Raw Materials-only. Tasks 001D–001H extend, rather
+than replace, that central Inventory transaction boundary.
+
+- Use one warehouse-aware ledger with global Products and fixed warehouse identities;
+  do not build three unrelated Inventory systems.
+- Balance locking, nonnegative checks, movement before/after values, source-lot FIFO,
+  allocation fingerprints, and provenance are scoped by `(product, warehouse)`.
+- Existing state is backfilled to Raw Materials without changing immutable business
+  identifiers. New Finished Goods and Customs state must not be inferred by rewriting
+  history.
+- Trusted reads and adjustments enforce the exact warehouse permission. Transfers
+  require adjustment permission in both warehouses, conserve quantity through paired
+  movements, and preserve provenance. Future frontend tabs compose shared UI and never
+  broaden data access.
+- Warehouse-aware Finish locks in a deterministic order: request/Work Order and Project
+  context, Products, warehouse balances, source lots, then destination output state.
+  It rechecks actor authority after blocking locks and commits inputs, output, PDF,
+  Work Order, provenance, and audit atomically.
+- Production source priority is Raw Materials FIFO, Customs FIFO, then Finished Goods
+  FIFO. The allocation fingerprint includes Product, warehouse, source lot, and exact
+  quantity; mutation creates a separate movement for every Product/warehouse deduction.
+- Project availability and shared shortage use Raw Materials plus Customs; Finished
+  Goods stays excluded. Combined reads require visibility of both eligible warehouses.
+- Balance triggers enqueue Raw/Customs changes only. The existing deferred queue
+  deduplicates by transaction/Product so Raw↔Customs transfers are neutral and boundary
+  transfers reconcile exactly once from final state. Migration 140 does not initialize,
+  rewrite, or delete historical shortage records.
+- Serial identity is global and textual: exact three-digit calculator serials coexist
+  with generated seven-digit ordinary Product serials, including archived identities.

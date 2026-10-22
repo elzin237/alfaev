@@ -55,11 +55,11 @@ function parseRow(value: unknown): PcbBomVersionHistoryItem | null {
 
 export async function listPcbBomVersions(cardId: string): Promise<PcbBomHistoryResult> {
   if (!isPcbCardId(cardId)) {
-    return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+    return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   }
   const { data, error } = await supabase.rpc("list_pcb_bom_versions", { p_pcb_card_id: cardId });
   if (error?.code === "P0002") {
-    return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+    return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   }
   if (error?.code === "42501") {
     return { ok: false, error: { code: "access_denied", message: "You cannot view this PCB BOM history." } };

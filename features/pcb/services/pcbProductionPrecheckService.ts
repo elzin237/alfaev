@@ -33,7 +33,7 @@ export type PcbPrecheckReadResult<T> =
   | { ok: false; error: { code: "not_found" | "unavailable" | "read_failed"; message: string } };
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const serial = /^[0-9]{7}$/;
+const serial = /^(?:[0-9]{3}|[0-9]{7})$/;
 const maxBigint = 9223372036854775807n;
 const failed = { ok: false as const, error: { code: "read_failed" as const,
   message: "PCB production precheck could not be loaded." } };
@@ -53,11 +53,11 @@ function whole(value: unknown, positive: boolean): value is string {
 }
 
 export async function getPcbProductionPrecheck(cardId: string): Promise<PcbPrecheckReadResult<PcbProductionSource>> {
-  if (!isPcbCardId(cardId)) return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+  if (!isPcbCardId(cardId)) return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   const { data, error } = await supabase.rpc("get_pcb_production_precheck", { p_pcb_card_id: cardId });
-  if (error?.code === "P0002") return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+  if (error?.code === "P0002") return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   if (error?.code === "PCB06" || error?.code === "PCB07") {
-    return { ok: false, error: { code: "unavailable", message: "PCB Card is not available for production." } };
+    return { ok: false, error: { code: "unavailable", message: "This finished-product definition is not available for production." } };
   }
   if (error || !Array.isArray(data) || data.length === 0) return failed;
 

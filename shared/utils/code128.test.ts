@@ -33,8 +33,17 @@ describe("encodeProductSerialCode128", () => {
     );
   });
 
+  it("preserves and encodes exact three-digit Serials", () => {
+    expect(encodeProductSerialCode128("000").serialNumber).toBe("000");
+    expect(encodeProductSerialCode128("007").serialNumber).toBe("007");
+    expect(encodeProductSerialCode128("123").symbolValues).toHaveLength(6);
+  });
+
   it.each([
-    ["wrong length", "123456"],
+    ["wrong length", "12"],
+    ["unsupported four digits", "1234"],
+    ["unsupported five digits", "12345"],
+    ["unsupported six digits", "123456"],
     ["too long", "12345678"],
     ["letters", "123A567"],
     ["leading whitespace", " 1234567"],
@@ -45,7 +54,7 @@ describe("encodeProductSerialCode128", () => {
     ["full-width digits", "１２３４５６７"],
   ])("rejects %s without trimming or repair", (_label, serialNumber) => {
     expect(() => encodeProductSerialCode128(serialNumber)).toThrowError(
-      "Product Serial Number must contain exactly 7 ASCII digits.",
+      "Product Serial Number must contain exactly 3 or 7 ASCII digits.",
     );
   });
 });

@@ -7,6 +7,7 @@ import { loadBackendTestEnvironment } from "./env";
 import { createSecurityFixtureHarness, type SecurityFixtureHarness } from "./security-fixtures";
 
 const environment = loadBackendTestEnvironment();
+const committedConcurrencyIt = environment.projectRef === "local" ? it : it.skip;
 let harness: SecurityFixtureHarness | undefined;
 
 function fixture(): SecurityFixtureHarness {
@@ -25,9 +26,17 @@ async function setActor(database: PoolClient, authUserId: string, role: "authent
   await database.query(`set local role ${role}`);
 }
 
-async function createCard(database: PoolClient, authUserId: string, name: string): Promise<CreationRow> {
+async function createCard(
+  database: PoolClient,
+  authUserId: string,
+  name: string,
+  serialNumber: string,
+): Promise<CreationRow> {
   await setActor(database, authUserId);
-  const result = await database.query<CreationRow>("select * from public.create_pcb_card($1)", [name]);
+  const result = await database.query<CreationRow>(
+    "select * from public.create_pcb_card($1, $2)",
+    [name, serialNumber],
+  );
   await database.query("reset role");
   const created = result.rows[0];
   if (!created) throw new Error("PCB Card creation returned no row");
@@ -64,6 +73,22 @@ async function assertRejected(database: PoolClient, sql: string, params: readonl
   await database.query("rollback to savepoint rejected_pcb_create");
 }
 
+async function findUnusedThreeDigitSerials(
+  database: PoolClient,
+  count: number,
+): Promise<string[]> {
+  return (await database.query<{ serial_number: string }>(
+    `select pg_catalog.lpad(candidate::text, 3, '0') as serial_number
+     from pg_catalog.generate_series(0, 999) as candidate
+     where not exists (
+       select 1 from public.products as product
+       where product.serial_number = pg_catalog.lpad(candidate::text, 3, '0')
+     )
+     order by candidate limit $1`,
+    [count],
+  )).rows.map((row) => row.serial_number);
+}
+
 describe("trusted PCB Card creation", () => {
   beforeAll(async () => { harness = await createSecurityFixtureHarness(environment); });
   afterAll(async () => {
@@ -73,11 +98,13 @@ describe("trusted PCB Card creation", () => {
     });
   });
 
-  it("derives one Product, zero balance and exactly two trusted audits for an Admin", async () => {
+  it("derives one Product, three zero balances and exactly two trusted audits for an Admin", async () => {
     await fixture().withRollbackDatabaseTransaction(async (database) => {
       const before = await counts(database);
-      const created = await createCard(database, fixture().actors.admin.authUserId, "  Controller PCB  ");
-      expect(created.serial_number).toMatch(/^[0-9]{7}$/);
+      const [serial] = await findUnusedThreeDigitSerials(database, 1);
+      if (!serial || !serial.startsWith("0")) throw new Error("An unused leading-zero Serial is required");
+      const created = await createCard(database, fixture().actors.admin.authUserId, "  Controller PCB  ", serial);
+      expect(created.serial_number).toBe(serial);
       const product = await database.query<{
         name: string; category: string; brand_id: string | null; product_kind: string;
         is_active: boolean; serial_number: string; created_by_user_id: string;
@@ -100,10 +127,17 @@ describe("trusted PCB Card creation", () => {
         created_by_user_id: fixture().actors.admin.profileId,
         updated_by_user_id: fixture().actors.admin.profileId,
       }]);
-      const balance = await database.query<{ quantity: string }>(
-        "select quantity from public.inventory_balances where product_id=$1", [created.product_id],
+      const balance = await database.query<{ code: string; quantity: string }>(
+        `select warehouse.code, balance.quantity
+         from public.inventory_balances as balance
+         join public.inventory_warehouses as warehouse on warehouse.id=balance.warehouse_id
+         where balance.product_id=$1 order by warehouse.sort_order`, [created.product_id],
       );
-      expect(balance.rows).toEqual([{ quantity: "0" }]);
+      expect(balance.rows).toEqual([
+        { code: "raw_materials", quantity: "0" },
+        { code: "finished_goods", quantity: "0" },
+        { code: "customs", quantity: "0" },
+      ]);
       const audits = await database.query<{
         action_type: string; actor_user_id: string; entity_id: string;
         after_data: Record<string, unknown>;
@@ -121,7 +155,7 @@ describe("trusted PCB Card creation", () => {
       const after = await counts(database);
       expect(Number(after?.products) - Number(before?.products)).toBe(1);
       expect(Number(after?.cards) - Number(before?.cards)).toBe(1);
-      expect(Number(after?.balances) - Number(before?.balances)).toBe(1);
+      expect(Number(after?.balances) - Number(before?.balances)).toBe(3);
       expect(after?.movements).toBe(before?.movements);
       expect(after?.suppliers).toBe(before?.suppliers);
       expect(after?.product_suppliers).toBe(before?.product_suppliers);
@@ -129,7 +163,89 @@ describe("trusted PCB Card creation", () => {
     });
   });
 
-  it("allows pcb.create without read or Inventory grants, and allows duplicate card names", async () => {
+  it("preserves historical seven-digit definitions and both-length trusted lookup", async () => {
+    await fixture().withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture().actors.admin;
+      const historicalSerial = (await database.query<{ serial_number: string }>(
+        "select public.allocate_product_serial_number() as serial_number",
+      )).rows[0]?.serial_number;
+      if (!historicalSerial) throw new Error("Historical Serial fixture is unavailable");
+      const historicalProductId = randomUUID();
+      const historicalCardId = randomUUID();
+      await database.query(
+        `insert into public.products (
+           id, serial_number, name, category, product_kind,
+           created_by_user_id, updated_by_user_id
+         ) values ($1,$2,$3,'PCB','pcb_finished_good',$4,$4)`,
+        [historicalProductId, historicalSerial, `Historical ${randomUUID()}`, actor.profileId],
+      );
+      await database.query(
+        `insert into public.pcb_cards (
+           id, name, output_product_id, created_by_user_id, updated_by_user_id
+         ) values ($1,$2,$3,$4,$4)`,
+        [historicalCardId, `Historical definition ${randomUUID()}`, historicalProductId, actor.profileId],
+      );
+      const [calculatorSerial] = await findUnusedThreeDigitSerials(database, 1);
+      if (!calculatorSerial) throw new Error("Calculator Serial fixture is unavailable");
+      const calculator = await createCard(
+        database,
+        actor.authUserId,
+        `Calculator ${randomUUID()}`,
+        calculatorSerial,
+      );
+      await setActor(database, actor.authUserId);
+      const draft = (await database.query<{ work_order_id: string }>(
+        "select work_order_id from public.create_draft_work_order()",
+      )).rows[0];
+      if (!draft) throw new Error("Draft Work Order fixture is unavailable");
+      const resolved = await database.query<{ serial_number: string }>(
+        `select serial_number from public.resolve_work_order_product_barcode($1,$2)
+         union all
+         select serial_number from public.resolve_work_order_product_barcode($1,$3)
+         order by serial_number`,
+        [draft.work_order_id, calculator.serial_number, historicalSerial],
+      );
+      const listed = await database.query<{ serial_number: string }>(
+        "select serial_number from public.list_pcb_cards() where pcb_card_id=any($1::uuid[]) order by serial_number",
+        [[calculator.pcb_card_id, historicalCardId]],
+      );
+      await database.query("reset role");
+      expect(resolved.rows.map((row) => row.serial_number).sort())
+        .toEqual([calculatorSerial, historicalSerial].sort());
+      expect(listed.rows.map((row) => row.serial_number).sort())
+        .toEqual([calculatorSerial, historicalSerial].sort());
+    });
+  });
+
+  it("exposes only the new authenticated trusted creation signature", async () => {
+    await fixture().withRollbackDatabaseTransaction(async (database) => {
+      const metadata = await database.query<{
+        anonymous_execute: boolean;
+        authenticated_execute: boolean;
+        old_signature: string | null;
+        public_execute: boolean;
+        settings: string[] | null;
+      }>(
+        `select
+           pg_catalog.has_function_privilege('anon','public.create_pcb_card(text,text)','EXECUTE') as anonymous_execute,
+           pg_catalog.has_function_privilege('authenticated','public.create_pcb_card(text,text)','EXECUTE') as authenticated_execute,
+           pg_catalog.to_regprocedure('public.create_pcb_card(text)')::text as old_signature,
+           pg_catalog.has_function_privilege('public','public.create_pcb_card(text,text)','EXECUTE') as public_execute,
+           routine.proconfig as settings
+         from pg_catalog.pg_proc as routine
+         where routine.oid='public.create_pcb_card(text,text)'::pg_catalog.regprocedure`,
+      );
+      expect(metadata.rows).toEqual([{
+        anonymous_execute: false,
+        authenticated_execute: true,
+        old_signature: null,
+        public_execute: false,
+        settings: ["search_path=\"\""],
+      }]);
+    });
+  });
+
+  it("allows pcb.create without read or Inventory grants and rejects case-insensitive active/archived names", async () => {
     await fixture().withRollbackDatabaseTransaction(async (database) => {
       const actor = fixture().actors.unpermitted;
       await grantPermission(database, actor.profileId, "pcb.create");
@@ -139,16 +255,23 @@ describe("trusted PCB Card creation", () => {
          where permission.user_id=$1 order by definition.key`, [actor.profileId],
       );
       expect(grants.rows.map((row) => row.key)).toEqual(["pcb.create"]);
-      const name = `Duplicate card ${randomUUID()}`;
-      const first = await createCard(database, actor.authUserId, name);
-      const second = await createCard(database, actor.authUserId, name);
-      expect(first.pcb_card_id).not.toBe(second.pcb_card_id);
-      expect(first.product_id).not.toBe(second.product_id);
-      expect(first.serial_number).not.toBe(second.serial_number);
-      const cards = await database.query<{ name: string }>(
-        "select name from public.pcb_cards where id=any($1::uuid[])", [[first.pcb_card_id, second.pcb_card_id]],
+      const name = `Unique card ${randomUUID()}`;
+      const [firstSerial, secondSerial, thirdSerial] = await findUnusedThreeDigitSerials(database, 3);
+      if (!firstSerial || !secondSerial || !thirdSerial) throw new Error("Three Serials are required");
+      const first = await createCard(database, actor.authUserId, name, firstSerial);
+      await setActor(database, actor.authUserId);
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+        [name.toUpperCase(), secondSerial], "PCB14");
+      await database.query("reset role");
+      await database.query(
+        `update public.pcb_cards set is_active=false, archived_at=now(),
+           archived_by_user_id=$2, updated_at=now(), updated_by_user_id=$2 where id=$1`,
+        [first.pcb_card_id, actor.profileId],
       );
-      expect(cards.rows).toEqual([{ name }, { name }]);
+      await setActor(database, actor.authUserId);
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+        [name.toLowerCase(), thirdSerial], "PCB14");
+      await database.query("reset role");
     });
   });
 
@@ -162,31 +285,37 @@ describe("trusted PCB Card creation", () => {
         await database.query("savepoint permission_case");
         if (permissionKey) await grantPermission(database, actor.profileId, permissionKey);
         await setActor(database, actor.authUserId);
-        await assertRejected(database, "select * from public.create_pcb_card($1)",
-          [`Denied ${randomUUID()}`], "42501");
+        await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+          [`Denied ${randomUUID()}`, "101"], "42501");
         await database.query("rollback to savepoint permission_case");
         expect(await counts(database)).toEqual(before);
       }
       await setActor(database, fixture().actors.inactive.authUserId);
-      await assertRejected(database, "select * from public.create_pcb_card($1)", ["Inactive"], "42501");
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)", ["Inactive", "102"], "42501");
       await database.query("reset role");
       await setActor(database, "", "anon");
-      await assertRejected(database, "select * from public.create_pcb_card($1)", ["Anonymous"], "42501");
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)", ["Anonymous", "103"], "42501");
       await database.query("reset role");
       expect(await counts(database)).toEqual(before);
     });
   });
 
-  it("rejects missing/blank name before serial allocation and preserves Product/PcbCard invariants", async () => {
+  it("rejects invalid Name/Code and Serial formats and preserves Product/PcbCard invariants", async () => {
     await fixture().withRollbackDatabaseTransaction(async (database) => {
       await setActor(database, fixture().actors.admin.authUserId);
       for (const name of [null, "", "   "]) {
-        await assertRejected(database, "select * from public.create_pcb_card($1)", [name], "22023");
+        await assertRejected(database, "select * from public.create_pcb_card($1,$2)", [name, "104"], "22023");
+      }
+      for (const serial of [null, "", "12", "1234", "12345", " 123", "123 ", "１２３", "١٢٣", "abc"]) {
+        await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+          [`Invalid Serial ${String(serial)}`, serial], "22023");
       }
       await database.query("reset role");
 
-      const created = await createCard(database, fixture().actors.admin.authUserId, "Invariant card");
-      const other = await createCard(database, fixture().actors.admin.authUserId, "Other card");
+      const [firstSerial, secondSerial] = await findUnusedThreeDigitSerials(database, 2);
+      if (!firstSerial || !secondSerial) throw new Error("Two Serials are required");
+      const created = await createCard(database, fixture().actors.admin.authUserId, "Invariant card", firstSerial);
+      const other = await createCard(database, fixture().actors.admin.authUserId, "Other card", secondSerial);
       await assertRejected(database,
         "update public.products set product_kind='component' where id=$1", [created.product_id], "PRD02");
       await assertRejected(database,
@@ -212,6 +341,27 @@ describe("trusted PCB Card creation", () => {
     });
   });
 
+  it("rejects globally colliding active and archived Product Serials", async () => {
+    await fixture().withRollbackDatabaseTransaction(async (database) => {
+      const actor = fixture().actors.admin;
+      const [serial] = await findUnusedThreeDigitSerials(database, 1);
+      if (!serial) throw new Error("A three-digit Serial is required");
+      const active = await createCard(database, actor.authUserId, "Active Serial owner", serial);
+      await setActor(database, actor.authUserId);
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+        ["Active collision", active.serial_number], "PRD06");
+      await database.query("reset role");
+
+      await setActor(database, actor.authUserId);
+      await database.query("select public.archive_product($1::uuid)", [active.product_id]);
+      await database.query("reset role");
+      await setActor(database, actor.authUserId);
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)",
+        ["Archived collision", active.serial_number], "PRD06");
+      await database.query("reset role");
+    });
+  });
+
   it("rolls back Product, zero balance, card and first audit if the second audit fails", async () => {
     await fixture().withRollbackDatabaseTransaction(async (database) => {
       await database.query(`create function pg_temp.reject_pcb_card_audit()
@@ -227,31 +377,32 @@ describe("trusted PCB Card creation", () => {
         before insert on public.audit_logs for each row
         execute function pg_temp.reject_pcb_card_audit()`);
       const before = await counts(database);
+      const [serial] = await findUnusedThreeDigitSerials(database, 1);
+      if (!serial) throw new Error("A three-digit Serial is required");
       await setActor(database, fixture().actors.admin.authUserId);
-      await assertRejected(database, "select * from public.create_pcb_card($1)", ["Rollback card"], "PCB90");
+      await assertRejected(database, "select * from public.create_pcb_card($1,$2)", ["Rollback card", serial], "PCB90");
       await database.query("reset role");
       expect(await counts(database)).toEqual(before);
-      const consumed = await database.query<{ value: string }>(
-        "select pg_catalog.currval('public.product_serial_number_seq'::pg_catalog.regclass)::text as value",
-      );
       await database.query("drop trigger reject_pcb_card_audit_test on public.audit_logs");
-      const created = await createCard(database, fixture().actors.admin.authUserId, "After rollback");
-      expect(Number(created.serial_number)).toBeGreaterThan(Number(consumed.rows[0]?.value));
+      const created = await createCard(database, fixture().actors.admin.authUserId, "After rollback", serial);
+      expect(created.serial_number).toBe(serial);
     });
   });
 
-  it("allocates distinct serials and coherent rows across independent concurrent transactions", async () => {
+  it("creates distinct manual Serials and coherent rows across independent concurrent transactions", async () => {
     await fixture().withDatabaseClients(2, async (clients) => {
       const [first, second] = clients;
       if (!first || !second) throw new Error("Concurrency clients are unavailable");
       await Promise.all([first.query("begin"), second.query("begin")]);
       const actor = fixture().actors.admin.authUserId;
-      const name = `Concurrent PCB ${randomUUID()}`;
+      const [firstSerial, secondSerial] = await findUnusedThreeDigitSerials(first, 2);
+      if (!firstSerial || !secondSerial) throw new Error("Two Serials are required");
       const [one, two] = await Promise.all([
-        createCard(first, actor, name), createCard(second, actor, name),
+        createCard(first, actor, `Concurrent PCB A ${randomUUID()}`, firstSerial),
+        createCard(second, actor, `Concurrent PCB B ${randomUUID()}`, secondSerial),
       ]);
-      expect(one.serial_number).toMatch(/^[0-9]{7}$/);
-      expect(two.serial_number).toMatch(/^[0-9]{7}$/);
+      expect(one.serial_number).toBe(firstSerial);
+      expect(two.serial_number).toBe(secondSerial);
       expect(one.serial_number).not.toBe(two.serial_number);
       expect(one.product_id).not.toBe(two.product_id);
       expect(one.pcb_card_id).not.toBe(two.pcb_card_id);
@@ -259,17 +410,65 @@ describe("trusted PCB Card creation", () => {
         const relation = await database.query<{ name: string; output_product_id: string }>(
           "select name,output_product_id from public.pcb_cards where id=$1", [created.pcb_card_id],
         );
-        expect(relation.rows).toEqual([{ name, output_product_id: created.product_id }]);
-        const balance = await database.query<{ quantity: string }>(
-          "select quantity from public.inventory_balances where product_id=$1", [created.product_id],
+        expect(relation.rows).toHaveLength(1);
+        expect(relation.rows[0]?.output_product_id).toBe(created.product_id);
+        const balance = await database.query<{ count: string }>(
+          "select count(*)::text as count from public.inventory_balances where product_id=$1 and quantity=0",
+          [created.product_id],
         );
-        expect(balance.rows).toEqual([{ quantity: "0" }]);
+        expect(balance.rows).toEqual([{ count: "3" }]);
         const audits = await database.query<{ action_type: string }>(
           "select action_type from public.audit_logs where entity_id=any($1::uuid[]) order by action_type",
           [[created.product_id, created.pcb_card_id]],
         );
         expect(audits.rows.map((row) => row.action_type)).toEqual(["pcb_card.created", "product.created"]);
       }
+    });
+  });
+
+  committedConcurrencyIt("rejects concurrent identical Serial creation at the global Product boundary", async () => {
+    await fixture().withDatabaseClients(2, async ([first, second]) => {
+      if (!first || !second) throw new Error("Concurrency clients are unavailable");
+      const [serial] = await findUnusedThreeDigitSerials(first, 1);
+      if (!serial) throw new Error("No three-digit Serial is available");
+      await Promise.all([first.query("begin"), second.query("begin")]);
+      const actor = fixture().actors.admin.authUserId;
+      const created = await createCard(first, actor, `Serial owner ${randomUUID()}`, serial);
+      const conflict = createCard(second, actor, `Serial contender ${randomUUID()}`, serial);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await first.query("commit");
+      await expect(conflict).rejects.toMatchObject({ code: "PRD06" });
+      await second.query("rollback");
+      const persisted = await first.query<{ count: string }>(
+        "select count(*)::text as count from public.products where serial_number=$1",
+        [serial],
+      );
+      expect(persisted.rows).toEqual([{ count: "1" }]);
+      expect(created.serial_number).toBe(serial);
+    });
+  });
+
+  committedConcurrencyIt("rejects concurrent case-insensitive Name/Code creation without an orphan Product", async () => {
+    await fixture().withDatabaseClients(2, async ([first, second]) => {
+      if (!first || !second) throw new Error("Concurrency clients are unavailable");
+      const [firstSerial, secondSerial] = await findUnusedThreeDigitSerials(first, 2);
+      if (!firstSerial || !secondSerial) throw new Error("Two three-digit Serials are required");
+      await Promise.all([first.query("begin"), second.query("begin")]);
+      const actor = fixture().actors.admin.authUserId;
+      const name = `Concurrent Name ${randomUUID()}`;
+      await createCard(first, actor, name, firstSerial);
+      const conflict = createCard(second, actor, name.toUpperCase(), secondSerial);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await first.query("commit");
+      await expect(conflict).rejects.toMatchObject({ code: "PCB14" });
+      await second.query("rollback");
+      const persisted = await first.query<{ cards: string; products: string }>(
+        `select
+           (select count(*)::text from public.pcb_cards where lower(name)=lower($1)) as cards,
+           (select count(*)::text from public.products where serial_number=$2) as products`,
+        [name, secondSerial],
+      );
+      expect(persisted.rows).toEqual([{ cards: "1", products: "0" }]);
     });
   });
 });

@@ -54,7 +54,11 @@ function AppRouter() {
             element={<SupplierDetailPage />}
           />
         </Route>
-        <Route element={<PermissionRoute permission="inventory.view" />}>
+        <Route element={<PermissionRoute anyOf={[
+          "inventory.raw_materials.view",
+          "inventory.finished_goods.view",
+          "inventory.customs.view",
+        ]} />}>
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/inventory/:productId" element={<ProductDetailPage />} />
         </Route>

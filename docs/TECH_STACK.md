@@ -215,7 +215,8 @@ Database may store either:
 - numeric sequence value plus formatted display
 - or generated 7-character representation
 
-The public/barcode value must always be exactly 7 digits.
+The public/barcode value is exact three- or seven-digit ASCII text. Finished Product
+Calculator creation supplies three digits; ordinary Product creation generates seven.
 
 ---
 
@@ -250,14 +251,14 @@ Use Code 128 for AlfaEV Product barcodes.
 
 Reason:
 
-- encodes the exact 7-digit AlfaEV Serial Number directly
+- encodes the exact 3- or 7-digit AlfaEV Serial Number directly
 - works with standard USB/Bluetooth HID barcode scanners
 - does not require adding a check digit to the AlfaEV Serial Number
 
 Barcode reader assumption:
 
 - standard scanner behaves as keyboard/HID input
-- scanned value is validated as a 7-digit AlfaEV Serial Number
+- scanned value is validated as an exact 3- or 7-digit AlfaEV Serial Number
 - no proprietary scanner SDK is required for the initial implementation
 
 Barcode image may be generated deterministically in the frontend for viewing/downloading.

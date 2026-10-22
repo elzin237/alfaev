@@ -10,7 +10,8 @@ export interface InventorySourceChoice {
 
 export interface InventorySourceLot {
   id: string;
-  sourceKind: "supplier" | "legacy_unknown" | "internal_production";
+  warehouseId: string;
+  sourceKind: "supplier" | "legacy_unknown" | "internal_production" | "warehouse_transfer";
   receivedAt: string;
   supplierName: string;
   catalogNumber: string | null;
@@ -48,10 +49,11 @@ function exactQuantity(value: unknown): bigint | null {
   }
 }
 
-export async function listInventorySourceChoices(productId: string): Promise<InventorySourceChoicesResult> {
+export async function listInventorySourceChoices(productId: string, warehouseId = "10000000-0000-4000-8000-000000000001"): Promise<InventorySourceChoicesResult> {
   try {
-    const { data, error } = await supabase.rpc("list_active_inventory_source_choices", {
+    const { data, error } = await supabase.rpc("list_active_inventory_source_choices_by_warehouse", {
       p_product_id: productId,
+      p_warehouse_id: warehouseId,
     });
     if (error || !Array.isArray(data)) throw new Error();
     const value: InventorySourceChoice[] = [];
@@ -76,17 +78,19 @@ export async function listInventorySourceChoices(productId: string): Promise<Inv
   }
 }
 
-export async function listInventorySourceLots(productId: string): Promise<InventorySourceLotsResult> {
+export async function listInventorySourceLots(productId: string, warehouseId = "10000000-0000-4000-8000-000000000001"): Promise<InventorySourceLotsResult> {
   try {
-    const { data, error } = await supabase.rpc("list_inventory_source_lots", {
+    const { data, error } = await supabase.rpc("list_inventory_source_lots_by_warehouse", {
       p_product_id: productId,
+      p_warehouse_id: warehouseId,
     });
     if (error || !Array.isArray(data)) throw new Error();
     const value: InventorySourceLot[] = [];
     for (const row of data) {
       if (typeof row !== "object" || row === null ||
         !uuidPattern.test(String(row.source_lot_id)) ||
-        !["supplier", "legacy_unknown", "internal_production"].includes(row.source_kind) ||
+        !uuidPattern.test(String(row.warehouse_id)) ||
+        !["supplier", "legacy_unknown", "internal_production", "warehouse_transfer"].includes(row.source_kind) ||
         typeof row.received_at !== "string" || !Number.isFinite(Date.parse(row.received_at)) ||
         !normalizedText(row.supplier_name) ||
         !normalizedOptionalText(row.catalog_number) ||
@@ -99,6 +103,7 @@ export async function listInventorySourceLots(productId: string): Promise<Invent
       if (receivedQuantity === null || receivedQuantity <= 0n || remainingQuantity === null || remainingQuantity > receivedQuantity) throw new Error();
       value.push({
         id: row.source_lot_id,
+        warehouseId: row.warehouse_id,
         sourceKind: row.source_kind as InventorySourceLot["sourceKind"],
         receivedAt: row.received_at,
         supplierName: row.supplier_name,

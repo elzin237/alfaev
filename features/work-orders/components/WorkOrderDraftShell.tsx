@@ -409,7 +409,7 @@ function WorkOrderDraftShell({
         <h2 className="text-xl font-bold text-zinc-900">PCB production plan</h2>
         <p className="mt-2 text-sm text-sky-900">The production plan and BOM materials are locked. Additional materials may be added to the Draft.</p>
         <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <ReadOnlyValue label="PCB Card" value={productionContext.pcbCardName} />
+          <ReadOnlyValue label="Finished Product" value={productionContext.pcbCardName} />
           <ReadOnlyValue label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
           <ReadOnlyValue label="Planned Quantity" value={productionContext.plannedQuantity} />
           <ReadOnlyValue label="Output Product" value={`${productionContext.outputSerialNumber} — ${productionContext.outputProductName}`} />

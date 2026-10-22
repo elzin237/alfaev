@@ -1,9 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { workOrderListQueryKey } from "../../work-orders/workOrderQueryKeys";
-import {
-  pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey,
-} from "../pcbQueryKeys";
+import { pcbProductionSourceQueryKey } from "../pcbQueryKeys";
 import { producePcb, type ProducePcbInput, type ProducePcbResult } from "../services/pcbProductionService";
 
 export type ProductionSubmission = ProducePcbInput;
@@ -17,13 +15,10 @@ export function usePcbProduction(cardId: string) {
     retry: false,
   });
 
-  async function refreshPrecheck(projectChoices: boolean) {
-    await Promise.allSettled([
-      queryClient.invalidateQueries({ queryKey: pcbProductionSourceQueryKey(profileId, cardId), exact: true }),
-      ...(projectChoices ? [queryClient.invalidateQueries({
-        queryKey: pcbProductionProjectsQueryKey(profileId), exact: true,
-      })] : []),
-    ]);
+  async function refreshPrecheck() {
+    await queryClient.invalidateQueries({
+      queryKey: pcbProductionSourceQueryKey(profileId, cardId), exact: true,
+    });
   }
 
   async function submit(submission: ProductionSubmission) {
@@ -31,11 +26,11 @@ export function usePcbProduction(cardId: string) {
     try {
       result = await mutation.mutateAsync(submission);
     } catch (error) {
-      await refreshPrecheck(true);
+      await refreshPrecheck();
       throw error;
     }
     if (!result.ok) {
-      await refreshPrecheck(result.error.code === "project_unavailable" || result.error.code === "unknown_outcome");
+      await refreshPrecheck();
       return result;
     }
     await Promise.allSettled([

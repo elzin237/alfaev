@@ -4,6 +4,7 @@ export type InventoryAdjustmentType = "add" | "remove" | "correction";
 
 export interface InventoryBalance {
   productId: string;
+  warehouseId: string;
   quantity: number;
   updatedAt: string;
 }
@@ -49,8 +50,9 @@ export type InventoryAdjustmentResult =
 
 interface InventoryBalanceRow {
   product_id: string;
+  warehouse_id: string;
   quantity: unknown;
-  updated_at: string;
+  balance_updated_at: string;
 }
 
 interface InventoryAdjustmentRow {
@@ -81,11 +83,13 @@ function isInventoryBalanceRow(value: unknown): value is InventoryBalanceRow {
     "product_id" in value &&
     typeof value.product_id === "string" &&
     value.product_id.length > 0 &&
+    "warehouse_id" in value &&
+    typeof value.warehouse_id === "string" &&
     "quantity" in value &&
     parseQuantity(value.quantity) !== null &&
-    "updated_at" in value &&
-    typeof value.updated_at === "string" &&
-    isDateTime(value.updated_at);
+    "balance_updated_at" in value &&
+    typeof value.balance_updated_at === "string" &&
+    isDateTime(value.balance_updated_at);
 }
 
 function isInventoryAdjustmentRow(
@@ -175,13 +179,13 @@ function adjustmentFailure(providerCode?: string): InventoryAdjustmentResult {
 
 export async function getInventoryBalance(
   productId: string,
+  warehouseId = "10000000-0000-4000-8000-000000000001",
 ): Promise<InventoryBalanceResult> {
   try {
-    const { data, error } = await supabase
-      .from("inventory_balances")
-      .select("product_id,quantity,updated_at")
-      .eq("product_id", productId)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc(
+      "get_inventory_product_by_warehouse",
+      { p_product_id: productId, p_warehouse_id: warehouseId },
+    );
 
     if (error) {
       return {
@@ -193,7 +197,7 @@ export async function getInventoryBalance(
       };
     }
 
-    if (data === null) {
+    if (!Array.isArray(data) || data.length !== 1) {
       return {
         ok: false,
         error: {
@@ -203,7 +207,7 @@ export async function getInventoryBalance(
       };
     }
 
-    if (!isInventoryBalanceRow(data)) {
+    if (!isInventoryBalanceRow(data[0])) {
       return {
         ok: false,
         error: {
@@ -213,7 +217,7 @@ export async function getInventoryBalance(
       };
     }
 
-    const quantity = parseQuantity(data.quantity);
+    const quantity = parseQuantity(data[0].quantity);
     if (quantity === null) {
       return {
         ok: false,
@@ -227,9 +231,10 @@ export async function getInventoryBalance(
     return {
       ok: true,
       value: {
-        productId: data.product_id,
+        productId: data[0].product_id,
+        warehouseId: data[0].warehouse_id,
         quantity,
-        updatedAt: data.updated_at,
+        updatedAt: data[0].balance_updated_at,
       },
     };
   } catch {
@@ -245,11 +250,20 @@ export async function getInventoryBalance(
 
 export async function adjustInventory(
   productId: string,
-  input: InventoryAdjustmentInput,
+  warehouseIdOrInput: string | InventoryAdjustmentInput,
+  maybeInput?: InventoryAdjustmentInput,
 ): Promise<InventoryAdjustmentResult> {
+  const warehouseId = typeof warehouseIdOrInput === "string"
+    ? warehouseIdOrInput
+    : "10000000-0000-4000-8000-000000000001";
+  const input = typeof warehouseIdOrInput === "string"
+    ? maybeInput
+    : warehouseIdOrInput;
+  if (!input) return adjustmentFailure("22023");
   try {
-    const { data, error } = await supabase.rpc("manual_adjust_inventory", {
+    const { data, error } = await supabase.rpc("adjust_inventory_warehouse", {
       p_product_id: productId,
+      p_warehouse_id: warehouseId,
       p_adjustment_type: input.adjustmentType,
       p_quantity: input.quantity,
       p_reason: input.reason.trim(),
@@ -281,5 +295,75 @@ export async function adjustInventory(
     };
   } catch {
     return adjustmentFailure();
+  }
+}
+
+export interface InventoryTransferInput {
+  destinationWarehouseId: string;
+  quantity: number;
+  reason: string;
+}
+
+export type InventoryTransferResult =
+  | {
+    ok: true;
+    value: {
+      transferId: string;
+      sourceQuantityAfter: number;
+      destinationQuantityAfter: number;
+    };
+  }
+  | { ok: false; error: InventoryAdjustmentError };
+
+function transferFailure(providerCode?: string): InventoryTransferResult {
+  const result = adjustmentFailure(providerCode);
+  if (!result.ok) return result;
+  return {
+    ok: false,
+    error: {
+      code: "inventory_adjustment_failed",
+      message: "The Inventory transfer could not be completed. Please try again.",
+    },
+  };
+}
+
+export async function transferInventory(
+  productId: string,
+  sourceWarehouseId: string,
+  input: InventoryTransferInput,
+): Promise<InventoryTransferResult> {
+  try {
+    const { data, error } = await supabase.rpc(
+      "transfer_inventory_between_warehouses",
+      {
+        p_product_id: productId,
+        p_source_warehouse_id: sourceWarehouseId,
+        p_destination_warehouse_id: input.destinationWarehouseId,
+        p_quantity: input.quantity,
+        p_reason: input.reason.trim(),
+      },
+    );
+    if (error) return transferFailure(error.code);
+    const row = Array.isArray(data) && data.length === 1 ? data[0] : null;
+    const sourceQuantityAfter = row ? parseQuantity(row.source_quantity_after) : null;
+    const destinationQuantityAfter = row
+      ? parseQuantity(row.destination_quantity_after)
+      : null;
+    if (
+      !row || typeof row.transfer_id !== "string" ||
+      sourceQuantityAfter === null || destinationQuantityAfter === null
+    ) {
+      return transferFailure();
+    }
+    return {
+      ok: true,
+      value: {
+        transferId: row.transfer_id,
+        sourceQuantityAfter,
+        destinationQuantityAfter,
+      },
+    };
+  } catch {
+    return transferFailure();
   }
 }

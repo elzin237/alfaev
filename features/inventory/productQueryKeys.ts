@@ -8,17 +8,31 @@ export function productListQueryPrefix(profileId: string | undefined) {
 
 export function productListQueryKey(
   profileId: string | undefined,
-  search = "",
+  warehouseIdOrSearch = "",
+  search?: string,
 ) {
+  const warehouseId = search === undefined ? "all-warehouses" : warehouseIdOrSearch;
+  const normalizedSearch = search === undefined ? warehouseIdOrSearch : search;
   return [
     ...productListQueryPrefix(profileId),
-    normalizeProductSearch(search),
+    warehouseId,
+    normalizeProductSearch(normalizedSearch),
   ] as const;
 }
 
 export function productDetailQueryKey(
   profileId: string | undefined,
-  productId: string,
+  warehouseIdOrProductId: string,
+  productId?: string,
 ) {
-  return ["inventory", "products", "detail", profileId, productId] as const;
+  const warehouseId = productId === undefined ? "all-warehouses" : warehouseIdOrProductId;
+  const resolvedProductId = productId ?? warehouseIdOrProductId;
+  return [
+    "inventory",
+    "products",
+    "detail",
+    profileId,
+    warehouseId,
+    resolvedProductId,
+  ] as const;
 }

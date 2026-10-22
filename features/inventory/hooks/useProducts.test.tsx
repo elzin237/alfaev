@@ -7,6 +7,7 @@ const productHookMocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   listProducts: vi.fn(),
 }));
+const warehouseId = "10000000-0000-4000-8000-000000000001";
 
 vi.mock("../../../app/auth/AuthProvider", () => ({
   useAuth: productHookMocks.useAuth,
@@ -26,7 +27,7 @@ function renderProductsHook(search = "") {
   );
 
   return {
-    ...renderHook(() => useProducts(search), { wrapper }),
+    ...renderHook(() => useProducts(warehouseId, search), { wrapper }),
     queryClient,
   };
 }
@@ -46,11 +47,12 @@ describe("useProducts", () => {
     const { result, queryClient } = renderProductsHook("  resistor  ");
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(productHookMocks.listProducts).toHaveBeenCalledWith("resistor");
+    expect(productHookMocks.listProducts).toHaveBeenCalledWith(warehouseId, "resistor");
     expect(queryClient.getQueryData([
       "inventory",
       "products",
       "profile-1",
+      warehouseId,
       "resistor",
     ])).toEqual({ ok: true, value: [] });
   });

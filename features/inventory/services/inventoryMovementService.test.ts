@@ -19,11 +19,13 @@ beforeEach(() => {
 });
 
 describe("inventoryMovementService", () => {
+  const warehouseId = "10000000-0000-4000-8000-000000000001";
   it("reads only the trusted history RPC and strictly maps ledger rows in returned order", async () => {
     serviceMocks.rpc.mockResolvedValue({
       data: [
         {
           movement_id: "movement-new",
+          warehouse_id: warehouseId,
           created_at: "2026-09-14T12:00:00.000Z",
           movement_type: "manual_remove",
           quantity_delta: "-3",
@@ -39,6 +41,7 @@ describe("inventoryMovementService", () => {
         },
         {
           movement_id: "movement-old",
+          warehouse_id: warehouseId,
           created_at: "2026-09-14T10:00:00.000Z",
           movement_type: "manual_add",
           quantity_delta: 10,
@@ -61,6 +64,7 @@ describe("inventoryMovementService", () => {
       value: [
         {
           movementId: "movement-new",
+          warehouseId,
           createdAt: "2026-09-14T12:00:00.000Z",
           movementType: "manual_remove",
           quantityDelta: -3,
@@ -76,6 +80,7 @@ describe("inventoryMovementService", () => {
         },
         {
           movementId: "movement-old",
+          warehouseId,
           createdAt: "2026-09-14T10:00:00.000Z",
           movementType: "manual_add",
           quantityDelta: 10,
@@ -92,8 +97,8 @@ describe("inventoryMovementService", () => {
       ],
     });
     expect(serviceMocks.rpc).toHaveBeenCalledWith(
-      "get_inventory_movements_for_product",
-      { p_product_id: "product-1" },
+      "get_inventory_movements_for_product_by_warehouse",
+      { p_product_id: "product-1", p_warehouse_id: warehouseId },
     );
     expect(serviceMocks.from).not.toHaveBeenCalled();
   });
@@ -107,6 +112,7 @@ describe("inventoryMovementService", () => {
       .mockResolvedValueOnce({
         data: [{
           movement_id: "movement-1",
+          warehouse_id: warehouseId,
           created_at: "2026-09-14T12:00:00.000Z",
           movement_type: "manual_add",
           quantity_delta: 5,

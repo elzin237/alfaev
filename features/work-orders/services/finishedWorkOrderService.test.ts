@@ -44,6 +44,9 @@ const materialRow = {
   supplier_name: "IBP",
   catalog_number: "CAT-100",
   supplier_description: "Archived source snapshot",
+  warehouse_id: "10000000-0000-4000-8000-000000000003",
+  warehouse_code: "customs",
+  warehouse_name: "Customs Warehouse",
 };
 
 const movementRow = {
@@ -55,6 +58,9 @@ const movementRow = {
   quantity_before: "9223372036854775807",
   quantity_after: "0",
   created_at: "2026-09-22T10:00:00.654321+00:00",
+  warehouse_id: "10000000-0000-4000-8000-000000000003",
+  warehouse_code: "customs",
+  warehouse_name: "Customs Warehouse",
 };
 
 beforeEach(() => vi.resetAllMocks());
@@ -135,6 +141,9 @@ describe("finishedWorkOrderService", () => {
         supplierName: "IBP",
         catalogNumber: "CAT-100",
         supplierDescription: "Archived source snapshot",
+        warehouseId: materialRow.warehouse_id,
+        warehouseCode: "customs",
+        warehouseName: "Customs Warehouse",
       }, {
         productId: "00000000-0000-4000-8000-000000000031",
         serialNumber: "0000124",
@@ -144,6 +153,9 @@ describe("finishedWorkOrderService", () => {
         supplierName: "IBP",
         catalogNumber: "CAT-100",
         supplierDescription: "Archived source snapshot",
+        warehouseId: materialRow.warehouse_id,
+        warehouseCode: "customs",
+        warehouseName: "Customs Warehouse",
       }],
     });
     expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(
@@ -173,6 +185,9 @@ describe("finishedWorkOrderService", () => {
         quantityBefore: "9223372036854775807",
         quantityAfter: "0",
         createdAt: movementRow.created_at,
+        warehouseId: movementRow.warehouse_id,
+        warehouseCode: "customs",
+        warehouseName: "Customs Warehouse",
       }, {
         movementId: outputMovement.movement_id,
         productId,
@@ -182,6 +197,9 @@ describe("finishedWorkOrderService", () => {
         quantityBefore: "2",
         quantityAfter: "10",
         createdAt: movementRow.created_at,
+        warehouseId: movementRow.warehouse_id,
+        warehouseCode: "customs",
+        warehouseName: "Customs Warehouse",
       }],
     });
     expect(serviceMocks.rpc).toHaveBeenCalledExactlyOnceWith(

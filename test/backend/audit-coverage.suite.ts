@@ -187,7 +187,7 @@ const auditedMutations: readonly AuditContract[] = [
     actions: ["fixed_asset.archived"], entityTypes: ["fixed_asset"],
   },
   {
-    signature: "public.create_pcb_card(text)",
+    signature: "public.create_pcb_card(text,text)",
     actions: ["product.created", "pcb_card.created"],
     entityTypes: ["product", "pcb_card"],
   },

@@ -4,20 +4,20 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { inventorySourceChoicesQueryKey, inventorySourceLotsQueryKey } from "../inventorySourceQueryKeys";
 import { listInventorySourceChoices, listInventorySourceLots } from "../services/inventorySourceService";
 
-export function useInventorySourceChoices(productId: string, enabled: boolean) {
+export function useInventorySourceChoices(productId: string, warehouseId: string, enabled: boolean) {
   const { profile } = useAuth();
   return useQuery({
-    queryKey: inventorySourceChoicesQueryKey(profile?.id, productId),
-    queryFn: () => listInventorySourceChoices(productId),
-    enabled: Boolean(enabled && profile?.id && productId),
+    queryKey: inventorySourceChoicesQueryKey(profile?.id, warehouseId, productId),
+    queryFn: () => listInventorySourceChoices(productId, warehouseId),
+    enabled: Boolean(enabled && profile?.id && productId && warehouseId),
   });
 }
 
-export function useInventorySourceLots(productId: string) {
+export function useInventorySourceLots(productId: string, warehouseId: string) {
   const { profile } = useAuth();
   return useQuery({
-    queryKey: inventorySourceLotsQueryKey(profile?.id, productId),
-    queryFn: () => listInventorySourceLots(productId),
-    enabled: Boolean(profile?.id && productId),
+    queryKey: inventorySourceLotsQueryKey(profile?.id, warehouseId, productId),
+    queryFn: () => listInventorySourceLots(productId, warehouseId),
+    enabled: Boolean(profile?.id && productId && warehouseId),
   });
 }

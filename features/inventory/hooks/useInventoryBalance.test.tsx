@@ -7,6 +7,7 @@ const hookMocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   adjustInventory: vi.fn(),
   getInventoryBalance: vi.fn(),
+  transferInventory: vi.fn(),
 }));
 
 vi.mock("../../../app/auth/AuthProvider", () => ({
@@ -15,9 +16,11 @@ vi.mock("../../../app/auth/AuthProvider", () => ({
 vi.mock("../services/inventoryBalanceService", () => ({
   adjustInventory: hookMocks.adjustInventory,
   getInventoryBalance: hookMocks.getInventoryBalance,
+  transferInventory: hookMocks.transferInventory,
 }));
 
 import { useInventoryBalance } from "./useInventoryBalance";
+const warehouseId = "10000000-0000-4000-8000-000000000001";
 
 function renderBalanceHook() {
   const queryClient = new QueryClient({
@@ -39,6 +42,7 @@ beforeEach(() => {
     ok: true,
     value: {
       productId: "product-1",
+      warehouseId,
       quantity: 10,
       updatedAt: "2026-09-14T10:00:00.000Z",
     },
@@ -49,6 +53,14 @@ beforeEach(() => {
       movementId: "movement-1",
       quantityBefore: 10,
       quantityAfter: 15,
+    },
+  });
+  hookMocks.transferInventory.mockResolvedValue({
+    ok: true,
+    value: {
+      transferId: "transfer-1",
+      sourceQuantityAfter: 7,
+      destinationQuantityAfter: 3,
     },
   });
 });
@@ -68,9 +80,10 @@ describe("useInventoryBalance", () => {
       "balances",
       "detail",
       "profile-1",
+      warehouseId,
       "product-1",
     ])).toBeDefined();
-    expect(hookMocks.getInventoryBalance).toHaveBeenCalledWith("product-1");
+    expect(hookMocks.getInventoryBalance).toHaveBeenCalledWith("product-1", warehouseId);
   });
 
   it("invalidates balance, history, provenance, commitments, and Product list after adjustment", async () => {
@@ -86,18 +99,19 @@ describe("useInventoryBalance", () => {
       });
     });
 
-    expect(hookMocks.adjustInventory).toHaveBeenCalledWith("product-1", {
+    expect(hookMocks.adjustInventory).toHaveBeenCalledWith("product-1", warehouseId, {
       adjustmentType: "add",
       quantity: 5,
       reason: "Delivery",
     });
-    expect(invalidateQueries).toHaveBeenCalledTimes(5);
+    expect(invalidateQueries).toHaveBeenCalledTimes(10);
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: [
         "inventory",
         "balances",
         "detail",
         "profile-1",
+        warehouseId,
         "product-1",
       ],
       exact: true,
@@ -109,13 +123,18 @@ describe("useInventoryBalance", () => {
       queryKey: ["inventory", "commitments", "profile-1"], exact: true,
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["inventory", "movements", "product", "profile-1", "product-1"],
+      queryKey: ["inventory", "movements", "product", "profile-1", warehouseId, "product-1"],
       exact: true,
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["inventory-source-lots", "profile-1", "product-1"],
+      queryKey: ["inventory-source-lots", "profile-1", warehouseId, "product-1"],
       exact: true,
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "cards", "profile-1"], exact: true });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "bom", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "bom-choices", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "production-source", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "detail", "profile-1", warehouseId, "product-1"], exact: true });
   });
 
   it("does not invalidate after failed adjustment", async () => {
@@ -136,5 +155,56 @@ describe("useInventoryBalance", () => {
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("invalidates both warehouse views after a trusted transfer without optimistic writes", async () => {
+    const { result, queryClient } = renderBalanceHook();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const setQueryData = vi.spyOn(queryClient, "setQueryData");
+    await waitFor(() => expect(result.current.balanceQuery.isSuccess).toBe(true));
+    await act(async () => {
+      await result.current.transfer({
+        destinationWarehouseId: "10000000-0000-4000-8000-000000000002",
+        quantity: 3,
+        reason: "Rebalance",
+      });
+    });
+    expect(hookMocks.transferInventory).toHaveBeenCalledWith(
+      "product-1",
+      warehouseId,
+      {
+        destinationWarehouseId: "10000000-0000-4000-8000-000000000002",
+        quantity: 3,
+        reason: "Rebalance",
+      },
+    );
+    expect(invalidateQueries).toHaveBeenCalledTimes(10);
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "cards", "profile-1"], exact: true });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["pcb", "bom", "profile-1"] });
+    expect(setQueryData).not.toHaveBeenCalled();
+  });
+
+  it("refetches authoritative Calculator stock while leaving another profile's cache untouched", async () => {
+    const { result, queryClient } = renderBalanceHook();
+    await waitFor(() => expect(result.current.balanceQuery.isSuccess).toBe(true));
+    const ownKey = ["pcb", "cards", "profile-1"] as const;
+    const foreignKey = ["pcb", "cards", "profile-2"] as const;
+    queryClient.setQueryData(ownKey, 0);
+    queryClient.setQueryData(foreignKey, 99);
+    await act(async () => { await result.current.transfer({ destinationWarehouseId: "customs", quantity: 1, reason: "Intake" }); });
+    expect(queryClient.getQueryState(ownKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(foreignKey)?.isInvalidated).toBe(false);
+    const readStock = vi.fn().mockResolvedValue(3);
+    expect(await queryClient.fetchQuery({ queryKey: ownKey, queryFn: readStock })).toBe(3);
+    expect(queryClient.getQueryData(foreignKey)).toBe(99);
+  });
+
+  it("does not invalidate or optimistically change stock after a failed transfer", async () => {
+    hookMocks.transferInventory.mockResolvedValue({ ok: false, error: { code: "access_denied", message: "safe" } });
+    const { result, queryClient } = renderBalanceHook();
+    await waitFor(() => expect(result.current.balanceQuery.isSuccess).toBe(true));
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    await act(async () => { await result.current.transfer({ destinationWarehouseId: "customs", quantity: 1, reason: "Intake" }); });
+    expect(invalidate).not.toHaveBeenCalled();
   });
 });

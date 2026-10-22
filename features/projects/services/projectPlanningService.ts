@@ -62,7 +62,7 @@ function isName(value: unknown): value is string {
 }
 
 function isSerial(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9]{7}$/.test(value);
+  return typeof value === "string" && /^(?:[0-9]{3}|[0-9]{7})$/.test(value);
 }
 
 function isProductKind(value: unknown): value is PlanningProductKind {

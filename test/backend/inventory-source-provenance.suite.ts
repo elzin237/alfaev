@@ -168,8 +168,11 @@ export function registerInventorySourceProvenanceTests(
                 from public.inventory_source_allocations as allocation
                 where allocation.product_id = $1::uuid) as allocated_quantity
              from public.inventory_balances as balance
-             join public.inventory_source_lots as lot on lot.product_id = balance.product_id
+             join public.inventory_source_lots as lot
+               on lot.product_id = balance.product_id
+              and lot.warehouse_id = balance.warehouse_id
              where balance.product_id = $1::uuid
+               and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
              group by balance.quantity`,
             [productId],
           );
@@ -368,7 +371,9 @@ export function registerInventorySourceProvenanceTests(
           await database.query("rollback to savepoint insufficient_remove");
 
           const balance = await database.query<BalanceRow>(
-            "select quantity::text from public.inventory_balances where product_id = $1::uuid",
+            `select quantity::text from public.inventory_balances
+             where product_id = $1::uuid
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [productId],
           );
           const lots = await database.query<LotRow>(

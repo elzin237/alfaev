@@ -19,6 +19,47 @@ interface ActivityWaitRow extends QueryResultRow {
   wait_event_type: string | null;
 }
 
+const expectedDelegablePermissionKeys = [
+  "dashboard.view",
+  "projects.view",
+  "projects.create",
+  "projects.edit",
+  "projects.archive",
+  "projects.alerts.receive",
+  "projects.alerts.send",
+  "procurement.view",
+  "procurement.create",
+  "procurement.edit",
+  "procurement.change_status",
+  "procurement.resolve",
+  "suppliers.view",
+  "suppliers.create",
+  "suppliers.edit",
+  "suppliers.archive",
+  "inventory.view",
+  "inventory.raw_materials.view",
+  "inventory.raw_materials.adjust",
+  "inventory.finished_goods.view",
+  "inventory.finished_goods.adjust",
+  "inventory.customs.view",
+  "inventory.customs.adjust",
+  "inventory.products.create",
+  "inventory.products.edit",
+  "inventory.brands.manage",
+  "inventory.barcodes.generate",
+  "pcb.view",
+  "pcb.create",
+  "pcb.edit",
+  "pcb.produce",
+  "pcb.archive",
+  "work_orders.view",
+  "work_orders.create",
+  "work_orders.edit_draft",
+  "work_orders.finish",
+  "work_orders.delete_draft",
+  "archive.view",
+] as const;
+
 const adminRpcAttacks = (
   client: SupabaseClient,
   actor: SecurityActor,
@@ -276,7 +317,10 @@ export function registerPermissionEscalationAttackTests(
         );
         const permissionKeys = definitions.rows.map((row) => row.key);
 
-        expect(permissionKeys).toHaveLength(32);
+        expect(permissionKeys).toHaveLength(38);
+        expect(new Set(permissionKeys)).toEqual(
+          new Set(expectedDelegablePermissionKeys),
+        );
 
         for (const permissionKey of permissionKeys) {
           for (const target of [attacker, activeTarget, inactiveTarget]) {

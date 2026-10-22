@@ -27,7 +27,7 @@ const allowedKeys = new Set([
   "product_name",
   "quantity",
 ]);
-const serialNumberPattern = /^[0-9]{7}$/;
+const serialNumberPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

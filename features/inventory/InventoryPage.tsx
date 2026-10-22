@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import EmptyState from "../../shared/components/EmptyState";
@@ -10,22 +11,45 @@ import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
 import ComponentImportDialog from "./components/ComponentImportDialog";
 import ProductList from "./components/ProductList";
+import InventoryWarehouseTabs from "./components/InventoryWarehouseTabs";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useComponentImport } from "./hooks/useComponentImport";
 import { useProductCreation } from "./hooks/useProductCreation";
 import { useProducts } from "./hooks/useProducts";
 import { useInventoryCommitments } from "./hooks/useInventoryCommitments";
+import {
+  useInventoryLegacyViewPermission,
+  useInventoryWarehouseAccess,
+} from "./hooks/useInventoryWarehouseAccess";
+import { findInventoryWarehouse } from "./inventoryWarehouses";
 import type { Brand } from "./services/brandService";
 
 function InventoryPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const warehouseAccess = useInventoryWarehouseAccess();
+  const legacyAccess = useInventoryLegacyViewPermission();
+  const requestedWarehouse = findInventoryWarehouse(searchParams.get("warehouse"));
+  const selectedWarehouse = warehouseAccess.authorizedWarehouses.find(
+    (warehouse) => warehouse.id === requestedWarehouse?.id,
+  ) ?? warehouseAccess.authorizedWarehouses[0];
   const { brandsQuery, canManage, create: createBrand, update, archive } =
-    useBrandManagement();
+    useBrandManagement(legacyAccess.canReadLegacyInventory);
   const { canCreate, create: createProduct } = useProductCreation();
   const { importBatch } = useComponentImport();
   const [productSearch, setProductSearch] = useState("");
   const [debouncedProductSearch, setDebouncedProductSearch] = useState("");
-  const productsQuery = useProducts(debouncedProductSearch);
-  const commitmentsQuery = useInventoryCommitments();
+  const productsQuery = useProducts(
+    selectedWarehouse?.id ?? "",
+    debouncedProductSearch,
+    Boolean(selectedWarehouse),
+  );
+  const canShowCommitments = Boolean(
+    warehouseAccess.canReadProjectAvailability &&
+      selectedWarehouse?.code === "raw_materials",
+  );
+  const commitmentsQuery = useInventoryCommitments(
+    canShowCommitments,
+  );
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
@@ -37,6 +61,15 @@ function InventoryPage() {
   const [productSuccessMessage, setProductSuccessMessage] = useState<string | null>(null);
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedWarehouse || requestedWarehouse?.id === selectedWarehouse.id) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("warehouse", selectedWarehouse.code);
+      return next;
+    }, { replace: true });
+  }, [requestedWarehouse?.id, selectedWarehouse, setSearchParams]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -101,7 +134,17 @@ function InventoryPage() {
 
   let productContent: ReactNode;
 
-  if (productsQuery.isPending) {
+  if (warehouseAccess.isPending) {
+    productContent = <LoadingState message="Checking warehouse access..." />;
+  } else if (warehouseAccess.isError) {
+    productContent = (
+      <ErrorState title="Unable to verify access" message="Your warehouse access could not be verified." />
+    );
+  } else if (!selectedWarehouse) {
+    productContent = (
+      <ErrorState title="Access denied" message="You do not have permission to view any Inventory warehouse." />
+    );
+  } else if (productsQuery.isPending) {
     productContent = <LoadingState message="Loading Products..." />;
   } else if (productsQuery.isError || !productsQuery.data?.ok) {
     productContent = (
@@ -132,22 +175,30 @@ function InventoryPage() {
       />
     );
   } else {
-    const commitments = commitmentsQuery.data?.ok
+    const commitments = canShowCommitments && commitmentsQuery.data?.ok
       ? new Map(commitmentsQuery.data.value.map((item) => [item.productId, item]))
       : undefined;
     productContent = (
       <div className="space-y-4">
-        {commitmentsQuery.isPending ? (
+        {canShowCommitments && commitmentsQuery.isPending ? (
           <LoadingState message="Loading Project commitments..." />
-        ) : commitmentsQuery.isError || !commitmentsQuery.data?.ok ||
-          productsQuery.data.value.some((product) => !commitments?.has(product.id)) ? (
+        ) : canShowCommitments && (
+          commitmentsQuery.isError ||
+          !commitmentsQuery.data?.ok ||
+          productsQuery.data.value.some((product) => !commitments?.has(product.id))
+        ) ? (
           <ErrorState
             title="Unable to load Project commitments"
             message="Project commitment figures are unavailable. Physical quantities remain visible."
             onRetry={() => void commitmentsQuery.refetch()}
           />
         ) : null}
-        <ProductList products={productsQuery.data.value} commitments={commitments} />
+        <ProductList
+          products={productsQuery.data.value}
+          commitments={commitments}
+          warehouseCode={selectedWarehouse.code}
+          showCommitments={canShowCommitments}
+        />
       </div>
     );
   }
@@ -229,12 +280,27 @@ function InventoryPage() {
       )}
 
       <section className="space-y-5" aria-labelledby="products-heading">
+        {!warehouseAccess.isPending && selectedWarehouse && (
+          <InventoryWarehouseTabs
+            warehouses={warehouseAccess.authorizedWarehouses}
+            selectedWarehouseId={selectedWarehouse.id}
+            onSelect={(warehouse) => {
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current);
+                next.set("warehouse", warehouse.code);
+                return next;
+              });
+            }}
+          />
+        )}
         <div>
           <h2 id="products-heading" className="text-2xl font-bold text-zinc-900">
             Products
           </h2>
           <p className="mt-1 text-sm leading-6 text-zinc-500">
-            Active and archived Inventory Products.
+            {selectedWarehouse
+              ? `Active and archived Products with ${selectedWarehouse.label} stock.`
+              : "Active and archived Inventory Products."}
           </p>
         </div>
 
@@ -258,6 +324,7 @@ function InventoryPage() {
         {productContent}
       </section>
 
+      {legacyAccess.canReadLegacyInventory && (
       <section className="space-y-5" aria-labelledby="brands-heading">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -291,6 +358,7 @@ function InventoryPage() {
         )}
         {brandContent}
       </section>
+      )}
 
       <BrandFormDialog
         open={formMode !== null}
@@ -316,9 +384,9 @@ function InventoryPage() {
       <AddComponentDialog
         open={isComponentDialogOpen}
         brands={brandsQuery.data?.ok ? brandsQuery.data.value : []}
-        isBrandsLoading={brandsQuery.isPending}
+        isBrandsLoading={legacyAccess.canReadLegacyInventory && brandsQuery.isPending}
         brandLoadError={
-          brandsQuery.isError || brandsQuery.data?.ok === false
+          legacyAccess.canReadLegacyInventory && (brandsQuery.isError || brandsQuery.data?.ok === false)
             ? brandsQuery.data?.ok === false
               ? brandsQuery.data.error.message
               : "The Brand list could not be loaded."
@@ -337,9 +405,9 @@ function InventoryPage() {
       <ComponentImportDialog
         open={isImportDialogOpen}
         brands={brandsQuery.data?.ok ? brandsQuery.data.value : []}
-        isBrandsLoading={brandsQuery.isPending}
+        isBrandsLoading={legacyAccess.canReadLegacyInventory && brandsQuery.isPending}
         brandLoadError={
-          brandsQuery.isError || brandsQuery.data?.ok === false
+          legacyAccess.canReadLegacyInventory && (brandsQuery.isError || brandsQuery.data?.ok === false)
             ? brandsQuery.data?.ok === false
               ? brandsQuery.data.error.message
               : "The Brand list could not be loaded."

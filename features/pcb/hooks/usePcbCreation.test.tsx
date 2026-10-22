@@ -52,13 +52,13 @@ describe("PCB creation permission and cache", () => {
     const commitmentKey = ["inventory", "commitments", "profile-1"];
     for (const key of [pcbKey, productKey, commitmentKey]) client.setQueryData(key, "cached");
     const invalidate = vi.spyOn(client, "invalidateQueries");
-    await act(async () => { await result.current.create("Card"); });
+    await act(async () => { await result.current.create("Card", "007"); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbKey, exact: true });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "profile-1"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: commitmentKey, exact: true });
     invalidate.mockClear();
     mocks.createPcbCard.mockResolvedValue({ ok: false, error: { code: "pcb_create_failed", message: "Failed" } });
-    await act(async () => { await result.current.create("Card"); });
+    await act(async () => { await result.current.create("Card", "007"); });
     expect(invalidate).not.toHaveBeenCalled();
   });
 });

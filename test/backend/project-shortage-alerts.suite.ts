@@ -160,12 +160,16 @@ export function registerProjectShortageAlertTests(
           expect(openingCounts.rows[0]).toEqual({ events: "1", notifications: "1" });
 
           await database.query(
-            "update public.inventory_balances set quantity = 4 where product_id = $1",
+            `update public.inventory_balances set quantity = 4
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
           await database.query(
-            "update public.inventory_balances set quantity = 4 where product_id = $1",
+            `update public.inventory_balances set quantity = 4
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
@@ -183,12 +187,16 @@ export function registerProjectShortageAlertTests(
           ]));
 
           await database.query(
-            "update public.inventory_balances set quantity = 0 where product_id = $1",
+            `update public.inventory_balances set quantity = 0
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
           await database.query(
-            "update public.inventory_balances set quantity = 10 where product_id = $1",
+            `update public.inventory_balances set quantity = 10
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
@@ -214,7 +222,9 @@ export function registerProjectShortageAlertTests(
           )).rows[0]?.count).toBe("2");
 
           await database.query(
-            "update public.inventory_balances set quantity = 0 where product_id = $1",
+            `update public.inventory_balances set quantity = 0
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
@@ -356,7 +366,9 @@ export function registerProjectShortageAlertTests(
           expect(unreadAfterRead).toBe(unreadBefore);
 
           await database.query(
-            "update public.inventory_balances set quantity = 10 where product_id = $1",
+            `update public.inventory_balances set quantity = 10
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           );
           await flush(database);
@@ -767,7 +779,8 @@ export function registerProjectShortageAlertTests(
           }>(
             `select
                (select quantity::text from public.inventory_balances
-                where product_id = $1) as quantity,
+                where product_id = $1
+                  and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as quantity,
                (select count(*)::integer from public.project_shortage_episodes
                 where project_id = $2 and product_id = $1
                   and resolved_at is null) as episodes,
@@ -786,7 +799,8 @@ export function registerProjectShortageAlertTests(
           expect((await first.query(
             `select pg_catalog.sum(remaining_quantity)::text as remaining
              from public.inventory_source_lots
-             where product_id = $1`,
+             where product_id = $1
+               and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
             [created.productId],
           )).rows[0]?.remaining).toBe("8");
         });

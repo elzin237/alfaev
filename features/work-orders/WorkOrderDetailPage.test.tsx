@@ -931,13 +931,13 @@ describe("WorkOrderDetailPage", () => {
     const scanner = screen.getByRole("textbox", {
       name: "Scan Product Barcode",
     });
-    fireEvent.change(scanner, { target: { value: "123" } });
+    fireEvent.change(scanner, { target: { value: "1234" } });
     fireEvent.keyDown(scanner, { key: "Enter", code: "Enter" });
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Enter a 7-digit Serial Number.",
+      "Enter a 3- or 7-digit Serial Number.",
     );
-    expect(scanner).toHaveValue("123");
+    expect(scanner).toHaveValue("1234");
     expect(pageMocks.saveDraft).not.toHaveBeenCalled();
     expect(screen.queryByText(/Captured Serial Number/)).not.toBeInTheDocument();
   });

@@ -35,6 +35,12 @@ const trustedOnlyTables = [
   "audit_logs",
   "inventory_source_allocations",
   "inventory_source_lots",
+  ...(process.env.INVENTORY_WAREHOUSE_OPERATIONS === "1"
+    ? ["inventory_warehouse_transfers"]
+    : []),
+  ...(process.env.INVENTORY_WAREHOUSE_FOUNDATION === "1"
+    ? ["inventory_warehouses"]
+    : []),
   "pcb_production_work_orders",
   "permission_definitions",
   "project_activity_alert_recipients",
@@ -277,7 +283,9 @@ export function registerRlsPolicyMatrixTests(
         );
         expect(applicationFunctions).toHaveLength(
           process.env.PROJECT_SHORTAGE_ALERTS === "1"
-            ? 166
+            ? process.env.INVENTORY_WAREHOUSE_OPERATIONS === "1"
+              ? 174
+              : 166
             : process.env.PROJECT_ISSUE_RESOLUTION_IMAGES === "1"
             ? 162
             : process.env.PROJECT_ISSUE_RESOLUTION === "1"
@@ -920,13 +928,21 @@ export function registerRlsPolicyMatrixTests(
            from public.products as product
            join public.inventory_balances as balance
              on balance.product_id = product.id
-           where product.id = $1::uuid`,
+           where product.id = $1::uuid
+           order by balance.warehouse_id`,
           [productId],
         );
-        expect(preserved.rows).toEqual([{
-          name: "Task 145 Immutable Product",
-          quantity: "0",
-        }]);
+        expect(preserved.rows).toEqual(
+          Array.from(
+            {
+              length: process.env.INVENTORY_WAREHOUSE_FOUNDATION === "1" ? 3 : 1,
+            },
+            () => ({
+              name: "Task 145 Immutable Product",
+              quantity: "0",
+            }),
+          ),
+        );
         const forgedAudit = await database.query<{ count: string }>(
           "select pg_catalog.count(*)::text as count from public.audit_logs where action_type = 'forged'",
         );

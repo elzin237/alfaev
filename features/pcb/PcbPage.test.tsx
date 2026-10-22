@@ -19,7 +19,7 @@ describe("PCB list and creation", () => {
       { id: "b", name: "Legacy Card", serialNumber: "0000002", currentStock: 3, isActive: false },
     ] }, refetch: mocks.refetch });
     mocks.usePcbCreation.mockReturnValue({ canCreate: true, create: mocks.create });
-    mocks.create.mockResolvedValue({ ok: true, value: { pcbCardId: "a", productId: "p", serialNumber: "0000003" } });
+    mocks.create.mockResolvedValue({ ok: true, value: { pcbCardId: "a", productId: "p", serialNumber: "007" } });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -29,20 +29,22 @@ describe("PCB list and creation", () => {
     expect(screen.getByText("Legacy Card")).toBeInTheDocument();
     expect(screen.getByText("0000001")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Finished Goods stock" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Current Stock" })).not.toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create PCB Card" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Finished Product Calculator" })).toBeInTheDocument();
   });
 
   it("fails closed for a view-only creator", () => {
     mocks.usePcbCreation.mockReturnValue({ canCreate: false, create: mocks.create });
     renderPage();
-    expect(screen.queryByRole("button", { name: "Create PCB Card" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Finished Product Calculator" })).not.toBeInTheDocument();
   });
 
   it("shows loading, error with retry, and empty states", () => {
     mocks.usePcbCards.mockReturnValueOnce({ isPending: true });
     const view = renderPage();
-    expect(screen.getByText("Loading PCB Cards...")).toBeInTheDocument();
+    expect(screen.getByText("Loading Finished Product Calculator...")).toBeInTheDocument();
     view.unmount();
     mocks.usePcbCards.mockReturnValueOnce({ isPending: false, isError: true, refetch: mocks.refetch });
     const errorView = renderPage();
@@ -51,35 +53,40 @@ describe("PCB list and creation", () => {
     errorView.unmount();
     mocks.usePcbCards.mockReturnValueOnce({ isPending: false, isError: false, data: { ok: true, value: [] } });
     renderPage();
-    expect(screen.getByText("No PCB Cards found")).toBeInTheDocument();
+    expect(screen.getByText("No finished-product definitions found")).toBeInTheDocument();
   });
 
-  it("validates name, submits only normalized name, and shows generated Serial", async () => {
+  it("validates name and exact three-digit Serial, preserving leading zeroes", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Create PCB Card" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Finished Product Calculator" }));
     const dialog = screen.getByRole("dialog");
-    expect(dialog.querySelectorAll("input")).toHaveLength(1);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create PCB Card" }));
+    expect(dialog.querySelectorAll("input")).toHaveLength(2);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
     expect(screen.getByRole("alert")).toHaveTextContent("required");
     fireEvent.change(screen.getByLabelText("Name / Code"), { target: { value: "  Controller  " } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create PCB Card" }));
-    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Controller"));
+    fireEvent.change(screen.getByLabelText("Three-digit Serial Number"), { target: { value: "07" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("exact three-digit");
+    fireEvent.change(screen.getByLabelText("Three-digit Serial Number"), { target: { value: "007" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Controller", "007"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    expect(screen.getByRole("status")).toHaveTextContent("0000003");
+    expect(screen.getByRole("status")).toHaveTextContent("007");
   });
 
   it("prevents duplicate submits and keeps safe backend errors visible", async () => {
     let finish: ((result: { ok: false; error: { code: string; message: string } }) => void) | undefined;
     mocks.create.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Create PCB Card" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Finished Product Calculator" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Name / Code"), { target: { value: "Card" } });
-    const submit = within(dialog).getByRole("button", { name: "Create PCB Card" });
+    fireEvent.change(within(dialog).getByLabelText("Three-digit Serial Number"), { target: { value: "123" } });
+    const submit = within(dialog).getByRole("button", { name: "Create Finished Product Calculator" });
     fireEvent.click(submit);
     fireEvent.click(submit);
     expect(mocks.create).toHaveBeenCalledTimes(1);
-    finish?.({ ok: false, error: { code: "pcb_create_failed", message: "PCB Card could not be created." } });
+    finish?.({ ok: false, error: { code: "pcb_create_failed", message: "Finished Product Calculator could not be created." } });
     await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("could not be created"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });

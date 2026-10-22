@@ -45,7 +45,7 @@ function parseContext(value: unknown): PcbProductionWorkOrderContext | null {
     !isBigintText(value.bom_version_number, false) ||
     !isBigintText(value.planned_quantity, false) ||
     typeof value.output_product_id !== "string" || !uuidPattern.test(value.output_product_id) ||
-    typeof value.output_serial_number !== "string" || !/^[0-9]{7}$/.test(value.output_serial_number) ||
+    typeof value.output_serial_number !== "string" || !/^(?:[0-9]{3}|[0-9]{7})$/.test(value.output_serial_number) ||
     typeof value.output_product_name !== "string" || !value.output_product_name.trim() ||
     value.output_product_name.trim() !== value.output_product_name ||
     !(value.actual_good_quantity === null || isBigintText(value.actual_good_quantity, true))) {

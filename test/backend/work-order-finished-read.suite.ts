@@ -188,14 +188,26 @@ export function registerFinishedWorkOrderReadTests(
           });
           const materials = await readMaterials(database, state.workOrderId);
           expect(materials).toEqual([expect.objectContaining({
+            catalog_number: "—",
             product_id: state.productId,
             quantity: "9007199254740993",
+            source_kind: "legacy_unknown",
+            warehouse_code: null,
+            warehouse_id: null,
+            warehouse_name: null,
           })]);
           expect(Object.keys(materials[0]!).sort()).toEqual([
+            "catalog_number",
             "product_id",
             "product_name",
             "quantity",
             "serial_number",
+            "source_kind",
+            "supplier_description",
+            "supplier_name",
+            "warehouse_code",
+            "warehouse_id",
+            "warehouse_name",
           ]);
           const movements = await readMovements(database, state.workOrderId);
           expect(movements).toEqual([expect.objectContaining({
@@ -204,7 +216,21 @@ export function registerFinishedWorkOrderReadTests(
             quantity_after: "0",
             quantity_before: "9007199254740993",
             quantity_delta: "-9007199254740993",
+            warehouse_code: "raw_materials",
           })]);
+          expect(Object.keys(movements[0]!).sort()).toEqual([
+            "created_at",
+            "movement_id",
+            "product_id",
+            "product_name",
+            "quantity_after",
+            "quantity_before",
+            "quantity_delta",
+            "serial_number",
+            "warehouse_code",
+            "warehouse_id",
+            "warehouse_name",
+          ]);
           await database.query("reset role");
 
           await setOnlyRelevantPermission(

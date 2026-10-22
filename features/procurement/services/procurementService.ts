@@ -240,7 +240,7 @@ function isProcurementRequestRow(
     "product_serial_number" in value &&
     (value.product_serial_number === null ||
       (typeof value.product_serial_number === "string" &&
-        /^[0-9]{7}$/.test(value.product_serial_number))) &&
+        /^(?:[0-9]{3}|[0-9]{7})$/.test(value.product_serial_number))) &&
     ((value.product_id === null && value.product_serial_number === null) ||
       (value.product_id !== null && value.product_serial_number !== null)) &&
     "requested_name" in value &&
@@ -318,7 +318,7 @@ function isProcurementProductChoiceRow(
     isUuid(value.product_id) &&
     "serial_number" in value &&
     typeof value.serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.serial_number) &&
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.serial_number) &&
     "name" in value &&
     isTrimmedNonblank(value.name);
 }
@@ -615,7 +615,7 @@ function isCreatedProductFromProcurementRequestRow(
     isUuid(value.product_id) &&
     "serial_number" in value &&
     typeof value.serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.serial_number);
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.serial_number);
 }
 
 export async function searchProcurementRequests(

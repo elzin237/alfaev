@@ -149,6 +149,8 @@ Completed directly. Existing Completed Projects remain preserved.
 5. Inventory and Project views derive outstanding commitment separately for each Project and Product, then sum those values by Product.
 6. Only qualifying physical consumption for that same Project and Product reduces its commitment; one Project's consumption never offsets another's.
 7. Completed or Cancelled Projects contribute no commitment; unused material is released without a stock movement.
+8. Available after Commitments subtracts that total from Raw Materials plus Customs
+   stock. Finished Goods is excluded from this Project planning calculation.
 
 Qualifying consumption includes finished Work Order deductions and, where applicable,
 Project-linked PCB production input deductions. Additions/output movements, unrelated
@@ -418,13 +420,13 @@ Non-admin users cannot perform this operation regardless of UI manipulation.
 
 # 8. PCB Definition Flow
 
-## Create PCB Card
+## Create Finished Product Calculator definition
 
-1. Authorized user/Admin opens PCB Cards.
-2. Click Create PCB Card.
-3. Enter only the required card name/code; AlfaEV trims it and rejects blank input. The user does not choose Serial Number, Product Category, Brand, kind, Supplier, or initial stock.
-4. The trusted operation, authorized for an active Admin or `pcb.create`, creates one active `pcb_finished_good` Product with the normalized card Name, Category `PCB`, and no Brand, then links the new active PcbCard to it atomically.
-5. That Product receives its own server-allocated 7-digit Serial Number / barcode identity and a zero InventoryBalance. Card creation adds no InventoryMovement, finished-goods stock, Supplier link, or Catalog Number. Exactly one Product creation audit and one `pcb_card.created` audit are recorded atomically; failed creation leaves no business or audit rows, though the consumed Serial is never reused.
+1. Authorized user/Admin opens Finished Product Calculator.
+2. Click Create Finished Product Calculator.
+3. Enter the required Name/Code and an exact three-digit Serial Number as text. AlfaEV trims Name/Code, preserves Serial leading zeroes, and rejects invalid or duplicate values.
+4. The trusted operation, authorized for an active Admin or `pcb.create`, creates one active `pcb_finished_good` Product with that Serial, the normalized Name, Category `PCB`, and no Brand, then links the new active PcbCard to it atomically.
+5. The Product trigger creates a zero balance in Raw Materials, Finished Goods, and Customs Warehouse. Creation adds no InventoryMovement, stock, Supplier link, or Catalog Number. Exactly one Product creation audit and one `pcb_card.created` audit are recorded atomically; any conflict or audit failure leaves no Product, balance, definition, or audit row.
 
 After card creation, the later BOM workflow may:
 
@@ -906,7 +908,8 @@ The application flow is correctly implemented when:
 - direct URLs cannot bypass authorization
 - Dashboard respects module permissions
 - Nabavka remains simple and does not mutate Inventory automatically
-- Product Serial Numbers are always system-generated
+- ordinary Product/import seven-digit Serial Numbers are system-generated; Finished
+  Product Calculator accepts an exact manual three-digit Serial Number
 - Inventory cannot change without a movement record
 - PCB production Work Order creation changes no stock; its later atomic Finish consumes planned inputs and adds only actual-good finished-goods stock
 - used BOM versions remain historical
@@ -933,3 +936,49 @@ The application flow is correctly implemented when:
 4. An unchanged deficit is a no-op; increases/decreases append history only.
 5. A resolved deficit closes the episode and sends one resolution notification.
 6. A later recurrence opens a new episode. Page views never create shortage history.
+
+## Warehouse-aware Inventory and Finished Product Calculator flow
+
+Tasks 001B–001C establish the warehouse-aware storage foundation, permission-aware
+warehouse reads, trusted adjustments, and atomic transfers while keeping every legacy
+production flow explicitly bound to Raw Materials. Task 001D implements the local tabs
+and warehouse-scoped Inventory interactions. Task 001E implements the calculator rename,
+manual three-digit creation, and 3/7-digit lookup locally. Task 001F adds warehouse-aware
+Finish. Task 001G adds Raw Materials plus Customs Project availability while excluding
+Finished Goods.
+
+1. Inventory opens on one existing route with permission-filtered Raw Materials,
+   Finished Goods, and Customs Warehouse tabs. Each tab reads only its own balances,
+   movements, source lots, search results, and permitted adjustment actions.
+   The trusted detail read keeps Product and balance timestamps distinct, and an Add
+   operation loads only active Supplier sources after exact-warehouse adjustment
+   authorization. Transfers require adjustment authority at both ends and refresh both
+   warehouse views without optimistic balance changes. The selected warehouse is kept
+   in the Inventory URL, and revoked access switches to the first authorized tab.
+2. Existing Inventory balances/history are migrated once to Raw Materials. No
+   historical PCB output is retrospectively moved.
+3. The user-visible PCB Cards experience is Finished Product Calculator while
+   retaining `/pcb`, PCB/BOM identities, and historical records.
+4. Creating a calculator definition supplies a trimmed, case-insensitively unique
+   Name/Code and an exact globally unique three-digit Serial Number as text. Ordinary
+   Products/imports continue to receive generated seven-digit serials.
+5. Produce asks for Planned Production Quantity and performs BOM/precheck; it does not
+   offer a Project selector and creates a no-Project specialized Draft Work Order.
+6. Finish locks and revalidates the warehouse-aware allocation in the exact order Raw
+   Materials FIFO, Customs FIFO, then Finished Goods FIFO.
+7. One atomic Finish deducts every input from its actual warehouse, freezes allocation
+   and PDF provenance, and credits actual-good output to Finished Goods. Failure or an
+   idempotent retry cannot create partial or duplicate stock changes.
+8. Authorized lookup/scanning accepts exact three- and seven-digit serial text and
+   preserves leading zeroes.
+9. Project planning and shared shortage use the final transaction sum of Raw Materials
+   plus Customs. Raw↔Customs transfers are shortage-neutral; crossing the Finished Goods
+   boundary may change shortage once, after deferred reconciliation.
+
+Warehouse migrations 136–142 are deployed to alfaev-dev (142/142), and DEV
+`finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally;
+read-only browser acceptance is complete, controlled Stage 2 mutation acceptance is
+pending, and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.

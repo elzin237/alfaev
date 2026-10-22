@@ -60,6 +60,10 @@ import { registerProjectAlertRealtimeInvalidationTests } from "./project-alert-r
 import { registerProjectIssueResolutionTests } from "./project-issue-resolution.suite";
 import { registerProjectIssueResolutionImageTests } from "./project-issue-resolution-images.suite";
 import { registerProjectShortageAlertTests } from "./project-shortage-alerts.suite";
+import { registerInventoryWarehouseFoundationTests } from "./inventory-warehouse-foundation.suite";
+import { registerInventoryWarehouseOperationsTests } from "./inventory-warehouse-operations.suite";
+import { registerWarehouseAwareProductionTests } from "./warehouse-aware-production.suite";
+import { registerWarehouseAwareShortageTests } from "./warehouse-aware-shortages.suite";
 
 describe("Supabase security helpers", () => {
   // Register domain suites under one fixture lifecycle to avoid repeated Auth setup.
@@ -125,5 +129,9 @@ describe("Supabase security helpers", () => {
   registerProjectIssueResolutionTests(requireHarness);
   registerProjectIssueResolutionImageTests(requireHarness);
   registerProjectShortageAlertTests(requireHarness);
+  registerInventoryWarehouseFoundationTests(requireHarness);
+  registerInventoryWarehouseOperationsTests(requireHarness);
+  registerWarehouseAwareProductionTests(requireHarness);
+  registerWarehouseAwareShortageTests(requireHarness);
   registerProcurementProductConcurrencyTests(requireHarness);
 });

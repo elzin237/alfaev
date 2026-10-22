@@ -283,7 +283,7 @@ const draftMaterialAllowedKeys = new Set([
   "source_type",
   "current_inventory",
 ]);
-const productSerialNumberPattern = /^[0-9]{7}$/;
+const productSerialNumberPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 const postgresBigintMax = 9223372036854775807n;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -590,7 +590,7 @@ function productResolutionFailure(
       ok: false,
       error: {
         code: "invalid_serial_number",
-        message: "Enter a valid 7-digit Serial Number.",
+        message: "Enter a valid 3- or 7-digit Serial Number.",
       },
     };
   }

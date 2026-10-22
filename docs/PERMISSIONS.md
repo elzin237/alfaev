@@ -191,17 +191,21 @@ A trusted minimal Supplier-choice lookup used to create ProductSupplier relation
 
 A trusted minimal Product-choice lookup used to create ProductSupplier relationships may return only active Product IDs, Serial Numbers, and Names. It requires an active Admin, Edit Product/Component Data (`inventory.products.edit`), or Edit Suppliers (`suppliers.edit`). General Product reads remain restricted to an active Admin or View Inventory (`inventory.view`); the lookup does not expose Product Category, Brand, lifecycle timestamps/actors, or other Product details.
 
-### PCB Cards
+### Finished Product Calculator
 
-- View PCB Cards (`pcb.view`)
-- Create PCB Card/BOM (`pcb.create`)
-- Edit PCB Card/BOM (`pcb.edit`)
-- Produce PCB Cards (`pcb.produce`)
+- View Finished Product Calculator (`pcb.view`)
+- Create Finished Product Calculator/BOM (`pcb.create`)
+- Edit Finished Product Calculator/BOM (`pcb.edit`)
+- Produce Finished Products (`pcb.produce`)
 - Delete/Archive PCB Definitions (`pcb.archive`)
 
-PcbCard reads require an active Admin or View PCB Cards (`pcb.view`). Task 085 grants no direct client mutation path. Later trusted PcbCard creation, editing, production, and archive operations must enforce the corresponding existing permission or Admin status at the backend; no new PCB permission key is introduced.
+PcbCard reads require an active Admin or View Finished Product Calculator (`pcb.view`). Trusted PcbCard creation, editing, production, and archive operations enforce the corresponding existing permission or Admin status at the backend; no new PCB permission key is introduced and technical `pcb_*` identities remain unchanged.
 
-The PCB production route and its optional Project picker require an active Admin or `pcb.produce`; `projects.view` is not additionally required. A trusted picker read may expose only Project ID, Name, and Status and only for open Projects (`planned`, `in_progress`, `on_hold`). This does not grant general Project-table reads or `/projects` access, which still require an active Admin or `projects.view`.
+The PCB production route requires an active Admin or `pcb.produce`; new Calculator
+production has no Project picker and always submits a null Project. Historical
+Project-linked production remains readable under its existing module permissions.
+Finishing production continues to require active Admin or `work_orders.finish`; it does
+not require or confer any warehouse `adjust` permission.
 
 `pcb.produce` authorizes creation of the specialized PCB-production Draft Work Order without `work_orders.create`. It does not grant general Work Order view/edit/finish/delete access. After creation, the existing Work Order permissions apply, and Finish specifically requires active Admin or `work_orders.finish`.
 
@@ -329,3 +333,27 @@ permission. Delivery is snapshotted to all active Admins and active non-Admins w
 both effective `dashboard.view` and `projects.view`. Inactive users are excluded. This
 does not grant direct access to shortage tables, Inventory, Projects, or other users'
 notification records.
+
+## 9. Warehouse permissions
+
+Task 001C implements six independently delegable warehouse capabilities while legacy
+`inventory.view` reads remain restricted to Raw Materials:
+
+- `inventory.raw_materials.view`
+- `inventory.raw_materials.adjust`
+- `inventory.finished_goods.view`
+- `inventory.finished_goods.adjust`
+- `inventory.customs.view`
+- `inventory.customs.adjust`
+
+Active Admin bypass remains canonical. A non-Admin receives only explicitly delegated
+warehouse access; view or adjustment access to one warehouse does not reveal or mutate
+another. Trusted database operations re-check every boundary, and UI tab visibility is
+only presentation.
+
+During migration, each existing non-Admin `inventory.view` holder receives an explicit
+`inventory.raw_materials.view` grant. The legacy permission does not become an implicit
+all-warehouse grant. Existing Product creation/edit, Brand, barcode, PCB, and Work Order
+permissions remain separate. Warehouse Add, Remove, and Correction require the matching
+warehouse `adjust` permission, and transfers require adjustment authority in both source
+and destination warehouses. Task 001D owns the permission-aware Inventory tabs.

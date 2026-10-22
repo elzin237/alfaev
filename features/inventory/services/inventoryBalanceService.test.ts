@@ -18,6 +18,7 @@ vi.mock("../../../lib/supabase/client", () => ({
 import {
   adjustInventory,
   getInventoryBalance,
+  transferInventory,
 } from "./inventoryBalanceService";
 
 beforeEach(() => {
@@ -28,13 +29,15 @@ beforeEach(() => {
 });
 
 describe("inventoryBalanceService", () => {
+  const warehouseId = "10000000-0000-4000-8000-000000000001";
   it("reads and strictly maps one Product balance", async () => {
-    serviceMocks.maybeSingle.mockResolvedValue({
-      data: {
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{
         product_id: "product-1",
+        warehouse_id: warehouseId,
         quantity: "42",
-        updated_at: "2026-09-14T10:00:00.000Z",
-      },
+        balance_updated_at: "2026-09-14T10:00:00.000Z",
+      }],
       error: null,
     });
 
@@ -42,31 +45,31 @@ describe("inventoryBalanceService", () => {
       ok: true,
       value: {
         productId: "product-1",
+        warehouseId,
         quantity: 42,
         updatedAt: "2026-09-14T10:00:00.000Z",
       },
     });
-    expect(serviceMocks.from).toHaveBeenCalledWith("inventory_balances");
-    expect(serviceMocks.select).toHaveBeenCalledWith(
-      "product_id,quantity,updated_at",
+    expect(serviceMocks.rpc).toHaveBeenCalledWith(
+      "get_inventory_product_by_warehouse",
+      { p_product_id: "product-1", p_warehouse_id: warehouseId },
     );
-    expect(serviceMocks.eq).toHaveBeenCalledWith("product_id", "product-1");
-    expect(serviceMocks.maybeSingle).toHaveBeenCalledOnce();
   });
 
   it("distinguishes a missing balance from safe load failures", async () => {
-    serviceMocks.maybeSingle
-      .mockResolvedValueOnce({ data: null, error: null })
+    serviceMocks.rpc
+      .mockResolvedValueOnce({ data: [], error: null })
       .mockResolvedValueOnce({
         data: null,
         error: { code: "XX000", message: "raw database details" },
       })
       .mockResolvedValueOnce({
-        data: {
+        data: [{
           product_id: "product-1",
           quantity: -1,
-          updated_at: "invalid",
-        },
+          warehouse_id: warehouseId,
+          balance_updated_at: "invalid",
+        }],
         error: null,
       });
 
@@ -90,7 +93,7 @@ describe("inventoryBalanceService", () => {
     expect(JSON.stringify(failed)).not.toContain("raw database details");
   });
 
-  it("calls only manual_adjust_inventory with normalized input and maps its result", async () => {
+  it("calls only adjust_inventory_warehouse with normalized input and maps its result", async () => {
     serviceMocks.rpc.mockResolvedValue({
       data: [{
         movement_id: "movement-1",
@@ -113,8 +116,9 @@ describe("inventoryBalanceService", () => {
         quantityAfter: 15,
       },
     });
-    expect(serviceMocks.rpc).toHaveBeenCalledWith("manual_adjust_inventory", {
+    expect(serviceMocks.rpc).toHaveBeenCalledWith("adjust_inventory_warehouse", {
       p_product_id: "product-1",
+      p_warehouse_id: warehouseId,
       p_adjustment_type: "add",
       p_quantity: 5,
       p_reason: "Counted delivery",
@@ -170,5 +174,41 @@ describe("inventoryBalanceService", () => {
         message: "The Inventory adjustment could not be completed. Please try again.",
       },
     });
+  });
+
+  it("transfers only through the trusted atomic warehouse RPC", async () => {
+    const destinationWarehouseId = "10000000-0000-4000-8000-000000000002";
+    serviceMocks.rpc.mockResolvedValue({
+      data: [{
+        transfer_id: "transfer-1",
+        outbound_movement_id: "outbound-1",
+        inbound_movement_id: "inbound-1",
+        source_quantity_after: "7",
+        destination_quantity_after: "3",
+      }],
+      error: null,
+    });
+    await expect(transferInventory("product-1", warehouseId, {
+      destinationWarehouseId,
+      quantity: 3,
+      reason: "  Rebalance stock  ",
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        transferId: "transfer-1",
+        sourceQuantityAfter: 7,
+        destinationQuantityAfter: 3,
+      },
+    });
+    expect(serviceMocks.rpc).toHaveBeenCalledWith(
+      "transfer_inventory_between_warehouses",
+      {
+        p_product_id: "product-1",
+        p_source_warehouse_id: warehouseId,
+        p_destination_warehouse_id: destinationWarehouseId,
+        p_quantity: 3,
+        p_reason: "Rebalance stock",
+      },
+    );
   });
 });

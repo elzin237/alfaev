@@ -3,7 +3,28 @@
 Status: Canonical business rules v1  
 Purpose: Define business invariants that implementation must preserve.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.
+
 ---
+
+## Task 001J warehouse listing contract
+
+- Raw Materials retains existing Product visibility, including historical Calculator stock.
+- Finished Goods lists only Calculator outputs linked by `pcb_cards.output_product_id`,
+  including active/archived outputs and zero stock. Ordinary Products are excluded.
+- Customs lists positive Customs balances or committed Customs movement history.
+  Structural zero rows are hidden; depletion retains visibility; rollback creates none.
+- Listing membership does not restrict trusted detail, adjustments, transfers or
+  Work Order allocation. Existing ordinary-Product transfers into Finished Goods
+  remain allowed but do not make those Products Calculator outputs.
+- Calculator output stock means Finished Goods quantity. BOM input/picker stock stays
+  Raw; historical stock is not reclassified.
 
 ## 1. General Principles
 
@@ -126,7 +147,12 @@ Then:
 
 `committed_to_projects(X) = sum of outstanding_commitment(P, X) across Projects currently in planned/in_progress/on_hold`
 
-`available_after_commitments(X) = InventoryBalance.quantity - committed_to_projects(X)`
+`eligible_physical_stock(X) = Raw Materials quantity + Customs Warehouse quantity`
+
+`available_after_commitments(X) = eligible_physical_stock(X) - committed_to_projects(X)`
+
+Finished Goods stock is excluded from Project availability and shared shortage in V1,
+even though warehouse-aware Work Order Finish may consume a finished Product directly.
 
 Consumption from one Project must never reduce another Project's commitment. Completed
 and Cancelled Projects contribute zero. Reopening a Completed Project to `in_progress`
@@ -318,7 +344,7 @@ When Admin uses `Create component from request`:
 
 Workers never manually assign Serial Number / Šifra values.
 
-The workflow is one concurrency-safe transaction. Competing Admin attempts cannot create two Products for the same request, and any required audit failure rolls back all domain mutations. Sequence gaps after a failed attempt are acceptable and never reused. Product initialization creates its normal zero InventoryBalance, but creates no InventoryMovement and does not add delivered Procurement quantity to stock; physical stock is entered separately through the Admin Inventory workflow.
+The workflow is one concurrency-safe transaction. Competing Admin attempts cannot create two Products for the same request, and any required audit failure rolls back all domain mutations. Sequence gaps after a failed attempt are acceptable and never reused. Product initialization creates three zero InventoryBalance rows, one per warehouse, but creates no InventoryMovement and does not add delivered Procurement quantity to stock; physical stock is entered separately through the authorized Inventory workflow.
 
 ### Statuses
 
@@ -444,21 +470,22 @@ The badge counts rows/requests, not piece quantities.
 - Inventory supports creating Components from `.xlsx` only. The initial template contains only Name, Category, and optional Brand; Supplier and Catalog Number are not imported.
 - Each valid spreadsheet row requests one new `component`. Name and free-text Category are required, trimmed, and nonblank. Blank Brand means no Brand; a provided Brand must resolve to an existing active Brand. Import never creates Brands implicitly.
 - Name, Category, and Brand are not Product identity. Visually duplicate rows are not silently deduplicated; each valid row receives its own server-allocated permanent 7-digit Serial Number. Excel never supplies Serial Number or Product kind, and `pcb_finished_good` remains reserved for trusted PCB workflows.
-- Import sets no initial stock. Each created Product receives its normal zero InventoryBalance, with no InventoryMovement; physical stock entry is a separate Inventory operation.
+- Import sets no initial stock. Each created Product receives three zero InventoryBalance rows, one per warehouse, with no InventoryMovement; physical stock entry is a separate Inventory operation.
 - A confirmed import is all-or-nothing: the trusted backend revalidates every row and Brand before writes, then creates all Products and one immutable batch-level Product-creation audit containing created Product IDs and count in one transaction. Failed or denied import persists no Product, balance, or success audit. Rolled-back Serial allocations may leave gaps and are never reused.
 
 ### Serial Number / Šifra
 
-- required
-- unique
-- generated automatically by AlfaEV
-- exactly 7 digits
-- starts at `0000001`
-- sequentially increments
+- required text and globally unique, including archived Products
+- current ordinary Product/import creation generates exactly 7 digits, starts at
+  `0000001`, and sequentially increments
+- approved Finished Product Calculator creation accepts a manual exact 3-digit value
+  through its trusted creation boundary
+- exactly 3 or 7 digits; leading zeroes are preserved
 - never reused
 - used as barcode value
 
-The sequence must be generated safely by trusted backend/database logic to prevent duplicates under concurrent creation.
+The ordinary-Product sequence and the shared uniqueness constraint must prevent
+duplicates under concurrent creation.
 
 ### Catalog Number
 
@@ -601,16 +628,16 @@ Scanning the barcode must resolve the matching AlfaEV product by Serial Number /
 
 ### PCB card definitions
 
-- PcbCard Name is the required human-facing card name/code. It is trimmed before persistence, must be nonblank, and is not unique.
+- PcbCard Name is the required human-facing Name/Code. It is trimmed before persistence, must be nonblank, and is case-insensitively unique across active and archived definitions.
 - Every PcbCard has exactly one stock-tracked output Product, and one Product may be the output of at most one PcbCard.
 - The output Product must be a `pcb_finished_good`; its link to the PcbCard cannot be changed after card creation.
 - A new PcbCard starts active with no archive metadata. An active card has null archive timestamp and actor, while an archived card has both values populated.
 - Archiving the output Product later does not invalidate or rewrite the historical PcbCard relationship.
 - Task 085 creates no PcbCard archive or reactivation workflow. Where production history exists, a PcbCard must be archived rather than hard-deleted, consistent with the existing lifecycle rule.
-- Creating a PcbCard takes only its required, trimmed, nonblank human-facing Name/Code; card names are not unique. The trusted operation creates exactly one new active output Product with the same normalized Name, Category `PCB`, no Brand, and kind `pcb_finished_good`. Its unique 7-digit Serial Number comes from the trusted allocator, never from the user.
-- Normal Product setup initializes the output Product's InventoryBalance at zero. Card creation is not production: it adds no finished-goods stock and creates no InventoryMovement. Only later PCB production may increase finished-goods stock.
+- Creating a PcbCard through Finished Product Calculator takes its required, trimmed Name/Code and a manually supplied exact three-digit Serial Number as text. The trusted operation creates exactly one new active output Product with the same normalized Name, Category `PCB`, no Brand, and kind `pcb_finished_good`; ordinary Product/import creation still uses the seven-digit allocator.
+- Normal Product setup initializes the output Product's three warehouse balances at zero. Definition creation is not production: it adds no finished-goods stock and creates no InventoryMovement. Only later production may increase finished-goods stock.
 - A PcbCard definition does not inherently require a Supplier. Creation adds no Supplier, ProductSupplier relationship, or Catalog Number.
-- Task 086 creation is authorized by an active Admin or `pcb.create`, without requiring `pcb.view` or Inventory Product permissions. It atomically creates the Product, zero balance, card, and exactly one Product creation audit plus one `pcb_card.created` audit. Failure leaves none of those rows or audits; a rolled-back Serial allocation may leave a permanent sequence gap.
+- Creation is authorized by an active Admin or `pcb.create`, without requiring `pcb.view` or Inventory Product permissions. It atomically creates the Product, three zero warehouse balances, card, and exactly one Product creation audit plus one `pcb_card.created` audit. Failure leaves none of those rows or audits.
 
 ### BOM calculation
 
@@ -634,7 +661,7 @@ Insufficient stock does not prevent creating the specialized Draft Work Order be
 
 ### PCB production Work Order creation and Finish
 
-`Produce PCB` creates an idempotent specialized Draft Work Order. The planned quantity is a positive exact bigint and freezes the exact PCB Card, BOM version, optional Project, derived BOM material quantities, and description `PCB production — <PcbCard name>`. BOM-derived WorkOrderItems have authoritative frozen `pcb_bom` origin. They cannot be edited or removed. A separate `manual` row set may contain supplemental active eligible Products while the parent remains Draft; managing that set requires Admin or `work_orders.edit_draft`, never `pcb.produce` alone. Supplemental rows may be outside Project requirements or above planned quantities and create no reservation or Inventory effect. Project and Customer are not required, an empty BOM is valid, multiple Draft batches for one card are valid, and creation changes no Inventory, creates no InventoryMovement/PcbProductionRun, and records normal `work_order.created` plus `pcb_production.work_order_created` history.
+The locally implemented `Produce PCB` flow creates an idempotent specialized Draft Work Order. The planned quantity is a positive exact bigint and freezes the exact PCB Card, BOM version, derived BOM material quantities, and description `PCB production — <PcbCard name>`. New calculator-initiated production has no Project selection or association. Historical Project-linked contexts and exact idempotent replays remain preserved. BOM-derived WorkOrderItems have authoritative frozen `pcb_bom` origin. They cannot be edited or removed. A separate `manual` row set may contain supplemental active eligible Products while the parent remains Draft; managing that set requires Admin or `work_orders.edit_draft`, never `pcb.produce` alone. Supplemental rows create no reservation or Inventory effect. An empty BOM is valid, multiple Draft batches for one card are valid, and creation changes no Inventory, creates no InventoryMovement/PcbProductionRun, and records normal `work_order.created` plus `pcb_production.work_order_created` history.
 
 At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual_good <= planned_quantity`. If all frozen and supplemental inputs remain eligible and sufficient:
 
@@ -642,26 +669,24 @@ At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual
 - record the exact BOM version used
 - deduct every persisted frozen and supplemental material quantity
 - consume BOM inputs for the frozen planned quantity and supplemental inputs exactly as saved
-- add only actual-good quantity to finished-goods Inventory
+- add only actual-good quantity to Finished Goods Warehouse Inventory
 - record Inventory movements for both consumed inputs and produced output
 - record actor and timestamp
 - record audit event
 
-Frozen and supplemental rows may reference the same Product because origin is part of their authoritative identity. Finish aggregates those rows by Product for deterministic physical-stock locking, sufficiency, and one canonical input movement containing their exact sum. Actual good zero still consumes all saved inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes the optional Project. The operation is atomic: input deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
+Frozen and supplemental rows may reference the same Product because origin is part of their authoritative identity. Finish aggregates those rows by Product for deterministic physical-stock locking and sufficiency. It consumes Raw Materials FIFO, then Customs FIFO, then Finished Goods FIFO, with one input movement per consumed Product/warehouse and exact source-lot allocations. Actual good zero still consumes all saved inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes a historical linked Project. The operation is atomic: input deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
 
 Produced PCB cards are stock-tracked finished goods.
 
-### Project link
+### Historical Project links
 
-Project is optional.
+New calculator production is General Stock with no Project association. Existing Project-linked production keeps its original traceability and remains readable and finishable; the warehouse rollout does not rewrite those links or reserve Project requirements.
 
-A new production Work Order may link only a currently open Project (`planned`, `in_progress`, or `on_hold`), not a `completed` or `cancelled` Project. The trusted creation operation re-checks Project existence and current status; a prior frontend choice is not authoritative. This link is traceability-only and does not reserve Project requirements.
-
-If Project is set:
+For a historical Project-linked production:
 - the production run is linked to that Project
 - its underlying BOM component consumption may contribute to the Project's derived material usage
 
-If Project is empty:
+For General Stock production:
 - production remains valid and still affects Inventory
 
 Project reporting must not double-count the same material consumption if produced PCB finished goods are later issued through a Work Order. The final DATA_MODEL/reporting design must preserve one traceable source of consumption per physical material movement.
@@ -741,7 +766,8 @@ not reserve Inventory or calculate/allocate Project commitments.
 
 When a product barcode is scanned while editing a Work Order:
 
-- resolve an existing active Product by its exact 7-digit Serial Number / Šifra
+- resolve an existing active Product by exact three- or seven-digit Serial Number /
+  Šifra text, preserving leading zeroes without trimming or numeric conversion
 - allow either stock-tracked Product kind: `component` or `pcb_finished_good`
 - add product to materials table
 - populate product data automatically
@@ -1059,3 +1085,68 @@ Users with history:
 - Resolution closes rather than deletes an episode; recurrence creates a new episode.
 - Initial enablement records current shortages as baseline detections without inventing
   earlier history.
+- Migration 142, deployed to DEV, also schedules deferred
+  reconciliation for negative Project-linked `work_order` and
+  `pcb_production_input` movements from any warehouse, including Finished Goods.
+  Eligible physical stock remains Raw Materials plus Customs. Multiple qualifying
+  movements coalesce by transaction/Product; quantity-only changes do not notify.
+  This correction does not implement Finished Goods reservations.
+
+## 16. Three-warehouse and Finished Product Calculator rules
+
+Tasks 001B–001C implement the fixed warehouse identities, warehouse-scoped ledger,
+historical Raw Materials mapping, six independent warehouse permissions, trusted scoped
+reads/adjustments, and atomic transfers. Tasks 001D–001E implement the Inventory tabs
+and Finished Product Calculator locally. Task 001F adds multi-warehouse production;
+Task 001G adds the warehouse-aware Project availability formula locally.
+
+### Warehouse identities and stock
+
+- `raw_materials` — Raw Materials — Skladište repromaterijala
+- `finished_goods` — Finished Goods — Skladište gotovih proizvoda
+- `customs` — Customs Warehouse — Carinsko skladište
+- AlfaEV uses one warehouse-aware Inventory ledger. Products remain global, while each
+  balance, movement, and source lot belongs to one warehouse and stock is counted
+  independently per warehouse.
+- Existing stock, movements, and source lots migrate to Raw Materials without
+  duplication. Historical PCB output is not retrospectively moved to Finished Goods.
+- Trusted Add/Remove/Correction operates inside one requested warehouse. A transfer
+  requires adjustment authority in both distinct warehouses and atomically creates
+  paired movements while conserving stock and retaining source-lot provenance.
+
+### Production and availability
+
+- Raw Materials and Customs are production-eligible. Finished Goods may also be
+  consumed directly when a Work Order needs that finished Product as an input.
+- Consumption may split across warehouses and every deduction records its actual source
+  warehouse. Work Order Finish remains atomic and idempotent, and successful PCB
+  production credits actual-good output to Finished Goods with output provenance.
+- Source allocation is exactly Raw Materials FIFO, then Customs FIFO, then Finished
+  Goods FIFO. A single requirement may be split across those warehouses.
+- Customs remains separately accounted and may be consumed without a Raw Materials
+  transfer. Declaration/release references and responsible actor are recorded where
+  applicable, but mandatory evidence and legal-release rules await compliance approval.
+- Project availability and shared shortage use Raw Materials plus Customs Warehouse
+  stock, minus outstanding open-Project commitments. Finished Goods remains excluded.
+- Raw↔Customs transfers conserve eligible stock and create no artificial shortage
+  transition. Eligible↔Finished Goods transfers may change shortage, but deferred
+  reconciliation evaluates only final transaction state.
+- Existing shortage episode/event, recipient, read/dismiss, and AuditLog history is
+  retained; migration 140 does not rerun baseline initialization or rewrite history.
+
+### Finished Product Calculator
+
+- The user-visible name is **Finished Product Calculator**. Existing PCB/BOM
+  entities, `/pcb`, trusted identifiers, and historical AuditLog rows remain unchanged.
+- New calculator entries require a trimmed Name/Code and a manually entered exact
+  three-digit text Serial Number (`000`–`999`), preserving leading zeroes.
+- Ordinary Products and imports retain generated exact seven-digit serials. Authorized
+  lookup/scanning accepts exact three- or seven-digit Serial Numbers.
+- Serial Numbers are globally unique across Products, warehouses, and archived Product
+  identities. Finished Product Calculator Name/Code is trimmed and case-insensitively
+  unique across active and archived finished-product definitions. Ordinary Inventory
+  component names do not gain global uniqueness.
+- Calculator-initiated Produce no longer accepts a Project. It freezes a no-Project
+  production Draft; historical Project-linked Work Orders remain readable unchanged.
+- Migration 138 preflights historical PCB names for normalized duplicates before adding
+  the unique index. No existing Product is renamed, merged, deleted, or assigned another Serial.

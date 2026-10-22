@@ -1028,9 +1028,10 @@ export function registerPermissionsTests(requireHarness: () => SecurityFixtureHa
         throw new Error("Admin permission matrix RPC returned invalid data");
       }
 
-      expect(rows).toHaveLength(32);
+      expect(rows).toHaveLength(PERMISSION_KEYS.length);
       expect(rows.map((row) => row.permission_key)).toEqual(PERMISSION_KEYS);
-      expect(new Set(rows.map((row) => row.permission_key)).size).toBe(32);
+      expect(new Set(rows.map((row) => row.permission_key)).size)
+        .toBe(PERMISSION_KEYS.length);
 
       for (const row of rows) {
         expect(Object.keys(row).sort()).toEqual([

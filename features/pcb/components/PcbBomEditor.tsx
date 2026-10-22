@@ -137,7 +137,7 @@ export default function PcbBomEditor({ detail, canEdit, profileId, onSave }: Pro
       </div>
 
       {rows.length === 0 ? <div className="mt-5"><EmptyState title="No BOM inputs"
-        description="Add eligible Products to define this PCB Card's BOM." /></div> :
+        description="Add eligible Products to define this finished product's BOM." /></div> :
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[760px] text-left text-sm">
             <thead className="border-b border-zinc-200 text-zinc-600"><tr>

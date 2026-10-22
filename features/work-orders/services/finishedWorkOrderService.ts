@@ -24,10 +24,13 @@ export interface FinishedWorkOrderMaterial {
   serialNumber: string;
   productName: string;
   quantity: string;
-  sourceKind: "supplier" | "legacy_unknown" | "internal_production";
+  sourceKind: "supplier" | "legacy_unknown" | "internal_production" | "warehouse_transfer";
   supplierName: string | null;
   catalogNumber: string;
   supplierDescription: string | null;
+  warehouseId: string | null;
+  warehouseCode: "raw_materials" | "customs" | "finished_goods" | null;
+  warehouseName: string | null;
 }
 
 export interface FinishedWorkOrderMovement {
@@ -39,6 +42,9 @@ export interface FinishedWorkOrderMovement {
   quantityBefore: string;
   quantityAfter: string;
   createdAt: string;
+  warehouseId: string;
+  warehouseCode: "raw_materials" | "customs" | "finished_goods";
+  warehouseName: string;
 }
 
 export interface FinishedWorkOrderReadError {
@@ -87,6 +93,9 @@ const materialKeys = new Set([
   "supplier_name",
   "catalog_number",
   "supplier_description",
+  "warehouse_id",
+  "warehouse_code",
+  "warehouse_name",
 ]);
 const movementKeys = new Set([
   "movement_id",
@@ -97,12 +106,15 @@ const movementKeys = new Set([
   "quantity_before",
   "quantity_after",
   "created_at",
+  "warehouse_id",
+  "warehouse_code",
+  "warehouse_name",
 ]);
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const timestampPattern =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const serialNumberPattern = /^[0-9]{7}$/;
+const serialNumberPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 const postgresBigintMax = 9223372036854775807n;
 const postgresBigintMin = -9223372036854775808n;
 
@@ -208,10 +220,14 @@ function parseMaterial(value: unknown): FinishedWorkOrderMaterial | null {
     typeof value.serial_number !== "string" ||
     !serialNumberPattern.test(value.serial_number) ||
     !isTrimmedNonblank(value.product_name) ||
-    !["supplier", "legacy_unknown", "internal_production"].includes(String(value.source_kind)) ||
+    !["supplier", "legacy_unknown", "internal_production", "warehouse_transfer"].includes(String(value.source_kind)) ||
     !(value.supplier_name === null || isTrimmedNonblank(value.supplier_name)) ||
     !isTrimmedNonblank(value.catalog_number) ||
-    !(value.supplier_description === null || isTrimmedNonblank(value.supplier_description))
+    !(value.supplier_description === null || isTrimmedNonblank(value.supplier_description)) ||
+    !((value.warehouse_id === null && value.warehouse_code === null && value.warehouse_name === null) ||
+      (isUuid(value.warehouse_id) &&
+        ["raw_materials", "customs", "finished_goods"].includes(String(value.warehouse_code)) &&
+        isTrimmedNonblank(value.warehouse_name)))
   ) return null;
   const quantity = parsePositiveBigint(value.quantity);
   const sourceKind = value.source_kind as FinishedWorkOrderMaterial["sourceKind"];
@@ -230,6 +246,9 @@ function parseMaterial(value: unknown): FinishedWorkOrderMaterial | null {
       supplierName: value.supplier_name as string | null,
       catalogNumber: value.catalog_number,
       supplierDescription: value.supplier_description as string | null,
+      warehouseId: value.warehouse_id as string | null,
+      warehouseCode: value.warehouse_code as FinishedWorkOrderMaterial["warehouseCode"],
+      warehouseName: value.warehouse_name as string | null,
     };
 }
 
@@ -242,7 +261,10 @@ function parseMovement(value: unknown): FinishedWorkOrderMovement | null {
     typeof value.serial_number !== "string" ||
     !serialNumberPattern.test(value.serial_number) ||
     !isTrimmedNonblank(value.product_name) ||
-    !isTimestamp(value.created_at)
+    !isTimestamp(value.created_at) ||
+    !isUuid(value.warehouse_id) ||
+    !["raw_materials", "customs", "finished_goods"].includes(String(value.warehouse_code)) ||
+    !isTrimmedNonblank(value.warehouse_name)
   ) return null;
   const quantityDelta = parseSignedBigint(value.quantity_delta);
   const quantityBefore = parseNonnegativeBigint(value.quantity_before);
@@ -261,6 +283,9 @@ function parseMovement(value: unknown): FinishedWorkOrderMovement | null {
     quantityBefore,
     quantityAfter,
     createdAt: value.created_at,
+    warehouseId: value.warehouse_id,
+    warehouseCode: value.warehouse_code as FinishedWorkOrderMovement["warehouseCode"],
+    warehouseName: value.warehouse_name,
   };
 }
 

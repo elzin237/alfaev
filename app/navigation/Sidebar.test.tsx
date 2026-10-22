@@ -161,7 +161,7 @@ describe("Sidebar permission visibility", () => {
         "Nabavka",
         "Dobavljači",
         "Skladište",
-        "PCB Cards",
+        "Finished Product Calculator",
         "Radni Nalozi",
         "Dokumentacija",
         "Osnovna sredstva",
@@ -234,7 +234,7 @@ describe("Sidebar permission visibility", () => {
     renderSidebar();
 
     await waitFor(() => {
-      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(8);
+      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(10);
     });
     expect(screen.getAllByRole("link").map((link) => link.textContent))
       .toEqual(["Calendar"]);
@@ -263,7 +263,7 @@ describe("Sidebar permission visibility", () => {
     renderSidebar();
 
     await waitFor(() => {
-      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(8);
+      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(10);
     });
     expect(screen.getAllByRole("link").map((link) => link.textContent))
       .toEqual(["Calendar"]);
@@ -533,7 +533,7 @@ describe("Sidebar permission visibility", () => {
 
     renderSidebar();
 
-    await waitFor(() => expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(8));
+    await waitFor(() => expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(10));
     expect(sidebarMocks.useProcurementSidebarBadge).toHaveBeenLastCalledWith(
       createProfile(firstUser).id,
       false,
@@ -584,7 +584,7 @@ describe("Sidebar permission visibility", () => {
     renderSidebar(vi.fn(), queryClient);
 
     await waitFor(() => {
-      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(16);
+      expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(20);
     });
     expect(screen.queryByRole("link", { name: "Projects" }))
       .not.toBeInTheDocument();
@@ -625,7 +625,7 @@ describe("Sidebar permission visibility", () => {
       expect(screen.queryByRole("link", { name: "Projects" }))
         .not.toBeInTheDocument();
     });
-    expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(16);
+    expect(sidebarMocks.hasPermission).toHaveBeenCalledTimes(20);
   });
 
   it("preserves close-on-navigation behavior", () => {

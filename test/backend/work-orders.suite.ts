@@ -224,6 +224,25 @@ async function findUnusedLeadingZeroProductSerial(
   return serialNumber;
 }
 
+async function findUnusedThreeDigitProductSerial(
+  database: PoolClient,
+): Promise<string> {
+  const serialNumber = (await database.query<{ serial_number: string }>(
+    `select pg_catalog.lpad(candidate::text, 3, '0') as serial_number
+     from pg_catalog.generate_series(0, 999) as candidate
+     where not exists (
+       select 1 from public.products as product
+       where product.serial_number = pg_catalog.lpad(candidate::text, 3, '0')
+     )
+     order by candidate
+     limit 1`,
+  )).rows[0]?.serial_number;
+  if (!serialNumber) {
+    throw new Error("No unused three-digit Product Serial Number is available");
+  }
+  return serialNumber;
+}
+
 async function findMissingProductSerial(
   database: PoolClient,
 ): Promise<string> {
@@ -4222,7 +4241,7 @@ export function registerWorkOrderSchemaTests(
         )).error);
       });
 
-      it("enforces Draft context and exact seven-digit serial validation", async () => {
+      it("enforces Draft context and exact three- or seven-digit serial validation", async () => {
         const fixture = requireHarness();
         await fixture.withRollbackDatabaseTransaction(async (database) => {
           const actor = fixture.actors.admin;
@@ -4241,18 +4260,27 @@ export function registerWorkOrderSchemaTests(
             kind: "component",
             serialNumber,
           });
+          const threeDigitSerial = await findUnusedThreeDigitProductSerial(database);
+          await createResolverProduct(database, {
+            actorId: actor.profileId,
+            kind: "pcb_finished_good",
+            serialNumber: threeDigitSerial,
+          });
           await actAs(database, actor);
 
           expect(await resolveWorkOrderProductBarcode(
             database, draftId, serialNumber,
           )).toHaveLength(1);
+          expect(await resolveWorkOrderProductBarcode(
+            database, draftId, threeDigitSerial,
+          )).toMatchObject([{ serial_number: threeDigitSerial }]);
           await expectRejected(
             database,
             () => resolveWorkOrderProductBarcode(database, null, serialNumber),
             "22023",
             "Work Order ID is required",
           );
-          for (const validSerial of ["0000001", "0000123", "1234567"]) {
+          for (const validSerial of ["000", "007", "123", "0000001", "0000123", "1234567"]) {
             await expectRejected(
               database,
               () => resolveWorkOrderProductBarcode(
@@ -4270,7 +4298,8 @@ export function registerWorkOrderSchemaTests(
             "WOR02",
           );
           for (const invalidSerial of [
-            null, "123", "12345678", "ABC0123", "12 3456", " 0000001",
+            null, "12", "1234", "12345", "123456", "12345678", "ABC0123",
+            "12 3456", " 0000001", "１２３", "١٢٣",
           ]) {
             await expectRejected(
               database,
@@ -4278,7 +4307,7 @@ export function registerWorkOrderSchemaTests(
                 database, draftId, invalidSerial,
               ),
               "22023",
-              "Enter a 7-digit Serial Number",
+              "Enter a 3- or 7-digit Serial Number",
             );
           }
           await database.query("reset role");

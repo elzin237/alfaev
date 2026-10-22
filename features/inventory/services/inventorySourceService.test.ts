@@ -8,6 +8,7 @@ import { listInventorySourceChoices, listInventorySourceLots } from "./inventory
 beforeEach(() => vi.resetAllMocks());
 
 describe("inventorySourceService", () => {
+  const warehouseId = "10000000-0000-4000-8000-000000000001";
   it("maps exact ProductSupplier choices without broad Supplier fields", async () => {
     mocks.rpc.mockResolvedValue({ data: [{
       product_supplier_id: "10000000-0000-4000-8000-000000000001",
@@ -23,12 +24,17 @@ describe("inventorySourceService", () => {
       catalogNumber: "CAT-100",
       description: "Control relay",
     }] });
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "list_active_inventory_source_choices_by_warehouse",
+      { p_product_id: "product-1", p_warehouse_id: warehouseId },
+    );
   });
 
   it("preserves exact bigint lots and truthful legacy/internal labels", async () => {
     mocks.rpc.mockResolvedValue({ data: [
       {
         source_lot_id: "30000000-0000-4000-8000-000000000001", source_kind: "supplier",
+        warehouse_id: warehouseId,
         received_at: "2026-10-13T08:00:00.123456+00:00",
         supplier_name: "IBP", catalog_number: "CAT-100", description: null,
         received_quantity: "9223372036854775807", remaining_quantity: "9",
@@ -36,6 +42,7 @@ describe("inventorySourceService", () => {
       },
       {
         source_lot_id: "30000000-0000-4000-8000-000000000002", source_kind: "legacy_unknown",
+        warehouse_id: warehouseId,
         received_at: "2026-10-13T09:00:00+00:00",
         supplier_name: "Legacy / Unknown", catalog_number: null, description: null,
         received_quantity: "2", remaining_quantity: "2", added_by_full_name: null,
@@ -47,6 +54,10 @@ describe("inventorySourceService", () => {
       expect(result.value[0]?.receivedQuantity).toBe(9_223_372_036_854_775_807n);
       expect(result.value[1]).toMatchObject({ supplierName: "Legacy / Unknown", catalogNumber: null });
     }
+    expect(mocks.rpc).toHaveBeenCalledWith(
+      "list_inventory_source_lots_by_warehouse",
+      { p_product_id: "product-1", p_warehouse_id: warehouseId },
+    );
   });
 
   it("fails malformed or overflow rows safely", async () => {

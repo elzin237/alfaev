@@ -44,7 +44,7 @@ function FinishedWorkOrderView({
       {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">PCB production result</h2>
         <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <ReadOnlyField label="PCB Card" value={productionContext.pcbCardName} />
+          <ReadOnlyField label="Finished Product" value={productionContext.pcbCardName} />
           <ReadOnlyField label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
           <ReadOnlyField label="Planned Quantity" value={productionContext.plannedQuantity} />
           <ReadOnlyField label="Actual Completed" value={productionContext.actualGoodQuantity ?? "Not recorded"} />
@@ -91,6 +91,7 @@ function FinishedWorkOrderView({
                     {[
                       "Serial Number",
                       "Product Name",
+                      "Warehouse",
                       "Supplier",
                       "Catalog Number",
                       "Source Description",
@@ -109,7 +110,8 @@ function FinishedWorkOrderView({
                         {material.serialNumber}
                       </td>
                       <td className="px-5 py-4">{material.productName}</td>
-                      <td className="px-5 py-4">{material.supplierName ?? (material.sourceKind === "legacy_unknown" ? "Legacy / Unknown" : "Internal Production")}</td>
+                      <td className="px-5 py-4">{material.warehouseName ?? "Historical / Unattributed"}</td>
+                      <td className="px-5 py-4">{material.supplierName ?? (material.sourceKind === "legacy_unknown" ? "Legacy / Unknown" : material.sourceKind === "warehouse_transfer" ? "Warehouse Transfer" : "Internal Production")}</td>
                       <td className="whitespace-nowrap px-5 py-4 font-mono">{material.catalogNumber}</td>
                       <td className="px-5 py-4">{material.supplierDescription ?? "—"}</td>
                       <td className="whitespace-nowrap px-5 py-4 tabular-nums">
@@ -145,6 +147,7 @@ function FinishedWorkOrderView({
                       "Date",
                       "Serial Number",
                       "Product Name",
+                      "Warehouse",
                       "Delta",
                       "Before",
                       "After",
@@ -167,6 +170,7 @@ function FinishedWorkOrderView({
                         {movement.serialNumber}
                       </td>
                       <td className="px-5 py-4">{movement.productName}</td>
+                      <td className="px-5 py-4">{movement.warehouseName}</td>
                       <td className={`whitespace-nowrap px-5 py-4 font-semibold tabular-nums ${movement.quantityDelta.startsWith("-") ? "text-red-700" : "text-emerald-700"}`}>
                         {movement.quantityDelta}
                       </td>

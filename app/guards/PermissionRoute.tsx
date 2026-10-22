@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { Outlet } from "react-router";
 
 import { useAuth } from "../auth/AuthProvider";
@@ -9,23 +9,27 @@ import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 
 interface PermissionRouteProps {
-  permission: PermissionKey;
+  permission?: PermissionKey;
+  anyOf?: readonly PermissionKey[];
 }
 
-function PermissionRoute({ permission }: PermissionRouteProps) {
+function PermissionRoute({ permission, anyOf }: PermissionRouteProps) {
   const { session, profile, isAdmin } = useAuth();
+  const permissions = anyOf ?? (permission ? [permission] : []);
   const canCheckPermission = Boolean(
     session && profile?.isActive && !isAdmin,
   );
-  const permissionQuery = useQuery({
-    queryKey: permissionQueryKey(
-      session?.user.id,
-      profile?.id,
-      permission,
-    ),
-    queryFn: () => hasPermission(permission),
-    enabled: canCheckPermission,
-    staleTime: 60_000,
+  const permissionQueries = useQueries({
+    queries: permissions.map((permissionKey) => ({
+      queryKey: permissionQueryKey(
+        session?.user.id,
+        profile?.id,
+        permissionKey,
+      ),
+      queryFn: () => hasPermission(permissionKey),
+      enabled: canCheckPermission,
+      staleTime: 60_000,
+    })),
   });
 
   if (!session || !profile || !profile.isActive) {
@@ -41,24 +45,27 @@ function PermissionRoute({ permission }: PermissionRouteProps) {
     return <Outlet />;
   }
 
-  if (permissionQuery.isPending) {
+  if (permissionQueries.some((query) => query.isPending)) {
     return <LoadingState message="Checking your access..." />;
   }
 
-  if (permissionQuery.isError || !permissionQuery.data?.ok) {
+  const failedQuery = permissionQueries.find(
+    (query) => query.isError || query.data?.ok === false,
+  );
+  if (failedQuery) {
     return (
       <ErrorState
         title="Unable to verify access"
         message={
-          permissionQuery.data?.ok === false
-            ? permissionQuery.data.error.message
+          failedQuery.data?.ok === false
+            ? failedQuery.data.error.message
             : "Your access could not be verified."
         }
       />
     );
   }
 
-  if (!permissionQuery.data.value) {
+  if (!permissionQueries.some((query) => query.data?.ok === true && query.data.value)) {
     return (
       <ErrorState
         title="Access denied"

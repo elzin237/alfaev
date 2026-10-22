@@ -178,7 +178,9 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           database, fixture.actors.admin.profileId,
         );
         await database.query(
-          "update public.inventory_balances set quantity = 10 where product_id = $1",
+          `update public.inventory_balances set quantity = 10
+           where product_id = $1
+             and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productIds[0]],
         );
         await database.query(
@@ -232,7 +234,9 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           [productIds[0], brandId],
         );
         await database.query(
-          "update public.inventory_balances set quantity = 10 where product_id = $1",
+          `update public.inventory_balances set quantity = 10
+           where product_id = $1
+             and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productIds[0]],
         );
         await database.query(
@@ -263,12 +267,15 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
         )).toEqual([]);
 
         await database.query(
-          "insert into public.user_permissions (user_id, permission_definition_id, granted_by_user_id) values ($1, $2, $3)",
-          [
-            fixture.actors.permitted.profileId,
-            fixture.permissionDefinitionIds.inventoryView,
-            fixture.actors.admin.profileId,
-          ],
+          `insert into public.user_permissions (
+             user_id, permission_definition_id, granted_by_user_id
+           )
+           select $1::uuid, definition.id, $2::uuid
+           from public.permission_definitions as definition
+           where definition.key in (
+             'inventory.raw_materials.view', 'inventory.customs.view'
+           )`,
+          [fixture.actors.permitted.profileId, fixture.actors.admin.profileId],
         );
         const authorized = await callPlanningAs<Record<string, unknown>>(
           database,
@@ -355,13 +362,15 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
         `select
            (select count(*)::integer
             from public.inventory_balances
-            where product_id = any($1::uuid[])) as balances,
+            where product_id = any($1::uuid[])
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as balances,
            (select count(*)::integer
             from public.inventory_movements
             where product_id = any($1::uuid[])) as movements,
            (select coalesce(sum(quantity), 0::numeric)::text
             from public.inventory_balances
-            where product_id = any($1::uuid[])) as total_quantity`,
+            where product_id = any($1::uuid[])
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as total_quantity`,
         [productIds],
       );
 
@@ -435,13 +444,15 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
         `select
            (select count(*)::integer
             from public.inventory_balances
-            where product_id = any($1::uuid[])) as balances,
+            where product_id = any($1::uuid[])
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as balances,
            (select count(*)::integer
             from public.inventory_movements
             where product_id = any($1::uuid[])) as movements,
            (select coalesce(sum(quantity), 0::numeric)::text
             from public.inventory_balances
-            where product_id = any($1::uuid[])) as total_quantity`,
+            where product_id = any($1::uuid[])
+              and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as total_quantity`,
         [productIds],
       )).toEqual(inventoryBefore);
 
@@ -902,7 +913,10 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
       const inventoryBefore = await database.query<{
         product_id: string; quantity: string;
       }>(
-        "select product_id, quantity from public.inventory_balances where product_id = any($1::uuid[]) order by product_id",
+        `select product_id, quantity from public.inventory_balances
+         where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
+         order by product_id`,
         [productIds],
       );
       const productsBefore = await database.query<ProductRow>(
@@ -1115,7 +1129,10 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
         [projectIds],
       )).toEqual(projectsBefore);
       expect(await database.query(
-        "select product_id, quantity from public.inventory_balances where product_id = any($1::uuid[]) order by product_id",
+        `select product_id, quantity from public.inventory_balances
+         where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
+         order by product_id`,
         [productIds],
       )).toEqual(inventoryBefore);
       expect((await database.query<{ count: number }>(
@@ -1470,7 +1487,9 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
         database, fixture.actors.admin.profileId,
       );
       await database.query(
-        "update public.inventory_balances set quantity = 100 where product_id = $1",
+        `update public.inventory_balances set quantity = 100
+         where product_id = $1
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productIds[0]],
       );
       for (const groupId of [groupIds[0], groupIds[1]]) {
@@ -1563,7 +1582,9 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
       );
       const actorId = fixture.actors.admin.profileId;
       await database.query(
-        "update public.inventory_balances set quantity = 100 where product_id = $1",
+        `update public.inventory_balances set quantity = 100
+         where product_id = $1
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productIds[0]],
       );
       const secondGroupId = randomUUID();
@@ -1691,12 +1712,24 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           balance: Record<string, unknown>;
           movement_count: string; audit_count: string;
         }>(
-          "select (select to_jsonb(project) from public.projects as project where project.id = $1) as project, (select to_jsonb(product) from public.products as product where product.id = $2) as product, (select to_jsonb(item) from public.project_products as item where item.id = $3) as group_row, (select to_jsonb(component) from public.project_product_components as component where component.id = $4) as requirement, (select to_jsonb(balance) from public.inventory_balances as balance where balance.product_id = $2) as balance, (select count(*) from public.inventory_movements) as movement_count, (select count(*) from public.audit_logs) as audit_count",
+          "select (select to_jsonb(project) from public.projects as project where project.id = $1) as project, (select to_jsonb(product) from public.products as product where product.id = $2) as product, (select to_jsonb(item) from public.project_products as item where item.id = $3) as group_row, (select to_jsonb(component) from public.project_product_components as component where component.id = $4) as requirement, (select to_jsonb(balance) from public.inventory_balances as balance where balance.product_id = $2 and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as balance, (select count(*) from public.inventory_movements) as movement_count, (select count(*) from public.audit_logs) as audit_count",
           [projectIds[0], productIds[0], groupIds[0], requirementId],
         );
         return tracked.rows[0];
       };
       const before = await snapshot();
+
+      await database.query(
+        `insert into public.user_permissions (
+           user_id, permission_definition_id, granted_by_user_id
+         )
+         select $1::uuid, definition.id, $2::uuid
+         from public.permission_definitions as definition
+         where definition.key in (
+           'inventory.raw_materials.view', 'inventory.customs.view'
+         )`,
+        [fixture.actors.brandManager.profileId, fixture.actors.admin.profileId],
+      );
 
       for (const actor of [
         fixture.actors.admin, fixture.actors.brandManager,
@@ -1882,7 +1915,7 @@ export function registerProjectPlanningTests(requireHarness: () => SecurityFixtu
           audit_count: number; movement_count: number;
           quantity: string; relation_count: number;
         }>(
-          "select (select count(*)::integer from public.project_product_components where project_product_id = $1 and product_id = $2) as relation_count, (select count(*)::integer from public.audit_logs where action_type = 'project_product_component.created' and entity_id in (select id from public.project_product_components where project_product_id = $1 and product_id = $2)) as audit_count, (select count(*)::integer from public.inventory_movements where product_id = $2) as movement_count, (select quantity::text from public.inventory_balances where product_id = $2) as quantity",
+          "select (select count(*)::integer from public.project_product_components where project_product_id = $1 and product_id = $2) as relation_count, (select count(*)::integer from public.audit_logs where action_type = 'project_product_component.created' and entity_id in (select id from public.project_product_components where project_product_id = $1 and product_id = $2)) as audit_count, (select count(*)::integer from public.inventory_movements where product_id = $2) as movement_count, (select quantity::text from public.inventory_balances where product_id = $2 and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid) as quantity",
           [groupId, productId],
         );
         expect(result.rows).toEqual([{

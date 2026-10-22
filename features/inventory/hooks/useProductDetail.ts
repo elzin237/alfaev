@@ -16,15 +16,20 @@ import {
   type UpdateProductInput,
 } from "../services/productService";
 
-export function useProductDetail(productId: string) {
+export function useProductDetail(
+  productId: string,
+  warehouseId = "10000000-0000-4000-8000-000000000001",
+  enabled = true,
+  canReadBrands = true,
+) {
   const { session, profile, isAdmin } = useAuth();
   const queryClient = useQueryClient();
-  const detailQueryKey = productDetailQueryKey(profile?.id, productId);
+  const detailQueryKey = productDetailQueryKey(profile?.id, warehouseId, productId);
   const listQueryPrefix = productListQueryPrefix(profile?.id);
   const productQuery = useQuery({
     queryKey: detailQueryKey,
-    queryFn: () => getProduct(productId),
-    enabled: Boolean(profile?.id && productId),
+    queryFn: () => getProduct(productId, warehouseId),
+    enabled: Boolean(enabled && profile?.id && productId && warehouseId),
     staleTime: 60_000,
   });
   const editPermissionQuery = useQuery({
@@ -48,7 +53,7 @@ export function useProductDetail(productId: string) {
   const brandsQuery = useQuery({
     queryKey: brandListQueryKey(profile?.id),
     queryFn: listBrands,
-    enabled: Boolean(profile?.id && canEdit),
+    enabled: Boolean(profile?.id && canEdit && canReadBrands),
     staleTime: 60_000,
   });
 

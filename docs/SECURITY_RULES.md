@@ -4,6 +4,14 @@ Status: Canonical security rules v1
 Purpose: Define mandatory security controls for AlfaEV.  
 Precedence: These rules override implementation convenience. Codex must not weaken them to make a task easier.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.
+
 ---
 
 # 1. Security Model
@@ -298,15 +306,15 @@ Every PcbCard must reference exactly one Product through a required, unique, his
 
 New PcbCard rows start active with no archive metadata. Active state requires both `archived_at` and `archived_by_user_id` to be null; archived state requires both values to be non-null. Actor references and the output Product reference use history-preserving deletion behavior. Task 085 adds no archive, hard-delete, or reactivation operation.
 
-Task 086 owns trusted backend-only PcbCard creation. The sole client input is the card Name/Code; the client cannot supply Product fields, Serial Number, actor identity, or initial stock. Creation requires an active Admin or `pcb.create`; neither `pcb.view` nor Inventory Product permissions are required. The trusted operation derives the active `pcb_finished_good` Product and its unique 7-digit Serial Number server-side, links exactly that Product to the new active card, and relies on normal zero InventoryBalance initialization. It creates no InventoryMovement or Supplier relationship. Product, zero balance, PcbCard, and exactly one `product.created` plus one `pcb_card.created` immutable audit event must commit atomically or all roll back. A consumed Serial Number is never reused even if that transaction rolls back.
+Trusted Finished Product Calculator creation accepts only Name/Code and an exact three-digit Serial Number. The client cannot supply Product kind/category/ID, actor identity, timestamps, or initial stock. Creation requires an active Admin or `pcb.create`; neither `pcb.view` nor Inventory Product permissions are required. The trusted operation derives the active `pcb_finished_good` Product, preserves the supplied Serial as text, links exactly that Product to the new active card, and relies on three-warehouse zero-balance initialization. It creates no InventoryMovement or Supplier relationship. Product, three zero balances, PcbCard, and exactly one `product.created` plus one `pcb_card.created` immutable audit event commit atomically or all roll back. Global constraints arbitrate concurrent Serial and normalized-name conflicts.
 
 ## PCB Production Security
 
 PCB production uses two trusted atomic boundaries: creating a specialized Draft Work Order, then finishing that Work Order. Creating the Draft never changes Inventory and never creates a PcbProductionRun.
 
-The `/pcb/:pcbCardId/produce` workflow requires an active Admin or `pcb.produce`; selecting an optional Project does not additionally require `projects.view` or grant general Project reads. A trusted narrow choice read for this workflow may expose only Project ID, Name, and Status to an active Admin or `pcb.produce` user. General Project RLS and `/projects` access remain unchanged. New production planning may link only a Project currently in `planned`, `in_progress`, or `on_hold`; the trusted creation operation re-checks its existence and status. The Project is optional traceability only, does not create a new commitment, and finishing PCB production never automatically completes it.
+The locally implemented `/pcb/:pcbCardId/produce` workflow requires an active Admin or `pcb.produce`. New calculator-initiated production has no Project picker/query or Project association; the trusted creation boundary rejects a non-null Project for a new request. Historical Project-linked contexts and exact request replays remain readable and finishable without rewriting their links. Finishing that production never automatically completes a linked Project. General Project RLS and `/projects` authorization remain unchanged.
 
-Creation requires only an active Admin or `pcb.produce`, not `work_orders.create`. It freezes the exact PcbCard, active BOM version, positive bigint planned quantity, optional Project, auto-generated description, and BOM-derived WorkOrderItems behind a durable unique client request UUID. Each BOM-derived row has authoritative `pcb_bom` origin and cannot be edited, deleted, replaced, or forged through a normal/manual path. An active Admin or user with `work_orders.edit_draft` may later manage a separate complete set of `manual` supplemental rows through a narrow trusted operation; `pcb.produce` alone does not grant that authority. The frozen header and production context remain unavailable to generic Draft editing. After creation, normal Work Order view, finish, and delete-Draft permissions apply; `pcb.produce` grants no broad Work Order access. The legacy `produce_pcb(uuid,text,uuid)` immediate-stock RPC is not executable by normal authenticated clients.
+Creation requires only an active Admin or `pcb.produce`, not `work_orders.create`. It freezes the exact PcbCard, active BOM version, positive bigint planned quantity, General Stock context, auto-generated description, and BOM-derived WorkOrderItems behind a durable unique client request UUID. Each BOM-derived row has authoritative `pcb_bom` origin and cannot be edited, deleted, replaced, or forged through a normal/manual path. An active Admin or user with `work_orders.edit_draft` may later manage a separate complete set of `manual` supplemental rows through a narrow trusted operation; `pcb.produce` alone does not grant that authority. The frozen header and production context remain unavailable to generic Draft editing. After creation, normal Work Order view, finish, and delete-Draft permissions apply; `pcb.produce` grants no broad Work Order access. The legacy `produce_pcb(uuid,text,uuid)` immediate-stock RPC is not executable by normal authenticated clients.
 
 PCB stock sufficiency uses current physical `InventoryBalance.quantity`, not Available after Commitments. Project commitments are a planning read model, not a physical-stock reservation.
 
@@ -321,7 +329,7 @@ At Work Order Finish, require an active Admin or `work_orders.finish` and, befor
 - validate sufficient stock for the combined frozen-BOM plus supplemental quantity of every input Product
 - prevent race-condition overspending
 
-Atomic Finish consumes every frozen BOM row plus every persisted supplemental row. When both origins reference the same Product, validation, locking, and consumption use their exact combined quantity and one canonical input movement. Output stock increases only by actual-good quantity. Actual good zero is valid, still consumes every input, and creates no output movement. Atomic success creates:
+Atomic Finish consumes every frozen BOM row plus every persisted supplemental row. When both origins reference the same Product, validation and locking use their exact combined quantity. Consumption follows Raw Materials FIFO, Customs FIFO, then Finished Goods FIFO, recording each consumed Product/warehouse and source lot. Output stock is credited only to Finished Goods and only by actual-good quantity. Actual good zero is valid, still consumes every input, and creates no output movement. Atomic success creates:
 
 - PcbProductionRun
 - input Inventory deductions
@@ -373,7 +381,7 @@ Barcode scan input:
 - trusted Product resolution requires an active Admin or `work_orders.edit_draft`
   and an existing Draft Work Order; it does not additionally require
   `work_orders.view` or `inventory.view`
-- validate the exact seven-digit Serial Number format on the backend without
+- validate exact three- or seven-digit Serial Number text on the backend without
   trimming or numeric conversion
 - resolve only an existing active Product by unique Product Serial Number;
   `component` and `pcb_finished_good` are eligible
@@ -533,7 +541,7 @@ Scanning a valid barcode:
 Validate scanner input:
 
 - exactly supported format
-- current expected 7-digit value
+- exact 3- or 7-digit text, without numeric conversion
 - Product exists
 - Product is eligible for the requested workflow
 
@@ -545,12 +553,15 @@ Do not execute arbitrary commands/URLs from scanned barcode content.
 
 Serial Number / Šifra:
 
-- allocated only by trusted database/backend
+- ordinary Product/import serials are allocated only by trusted database/backend
+- approved Finished Product Calculator serials are supplied as exact three-digit text
+  to a trusted, concurrency-safe creation boundary
 - unique constraint enforced in database
-- never accepted as a user-chosen identifier
+- accepted from a user only for the approved three-digit calculator creation flow
 - never reused
 
-Use a concurrency-safe sequence.
+Use a concurrency-safe sequence for ordinary seven-digit Products and a concurrency-safe
+global uniqueness constraint for both three- and seven-digit identities.
 
 Format display must not weaken uniqueness.
 
@@ -623,7 +634,7 @@ Resolution metadata must remain equivalent to lifecycle state: `status = 'resolv
 - creates the required immutable Product and Procurement-link AuditLog history plus ProductSupplier history only when a relationship is created
 - commits Product creation, optional ProductSupplier creation, Procurement linking, and all required audits atomically
 
-Failed or denied attempts persist no Product, ProductSupplier, Procurement link, or audit. A consumed Serial sequence value need not be reused after rollback. Normal Product creation still initializes one zero InventoryBalance through the existing schema mechanism, but this workflow creates no InventoryMovement and never adds delivered Procurement quantity to stock. Physical stock remains a separate Admin Inventory workflow.
+Failed or denied attempts persist no Product, ProductSupplier, Procurement link, or audit. A consumed ordinary Product Serial sequence value is not reused after rollback. Product creation initializes three zero InventoryBalance rows, one per warehouse, but this workflow creates no InventoryMovement and never adds delivered Procurement quantity to stock. Physical stock remains a separate authorized warehouse Inventory workflow.
 
 ---
 
@@ -670,9 +681,12 @@ Only physical consumption for the same Project and Product qualifies: finished W
 Order deductions and, where applicable, Project-linked PCB production input
 deductions. Inventory additions/output movements, unrelated manual adjustments, and
 another Project's consumption do not qualify. Raw PCB inputs and later finished-PCB
-consumption must not be double-counted. Available after Commitments is physical
-InventoryBalance quantity minus the summed commitment; it may be negative and must not
-be clamped or used as a substitute for authoritative physical-stock checks.
+consumption must not be double-counted. Available after Commitments is eligible
+physical stock (Raw Materials plus Customs Warehouse, excluding Finished Goods) minus
+the summed commitment; it may be negative and must not be clamped or used as a
+substitute for authoritative physical-stock checks. A combined eligible-stock read is
+shown only to an active Admin or a caller authorized to view both eligible warehouses;
+one warehouse permission must not leak the other warehouse through the aggregate.
 
 One Project may own multiple Work Orders. Their generic Draft materials are truthful
 proposed actual-use records and may fall outside or exceed the Project plan; Project
@@ -1242,3 +1256,70 @@ It exposes only Product ID/name/Serial Number, opening or resolution, the immuta
 global deficit snapshot, and baseline-detection state; it does not expose recipient
 identities, Inventory internals, or unrelated Product fields. Increased/decreased
 events remain internal history and never become Dashboard notifications.
+
+## Warehouse and Finished Product Calculator security
+
+Tasks 001B–001C establish warehouse identity, composite integrity, independent
+permissions, exact-warehouse trusted reads/adjustments, and two-sided transfer
+authorization. Inventory tabs, calculator creation, warehouse-aware production, and
+Raw-plus-Customs Project availability have their database changes deployed to DEV
+through migration 142; the frontend remains local. Read-only browser acceptance is
+complete, while controlled Stage 2 mutation and non-Admin acceptance remain pending.
+
+- Trusted listing combines the complete escaped search predicate with membership:
+  Raw retains compatibility visibility; Finished Goods requires a Card output link
+  (including archived/zero-stock outputs); Customs requires positive quantity or
+  committed movement history. Search cannot bypass membership.
+- Membership grants no authorization and does not restrict existing trusted detail,
+  adjustment, transfer or production operations. Calculator reads retain active Admin
+  or `pcb.view` and the narrow projection, not general warehouse access. Output stock
+  is Finished Goods; BOM input/picker stock stays Raw. The three read RPCs retain
+  STABLE SECURITY DEFINER, empty search_path and unchanged ACLs/RLS.
+- Inventory remains one trusted ledger, but balances, movements, and source lots become
+  scoped to one of `raw_materials`, `finished_goods`, or `customs`.
+- Active Admins retain the canonical bypass. Non-Admins require the exact warehouse
+  permission for every trusted read or adjustment; hiding a tab is never authorization.
+- The independently delegable permissions are
+  `inventory.raw_materials.view`, `inventory.raw_materials.adjust`,
+  `inventory.finished_goods.view`, `inventory.finished_goods.adjust`,
+  `inventory.customs.view`, and `inventory.customs.adjust`. Access to one warehouse
+  grants no access to another.
+- Existing `inventory.view` holders receive an explicit Raw Materials view grant during
+  migration. `inventory.view` must not become an implicit all-warehouse capability.
+  Product create/edit permissions remain independent.
+- Manual Add, Remove, and Correction keep their existing semantics but require the
+  target warehouse's adjustment permission and trusted backend enforcement.
+- The Inventory Add source-choice read requires active Admin or the exact target
+  warehouse's `adjust` permission. It returns only active adjustment-source fields and
+  does not broaden Supplier or ProductSupplier table access; the legacy source-choice
+  RPC remains Admin-only.
+- Warehouse Product detail requires active Admin or the exact target warehouse's
+  `view` permission. It returns global Product/Brand detail plus only that warehouse's
+  balance and separate balance timestamp, without granting direct Product/Brand access
+  or leaking another warehouse's stock.
+- Transfers require matching adjustment permission for both distinct warehouses,
+  re-check authorization under the trusted transaction, lock balances in stable
+  warehouse-ID order, preserve FIFO provenance, and commit paired movements atomically.
+- Production deductions and output credit remain one atomic Work Order Finish. Every
+  deduction records its actual warehouse; mixed-source consumption must neither
+  duplicate nor omit stock changes. Output is credited only after successful Finish.
+- Product identities and Serial Numbers remain global across warehouses. New Finished
+  Product Calculator entries use a caller-supplied exact three-digit text Serial Number;
+  ordinary Products/imports retain trusted generated seven-digit serials. Authorized
+  lookup and scanning accept only exact three- or seven-digit identities.
+- Customs stock may be production-eligible without a Raw Materials transfer, but this
+  software rule is not evidence of legal clearance. Mandatory declarations, release
+  evidence, validation, and responsible-actor requirements remain a compliance decision.
+- Automatic production allocation is Raw Materials FIFO, Customs FIFO, then Finished
+  Goods FIFO. Work Order Finish uses its existing trusted permission and does not grant
+  general warehouse adjustment authority. Per-warehouse quantities stay behind trusted
+  production/read projections.
+- Project availability aggregates Raw Materials plus Customs only when the caller may
+  view both warehouses. Finished Goods is excluded, and no warehouse breakdown is
+  exposed through Project planning. Shortage reconciliation remains trusted, deferred,
+  final-state-only, and inaccessible to browser roles.
+- The migration-142 correction, deployed to DEV, queues qualifying negative Project-linked
+  Work Order/PCB input movements from every warehouse, without granting browser
+  access to movements, the queue, episodes, or events. It reuses the private
+  SECURITY DEFINER queue helper with an empty search path; existing RPC permissions,
+  Raw-plus-Customs availability, and notification eligibility are unchanged.

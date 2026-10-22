@@ -50,7 +50,7 @@ describe("WorkOrderBarcodeScanInput", () => {
       expect(onScan).not.toHaveBeenCalled();
       expect(input).toHaveValue(value);
       expect(screen.getByRole("alert")).toHaveTextContent(
-        "Enter a 7-digit Serial Number.",
+        "Enter a 3- or 7-digit Serial Number.",
       );
     },
   );
@@ -59,7 +59,7 @@ describe("WorkOrderBarcodeScanInput", () => {
     const onScan = vi.fn();
     render(<WorkOrderBarcodeScanInput onScan={onScan} />);
     const input = screen.getByRole("textbox", { name: "Scan Product Barcode" });
-    fireEvent.change(input, { target: { value: "123" } });
+    fireEvent.change(input, { target: { value: "1234" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     expect(screen.getByRole("alert")).toBeInTheDocument();
 
@@ -69,6 +69,16 @@ describe("WorkOrderBarcodeScanInput", () => {
 
     expect(onScan).toHaveBeenCalledExactlyOnceWith("7654321");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it.each(["000", "007", "123"])("preserves exact three-digit Serial %s", (serial) => {
+    const onScan = vi.fn();
+    render(<WorkOrderBarcodeScanInput onScan={onScan} />);
+    const input = screen.getByRole("textbox", { name: "Scan Product Barcode" });
+    fireEvent.change(input, { target: { value: serial } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(onScan).toHaveBeenCalledExactlyOnceWith(serial);
+    expect(input).toHaveValue("");
   });
 
   it("does not submit an enclosing form when scanner Enter is handled", () => {

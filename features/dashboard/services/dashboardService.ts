@@ -298,7 +298,7 @@ function parseProcurement(
       !isUnsignedIntegerText(item.remaining_quantity) ||
       (item.product_serial_number !== null && (
         typeof item.product_serial_number !== "string" ||
-        !/^\d{7}$/.test(item.product_serial_number)
+        !/^(?:[0-9]{3}|[0-9]{7})$/.test(item.product_serial_number)
       )) || !isTimestamp(item.created_at) || !isTimestamp(item.updated_at)) {
       return undefined;
     }
@@ -336,7 +336,7 @@ function parseInventory(
     if (!isRecord(item) || !hasExactKeys(item, [
       "product_id", "serial_number", "name", "category", "quantity", "updated_at",
     ]) || !isUuid(item.product_id) || typeof item.serial_number !== "string" ||
-      !/^\d{7}$/.test(item.serial_number) || !isTrimmedNonblank(item.name) ||
+      !/^(?:[0-9]{3}|[0-9]{7})$/.test(item.serial_number) || !isTrimmedNonblank(item.name) ||
       !isTrimmedNonblank(item.category) || !isUnsignedIntegerText(item.quantity) ||
       !isTimestamp(item.updated_at)) return undefined;
     recent.push({

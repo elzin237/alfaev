@@ -6,17 +6,22 @@ import type { InventoryCommitment } from "../services/inventoryCommitmentService
 
 export interface ProductListProps {
   products: ProductListItem[];
+  warehouseCode?: string;
   commitments?: ReadonlyMap<string, InventoryCommitment>;
+  showCommitments?: boolean;
 }
 
-function ProductList({ products, commitments }: ProductListProps) {
+function ProductList({ products, warehouseCode, commitments, showCommitments = true }: ProductListProps) {
+  const headings = ["Serial Number", "Name", "Category", "Brand", "Physical Quantity"];
+  if (showCommitments) headings.push("Committed to Projects", "Available after Commitments");
+  headings.push("Status");
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-zinc-200">
           <thead className="bg-zinc-50">
             <tr>
-              {["Serial Number", "Name", "Category", "Brand", "Physical Quantity", "Committed to Projects", "Available after Commitments", "Status"].map(
+              {headings.map(
                 (heading) => (
                   <th
                     key={heading}
@@ -39,7 +44,7 @@ function ProductList({ products, commitments }: ProductListProps) {
                 </th>
                 <td className="px-5 py-4 font-semibold text-zinc-900">
                   <Link
-                    to={`/inventory/${product.id}`}
+                    to={`/inventory/${product.id}${warehouseCode ? `?warehouse=${warehouseCode}` : ""}`}
                     className="text-zinc-900 underline-offset-4 transition hover:text-red-600 hover:underline focus:outline-none focus:ring-2 focus:ring-red-200"
                   >
                     {product.name}
@@ -47,9 +52,9 @@ function ProductList({ products, commitments }: ProductListProps) {
                 </td>
                 <td className="px-5 py-4">{product.category}</td>
                 <td className="px-5 py-4">{product.brandName ?? "—"}</td>
-                <td className="whitespace-nowrap px-5 py-4 tabular-nums">{commitment?.physicalQuantity.toString() ?? product.quantity}</td>
-                <td className="whitespace-nowrap px-5 py-4 tabular-nums">{commitment?.committedToProjects.toString() ?? "Unavailable"}</td>
-                <td className="whitespace-nowrap px-5 py-4 tabular-nums">
+                <td className="whitespace-nowrap px-5 py-4 tabular-nums">{product.quantity}</td>
+                {showCommitments && <td className="whitespace-nowrap px-5 py-4 tabular-nums">{commitment?.committedToProjects.toString() ?? "Unavailable"}</td>}
+                {showCommitments && <td className="whitespace-nowrap px-5 py-4 tabular-nums">
                   {commitment ? (
                     <span className={commitment.availableAfterCommitments < 0n ? "font-semibold text-red-700" : undefined}>
                       {commitment.availableAfterCommitments.toString()}
@@ -58,7 +63,7 @@ function ProductList({ products, commitments }: ProductListProps) {
                         : ""}
                     </span>
                   ) : "Unavailable"}
-                </td>
+                </td>}
                 <td className="whitespace-nowrap px-5 py-4">
                   <StatusBadge
                     label={product.isActive ? "Active" : "Archived"}

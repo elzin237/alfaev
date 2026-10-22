@@ -14,8 +14,7 @@ import {
 } from "../pcbQueryKeys";
 
 const cardId = "11111111-1111-4111-8111-111111111111";
-const projectId = "22222222-2222-4222-8222-222222222222";
-const submission = { pcbCardId: cardId, plannedQuantity: "5", projectId: null,
+const submission = { pcbCardId: cardId, plannedQuantity: "5",
   creationRequestId: "33333333-3333-4333-8333-333333333333" };
 
 function setup() {
@@ -55,7 +54,7 @@ describe("PCB production mutation and cache", () => {
     expect(mocks.producePcb).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes stale precheck on failure, choices on Project or unknown outcome, and never invalidates success-only keys", async () => {
+  it("refreshes only the source precheck on failure and never invalidates removed Project choices", async () => {
     const { result, client } = setup();
     const invalidate = vi.spyOn(client, "invalidateQueries");
     for (const code of ["insufficient_inventory", "project_unavailable", "unknown_outcome"]) {
@@ -64,11 +63,7 @@ describe("PCB production mutation and cache", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbProductionSourceQueryKey("profile-1", cardId), exact: true });
       expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbBomHistoryQueryKey("profile-1", cardId), exact: true });
       expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionHistoryQueryKey("profile-1", cardId), exact: true });
-      if (code !== "insufficient_inventory") {
-        expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
-      } else {
-        expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
-      }
+      expect(invalidate).not.toHaveBeenCalledWith({ queryKey: pcbProductionProjectsQueryKey("profile-1"), exact: true });
       invalidate.mockClear();
     }
   });

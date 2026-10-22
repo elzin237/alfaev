@@ -51,7 +51,10 @@ interface MovementRow extends QueryResultRow {
   quantity_delta: string;
   source_id: string | null;
   source_type: string | null;
+  warehouse_id: string;
 }
+
+const rawMaterialsWarehouseId = "10000000-0000-4000-8000-000000000001";
 
 interface OperationResult {
   code?: string;
@@ -414,8 +417,9 @@ async function manualAdjust(
 ): Promise<OperationResult> {
   return await runAuthenticated(pool, actor, async (database) => {
     const currentQuantity = BigInt((await database.query<{ quantity: string }>(
-      "select quantity::text as quantity from public.inventory_balances where product_id = $1::uuid",
-      [productId],
+      `select quantity::text as quantity from public.inventory_balances
+       where product_id = $1::uuid and warehouse_id = $2::uuid`,
+      [productId, rawMaterialsWarehouseId],
     )).rows[0]?.quantity ?? "0");
     const createsStock = type === "add" ||
       (type === "correction" && BigInt(quantity) > currentQuantity);
@@ -426,11 +430,12 @@ async function manualAdjust(
       : null;
     await setActor(database, actor);
     await database.query(
-      `select * from public.manual_adjust_inventory(
-         $1::uuid, $2::text, $3::bigint, $4::text, $5::uuid
+      `select * from public.adjust_inventory_warehouse(
+         $1::uuid, $2::uuid, $3::text, $4::bigint, $5::text, $6::uuid
        )`,
       [
         productId,
+        rawMaterialsWarehouseId,
         type,
         quantity,
         `Task 148 committed ${type}`,
@@ -445,8 +450,8 @@ async function movementsFor(
   productId: string,
 ): Promise<MovementRow[]> {
   return (await pool.query<MovementRow>(
-    `select id, movement_type, quantity_delta::text, quantity_before::text,
-            quantity_after::text, source_type, source_id
+    `select id, warehouse_id, movement_type, quantity_delta::text,
+            quantity_before::text, quantity_after::text, source_type, source_id
      from public.inventory_movements
      where product_id = $1::uuid
        and reason is distinct from 'Task 148 committed initial supplier stock'
@@ -462,16 +467,24 @@ async function expectLedger(
   expectedFinal?: bigint,
 ): Promise<MovementRow[]> {
   const movements = await movementsFor(pool, productId);
-  let current = initialQuantity;
+  const warehouseQuantities = new Map<string, bigint>([
+    [rawMaterialsWarehouseId, initialQuantity],
+  ]);
   for (const movement of movements) {
+    const current = warehouseQuantities.get(movement.warehouse_id) ?? 0n;
     expect(BigInt(movement.quantity_before)).toBe(current);
-    current += BigInt(movement.quantity_delta);
-    expect(BigInt(movement.quantity_after)).toBe(current);
-    expect(current).toBeGreaterThanOrEqual(0n);
+    const next = current + BigInt(movement.quantity_delta);
+    expect(BigInt(movement.quantity_after)).toBe(next);
+    expect(next).toBeGreaterThanOrEqual(0n);
+    warehouseQuantities.set(movement.warehouse_id, next);
   }
+  const current = [...warehouseQuantities.values()].reduce(
+    (total, quantity) => total + quantity,
+    0n,
+  );
   if (expectedFinal !== undefined) expect(current).toBe(expectedFinal);
   const balance = (await pool.query<{ quantity: string }>(
-    `select quantity::text as quantity
+    `select pg_catalog.sum(quantity)::text as quantity
      from public.inventory_balances where product_id = $1::uuid`,
     [productId],
   )).rows[0]?.quantity;
@@ -539,8 +552,8 @@ describe.skipIf(!enabled)(
           throw new Error("Task 148 local runner is not targeting loopback Supabase");
         }
         pool = new Pool({ connectionString: databaseUrl, max: 15 });
-        expectedLatest = "20261013113000";
-        expectedMigrationCount = "119";
+        expectedLatest = "20261022150000";
+        expectedMigrationCount = "142";
       } else {
         const accessToken = (
           process.env.SUPABASE_ACCESS_TOKEN ??
@@ -598,6 +611,19 @@ describe.skipIf(!enabled)(
         database.query("set role postgres")
       ));
       initializedConnections.forEach((database) => database.release());
+      // Fail closed before creating any Auth, Profile, Storage, or business fixtures.
+      expect((await pool.query<{
+        migration_count: string;
+        latest: string;
+      }>(
+        `select pg_catalog.count(*)::text as migration_count,
+                pg_catalog.max(version) as latest
+         from supabase_migrations.schema_migrations`,
+      )).rows).toEqual([{
+        latest: expectedLatest,
+        migration_count: expectedMigrationCount,
+      }]);
+
       storage = createClient(
         supabaseUrl,
         serviceKey,
@@ -623,18 +649,6 @@ describe.skipIf(!enabled)(
       )).rows[0]?.id;
       if (!profileId) throw new Error("Task 148 actor Profile creation failed");
       actor = { authUserId: data.user.id, profileId };
-
-      expect((await pool.query<{
-        migration_count: string;
-        latest: string;
-      }>(
-        `select pg_catalog.count(*)::text as migration_count,
-                pg_catalog.max(version) as latest
-         from supabase_migrations.schema_migrations`,
-      )).rows).toEqual([{
-        latest: expectedLatest,
-        migration_count: expectedMigrationCount,
-      }]);
     }, 120_000);
 
     afterAll(async () => {

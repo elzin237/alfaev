@@ -5,8 +5,8 @@ import { useInventorySourceLots } from "../hooks/useInventorySources";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" });
 
-export default function SupplierStockHistorySection({ productId }: { productId: string }) {
-  const query = useInventorySourceLots(productId);
+export default function SupplierStockHistorySection({ productId, warehouseId = "10000000-0000-4000-8000-000000000001" }: { productId: string; warehouseId?: string }) {
+  const query = useInventorySourceLots(productId, warehouseId);
   const lots = query.data?.ok ? query.data.value : [];
   return (
     <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">

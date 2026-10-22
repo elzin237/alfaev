@@ -5,10 +5,9 @@ vi.mock("../../../lib/supabase/client", () => ({ supabase: { rpc: mocks.rpc } })
 import { producePcb } from "./pcbProductionService";
 
 const pcbCardId = "11111111-1111-4111-8111-111111111111";
-const projectId = "22222222-2222-4222-8222-222222222222";
 const workOrderId = "33333333-3333-4333-8333-333333333333";
 const creationRequestId = "44444444-4444-4444-8444-444444444444";
-const input = { pcbCardId, plannedQuantity: "9007199254740993", projectId: null, creationRequestId };
+const input = { pcbCardId, plannedQuantity: "9007199254740993", creationRequestId };
 beforeEach(() => vi.clearAllMocks());
 
 describe("PCB production Work Order creation service", () => {
@@ -45,11 +44,11 @@ describe("PCB production Work Order creation service", () => {
     expect(await producePcb(input)).toMatchObject({ ok: false, error: { code: "unknown_outcome" } });
   });
 
-  it("preserves leading-zero decimal text for authoritative normalization", async () => {
+  it("preserves leading-zero decimal text and always submits a null Project", async () => {
     mocks.rpc.mockResolvedValue({ data: [{ work_order_id: workOrderId, work_order_number: "RN-2026-0001" }], error: null });
-    await producePcb({ ...input, plannedQuantity: "005", projectId });
+    await producePcb({ ...input, plannedQuantity: "005" });
     expect(mocks.rpc).toHaveBeenCalledWith("create_pcb_production_work_order", expect.objectContaining({
-      p_planned_quantity: "005", p_project_id: projectId,
+      p_planned_quantity: "005", p_project_id: null,
     }));
   });
 

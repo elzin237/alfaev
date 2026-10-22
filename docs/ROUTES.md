@@ -4,6 +4,14 @@ Status: Canonical route map v1
 Purpose: Define the approved application routes, access rules, and route-level behavior for AlfaEV.  
 Rule: Routes must reflect the locked product scope only. Do not preserve unused placeholder routes.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented. Existing route identities are retained.
+
 ---
 
 # 1. Routing Principles
@@ -310,7 +318,7 @@ Permission-based actions:
 
 ---
 
-# 9. PCB Cards
+# 9. Finished Product Calculator
 
 ## `/pcb`
 
@@ -359,7 +367,7 @@ Purpose:
 
 Input:
 - planned production quantity
-- optional Project
+- no Project selector or Project association for new calculator-initiated production
 
 Behavior:
 1. load active BOM version
@@ -369,12 +377,12 @@ Behavior:
 5. on confirm, idempotently create a frozen PCB-production Draft Work Order
 6. change no Inventory and create no production run
 7. after creation, use `/work-orders/:workOrderId` only when the actor has `work_orders.view`
-8. Work Order Finish later consumes planned BOM inputs and adds actual-good output atomically
+8. Work Order Finish later consumes saved inputs in Raw Materials → Customs → Finished Goods order and credits actual-good output to Finished Goods atomically
 
 Access:
 - Admin or `pcb.produce`
 
-The optional Project picker does not require `projects.view` or grant `/projects` access. Its narrow trusted choices contain only ID, Name, and Status for open Projects (`planned`, `in_progress`, `on_hold`); the later production operation re-checks eligibility. Precheck Available is physical `InventoryBalance.quantity`, not Available after Commitments.
+The locally implemented Produce route makes no Project-choice query. Historical Project-linked production remains readable and finishable through its existing Work Order route without rewriting the Project association or broadening Project permissions. Precheck Available is the trusted combined production-eligible physical quantity across Raw Materials, Customs, and Finished Goods, not Available after Commitments. Project shortage availability separately uses Raw Materials plus Customs only.
 
 ---
 
@@ -701,3 +709,26 @@ The route map is correct when:
 - detail routes use stable IDs
 - removed placeholder routes no longer exist
 - direct URL navigation cannot bypass permissions
+
+---
+
+# 20. Locally implemented warehouse/calculator route behavior
+
+Tasks 001B–001G implement warehouse/calculator behavior locally without a new top-level
+route. The matching database migrations 136–142 are deployed to DEV (142/142), with
+`finish-work-order` v6 ACTIVE. The frontend remains local; read-only browser acceptance
+is complete, while controlled Stage 2 mutation and non-Admin acceptance remain pending.
+
+- `/inventory` remains the Inventory route and gains Raw Materials, Finished Goods, and
+  Customs Warehouse tabs. The route may render when at least one corresponding
+  warehouse view permission is effective, but it must query and display only authorized
+  warehouses. Existing Product master actions keep their own permissions.
+- `/inventory/:productId` remains the stable Product detail route. Warehouse-scoped
+  balances, history, lots, and adjustments shown there must obey the same independent
+  warehouse permissions.
+- `/pcb`, `/pcb/:pcbCardId`, and `/pcb/:pcbCardId/produce` remain unchanged as route
+  identities while their user-visible module name becomes Finished Product Calculator.
+- The locally implemented Produce route has no Project input and creates no new Project route or
+  association. Historical Project-linked production and routes remain readable.
+- No route guard substitutes for trusted warehouse authorization, and direct URLs must
+  not expose inaccessible warehouse data.

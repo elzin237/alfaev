@@ -8,6 +8,7 @@ import type { InventoryMovement } from "../services/inventoryMovementService";
 
 export interface InventoryHistorySectionProps {
   productId: string;
+  warehouseId?: string;
 }
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -37,8 +38,8 @@ function formatContext(movement: InventoryMovement): string {
   return context.length > 0 ? context.join(" · ") : "—";
 }
 
-function InventoryHistorySection({ productId }: InventoryHistorySectionProps) {
-  const movementsQuery = useInventoryMovements(productId);
+function InventoryHistorySection({ productId, warehouseId = "10000000-0000-4000-8000-000000000001" }: InventoryHistorySectionProps) {
+  const movementsQuery = useInventoryMovements(productId, warehouseId);
   let content: ReactNode;
 
   if (movementsQuery.isPending) {

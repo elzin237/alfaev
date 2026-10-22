@@ -11,14 +11,14 @@ import {
   updateBrand,
 } from "../services/brandService";
 
-export function useBrandManagement() {
+export function useBrandManagement(enabled = true) {
   const { session, profile, isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const listQueryKey = brandListQueryKey(profile?.id);
   const brandsQuery = useQuery({
     queryKey: listQueryKey,
     queryFn: listBrands,
-    enabled: Boolean(profile?.id),
+    enabled: Boolean(enabled && profile?.id),
     staleTime: 60_000,
   });
   const managementPermissionQuery = useQuery({

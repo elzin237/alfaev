@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe("Inventory routes", () => {
-  it("wires Product detail behind inventory.view", async () => {
+  it("wires Product detail behind any warehouse-view permission", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -55,7 +55,9 @@ describe("Inventory routes", () => {
       name: "Product detail route content",
     })).toBeInTheDocument();
     await waitFor(() => expect(routeMocks.hasPermission).toHaveBeenCalledWith(
-      "inventory.view",
+      "inventory.raw_materials.view",
     ));
+    expect(routeMocks.hasPermission).toHaveBeenCalledWith("inventory.finished_goods.view");
+    expect(routeMocks.hasPermission).toHaveBeenCalledWith("inventory.customs.view");
   });
 });

@@ -1,4 +1,4 @@
-const PRODUCT_SERIAL_PATTERN = /^[0-9]{7}$/;
+const PRODUCT_SERIAL_PATTERN = /^(?:[0-9]{3}|[0-9]{7})$/;
 
 const CODE128_PATTERNS = [
   "212222", "222122", "222221", "121223", "121322", "131222",
@@ -62,7 +62,7 @@ export function encodeProductSerialCode128(
     !PRODUCT_SERIAL_PATTERN.test(serialNumber)
   ) {
     throw new RangeError(
-      "Product Serial Number must contain exactly 7 ASCII digits.",
+      "Product Serial Number must contain exactly 3 or 7 ASCII digits.",
     );
   }
 

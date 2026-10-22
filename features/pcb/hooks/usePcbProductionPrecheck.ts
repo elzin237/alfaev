@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
-import { pcbProductionProjectsQueryKey, pcbProductionSourceQueryKey } from "../pcbQueryKeys";
+import { pcbProductionSourceQueryKey } from "../pcbQueryKeys";
 import { isPcbCardId } from "../services/pcbBomService";
-import { getPcbProductionPrecheck, listPcbProductionProjectChoices } from "../services/pcbProductionPrecheckService";
+import { getPcbProductionPrecheck } from "../services/pcbProductionPrecheckService";
 
 export function usePcbProductionPrecheck(cardId: string) {
   const { profile } = useAuth();
@@ -13,11 +13,5 @@ export function usePcbProductionPrecheck(cardId: string) {
     enabled,
     staleTime: 60_000,
   });
-  const projectsQuery = useQuery({
-    queryKey: pcbProductionProjectsQueryKey(profile?.id),
-    queryFn: listPcbProductionProjectChoices,
-    enabled,
-    staleTime: 60_000,
-  });
-  return { sourceQuery, projectsQuery };
+  return { sourceQuery };
 }

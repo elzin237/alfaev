@@ -4,6 +4,14 @@ Status: Canonical feature scope v1
 Purpose: Define the approved AlfaEV product modules and their required behavior.  
 Rule: Do not add placeholder or speculative modules that are not listed here.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.
+
 ---
 
 ## 1. Product Purpose
@@ -35,7 +43,7 @@ Final main navigation:
 3. Nabavka
 4. Dobavljači
 5. Skladište
-6. PCB Cards
+6. Finished Product Calculator
 7. Radni Nalozi
 8. Dokumentacija
 9. Osnovna sredstva
@@ -134,6 +142,9 @@ Project must never reduce another Project's commitment. Completed and Cancelled
 Projects contribute zero. Reopening a Completed Project to `in_progress` makes that
 Project's own still-outstanding requirement contribute again after subtracting only
 that Project's own prior consumption.
+
+Available after Commitments uses Raw Materials plus Customs Warehouse stock minus that
+shared commitment. Finished Goods stock is excluded from Project availability in V1.
 
 Qualifying actual consumption includes finished Work Order deductions linked to the
 same Project and Product and, where applicable, Project-linked PCB production input
@@ -388,7 +399,7 @@ Products/components may reference a Brand.
 
 Inventory tracks Alfa Proteh products/components and stock.
 
-Authorized users can bulk-create Components from a canonical `.xlsx` template containing only required Name, required free-text Category, and optional existing active Brand. Each valid row creates a distinct `component` with its own server-allocated Serial Number and zero initial InventoryBalance; no Supplier/Catalog Number or stock movement is imported. An explicit preview and confirmation precede one all-or-nothing trusted import, and the Product list refreshes after success. The file is not permanently stored for MVP.
+Authorized users can bulk-create Components from a canonical `.xlsx` template containing only required Name, required free-text Category, and optional existing active Brand. Each valid row creates a distinct `component` with its own server-allocated seven-digit Serial Number and three zero InventoryBalance rows, one per warehouse; no Supplier/Catalog Number or stock movement is imported. An explicit preview and confirmation precede one all-or-nothing trusted import, and the Product list refreshes after success. The file is not permanently stored for MVP.
 
 ### Product/component fields
 
@@ -404,16 +415,15 @@ At minimum:
 
 Locked rules:
 
-- generated automatically by AlfaEV
-- unique across AlfaEV
-- 7-digit sequential format
-- starts at `0000001`
-- increments sequentially
+- current ordinary Product/import values are generated automatically by AlfaEV in
+  7-digit sequential format, starting at `0000001`
+- approved Finished Product Calculator values are manually supplied exact 3-digit text
+- exact 3- or 7-digit format
+- globally unique across AlfaEV, warehouses, and archived Product identities
 - never reused
 - used as the barcode value
 
-Stored/barcode format:
-`0000001`
+Stored/barcode examples: `007`, `0000001`.
 
 The UI may optionally display the value with spaces for readability.
 
@@ -477,9 +487,9 @@ InventoryMovement rows and do not reserve or deduct physical stock.
 
 ---
 
-## 8. PCB Cards
+## 8. Finished Product Calculator
 
-PCB Cards has two major responsibilities:
+Finished Product Calculator has two major responsibilities:
 
 1. define PCB card types and their BOMs
 2. perform PCB production
@@ -505,11 +515,13 @@ The page must show a list of all PCB card definitions.
 
 ### PCB production
 
-User chooses:
+In the locally implemented production flow, the user chooses:
 
-- PCB card
+- Finished Product Calculator definition
 - planned production quantity
-- optional Project
+
+New production has no Project selection, Project-choice query, or Project association.
+Historical Project-linked production remains preserved, readable, and finishable.
 
 AlfaEV calculates the total required quantity of every BOM component.
 
@@ -529,14 +541,14 @@ If stock is insufficient, show:
 
 Current shortage is informative while creating the Draft; it does not reserve stock. Production must not Finish if any required component is insufficient at Finish time.
 
-Creation first freezes the PCB Card, active BOM, planned quantity, optional Project, generated description, and BOM-derived material rows in an idempotent specialized Draft Work Order without changing Inventory. Those rows remain immutable. While Draft, an Admin or `work_orders.edit_draft` user may manage a separate supplemental material set without changing the frozen plan or creating Project-planning/Inventory effects.
+Creation first freezes the calculator definition, active BOM, planned quantity, General Stock context, generated description, and BOM-derived material rows in an idempotent specialized Draft Work Order without changing Inventory. Those rows remain immutable. While Draft, an Admin or `work_orders.edit_draft` user may manage a separate supplemental material set without changing the frozen plan or creating Project-planning/Inventory effects.
 
 At Finish the user enters actual successfully completed quantity from zero through planned. If stock is sufficient:
 
 1. complete the production run
 2. record actual-good quantity and the exact frozen BOM version used
-3. deduct BOM components for the planned quantity plus every saved supplemental material quantity; aggregate a Product that appears in both origins
-4. add only actual-good PCB cards to finished-goods Inventory stock
+3. deduct BOM components for the planned quantity plus every saved supplemental material quantity; aggregate a Product that appears in both origins and consume Raw Materials FIFO, then Customs FIFO, then Finished Goods FIFO
+4. credit only actual-good output to Finished Goods Warehouse Inventory stock
 5. record Inventory movements for both component consumption and finished-goods output
 6. record actor and timestamp
 7. create audit history
@@ -545,14 +557,14 @@ The Finish operation must be atomic: component deductions, actual output, produc
 
 Produced PCB cards are real stock-tracked finished goods. Example: producing 20 E55 cards results in `+20 E55` finished-goods inventory in addition to deducting the required BOM components.
 
-### Optional Project link
+### Historical Project links
 
-Project is optional traceability on a PCB production Work Order/run and Finish never automatically completes it.
+New calculator production has no Project selection or association. Historical Project-linked Work Orders/runs preserve their traceability, remain readable and finishable, and Finish never automatically completes the Project.
 
-If a Project is selected:
+For historical Project-linked production:
 - consumed components contribute to that Project's derived material usage
 
-If Project is empty:
+For General Stock production:
 - production is treated as general stock/future-use production
 
 Inventory deduction and audit history happen in both cases.
@@ -905,3 +917,46 @@ presentation uses the
 existing Dashboard Alerts panel, unread badge, dismissal, pagination, and private
 Realtime refresh. It presents the quantity as a shared global deficit and navigates to
 the Project route without an Activity fragment. DEV acceptance remains pending.
+
+## Three-warehouse Inventory foundation and Finished Product Calculator
+
+Tasks 001B–001C supply the warehouse-aware database foundation, Raw Materials-only
+legacy compatibility, six warehouse permissions, scoped reads/adjustments, and atomic
+transfers. Tasks 001D–001G implement the local permission-aware Inventory experience,
+calculator behavior, multi-warehouse production, and revised shortage availability.
+
+- Inventory remains one ledger and one navigation entry, with Raw Materials, Finished
+  Goods, and Customs Warehouse tabs. Balances, movements, source lots, searches,
+  histories, and adjustments are warehouse-scoped and permission-filtered.
+- Trusted warehouse reads include the complete Product/Brand detail needed by the
+  existing detail experience and a narrow active Supplier-source list for authorized
+  warehouse Add operations. The UI uses those trusted reads for per-warehouse search,
+  detail, adjustment, source history, movement history, and atomic transfer; protected
+  source tables are not exposed directly.
+
+The Task 001D UI is locally complete, migrations 136–142 are deployed to DEV, and
+read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance is
+pending and non-Admin browser acceptance is incomplete; no frontend production
+deployment has occurred.
+- Existing stock/history migrates to Raw Materials without duplication or historical
+  PCB-output reclassification.
+- Production may consume Raw Materials, Customs, or a finished Product held in Finished
+  Goods. Mixed-source deductions record the actual warehouse in the order Raw Materials
+  FIFO, Customs FIFO, then Finished Goods FIFO.
+- Project availability and shared shortage use Raw Materials plus Customs; Finished
+  Goods remains excluded. Eligible-warehouse transfers conserve availability, while
+  transfers across the Finished Goods boundary reconcile once from final state.
+- User-visible PCB Cards is **Finished Product Calculator**, retaining `/pcb` and
+  its PCB/BOM/history identities. New definitions take a trimmed, case-insensitively
+  unique Name/Code and manual exact three-digit Serial Number. Ordinary Products/imports
+  retain generated seven-digit serials; both forms work in authorized scans/lookups.
+- Calculator creation/lookup and warehouse-aware production have their database changes
+  deployed to DEV, with `finish-work-order` v6 ACTIVE and the frontend implemented
+  locally. Produce keeps Planned Production Quantity and
+  BOM/precheck, removes Project selection, and successful Finish atomically consumes
+  inputs and credits only actual-good output to Finished Goods.
+- Task 001G migration 140 is deployed to DEV. It does not
+  rewrite or re-baseline existing shortage episodes, events, or notification history.
+- Customs consumption records its warehouse and applicable declaration/release and
+  responsible-actor context. The software does not certify legal clearance; mandatory
+  customs evidence and validation remain subject to compliance confirmation.

@@ -1,7 +1,7 @@
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const workOrderNumberPattern = /^RN-[0-9]{4}-[0-9]{4}$/;
-const serialNumberPattern = /^[0-9]{7}$/;
+const serialNumberPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 const positiveDecimalPattern = /^[1-9][0-9]*$/;
 const nonnegativeDecimalPattern = /^(0|[1-9][0-9]*)$/;
 const maximumPostgresBigint = 9_223_372_036_854_775_807n;

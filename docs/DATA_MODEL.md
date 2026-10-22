@@ -4,6 +4,14 @@ Status: Canonical logical data model v1
 Purpose: Define the relational entities, relationships, invariants, and historical-data rules required by the locked AlfaEV feature scope.  
 Rule: This document defines the logical model. Physical database syntax, indexes, RLS policies, RPCs/functions, and migrations are specified later after the production tech stack is locked.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.
+
 ---
 
 # 1. Modeling Principles
@@ -169,7 +177,7 @@ Examples of delegable permission keys:
 - `inventory.brands.manage`
 - `inventory.barcodes.generate`
 
-### PCB Cards
+### Finished Product Calculator (`pcb_cards`)
 - `pcb.view`
 - `pcb.create`
 - `pcb.edit`
@@ -279,8 +287,10 @@ Fields:
   - AlfaEV Serial Number / Šifra
   - required
   - unique
-  - exactly 7 digits
-  - system-generated
+  - current schema: exactly 7 digits and system-generated
+  - exactly 3 or 7 digits
+  - three-digit calculator values are caller-supplied text; seven-digit ordinary
+    Product/import values remain system-generated
 - `name`
   - required
   - trimmed before persistence
@@ -313,8 +323,11 @@ Rules:
 
 - Serial Number / Šifra is the unique business identifier.
 - Product Name, Category, Brand, and Catalog Number do not define Product identity.
-- Users never manually assign the Serial Number.
-- Serial Number starts at `0000001`, increments sequentially, and is never reused.
+- Users never manually assign ordinary Product/import Serial Numbers. The approved
+  Finished Product Calculator flow accepts a manual exact three-digit value through a
+  trusted creation boundary.
+- Ordinary seven-digit Serial Number allocation starts at `0000001` and increments
+  sequentially. No three- or seven-digit value is ever reused.
 - Barcode encodes `serial_number`.
 - Catalog Number does not belong on Product.
 - Product kind is immutable after creation.
@@ -328,13 +341,13 @@ Rules:
 
 ### Excel bulk Component creation contract
 
-The `.xlsx` template has Name, Category, and optional Brand only; it adds no Product columns or new database entity. The trusted import resolves a nonblank Brand to an existing active `Brand.id`, then creates one new active `component` Product per valid row. Duplicate-looking Name/Category/Brand values are separate Products with distinct server-allocated Serials; they are not deduplicated. The client cannot set Product ID, Serial Number, kind, actor/timestamps, or quantity. Existing Product initialization gives each new row exactly one zero InventoryBalance; import creates no InventoryMovement or Supplier/ProductSupplier record.
+The `.xlsx` template has Name, Category, and optional Brand only; it adds no Product columns or new database entity. The trusted import resolves a nonblank Brand to an existing active `Brand.id`, then creates one new active `component` Product per valid row. Duplicate-looking Name/Category/Brand values are separate Products with distinct server-allocated Serials; they are not deduplicated. The client cannot set Product ID, Serial Number, kind, actor/timestamps, or quantity. Product initialization gives each new Product three zero InventoryBalance rows, one per warehouse; import creates no InventoryMovement or Supplier/ProductSupplier record.
 
 The whole row set is validated at execution time and persisted atomically with one immutable batch-level Product-creation AuditLog event identifying the created Product IDs and count. That event is the import's creation history; redundant per-row import audits are not required. Invalid/denied batches leave no Product, balance, or success audit, although consumed sequence values are not reused.
 
 ### Serial Number allocation
 
-Conceptual requirement:
+Current ordinary Product/import requirement:
 
 - use trusted backend/database sequence allocation
 - return a zero-padded 7-digit string
@@ -343,7 +356,10 @@ Conceptual requirement:
 
 The physical implementation may use a database sequence rather than a normal application table.
 
-The Product schema stores the required unique seven-digit Serial Number. Serial allocation is a separate trusted concern and is not performed by the Product schema migration itself.
+The Product schema stores a required globally unique exact three- or seven-digit Serial
+Number as text. Task 001E accepts three digits only through trusted Finished Product
+Calculator creation while preserving the existing seven-digit allocator for ordinary
+Products/imports. Serial allocation remains a separate trusted concern.
 
 ---
 
@@ -484,7 +500,9 @@ Stores the current quantity for fast reads.
 Fields:
 
 - `product_id`
-  - primary/unique reference to Product
+  - required reference to Product; part of the composite primary key
+- `warehouse_id`
+  - required reference to the canonical warehouse; part of the composite primary key
 - `quantity`
   - whole-number current stock
   - must be >= 0
@@ -494,6 +512,8 @@ Current scope assumes stock quantities are whole-number pieces, matching the loc
 
 Rules:
 
+- Each Product has exactly three balances, one per Raw Materials, Finished Goods,
+  and Customs Warehouse. `(product_id, warehouse_id)` is the balance identity.
 - Never update InventoryBalance directly from arbitrary frontend code.
 - Every balance change must occur through a trusted Inventory mutation that also creates InventoryMovement.
 - Current quantity may never become negative.
@@ -717,7 +737,12 @@ Project P and Product X:
 Then:
 
 - `committed_to_projects(X) = sum of outstanding_commitment(P, X)` across Projects currently in `planned`, `in_progress`, or `on_hold`
-- `available_after_commitments(X) = InventoryBalance.quantity - committed_to_projects(X)`
+- `eligible_physical_stock(X) = Raw Materials quantity + Customs Warehouse quantity`
+- `available_after_commitments(X) = eligible_physical_stock(X) - committed_to_projects(X)`
+
+Finished Goods stock is excluded from Project availability in V1. Its use as direct
+Work Order input remains valid physical consumption and does not reclassify it as
+eligible Project stock.
 
 Consumption from one Project never reduces another Project's commitment. Completed and
 Cancelled Projects contribute zero. An Admin-reopened Project in `in_progress`
@@ -1121,7 +1146,7 @@ Trusted workflow:
 
 The Product's request-time name snapshot remains unchanged even when the final Product Name differs. A request with no Supplier can still create and link its Product without inventing a Supplier relationship. An archived non-null request Supplier or supplied Brand cannot be used for this new Product/relationship. Competing Admin attempts on one request cannot create duplicate linked Products. Failed attempts persist no domain mutation or audit; consumed Serial sequence values are never reused.
 
-Existing Product initialization creates one zero InventoryBalance automatically. This workflow creates no InventoryMovement and does not convert Delivered Quantity into stock; physical receipt remains a separate Admin Inventory operation.
+Product initialization creates three zero InventoryBalance rows automatically, one per warehouse. This workflow creates no InventoryMovement and does not convert Delivered Quantity into stock; physical receipt remains a separate authorized Inventory operation.
 
 ### Status/badge behavior
 Sidebar badge count is:
@@ -1137,7 +1162,7 @@ Admin updates Inventory manually when physical goods are entered into stock.
 
 ---
 
-# 10. PCB Cards and BOMs
+# 10. Finished Product Calculator and BOMs
 
 ## 10.1 PcbCard
 
@@ -1183,9 +1208,9 @@ Rules:
 - Active cards require both archive metadata fields to be null. Archived cards require both `archived_at` and `archived_by_user_id` to be non-null.
 - Task 085 defines the lifecycle metadata and consistency constraints but adds no archive, hard-delete, or reactivation operation.
 - If production history exists, the PCB card is archived rather than hard-deleted.
-- Trusted creation accepts only the normalized PcbCard Name/Code. It creates a new active output Product whose Name is that same normalized value, Category is exactly the free-text value `PCB`, Brand is `NULL`, and kind is `pcb_finished_good`. The existing trusted allocator supplies its 7-digit Serial Number; the client supplies no Product fields or initial stock.
-- The new Product receives exactly one zero InventoryBalance through normal Product initialization. No InventoryMovement, Supplier, ProductSupplier, or Catalog Number is created by card definition. Finished-goods stock increases only during later PCB production.
-- Product, zero balance, PcbCard, and exactly one `product.created` plus one `pcb_card.created` AuditLog entry commit atomically. The card audit identifies the card ID, normalized Name, output Product ID, and generated Serial Number. Failed creation leaves no Product, balance, card, or audit; allocated Serial Numbers are not reused after rollback.
+- Trusted creation accepts normalized PcbCard Name/Code and a manual exact three-digit Serial Number as text, preserving leading zeroes. It creates a new active output Product whose Name is that same normalized value, Category is exactly `PCB`, Brand is `NULL`, and kind is `pcb_finished_good`. Other Product fields and initial stock are server-derived. Ordinary Product/import creation retains generated seven-digit serials.
+- The new Product receives exactly three zero InventoryBalance rows, one per warehouse. No InventoryMovement, Supplier, ProductSupplier, or Catalog Number is created by card definition. Actual-good output is credited to Finished Goods only when production Finish succeeds.
+- Product, three zero balances, PcbCard, and exactly one `product.created` plus one `pcb_card.created` AuditLog entry commit atomically. The card audit identifies the card ID, normalized Name, output Product ID, and supplied Serial Number. Failed creation leaves no Product, balance, card, or audit; calculator creation does not consume the ordinary Product serial allocator. Persisted serial identities remain globally unique and are never reassigned.
 
 ---
 
@@ -1257,14 +1282,14 @@ Fields:
 
 Rules:
 
-- Project is optional and traceability-only; finishing PCB production never automatically completes it.
-- A newly linked Project must exist and currently be `planned`, `in_progress`, or `on_hold`; `completed` and `cancelled` are ineligible. Trusted production re-checks this at execution time, while historical run references remain preserved.
+- New calculator production has no Project association. Historical Project-linked production retains its traceability and remains readable and finishable; finishing PCB production never automatically completes that Project.
 - Production uses one immutable BOM version.
 - Work Order-driven production creates this row only on successful Finish. `quantity_produced` stores actual-good output and may be zero for new Work Order-driven runs; historical rows remain valid.
 - On successful Finish:
   - validate all frozen BOM and supplemental inputs
   - deduct every persisted WorkOrderItem input, aggregating rows that share a Product
-  - add `quantity_produced` actual-good output to the PcbCard output Product
+  - consume inputs in Raw Materials FIFO → Customs FIFO → Finished Goods FIFO order
+  - credit `quantity_produced` actual-good output to the PcbCard output Product in Finished Goods
   - create InventoryMovement rows for every input and a positive output only when actual good is greater than zero
   - create AuditLog
   - commit atomically
@@ -1879,11 +1904,11 @@ The physical implementation must provide trusted atomic operations for at least:
 - atomic rollback of balance, movement, and audit on any failure
 
 ## PCB production
-- idempotent specialized Draft creation freezes the exact PCB Card, BOM version, planned quantity, optional Project, description, and generated material rows without changing Inventory
+- idempotent specialized Draft creation freezes the exact PCB Card, BOM version, planned quantity, description, and generated material rows without a Project association or Inventory change; historical Project-linked contexts remain preserved
 - later Work Order Finish authorization and frozen-identity validation
 - all-stock sufficiency validation at Finish
 - all planned input InventoryBalance deductions
-- actual-good finished PCB InventoryBalance increment only when greater than zero
+- actual-good Finished Goods InventoryBalance increment only when greater than zero
 - corresponding nonzero InventoryMovement inserts
 - one Work Order-linked PcbProductionRun insert
 - Work Order/PDF finalization and required AuditLog inserts
@@ -1945,7 +1970,6 @@ Do not add entities solely because they are common in ERP software.
 The locked scope currently does not require dedicated entities for:
 
 - Customers
-- Warehouses/multiple storage locations
 - Purchase Orders
 - Invoices
 - Quality Control
@@ -1999,3 +2023,69 @@ was detected by the enablement baseline. Resolved episodes/events are retained.
 Shortage notifications reference the exact immutable event and snapshot Project,
 Product, event type, and quantity. System notifications have no sender. Existing
 Activity and Issue-resolution notification targets remain unchanged.
+
+## Warehouse-aware Inventory model and production extensions
+
+Tasks 001B–001G implement the fixed warehouse reference, composite balance identity,
+warehouse identity on movements/lots/allocations, independent permissions, scoped
+reads/adjustments, atomic transfers, warehouse-aware production, and warehouse-aware
+Project availability. Migrations 136–142 are deployed to DEV (142/142); the frontend
+remains local, with read-only browser acceptance complete and controlled Stage 2
+mutation/non-Admin acceptance still pending.
+
+- A fixed warehouse reference identifies `raw_materials` (Raw Materials / Skladište
+  repromaterijala), `finished_goods` (Finished Goods / Skladište gotovih proizvoda),
+  and `customs` (Customs Warehouse / Carinsko skladište).
+- `Product` remains a global master identity. Serial Number uniqueness is global and
+  includes archived Products; warehouses never create separate Product identities.
+- Warehouse-scoped Product detail is exposed through a trusted read that returns the
+  global Product identity/lifecycle and Brand identity/lifecycle together with only the
+  requested warehouse balance and its separate balance timestamp. Product `updated_at`
+  is never substituted with the InventoryBalance timestamp.
+- Listing membership is not balance existence. Raw Materials preserves all existing
+  Product visibility, including historical Calculator stock. Finished Goods lists only
+  Products referenced by `pcb_cards.output_product_id`, including zero-stock and
+  archived outputs. Customs lists positive balances or retained committed Customs
+  movement history; structural zero rows alone establish no membership. Depletion
+  preserves membership; rollback creates none. No stored origin/membership flag is added.
+- Calculator output-stock reads use Finished Goods only. BOM input/picker stock stays
+  Raw. Listing does not restrict trusted detail, adjustments, transfers or allocation.
+  Historical stock and provenance are not moved.
+- `InventoryBalance` becomes one row per `(product_id, warehouse_id)`.
+  `InventoryMovement` and `InventorySourceLot` carry a non-null warehouse identity;
+  before/after quantities and FIFO consumption are evaluated inside that warehouse.
+- Existing balances, movements, and lots are backfilled to Raw Materials without
+  duplicating quantity or rewriting immutable identifiers/history. Finished Goods and
+  Customs begin at zero for that history; old PCB output is not reclassified.
+- `InventoryWarehouseTransfer` immutably binds one source movement to one destination
+  movement for the same Product and requested transfer, preserving actor/reason and
+  source-lot provenance without permitting direct browser writes.
+- Inventory Add source choices use a warehouse-authorized trusted read and expose only
+  active Supplier/ProductSupplier choices required by the adjustment flow; protected
+  Supplier and ProductSupplier tables receive no broader browser grant.
+- Warehouse-aware allocation and its fingerprint include warehouse plus source-lot
+  identity. Mixed-source input and actual-good Finished Goods output commit atomically
+  with Work Order/PDF/audit history, and retries cannot duplicate deductions or output.
+- Project availability and shared shortage use the sum of Raw Materials and Customs
+  balances. Finished Goods remains excluded from Project availability even though it
+  can be consumed by warehouse-aware production.
+- Eligible-warehouse transfers are shortage-neutral; transfers across the eligible /
+  Finished Goods boundary may change shortage after deferred final-state reconciliation.
+- Migration 140 replaces calculation/read/reconciliation definitions only. Existing
+  shortage episodes, immutable events, notification snapshots, and read/dismiss state
+  are not rewritten or re-baselined.
+- Migration 142 (deployed to DEV) adds an InventoryMovement INSERT trigger
+  for negative Project-linked `work_order`/`pcb_production_input` consumption in any
+  warehouse. It uses the existing unique transaction/Product queue and deferred
+  final-state reconciler. Finished Goods consumption reduces matching Project demand
+  but Finished Goods balances remain excluded from eligible physical stock. No
+  historical backfill or reservation data model is introduced.
+- Product Serial Number accepts exact three- or seven-digit text. New Finished Product
+  Calculator outputs use a caller-supplied three-digit value; ordinary Product/import
+  creation keeps generated seven-digit values. Leading zeroes are data.
+- Finished Product Calculator Name/Code has a trimmed, case-insensitive uniqueness
+  constraint covering active and archived calculator definitions. This does not make
+  ordinary component names globally unique.
+- The existing PCB/BOM tables and identifiers remain canonical under the user-visible
+  Finished Product Calculator name. New calculator production stores no Project link;
+  historical Project-linked production remains readable and finishable.

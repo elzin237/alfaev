@@ -8,10 +8,16 @@ const detailPageMocks = vi.hoisted(() => ({
   refetchBrands: vi.fn(),
   archive: vi.fn(),
   update: vi.fn(),
+  useInventoryWarehouseAccess: vi.fn(),
+  useInventoryLegacyViewPermission: vi.fn(),
 }));
 
 vi.mock("./hooks/useProductDetail", () => ({
   useProductDetail: detailPageMocks.useProductDetail,
+}));
+vi.mock("./hooks/useInventoryWarehouseAccess", () => ({
+  useInventoryWarehouseAccess: detailPageMocks.useInventoryWarehouseAccess,
+  useInventoryLegacyViewPermission: detailPageMocks.useInventoryLegacyViewPermission,
 }));
 vi.mock("./components/ProductSuppliersSection", () => ({
   default: ({ productId, productName, productIsActive }: {
@@ -81,6 +87,10 @@ const otherArchivedBrand: Brand = {
 };
 const activeProduct: ProductDetail = {
   id: "product-1",
+  warehouseId: "10000000-0000-4000-8000-000000000001",
+  warehouseCode: "raw_materials",
+  quantity: 7,
+  balanceUpdatedAt: "2026-09-02T12:00:00.000Z",
   serialNumber: "0000001",
   name: "Controller",
   category: "Control",
@@ -109,6 +119,24 @@ function setHookState(options: {
     | { ok: true; value: Brand[] }
     | { ok: false; error: { code: string; message: string } };
 } = {}) {
+  detailPageMocks.useInventoryWarehouseAccess.mockReturnValue({
+    profileId: "profile-1",
+    authorizedWarehouses: [{
+      id: "10000000-0000-4000-8000-000000000001",
+      code: "raw_materials",
+      label: "Raw Materials",
+      viewPermission: "inventory.raw_materials.view",
+      adjustPermission: "inventory.raw_materials.adjust",
+    }],
+    adjustableWarehouseIds: new Set(["10000000-0000-4000-8000-000000000001"]),
+    canReadProjectAvailability: true,
+    isPending: false,
+    isError: false,
+  });
+  detailPageMocks.useInventoryLegacyViewPermission.mockReturnValue({
+    canReadLegacyInventory: true,
+    isPending: false,
+  });
   detailPageMocks.useProductDetail.mockReturnValue({
     canEdit: options.canEdit ?? true,
     canArchive: options.canArchive ?? options.canEdit ?? true,
@@ -224,7 +252,7 @@ describe("ProductDetailPage", () => {
     expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getByText("Not archived")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Inventory" }))
-      .toHaveAttribute("href", "/inventory");
+      .toHaveAttribute("href", "/inventory?warehouse=raw_materials");
     expect(screen.getByRole("region", { name: "Product Inventory balance" }))
       .toHaveTextContent("Balance for product-1 — active");
   });

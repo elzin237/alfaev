@@ -25,6 +25,10 @@ export interface ProductListItem {
 }
 
 export interface ProductDetail extends Product {
+  warehouseId: string;
+  warehouseCode: string;
+  quantity: number;
+  balanceUpdatedAt: string;
   brandIsActive: boolean | null;
   createdAt: string;
   updatedAt: string;
@@ -124,21 +128,23 @@ interface ProductRow {
 }
 
 interface ProductDetailRow {
-  id: string;
+  product_id: string;
+  warehouse_id: string;
+  warehouse_code: string;
   serial_number: string;
   name: string;
   category: string;
   brand_id: string | null;
-  brand: { name: string; is_active: boolean } | null;
+  brand_name: string | null;
+  brand_is_active: boolean | null;
   product_kind: ProductKind;
   is_active: boolean;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+  quantity: unknown;
+  balance_updated_at: string;
 }
-
-const productDetailFields =
-  "id,serial_number,name,category,brand_id,product_kind,is_active,created_at,updated_at,archived_at,brand:brands(name,is_active)";
 
 function isDateTime(value: string): boolean {
   return Number.isFinite(Date.parse(value));
@@ -168,7 +174,7 @@ function isProductRow(value: unknown): value is ProductRow {
     typeof value.id === "string" &&
     "serial_number" in value &&
     typeof value.serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.serial_number) &&
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.serial_number) &&
     "name" in value &&
     typeof value.name === "string" &&
     "category" in value &&
@@ -203,32 +209,26 @@ function mapProduct(row: ProductRow): ProductListItem | null {
 function isProductDetailRow(value: unknown): value is ProductDetailRow {
   if (typeof value !== "object" || value === null) return false;
 
-  const brandIsValid =
-    "brand" in value &&
-    (
-      value.brand === null ||
-      (
-        typeof value.brand === "object" &&
-        "name" in value.brand &&
-        typeof value.brand.name === "string" &&
-        "is_active" in value.brand &&
-        typeof value.brand.is_active === "boolean"
-      )
-    );
-
   return (
-    "id" in value &&
-    typeof value.id === "string" &&
+    "product_id" in value &&
+    typeof value.product_id === "string" &&
+    "warehouse_id" in value &&
+    typeof value.warehouse_id === "string" &&
+    "warehouse_code" in value &&
+    typeof value.warehouse_code === "string" &&
     "serial_number" in value &&
     typeof value.serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.serial_number) &&
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.serial_number) &&
     "name" in value &&
     typeof value.name === "string" &&
     "category" in value &&
     typeof value.category === "string" &&
     "brand_id" in value &&
     (typeof value.brand_id === "string" || value.brand_id === null) &&
-    brandIsValid &&
+    "brand_name" in value &&
+    (typeof value.brand_name === "string" || value.brand_name === null) &&
+    "brand_is_active" in value &&
+    (typeof value.brand_is_active === "boolean" || value.brand_is_active === null) &&
     "product_kind" in value &&
     isProductKind(value.product_kind) &&
     "is_active" in value &&
@@ -243,19 +243,30 @@ function isProductDetailRow(value: unknown): value is ProductDetailRow {
     (
       value.archived_at === null ||
       (typeof value.archived_at === "string" && isDateTime(value.archived_at))
-    )
+    ) &&
+    "quantity" in value &&
+    parseQuantity(value.quantity) !== null &&
+    "balance_updated_at" in value &&
+    typeof value.balance_updated_at === "string" &&
+    isDateTime(value.balance_updated_at)
   );
 }
 
 function mapProductDetail(row: ProductDetailRow): ProductDetail {
+  const quantity = parseQuantity(row.quantity);
+  if (quantity === null) throw new Error("Invalid quantity");
   return {
-    id: row.id,
+    id: row.product_id,
+    warehouseId: row.warehouse_id,
+    warehouseCode: row.warehouse_code,
+    quantity,
+    balanceUpdatedAt: row.balance_updated_at,
     serialNumber: row.serial_number,
     name: row.name,
     category: row.category,
     brandId: row.brand_id,
-    brandName: row.brand?.name ?? null,
-    brandIsActive: row.brand?.is_active ?? null,
+    brandName: row.brand_name,
+    brandIsActive: row.brand_is_active,
     productKind: row.product_kind,
     isActive: row.is_active,
     createdAt: row.created_at,
@@ -283,7 +294,7 @@ function isCreatedProductRow(value: unknown): value is CreatedProductRow {
     value.product_id.length > 0 &&
     "serial_number" in value &&
     typeof value.serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.serial_number)
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.serial_number)
   );
 }
 
@@ -448,10 +459,18 @@ export async function createProduct(
   }
 }
 
-export async function listProducts(search = ""): Promise<ProductListResult> {
+export async function listProducts(
+  warehouseIdOrSearch = "10000000-0000-4000-8000-000000000001",
+  search?: string,
+): Promise<ProductListResult> {
   try {
-    const normalizedSearch = search.trim();
-    const { data, error } = await supabase.rpc("search_inventory_products", {
+    const firstArgumentIsWarehouse = /^[0-9a-f-]{36}$/i.test(warehouseIdOrSearch);
+    const warehouseId = firstArgumentIsWarehouse
+      ? warehouseIdOrSearch
+      : "10000000-0000-4000-8000-000000000001";
+    const normalizedSearch = (firstArgumentIsWarehouse ? search ?? "" : warehouseIdOrSearch).trim();
+    const { data, error } = await supabase.rpc("search_inventory_products_by_warehouse", {
+      p_warehouse_id: warehouseId,
       p_search: normalizedSearch || null,
     });
 
@@ -479,13 +498,23 @@ export async function listProducts(search = ""): Promise<ProductListResult> {
 
 export async function getProduct(
   productId: string,
+  warehouseId = "10000000-0000-4000-8000-000000000001",
 ): Promise<ProductDetailResult> {
   try {
-    const { data, error } = await supabase
-      .from("products")
-      .select(productDetailFields)
-      .eq("id", productId)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc(
+      "get_inventory_product_by_warehouse",
+      { p_product_id: productId, p_warehouse_id: warehouseId },
+    );
+
+    if (error?.code === "P0002") {
+      return {
+        ok: false,
+        error: {
+          code: "product_not_found",
+          message: "The Product could not be found.",
+        },
+      };
+    }
 
     if (error) {
       return {
@@ -497,17 +526,7 @@ export async function getProduct(
       };
     }
 
-    if (data === null) {
-      return {
-        ok: false,
-        error: {
-          code: "product_not_found",
-          message: "The Product could not be found.",
-        },
-      };
-    }
-
-    if (!isProductDetailRow(data)) {
+    if (!Array.isArray(data) || data.length !== 1 || !isProductDetailRow(data[0])) {
       return {
         ok: false,
         error: {
@@ -517,7 +536,7 @@ export async function getProduct(
       };
     }
 
-    return { ok: true, value: mapProductDetail(data) };
+    return { ok: true, value: mapProductDetail(data[0]) };
   } catch {
     return {
       ok: false,

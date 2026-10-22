@@ -8,10 +8,9 @@ import {
   projectListQueryKey,
 } from "../../projects/projectQueryKeys";
 import { projectMaterialUsageQueryKey } from "../../projects/projectMaterialUsageQueryKeys";
-import { inventoryBalanceQueryKey } from "../../inventory/inventoryBalanceQueryKeys";
 import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
-import { productDetailQueryKey, productListQueryPrefix } from "../../inventory/productQueryKeys";
-import { pcbProductionHistoryQueryKey } from "../../pcb/pcbQueryKeys";
+import { productListQueryPrefix } from "../../inventory/productQueryKeys";
+import { pcbBomDetailQueryPrefix, pcbCardListQueryKey, pcbProductionHistoryQueryKey } from "../../pcb/pcbQueryKeys";
 import {
   deleteDraftWorkOrder,
   getWorkOrderDetail,
@@ -338,6 +337,16 @@ export function useWorkOrderDetail(workOrderId: string) {
             queryKey: projectListQueryKey(profile?.id),
             exact: true,
           }),
+          queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profile?.id) }),
+          queryClient.invalidateQueries({ queryKey: ["inventory", "products", "detail", profile?.id] }),
+          queryClient.invalidateQueries({ queryKey: ["inventory", "balances", "detail", profile?.id] }),
+          queryClient.invalidateQueries({ queryKey: ["inventory", "movements", "product", profile?.id] }),
+          queryClient.invalidateQueries({ queryKey: ["inventory-source-lots", profile?.id ?? "anonymous"] }),
+          queryClient.invalidateQueries({ queryKey: pcbCardListQueryKey(profile?.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: pcbBomDetailQueryPrefix(profile?.id) }),
+          queryClient.invalidateQueries({ queryKey: ["pcb", "bom-choices", profile?.id] }),
+          queryClient.invalidateQueries({ queryKey: ["pcb", "production-source", profile?.id] }),
         ];
         const projectInvalidations = result.value.projectId ? [
           queryClient.invalidateQueries({
@@ -354,17 +363,6 @@ export function useWorkOrderDetail(workOrderId: string) {
             queryKey: pcbProductionHistoryQueryKey(profile?.id, productionContext.pcbCardId),
             exact: true,
           }),
-          queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
-          queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profile?.id) }),
-          ...[productionContext.outputProductId, ...(
-            materialsQuery.data?.ok
-              ? materialsQuery.data.value.map((material) => material.productId)
-              : []
-          )]
-            .flatMap((productId) => [
-              queryClient.invalidateQueries({ queryKey: inventoryBalanceQueryKey(profile?.id, productId), exact: true }),
-              queryClient.invalidateQueries({ queryKey: productDetailQueryKey(profile?.id, productId), exact: true }),
-            ]),
         ] : [];
         await Promise.all([...commonInvalidations, ...projectInvalidations, ...productionInvalidations]);
         await queryClient.cancelQueries({

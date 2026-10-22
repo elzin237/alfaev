@@ -3713,7 +3713,8 @@ This plan aims for maximum Codex performance by keeping each prompt focused with
 - Notify once on opening and once on resolution; retain quantity changes as immutable
   event history without extra fanout.
 - Run an idempotent existing-shortage baseline only when the migration is explicitly
-  deployed. DEV deployment is pending.
+  deployed. Migration 135 and its approved baseline are deployed to DEV; later
+  warehouse migrations do not rerun that initialization.
 
 ## Task 003B — Automatic Project shortage alerts frontend
 
@@ -3726,3 +3727,88 @@ This plan aims for maximum Codex performance by keeping each prompt focused with
 - Navigate shortage rows to `/projects/<projectId>` only; do not invent Activity IDs or
   row-level Product targeting.
 - Keep DEV/browser acceptance as a separate deployment step.
+
+# PHASE R — Three Warehouses + Finished Product Calculator
+
+These slices implement the approved contract recorded by Task 001A. Each task records
+its current implementation/deployment state below.
+
+Current checkpoint: migrations 136–142 are deployed to alfaev-dev (142/142), and DEV
+`finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally and
+read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance is
+pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented; they remain a separate future phase.
+
+## 001B — Warehouse schema and historical backfill
+
+- Add fixed Raw Materials, Finished Goods, and Customs Warehouse identities.
+- Scope balances, movements, and source lots to a warehouse in one shared ledger.
+- Backfill all existing stock/history to Raw Materials without duplication or immutable
+  history rewrite; do not retrospectively move PCB output.
+- Atomically preserve every existing Inventory, Work Order, PCB, Dashboard, Project
+  planning, and shortage operation as explicitly Raw Materials-only. Finished Goods and
+  Customs begin at zero and are not enabled for legacy reads or mutations.
+
+## 001C — Warehouse permissions and trusted reads/adjustments/transfers
+
+- Implemented by forward migration 137, deployed to DEV.
+- Add the six independent warehouse view/adjust permissions and explicit legacy
+  `inventory.view` → Raw Materials view grants.
+- Enforce warehouse isolation in trusted reads and Add/Remove/Correction operations.
+- Complete the trusted warehouse Product-detail projection and provide a narrow active
+  Supplier-source choice read for Admins or matching warehouse adjusters, without
+  broadening Product, Brand, Supplier, or ProductSupplier table grants.
+- Transfer atomically between distinct warehouses with adjustment authority at both
+  ends, paired movements, FIFO provenance, stable locks, and no stock creation/loss.
+- Keep Task 001D tabs and Task 001F multi-warehouse production out of this slice.
+
+## 001D — Three Inventory tabs and UI
+
+- Implemented locally: permission-aware Raw Materials, Finished Goods, and Customs
+  Warehouse tabs on the existing Inventory route, trusted warehouse list/detail,
+  movement/source history, matching adjustment sources, and atomic transfers.
+- Profile/warehouse/Product query isolation, permission-revocation fallback, accessible
+  keyboard tabs, and responsive horizontal overflow are covered by focused tests.
+- Database migrations 136–142 are deployed to DEV. The frontend remains local and
+  read-only browser acceptance is complete; controlled Stage 2 mutation acceptance is
+  pending and non-Admin browser acceptance is incomplete.
+
+## 001E — Finished Product Calculator and three-digit serial creation
+
+- Forward migration 138 is deployed to DEV; frontend changes are implemented locally.
+- Rename only user-visible PCB Cards text; retain `/pcb`, schemas, identifiers, and
+  historical audit data.
+- Add concurrency-safe atomic creation using trimmed case-insensitively unique
+  Name/Code and globally unique exact three-digit Serial Number text.
+- Preflight historical PCB names for normalized duplicates before adding uniqueness.
+- Preserve ordinary seven-digit allocation and accept exact three- or seven-digit text
+  in trusted Product identity lookup/scanning. Warehouse-aware production is Task 001F.
+
+## 001F — Produce simplification and warehouse-aware Work Order Finish
+
+- Remove the new-production Project selector and always create calculator Work Orders
+  without a Project while retaining historical Project-linked records.
+- Consume actual warehouse sources and credit actual-good output to Finished Goods in
+  one idempotent atomic Finish with warehouse-aware fingerprint/PDF provenance.
+- Use exact Raw Materials FIFO → Customs FIFO → Finished Goods FIFO priority.
+- Preserve migration-138 Raw Materials-only shortage behavior until Task 001G applies
+  the forward-only Raw Materials plus Customs definition.
+
+## 001G — Project commitment/shortage compatibility
+
+- Implemented locally in migration 140: canonical V1 availability is Raw Materials plus
+  Customs, excluding Finished Goods, while preserving shared global deficit semantics.
+- Combined availability is visible only with both eligible-warehouse view permissions.
+- Deferred reconciliation makes eligible-warehouse transfers neutral and evaluates
+  eligible/Finished Goods boundary transfers from final transaction state.
+- Existing shortage episodes/events and notification history are retained without
+  baseline rerun or migration-time rewrite. Migration 140 is deployed to DEV.
+
+## 001H — Final local/security verification, controlled DEV deployment, and browser acceptance
+
+- Run migration, authorization, concurrency, ledger/provenance, barcode, Work Order,
+  shortage, UI, and historical-preservation gates on disposable/local infrastructure.
+- Deploy to DEV only after independent review and explicit authorization, then complete
+  browser acceptance before any separately authorized production rollout.

@@ -14,12 +14,18 @@ import { permissionQueryKey } from "../auth/permissionQueryKeys";
 import { useProjectAlertUnreadCount } from "../../features/dashboard/hooks/useProjectAlerts";
 import { useProcurementSidebarBadge } from "../../features/procurement/hooks/useProcurementSidebarBadge";
 import { NAVIGATION } from "./navigation";
+import type { PermissionKey } from "../auth/permissions";
 
-const permissionNavigationItems = NAVIGATION.flatMap((item) =>
-  item.access.kind === "permission"
-    ? [{ permission: item.access.permission }]
-    : [],
-);
+const permissionNavigationItems = NAVIGATION.reduce<
+  { permission: PermissionKey }[]
+>((items, item) => {
+  if (item.access.kind === "permission") {
+    items.push({ permission: item.access.permission });
+  } else if (item.access.kind === "any-permission") {
+    items.push(...item.access.permissions.map((permission) => ({ permission })));
+  }
+  return items;
+}, []);
 
 interface SidebarProps {
   sidebarOpen: boolean;
@@ -100,6 +106,13 @@ function Sidebar({
 
     if (item.access.kind === "admin") {
       return false;
+    }
+
+    if (item.access.kind === "any-permission") {
+      return item.access.permissions.some((permission) => {
+        const result = permissionResults.get(permission);
+        return result?.ok === true && result.value;
+      });
     }
 
     const result = permissionResults.get(item.access.permission);

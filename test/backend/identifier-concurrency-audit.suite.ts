@@ -95,7 +95,7 @@ export function registerIdentifierConcurrencyAuditTests(
   requireHarness: () => SecurityFixtureHarness,
 ): void {
   describe("Task 147 identifier concurrency audit", () => {
-    it("uses one hardened non-cycling Product allocator across every creation path", async () => {
+    it("uses one hardened non-cycling allocator for ordinary Product creation paths", async () => {
       const fixture = requireHarness();
 
       await fixture.withRollbackDatabaseTransaction(async (database) => {
@@ -168,10 +168,14 @@ export function registerIdentifierConcurrencyAuditTests(
           "create_pcb_card",
           "create_product",
         ]);
-        for (const routine of insertFunctions.rows) {
+        for (const routine of insertFunctions.rows.filter(
+          (row) => row.function_name !== "create_pcb_card",
+        )) {
           expect(routine.definition, routine.function_name)
             .toContain("public.allocate_product_serial_number()");
         }
+        expect(insertFunctions.rows.find((row) => row.function_name === "create_pcb_card")?.definition)
+          .not.toContain("public.allocate_product_serial_number()");
 
         const procurement = await database.query<{ definition: string }>(
           `select pg_catalog.lower(pg_catalog.pg_get_functiondef(
@@ -214,6 +218,16 @@ export function registerIdentifierConcurrencyAuditTests(
           setActor(pcbCreator, fixture.actors.admin),
           setActor(importer, fixture.actors.productCreator),
         ]);
+        const pcbSerials = (await normalAdmin.query<{ serial_number: string }>(
+          `select pg_catalog.lpad(candidate::text, 3, '0') as serial_number
+           from pg_catalog.generate_series(0, 999) as candidate
+           where not exists (
+             select 1 from public.products as product
+             where product.serial_number = pg_catalog.lpad(candidate::text, 3, '0')
+           )
+           order by candidate limit 3`,
+        )).rows.map((row) => row.serial_number);
+        expect(pcbSerials).toHaveLength(3);
 
         const [adminProducts, delegatedProducts, pcbCards, imported] =
           await Promise.all([
@@ -233,8 +247,8 @@ export function registerIdentifierConcurrencyAuditTests(
               const rows: PcbCardCreationRow[] = [];
               for (let index = 0; index < 3; index += 1) {
                 const result = await pcbCreator.query<PcbCardCreationRow>(
-                  "select * from public.create_pcb_card($1::text)",
-                  [`Task 147 PCB Card ${index}`],
+                  "select * from public.create_pcb_card($1::text, $2::text)",
+                  [`Task 147 PCB Card ${index}`, pcbSerials[index]],
                 );
                 rows.push(result.rows[0]!);
               }
@@ -278,14 +292,23 @@ export function registerIdentifierConcurrencyAuditTests(
 
         return {
           next: next.rows[0]!.serial_number,
+          calculatorSerials: pcbCards.map((row) => row.serial_number),
+          ordinarySerials: [
+            ...adminProducts,
+            ...delegatedProducts,
+            ...imported,
+          ].map((row) => row.serial_number),
           serials: created.map((row) => row.serial_number),
         };
       });
 
       expect(burst.serials).toHaveLength(16);
-      expectSerials(burst.serials);
+      expect(new Set(burst.serials).size).toBe(burst.serials.length);
+      expectSerials(burst.ordinarySerials);
+      expect(burst.calculatorSerials.every((serial) => /^[0-9]{3}$/.test(serial)))
+        .toBe(true);
       expect(Number(burst.next)).toBeGreaterThan(
-        Math.max(...burst.serials.map(Number)),
+        Math.max(...burst.ordinarySerials.map(Number)),
       );
 
       const afterRollback = await fixture.withRollbackDatabaseTransaction(

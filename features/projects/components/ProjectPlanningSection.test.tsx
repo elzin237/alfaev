@@ -168,7 +168,7 @@ describe("ProjectPlanningSection", () => {
     const table = screen.getByRole("table");
     for (const heading of [
       "Serial Number", "Product", "Kind", "Category", "Brand", "Required",
-      "Physical Quantity", "Committed to Projects",
+      "Eligible Stock (Raw + Customs)", "Committed to Projects",
       "Available After Commitments", "Shortage",
     ]) {
       expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument();

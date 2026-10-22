@@ -41,8 +41,9 @@ describe("PCB detail page", () => {
     expect(screen.getByText("Controller")).toBeInTheDocument();
     expect(screen.getByText("0000001")).toBeInTheDocument();
     expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("Finished Goods stock")).toBeInTheDocument();
     expect(screen.getByText("None")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to PCB Cards/ })).toHaveAttribute("href", "/pcb");
+    expect(screen.getByRole("link", { name: /Back to Finished Product Calculator/ })).toHaveAttribute("href", "/pcb");
     expect(screen.getByText("Editor authority: editable")).toBeInTheDocument();
     expect(screen.getByText("BOM History section")).toBeInTheDocument();
     expect(screen.getByText("Production History section")).toBeInTheDocument();
@@ -61,20 +62,20 @@ describe("PCB detail page", () => {
     expect(screen.getByText("Archived")).toBeInTheDocument();
     expect(screen.getByText("Editor authority: read-only")).toBeInTheDocument();
     expect(screen.getByText("Production History section")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Produce PCB" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Create Production Work Order" })).not.toBeInTheDocument();
   });
 
   it("links authorized active-card readers to the separate production precheck", () => {
     produceAccess.usePcbProduceAccess.mockReturnValue(true);
     renderPage();
-    expect(screen.getByRole("link", { name: "Produce PCB" }))
+    expect(screen.getByRole("link", { name: "Create Production Work Order" }))
       .toHaveAttribute("href", `/pcb/${cardId}/produce`);
   });
 
   it("handles loading, retryable error, not-found and invalid IDs safely", () => {
     mocks.usePcbBomDetail.mockReturnValueOnce({ detailQuery: { isPending: true } });
     const loading = renderPage();
-    expect(screen.getByText("Loading PCB Card...")).toBeInTheDocument();
+    expect(screen.getByText("Loading finished-product definition...")).toBeInTheDocument();
     loading.unmount();
     mocks.usePcbBomDetail.mockReturnValueOnce({ detailQuery: { isPending: false, isError: true,
       refetch: mocks.refetch } });
@@ -83,11 +84,11 @@ describe("PCB detail page", () => {
     expect(mocks.refetch).toHaveBeenCalled();
     error.unmount();
     mocks.usePcbBomDetail.mockReturnValueOnce({ detailQuery: { isPending: false, isError: false,
-      data: { ok: false, error: { code: "not_found", message: "PCB Card not found." } } } });
+      data: { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } } } });
     const missing = renderPage();
-    expect(screen.getByText("PCB Card not found.")).toBeInTheDocument();
+    expect(screen.getByText("Finished-product definition not found.")).toBeInTheDocument();
     missing.unmount();
     renderPage("bad-id");
-    expect(screen.getByText("The PCB Card could not be found.")).toBeInTheDocument();
+    expect(screen.getByText("The Finished Product Calculator definition could not be found.")).toBeInTheDocument();
   });
 });

@@ -50,7 +50,7 @@ export type PcbBomResult<T> =
   | { ok: false; error: PcbBomError };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const serialPattern = /^[0-9]{7}$/;
+const serialPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 const bigintMax = 9223372036854775807n;
 
 export function isPcbCardId(value: string): boolean {
@@ -102,11 +102,11 @@ const readError: PcbBomError = { code: "read_failed", message: "PCB BOM could no
 
 export async function getPcbBomEditor(cardId: string): Promise<PcbBomResult<PcbBomDetail>> {
   if (!isPcbCardId(cardId)) {
-    return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+    return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   }
   const { data, error } = await supabase.rpc("get_pcb_bom_editor", { p_pcb_card_id: cardId });
   if (error?.code === "P0002") {
-    return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+    return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   }
   if (error || !Array.isArray(data) || data.length === 0) return { ok: false, error: readError };
 
@@ -170,7 +170,7 @@ export async function searchPcbBomProductChoices(
   cardId: string,
   search: string,
 ): Promise<PcbBomResult<PcbBomProductChoice[]>> {
-  if (!isPcbCardId(cardId)) return { ok: false, error: { code: "not_found", message: "PCB Card not found." } };
+  if (!isPcbCardId(cardId)) return { ok: false, error: { code: "not_found", message: "Finished-product definition not found." } };
   const { data, error } = await supabase.rpc("search_pcb_bom_product_choices", {
     p_pcb_card_id: cardId, p_search: search.trim(),
   });
@@ -215,11 +215,11 @@ export async function saveInitialPcbBom(
   if (error) {
     const mapped: Record<string, PcbBomError> = {
       "42501": { code: "access_denied", message: "You do not have permission to edit this PCB BOM." },
-      P0002: { code: "not_found", message: "PCB Card not found." },
-      PCB07: { code: "card_archived", message: "This PCB Card is archived." },
+      P0002: { code: "not_found", message: "Finished-product definition not found." },
+      PCB07: { code: "card_archived", message: "This finished-product definition is archived." },
       PCB06: { code: "bom_unavailable", message: "This PCB BOM can no longer be edited here." },
       PCB04: { code: "product_unavailable", message: "A selected Product is unavailable." },
-      PCB05: { code: "invalid_items", message: "The PCB Card cannot consume its own output Product." },
+      PCB05: { code: "invalid_items", message: "The finished product cannot consume its own output Product." },
       "22023": { code: "invalid_items", message: "Enter valid BOM Products and quantities." },
       "23505": { code: "duplicate_product", message: "A Product appears more than once in this BOM." },
     };

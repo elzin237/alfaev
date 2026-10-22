@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { expectPermissionDenied } from "./helpers/assertions";
 import { createTestSerialNumber } from "./helpers/serial";
+import { seedSupplierStockForProfile } from "./helpers/inventory-provenance";
 import type { SecurityFixtureHarness } from "./security-fixtures";
 import {
   actAs,
@@ -14,6 +15,8 @@ import {
 } from "./work-order-finish-preflight.suite";
 
 interface SnapshotRow {
+  allocation_fingerprint: string;
+  catalog_number: string;
   customer_name_snapshot: string;
   description: string;
   material_position: string;
@@ -21,7 +24,6 @@ interface SnapshotRow {
   product_name: string;
   project_name: string;
   quantity: string;
-  serial_number: string;
   snapshot_updated_at: string;
   work_order_created_at: string;
   work_order_id: string;
@@ -42,9 +44,10 @@ async function getSnapshot(
        snapshot.description,
        snapshot.work_order_created_at::text as work_order_created_at,
        snapshot.snapshot_updated_at::text as snapshot_updated_at,
+       snapshot.allocation_fingerprint,
        snapshot.material_position,
        snapshot.product_id,
-       snapshot.serial_number,
+       snapshot.catalog_number,
        snapshot.product_name,
        snapshot.quantity
      from public.get_work_order_pdf_snapshot(
@@ -72,11 +75,12 @@ async function addSecondMaterial(
      )`,
     [productId, createTestSerialNumber(), `Snapshot Product ${productId}`, actorId],
   );
-  await database.query(
-    `update public.inventory_balances
-     set quantity = 10, updated_at = pg_catalog.clock_timestamp()
-     where product_id = $1::uuid`,
-    [productId],
+  await seedSupplierStockForProfile(
+    database,
+    actorId,
+    productId,
+    "10",
+    { catalogNumber: `SNAPSHOT-${productId}` },
   );
   await database.query(
     `insert into public.project_products (
@@ -130,14 +134,22 @@ export function registerWorkOrderPdfSnapshotTests(
             state.projectId!,
             state.workOrderId,
           );
+          const expectedMaterialOrder = (await database.query<{ id: string }>(
+            `select product.id
+             from public.products as product
+             where product.id = any($1::uuid[])
+             order by product.serial_number, product.id`,
+            [[state.productId, secondProductId]],
+          )).rows.map((row) => row.id);
           const before = (await database.query(
             `select
                work_order.status,
                work_order.updated_at::text,
                (select pg_catalog.count(*)::text from public.audit_logs
                 where entity_id = work_order.id) as audit_count,
-               (select pg_catalog.jsonb_object_agg(
-                  balance.product_id::text, balance.quantity::text
+               (select pg_catalog.jsonb_agg(
+                  to_jsonb(balance)
+                  order by balance.product_id, to_jsonb(balance) ->> 'warehouse_id'
                 ) from public.inventory_balances as balance
                 join public.work_order_items as item
                   on item.product_id = balance.product_id
@@ -155,15 +167,24 @@ export function registerWorkOrderPdfSnapshotTests(
           );
           expect(adminRows).toHaveLength(2);
           expect(adminRows.map((row) => row.material_position)).toEqual(["1", "2"]);
-          expect(adminRows[0]?.product_id).toBe(secondProductId);
-          expect(adminRows[1]).toMatchObject({
+          expect(adminRows.map((row) => row.product_id)).toEqual(expectedMaterialOrder);
+          expect(adminRows.find((row) => row.product_id === secondProductId))
+            .toMatchObject({ catalog_number: `SNAPSHOT-${secondProductId}`, quantity: "2" });
+          expect(adminRows.find((row) => row.product_id === state.productId)).toMatchObject({
+            catalog_number: `PREFLIGHT-${state.productId}`,
             product_id: state.productId,
             quantity: "9007199254740993",
             snapshot_updated_at: state.updatedAt,
             work_order_id: state.workOrderId,
             work_order_number: state.workOrderNumber,
           });
+          expect(adminRows[0]?.allocation_fingerprint).toMatch(/^[0-9a-f]{32}$/);
+          expect(adminRows.every((row) =>
+            row.allocation_fingerprint === adminRows[0]?.allocation_fingerprint,
+          )).toBe(true);
           expect(Object.keys(adminRows[0]!).sort()).toEqual([
+            "allocation_fingerprint",
+            "catalog_number",
             "customer_name_snapshot",
             "description",
             "material_position",
@@ -171,7 +192,6 @@ export function registerWorkOrderPdfSnapshotTests(
             "product_name",
             "project_name",
             "quantity",
-            "serial_number",
             "snapshot_updated_at",
             "work_order_created_at",
             "work_order_id",
@@ -224,8 +244,9 @@ export function registerWorkOrderPdfSnapshotTests(
                work_order.updated_at::text,
                (select pg_catalog.count(*)::text from public.audit_logs
                 where entity_id = work_order.id) as audit_count,
-               (select pg_catalog.jsonb_object_agg(
-                  balance.product_id::text, balance.quantity::text
+               (select pg_catalog.jsonb_agg(
+                  to_jsonb(balance)
+                  order by balance.product_id, to_jsonb(balance) ->> 'warehouse_id'
                 ) from public.inventory_balances as balance
                 join public.work_order_items as item
                   on item.product_id = balance.product_id

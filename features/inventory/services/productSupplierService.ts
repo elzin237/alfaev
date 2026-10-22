@@ -158,7 +158,7 @@ function isSupplierProductRow(value: unknown): value is SupplierProductRow {
     value.product_id.length > 0 &&
     "product_serial_number" in value &&
     typeof value.product_serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.product_serial_number) &&
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.product_serial_number) &&
     "product_name" in value &&
     typeof value.product_name === "string" &&
     value.product_name.length > 0 &&
@@ -185,7 +185,7 @@ function isProductSupplierProductChoiceRow(
     value.product_id.length > 0 &&
     "product_serial_number" in value &&
     typeof value.product_serial_number === "string" &&
-    /^[0-9]{7}$/.test(value.product_serial_number) &&
+    /^(?:[0-9]{3}|[0-9]{7})$/.test(value.product_serial_number) &&
     "product_name" in value &&
     typeof value.product_name === "string" &&
     value.product_name.length > 0

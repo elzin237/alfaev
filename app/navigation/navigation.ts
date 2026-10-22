@@ -17,6 +17,7 @@ import type { PermissionKey } from "../auth/permissions";
 
 export type NavigationAccess =
   | { kind: "permission"; permission: PermissionKey }
+  | { kind: "any-permission"; permissions: readonly PermissionKey[] }
   | { kind: "authenticated" }
   | { kind: "admin" };
 
@@ -56,10 +57,17 @@ export const NAVIGATION = [
     label: "Skladište",
     path: "/inventory",
     icon: Warehouse,
-    access: { kind: "permission", permission: "inventory.view" },
+    access: {
+      kind: "any-permission",
+      permissions: [
+        "inventory.raw_materials.view",
+        "inventory.finished_goods.view",
+        "inventory.customs.view",
+      ],
+    },
   },
   {
-    label: "PCB Cards",
+    label: "Finished Product Calculator",
     path: "/pcb",
     icon: Cpu,
     access: { kind: "permission", permission: "pcb.view" },

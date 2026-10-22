@@ -17,7 +17,7 @@ const groupLabels = [
   "Nabavka",
   "Dobavljači",
   "Skladište",
-  "PCB Cards",
+  "Finished Product Calculator",
   "Radni Nalozi",
   "Archive",
 ];
@@ -49,7 +49,7 @@ function permissionMatrix(): UserPermissionMatrixItem[] {
 afterEach(cleanup);
 
 describe("UserPermissionMatrix", () => {
-  it("renders all 32 delegable permissions once in canonical group order", () => {
+  it("renders all delegable permissions once in canonical group order", () => {
     const onPermissionChange = vi.fn();
 
     render(
@@ -66,7 +66,7 @@ describe("UserPermissionMatrix", () => {
     const checkboxes = screen.getAllByRole("checkbox");
 
     expect(renderedGroupLabels).toEqual(groupLabels);
-    expect(checkboxes).toHaveLength(32);
+    expect(checkboxes).toHaveLength(PERMISSION_KEYS.length);
     for (const permissionKey of PERMISSION_KEYS) {
       expect(screen.getAllByRole("checkbox", { name: permissionKey }))
         .toHaveLength(1);

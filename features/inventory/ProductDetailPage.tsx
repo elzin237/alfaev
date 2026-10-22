@@ -1,5 +1,5 @@
-import { useRef, useState, type ReactNode } from "react";
-import { Link, useParams } from "react-router";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
@@ -12,7 +12,13 @@ import ProductBarcodeSection from "./components/ProductBarcodeSection";
 import ProductEditDialog from "./components/ProductEditDialog";
 import ProductSuppliersSection from "./components/ProductSuppliersSection";
 import SupplierStockHistorySection from "./components/SupplierStockHistorySection";
+import InventoryWarehouseTabs from "./components/InventoryWarehouseTabs";
 import { useProductDetail } from "./hooks/useProductDetail";
+import {
+  useInventoryLegacyViewPermission,
+  useInventoryWarehouseAccess,
+} from "./hooks/useInventoryWarehouseAccess";
+import { findInventoryWarehouse, INVENTORY_WAREHOUSES } from "./inventoryWarehouses";
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
@@ -29,8 +35,20 @@ function formatProductKind(kind: "component" | "pcb_finished_good"): string {
 
 function ProductDetailPage() {
   const { productId = "" } = useParams<{ productId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const warehouseAccess = useInventoryWarehouseAccess();
+  const legacyAccess = useInventoryLegacyViewPermission();
+  const requestedWarehouse = findInventoryWarehouse(searchParams.get("warehouse"));
+  const selectedWarehouse = warehouseAccess.authorizedWarehouses.find(
+    (warehouse) => warehouse.id === requestedWarehouse?.id,
+  ) ?? warehouseAccess.authorizedWarehouses[0];
   const { productQuery, brandsQuery, canEdit, canArchive, update, archive } =
-    useProductDetail(productId);
+    useProductDetail(
+      productId,
+      selectedWarehouse?.id ?? "",
+      Boolean(selectedWarehouse),
+      legacyAccess.canReadLegacyInventory,
+    );
   const archiveLockRef = useRef(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
@@ -38,6 +56,15 @@ function ProductDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   let content: ReactNode;
+
+  useEffect(() => {
+    if (!selectedWarehouse || requestedWarehouse?.id === selectedWarehouse.id) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("warehouse", selectedWarehouse.code);
+      return next;
+    }, { replace: true });
+  }, [requestedWarehouse?.id, selectedWarehouse, setSearchParams]);
 
   async function confirmArchive() {
     if (archiveLockRef.current) return;
@@ -61,7 +88,13 @@ function ProductDetailPage() {
     }
   }
 
-  if (!productId) {
+  if (warehouseAccess.isPending) {
+    content = <LoadingState message="Checking warehouse access..." />;
+  } else if (warehouseAccess.isError) {
+    content = <ErrorState title="Unable to verify access" message="Your warehouse access could not be verified." />;
+  } else if (!selectedWarehouse) {
+    content = <ErrorState title="Access denied" message="You do not have permission to view any Inventory warehouse." />;
+  } else if (!productId) {
     content = (
       <ErrorState title="Product not found" message="The Product could not be found." />
     );
@@ -182,19 +215,29 @@ function ProductDetailPage() {
         <InventoryBalanceSection
           productId={product.id}
           productIsActive={product.isActive}
+          warehouse={selectedWarehouse}
+          canAdjust={warehouseAccess.adjustableWarehouseIds.has(selectedWarehouse.id)}
+          transferDestinations={INVENTORY_WAREHOUSES.filter(
+            (warehouse) => warehouse.id !== selectedWarehouse.id &&
+              warehouseAccess.adjustableWarehouseIds.has(warehouse.id),
+          )}
+          canReadCommitments={
+            warehouseAccess.canReadProjectAvailability &&
+              selectedWarehouse.code === "raw_materials"
+          }
         />
 
-        <InventoryHistorySection productId={product.id} />
+        <InventoryHistorySection productId={product.id} warehouseId={selectedWarehouse.id} />
 
         <ProductBarcodeSection serialNumber={product.serialNumber} />
 
-        <ProductSuppliersSection
+        {legacyAccess.canReadLegacyInventory && <ProductSuppliersSection
           productId={product.id}
           productName={product.name}
           productIsActive={product.isActive}
-        />
+        />}
 
-        <SupplierStockHistorySection productId={product.id} />
+        <SupplierStockHistorySection productId={product.id} warehouseId={selectedWarehouse.id} />
 
         <ProductEditDialog
           open={isEditOpen}
@@ -241,13 +284,27 @@ function ProductDetailPage() {
         description="View Product master data and lifecycle information."
         actions={
           <Link
-            to="/inventory"
+            to={selectedWarehouse ? `/inventory?warehouse=${selectedWarehouse.code}` : "/inventory"}
             className="rounded-xl border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300 focus:ring-offset-2"
           >
             Back to Inventory
           </Link>
         }
       />
+
+      {!warehouseAccess.isPending && selectedWarehouse && (
+        <InventoryWarehouseTabs
+          warehouses={warehouseAccess.authorizedWarehouses}
+          selectedWarehouseId={selectedWarehouse.id}
+          onSelect={(warehouse) => {
+            setSearchParams((current) => {
+              const next = new URLSearchParams(current);
+              next.set("warehouse", warehouse.code);
+              return next;
+            });
+          }}
+        />
+      )}
 
       {successMessage && (
         <p role="status" className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800">

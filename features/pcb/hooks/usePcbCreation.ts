@@ -20,8 +20,8 @@ export function usePcbCreation() {
     isAdmin || (permissionQuery.data?.ok === true && permissionQuery.data.value)
   ));
 
-  async function create(name: string) {
-    const result = await createPcbCard(name);
+  async function create(name: string, serialNumber: string) {
+    const result = await createPcbCard(name, serialNumber);
     if (result.ok) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: pcbCardListQueryKey(profile?.id), exact: true }),

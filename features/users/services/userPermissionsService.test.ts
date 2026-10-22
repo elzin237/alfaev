@@ -36,7 +36,7 @@ describe("userPermissionsService", () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toHaveLength(32);
+      expect(result.value).toHaveLength(PERMISSION_KEYS.length);
       expect(result.value[1]).toEqual({
         permissionKey: "projects.view",
         module: "projects",

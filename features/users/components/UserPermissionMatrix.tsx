@@ -13,7 +13,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{
   { module: "procurement", label: "Nabavka" },
   { module: "suppliers", label: "Dobavljači" },
   { module: "inventory", label: "Skladište" },
-  { module: "pcb", label: "PCB Cards" },
+  { module: "pcb", label: "Finished Product Calculator" },
   { module: "work_orders", label: "Radni Nalozi" },
   { module: "archive", label: "Archive" },
 ];

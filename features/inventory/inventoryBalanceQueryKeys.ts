@@ -1,12 +1,16 @@
 export function inventoryBalanceQueryKey(
   profileId: string | undefined,
-  productId: string,
+  warehouseIdOrProductId: string,
+  productId?: string,
 ) {
+  const warehouseId = productId === undefined ? "all-warehouses" : warehouseIdOrProductId;
+  const resolvedProductId = productId ?? warehouseIdOrProductId;
   return [
     "inventory",
     "balances",
     "detail",
     profileId,
-    productId,
+    warehouseId,
+    resolvedProductId,
   ] as const;
 }

@@ -8,6 +8,8 @@ const inventoryMocks = vi.hoisted(() => ({
   useComponentImport: vi.fn(),
   useProducts: vi.fn(),
   useInventoryCommitments: vi.fn(),
+  useInventoryWarehouseAccess: vi.fn(),
+  useInventoryLegacyViewPermission: vi.fn(),
   refetch: vi.fn(),
   productRefetch: vi.fn(),
   create: vi.fn(),
@@ -31,6 +33,10 @@ vi.mock("./hooks/useProducts", () => ({
 }));
 vi.mock("./hooks/useInventoryCommitments", () => ({
   useInventoryCommitments: inventoryMocks.useInventoryCommitments,
+}));
+vi.mock("./hooks/useInventoryWarehouseAccess", () => ({
+  useInventoryWarehouseAccess: inventoryMocks.useInventoryWarehouseAccess,
+  useInventoryLegacyViewPermission: inventoryMocks.useInventoryLegacyViewPermission,
 }));
 vi.mock("./components/ComponentImportDialog", () => ({
   default: ({
@@ -102,6 +108,24 @@ function setHookState(options: {
   productsError?: boolean;
   productsData?: ProductListResult;
 } = {}) {
+  inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({
+    profileId: "profile-1",
+    authorizedWarehouses: [{
+      id: "10000000-0000-4000-8000-000000000001",
+      code: "raw_materials",
+      label: "Raw Materials",
+      viewPermission: "inventory.raw_materials.view",
+      adjustPermission: "inventory.raw_materials.adjust",
+    }],
+    adjustableWarehouseIds: new Set(["10000000-0000-4000-8000-000000000001"]),
+    canReadProjectAvailability: true,
+    isPending: false,
+    isError: false,
+  });
+  inventoryMocks.useInventoryLegacyViewPermission.mockReturnValue({
+    canReadLegacyInventory: true,
+    isPending: false,
+  });
   inventoryMocks.useInventoryCommitments.mockReturnValue({
     isPending: false,
     isError: false,
@@ -138,9 +162,9 @@ function setHookState(options: {
   });
 }
 
-function renderInventory() {
+function renderInventory(path = "/inventory") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <InventoryPage />
     </MemoryRouter>,
   );
@@ -177,6 +201,55 @@ afterEach(() => {
 });
 
 describe("InventoryPage", () => {
+  it("shows only authorized warehouse tabs and never enables a hidden warehouse request", () => {
+    inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({
+      profileId: "profile-1",
+      authorizedWarehouses: [
+        {
+          id: "10000000-0000-4000-8000-000000000001",
+          code: "raw_materials",
+          label: "Raw Materials",
+          viewPermission: "inventory.raw_materials.view",
+          adjustPermission: "inventory.raw_materials.adjust",
+        },
+        {
+          id: "10000000-0000-4000-8000-000000000003",
+          code: "customs",
+          label: "Customs Warehouse",
+          viewPermission: "inventory.customs.view",
+          adjustPermission: "inventory.customs.adjust",
+        },
+      ],
+      adjustableWarehouseIds: new Set(),
+      canReadProjectAvailability: true,
+      isPending: false,
+      isError: false,
+    });
+    renderInventory("/inventory?warehouse=customs");
+    expect(screen.getByRole("tab", { name: "Customs Warehouse" }))
+      .toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "Finished Goods" }))
+      .not.toBeInTheDocument();
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000003", "", true,
+    );
+  });
+
+  it("fails closed and disables warehouse data reads when no view is authorized", () => {
+    inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({
+      profileId: "profile-1",
+      authorizedWarehouses: [],
+      adjustableWarehouseIds: new Set(),
+      canReadProjectAvailability: false,
+      isPending: false,
+      isError: false,
+    });
+    renderInventory();
+    expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("", "", false);
+  });
+
   it("keeps physical stock visible and never fakes commitment zero after a read failure", () => {
     setHookState({ productsData: { ok: true, value: [activeProduct] } });
     const retry = vi.fn();
@@ -293,25 +366,35 @@ describe("InventoryPage", () => {
       "placeholder",
       "Name, Category, Serial Number / Šifra, or Catalog Number",
     );
-    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000001", "", true,
+    );
     expect(screen.getByRole("heading", { name: "No Products found" }))
       .toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: "  res" } });
     fireEvent.change(search, { target: { value: "  resistor  " } });
-    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000001", "", true,
+    );
 
     act(() => vi.advanceTimersByTime(299));
-    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000001", "", true,
+    );
 
     act(() => vi.advanceTimersByTime(1));
-    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("resistor");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000001", "resistor", true,
+    );
     expect(screen.getByRole("heading", { name: "No matching Products" }))
       .toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Clear Search" }));
     expect(search).toHaveValue("");
-    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("");
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
+      "10000000-0000-4000-8000-000000000001", "", true,
+    );
     expect(screen.getByRole("heading", { name: "No Products found" }))
       .toBeInTheDocument();
   });

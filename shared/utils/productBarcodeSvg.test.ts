@@ -34,7 +34,13 @@ describe("createProductBarcodeSvg", () => {
 
   it("does not repair an invalid Product Serial", () => {
     expect(() => createProductBarcodeSvg(" 0000001")).toThrowError(
-      "Product Serial Number must contain exactly 7 ASCII digits.",
+      "Product Serial Number must contain exactly 3 or 7 ASCII digits.",
     );
+  });
+
+  it("renders leading-zero three-digit Product Serials without numeric conversion", () => {
+    const rendered = createProductBarcodeSvg("007");
+    expect(rendered.barcode.serialNumber).toBe("007");
+    expect(rendered.svg).toContain(">007</text>");
   });
 });

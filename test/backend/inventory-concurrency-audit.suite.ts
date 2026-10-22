@@ -11,7 +11,7 @@ import {
   getWorkOrderAllocationFingerprint,
   seedSupplierStockForProfile,
 } from "./helpers/inventory-provenance";
-import type { SecurityFixtureHarness } from "./security-fixtures";
+import type { SecurityActor, SecurityFixtureHarness } from "./security-fixtures";
 import {
   actAs,
   createPreflightFixture,
@@ -35,6 +35,8 @@ const storageService = createClient(
 );
 const storagePaths = new Set<string>();
 const pdfBytes = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n%%EOF\n");
+const rawWarehouseId = "10000000-0000-4000-8000-000000000001";
+const finishedWarehouseId = "10000000-0000-4000-8000-000000000002";
 
 interface ManualAdjustmentRow extends QueryResultRow {
   movement_id: string;
@@ -161,8 +163,10 @@ async function manualAdjust(
   reason: string,
 ): Promise<ManualAdjustmentRow> {
   const currentQuantity = BigInt((await database.query<{ quantity: string }>(
-    "select quantity::text as quantity from public.inventory_balances where product_id = $1::uuid",
-    [productId],
+    `select quantity::text as quantity
+     from public.inventory_balances
+     where product_id = $1::uuid and warehouse_id = $2::uuid`,
+    [productId, rawWarehouseId],
   )).rows[0]?.quantity ?? "0");
   const createsStock = type === "add" || (type === "correction" && BigInt(quantity) > currentQuantity);
   const sourceId = createsStock
@@ -217,8 +221,9 @@ async function assertLedger(
   expect(expectedBefore).toBe(expectedTerminal);
   expect((await database.query<{ quantity: string }>(
     `select quantity::text as quantity
-     from public.inventory_balances where product_id = $1::uuid`,
-    [productId],
+     from public.inventory_balances
+     where product_id = $1::uuid and warehouse_id = $2::uuid`,
+    [productId, rawWarehouseId],
   )).rows).toEqual([{ quantity: expectedTerminal.toString() }]);
   await assertInventorySourceInvariant(database, productId);
   return movements;
@@ -298,7 +303,7 @@ async function cleanupGenericFixture(
 
 async function createPcbFixture(
   database: PoolClient,
-  actorId: string,
+  actor: SecurityActor,
   values: {
     frozenQuantity: string;
     inputProductId?: string;
@@ -306,6 +311,7 @@ async function createPcbFixture(
     supplementalQuantity?: string;
   },
 ): Promise<PcbFixture> {
+  const actorId = actor.profileId;
   const inputProductId = values.inputProductId ?? await createProduct(
     database,
     actorId,
@@ -326,7 +332,6 @@ async function createPcbFixture(
   const outputProductId = await createProduct(database, actorId, "0", "pcb_finished_good");
   const cardId = randomUUID();
   const bomVersionId = randomUUID();
-  const workOrderId = randomUUID();
   await database.query(
     `insert into public.pcb_cards (
        id, name, output_product_id, created_by_user_id, updated_by_user_id
@@ -345,28 +350,15 @@ async function createPcbFixture(
      ) values ($1::uuid, $2::uuid, $3::bigint)`,
     [bomVersionId, inputProductId, values.frozenQuantity],
   );
-  await database.query(
-    `insert into public.work_orders (
-       id, work_order_number, project_id, customer_name_snapshot, description,
-       created_by_user_id, updated_by_user_id
-     ) values (
-       $1::uuid, $2::text, null, null, $3::text, $4::uuid, $4::uuid
+  await actAs(database, actor);
+  const workOrderId = (await database.query<{ work_order_id: string }>(
+    `select work_order_id
+     from public.create_pcb_production_work_order(
+       $1::uuid, '1', null, $2::uuid
      )`,
-    [workOrderId, await nextWorkOrderNumber(database), `PCB production — Task 148 Card ${cardId}`, actorId],
-  );
-  await database.query(
-    `insert into public.work_order_items (
-       work_order_id, product_id, quantity, added_by_user_id
-     ) values ($1::uuid, $2::uuid, $3::bigint, $4::uuid)`,
-    [workOrderId, inputProductId, values.frozenQuantity, actorId],
-  );
-  await database.query(
-    `insert into public.pcb_production_work_orders (
-       work_order_id, pcb_card_id, bom_version_id, planned_quantity,
-       creation_request_id, created_by_user_id
-     ) values ($1::uuid, $2::uuid, $3::uuid, 1, $4::uuid, $5::uuid)`,
-    [workOrderId, cardId, bomVersionId, randomUUID(), actorId],
-  );
+    [cardId, randomUUID()],
+  )).rows[0]!.work_order_id;
+  await database.query("reset role");
   if (values.supplementalQuantity !== undefined) {
     await database.query(
       `insert into public.work_order_items (
@@ -429,13 +421,13 @@ export function registerInventoryConcurrencyAuditTests(
           preflight_definition: string;
         }>(
           `select
-             pg_catalog.pg_get_functiondef('public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)'::pg_catalog.regprocedure) as apply_definition,
+             pg_catalog.pg_get_functiondef('public.apply_inventory_delta_in_warehouse(uuid,uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)'::pg_catalog.regprocedure) as apply_definition,
              pg_catalog.pg_get_functiondef('public.manual_adjust_inventory(uuid,text,bigint,text,uuid)'::pg_catalog.regprocedure) as manual_definition,
              pg_catalog.pg_get_functiondef('public.preflight_finish_work_order(uuid,timestamptz)'::pg_catalog.regprocedure) as preflight_definition,
              pg_catalog.pg_get_functiondef('public.finish_generic_work_order_internal(uuid,timestamptz,text,text)'::pg_catalog.regprocedure) as finish_definition,
              pg_catalog.pg_get_functiondef('public.preflight_finish_pcb_production_work_order(uuid,timestamptz,text)'::pg_catalog.regprocedure) as pcb_preflight_definition,
              pg_catalog.pg_get_functiondef('public.finish_pcb_work_order_internal(uuid,timestamptz,text,text,text)'::pg_catalog.regprocedure) as pcb_finish_definition,
-             pg_catalog.has_function_privilege('authenticated', 'public.apply_inventory_delta(uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)', 'EXECUTE') as apply_authenticated,
+             pg_catalog.has_function_privilege('authenticated', 'public.apply_inventory_delta_in_warehouse(uuid,uuid,bigint,text,text,text,uuid,uuid,uuid,uuid,text)', 'EXECUTE') as apply_authenticated,
              pg_catalog.has_function_privilege('authenticated', 'public.produce_pcb(uuid,text,uuid)', 'EXECUTE') as legacy_pcb_authenticated`,
         )).rows[0]!;
         const apply = normalizeDefinition(rows.apply_definition);
@@ -450,7 +442,7 @@ export function registerInventoryConcurrencyAuditTests(
           "for update",
           "if resulting_quantity < 0",
           "update public.inventory_balances as balance",
-          "insert into public.inventory_movements as inserted",
+          "insert into public.inventory_movements",
         ]);
         expectOrderedFragments(manual, [
           "from public.products as product",
@@ -468,19 +460,20 @@ export function registerInventoryConcurrencyAuditTests(
           "for update",
           "order by product.id",
           "for share of product",
-          "order by balance.product_id",
+          "order by balance.product_id, public.production_warehouse_priority(balance.warehouse_id)",
           "for update of balance",
         ]);
-        expect(finish).toContain("order by item.product_id");
-        expect(finish).toContain("from public.apply_inventory_delta");
-        expect(pcbPreflight).toContain("group by item.product_id");
-        expect(pcbPreflight).toContain("order by balance.product_id");
-        expect(pcbPreflight).toContain("for update");
+        expect(finish).toContain("order by plan.product_id, plan.warehouse_priority");
+        expect(finish).toContain("from public.apply_inventory_delta_in_warehouse");
+        expect(pcbPreflight).toContain("public.get_work_order_warehouse_source_allocation_plan");
         expect(pcbPreflight).toContain(
-          "balance.quantity::numeric - coalesce(( select pg_catalog.sum(item.quantity::numeric)",
+          "order by balance.product_id, public.production_warehouse_priority(balance.warehouse_id)",
         );
+        expect(pcbPreflight).toContain("for update");
+        expect(pcbPreflight).toContain("public.get_production_eligible_quantity");
         expect(pcbPreflight).toContain("+ actual_good_value::numeric");
-        expect(pcbFinish).toContain("group by item.product_id order by item.product_id");
+        expect(pcbFinish).toContain("order by plan.product_id, plan.warehouse_priority");
+        expect(pcbFinish).toContain("p_warehouse_id => '10000000-0000-4000-8000-000000000002'::uuid");
         expect(pcbFinish).toContain("p_movement_type => 'pcb_production_input'");
         expect(pcbFinish).toContain("p_movement_type => 'pcb_production_output'");
         expect(rows.apply_authenticated).toBe(false);
@@ -683,7 +676,8 @@ export function registerInventoryConcurrencyAuditTests(
           }
           expect((await observer.query(
             `select
-               (select quantity::text from public.inventory_balances where product_id = $1::uuid) as quantity,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1::uuid and warehouse_id = '${rawWarehouseId}'::uuid) as quantity,
                (select status from public.work_orders where id = $2::uuid) as status,
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id = $1::uuid) as movements,
                (select pg_catalog.count(*)::text from public.work_order_pdfs where work_order_id = $2::uuid) as pdfs`,
@@ -703,7 +697,7 @@ export function registerInventoryConcurrencyAuditTests(
       await fixture.withDatabaseClients(2, async ([worker, observer]) => {
         if (!worker || !observer) throw new Error("Task 148 PCB aggregate clients unavailable");
         await observer.query("begin");
-        const state = await createPcbFixture(observer, actor.profileId, {
+        const state = await createPcbFixture(observer, actor, {
           frozenQuantity: "5",
           inputStock: "6",
           supplementalQuantity: "2",
@@ -718,7 +712,8 @@ export function registerInventoryConcurrencyAuditTests(
           await worker.query("rollback");
           expect((await observer.query(
             `select
-               (select quantity::text from public.inventory_balances where product_id = $1::uuid) as input_quantity,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1::uuid and warehouse_id = '${rawWarehouseId}'::uuid) as input_quantity,
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id in ($1::uuid, $2::uuid)) as movements,
                (select pg_catalog.count(*)::text from public.pcb_production_runs where work_order_id = $3::uuid) as runs`,
             [state.inputProductId, state.outputProductId, state.workOrderId],
@@ -737,7 +732,18 @@ export function registerInventoryConcurrencyAuditTests(
           await observer.query("commit");
           await worker.query("begin");
           await actAs(worker, actor);
+          expect((await worker.query(
+            `select actual_good_quantity::text, output_product_id
+             from public.preflight_finish_pcb_production_work_order(
+               $1::uuid, $2::timestamptz, '1'
+             ) limit 1`,
+            [state.workOrderId, state.updatedAt],
+          )).rows).toEqual([{
+            actual_good_quantity: "1",
+            output_product_id: state.outputProductId,
+          }]);
           await finishPcb(worker, state, reference, "1");
+          await worker.query("reset role");
           expect((await worker.query<MovementRow>(
             `select id, movement_type, quantity_delta::text, quantity_before::text,
                     quantity_after::text, source_type, source_id
@@ -754,12 +760,22 @@ export function registerInventoryConcurrencyAuditTests(
           })]);
           expect((await worker.query(
             `select
-               (select quantity::text from public.inventory_balances where product_id = $1::uuid) as input_quantity,
-               (select quantity::text from public.inventory_balances where product_id = $2::uuid) as output_quantity,
+               (select pg_catalog.sum(quantity)::text from public.inventory_balances
+                where product_id = $1::uuid) as input_quantity,
+               (select pg_catalog.sum(quantity)::text from public.inventory_balances
+                where product_id = $2::uuid) as output_quantity,
                (select pg_catalog.count(*)::text from public.pcb_production_runs where work_order_id = $3::uuid) as runs,
+               (select quantity_produced::text from public.pcb_production_runs
+                where work_order_id = $3::uuid) as produced,
                (select pg_catalog.count(*)::text from public.work_order_pdfs where work_order_id = $3::uuid) as pdfs`,
             [state.inputProductId, state.outputProductId, state.workOrderId],
-          )).rows).toEqual([{ input_quantity: "0", output_quantity: "1", pdfs: "1", runs: "1" }]);
+          )).rows).toEqual([{
+            input_quantity: "0",
+            output_quantity: "1",
+            pdfs: "1",
+            produced: "1",
+            runs: "1",
+          }]);
           await worker.query("rollback");
         } finally {
           await worker.query("rollback").catch(() => undefined);
@@ -775,11 +791,11 @@ export function registerInventoryConcurrencyAuditTests(
         if (!first || !second || !observer) throw new Error("Task 148 PCB Finish clients unavailable");
         await observer.query("begin");
         const sharedInput = await createProduct(observer, actor.profileId, "10");
-        const firstState = await createPcbFixture(observer, actor.profileId, {
+        const firstState = await createPcbFixture(observer, actor, {
           frozenQuantity: "7",
           inputProductId: sharedInput,
         });
-        const secondState = await createPcbFixture(observer, actor.profileId, {
+        const secondState = await createPcbFixture(observer, actor, {
           frozenQuantity: "7",
           inputProductId: sharedInput,
         });
@@ -798,6 +814,7 @@ export function registerInventoryConcurrencyAuditTests(
           await waitForLockWait(observer, competingName);
           await first.query("rollback");
           await expect(competing).resolves.toBeUndefined();
+          await second.query("reset role");
           expect((await second.query(
             `select
                (select pg_catalog.count(*)::text from public.pcb_production_runs where work_order_id = $1::uuid) as runs,
@@ -832,7 +849,8 @@ export function registerInventoryConcurrencyAuditTests(
 
           expect((await observer.query(
             `select
-               (select quantity::text from public.inventory_balances where product_id = $1::uuid) as quantity,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1::uuid and warehouse_id = '${rawWarehouseId}'::uuid) as quantity,
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id = $1::uuid) as movements,
                (select pg_catalog.count(*)::text from public.pcb_production_runs
                 where work_order_id in ($2::uuid, $3::uuid)) as runs`,
@@ -852,7 +870,7 @@ export function registerInventoryConcurrencyAuditTests(
       await fixture.withDatabaseClients(3, async ([finisher, adjuster, observer]) => {
         if (!finisher || !adjuster || !observer) throw new Error("Task 148 PCB output clients unavailable");
         await observer.query("begin");
-        const state = await createPcbFixture(observer, actor.profileId, {
+        const state = await createPcbFixture(observer, actor, {
           frozenQuantity: "2",
           inputStock: "10",
         });
@@ -904,8 +922,8 @@ export function registerInventoryConcurrencyAuditTests(
           }
           expect((await observer.query(
             `select quantity::text as quantity from public.inventory_balances
-             where product_id = $1::uuid`,
-            [state.outputProductId],
+             where product_id = $1::uuid and warehouse_id = $2::uuid`,
+            [state.outputProductId, rawWarehouseId],
           )).rows).toEqual([{ quantity: "10" }]);
         } finally {
           await finisher.query("rollback").catch(() => undefined);
@@ -934,7 +952,7 @@ export function registerInventoryConcurrencyAuditTests(
           updatedAt: genericState.updatedAt,
           workOrderId: genericState.workOrderId,
         };
-        const pcbState = await createPcbFixture(observer, actor.profileId, {
+        const pcbState = await createPcbFixture(observer, actor, {
           frozenQuantity: "7",
           inputProductId: genericState.productId,
         });
@@ -971,7 +989,8 @@ export function registerInventoryConcurrencyAuditTests(
           await pcbFinisher.query("rollback");
           expect((await observer.query(
             `select
-               (select quantity::text from public.inventory_balances where product_id = $1::uuid) as quantity,
+               (select quantity::text from public.inventory_balances
+                where product_id = $1::uuid and warehouse_id = '${rawWarehouseId}'::uuid) as quantity,
                (select status from public.work_orders where id = $2::uuid) as generic_status,
                (select status from public.work_orders where id = $3::uuid) as pcb_status,
                (select pg_catalog.count(*)::text from public.inventory_movements where product_id = $1::uuid) as movements`,

@@ -423,7 +423,7 @@ describe("workOrderService", () => {
   it.each([
     ["42501", "access_denied", "You no longer have permission to edit this Draft."],
     ["WOR02", "work_order_not_editable", "This Work Order can no longer be edited."],
-    ["22023", "invalid_serial_number", "Enter a valid 7-digit Serial Number."],
+    ["22023", "invalid_serial_number", "Enter a valid 3- or 7-digit Serial Number."],
     ["P0002", "product_not_found", "No Product was found for this Serial Number."],
     [
       "PRD05",
@@ -831,7 +831,7 @@ describe("workOrderService", () => {
     ["zero quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "0", source_type: "manual", current_inventory: "0" }]],
     ["overflow quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "9223372036854775808", source_type: "manual", current_inventory: "0" }]],
     ["unsafe numeric quantity", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: 9007199254740992, source_type: "manual", current_inventory: "0" }]],
-    ["invalid serial", [{ product_id: resolvedProductRow.product_id, serial_number: "123", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0" }]],
+    ["invalid serial", [{ product_id: resolvedProductRow.product_id, serial_number: "1234", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0" }]],
     ["untrimmed name", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: " A ", quantity: "1", source_type: "manual", current_inventory: "0" }]],
     ["invalid origin", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", source_type: "other", current_inventory: "0" }]],
     ["extra field", [{ product_id: resolvedProductRow.product_id, serial_number: "0000001", product_name: "A", quantity: "1", source_type: "manual", current_inventory: "0", hidden: true }]],

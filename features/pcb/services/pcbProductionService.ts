@@ -4,7 +4,6 @@ import { isPcbCardId } from "./pcbBomService";
 export interface ProducePcbInput {
   pcbCardId: string;
   plannedQuantity: string;
-  projectId: string | null;
   creationRequestId: string;
 }
 
@@ -22,10 +21,10 @@ const errorMessages: Record<ProducePcbErrorCode, string> = {
   access_denied: "Your session no longer allows PCB production.",
   insufficient_inventory: "The production Work Order could not be created because Inventory validation failed.",
   bom_unavailable: "The active PCB BOM changed or is no longer available. Review the refreshed precheck.",
-  card_unavailable: "This PCB Card is no longer available for production.",
+  card_unavailable: "This finished-product definition is no longer available for production.",
   project_unavailable: "The selected Project is no longer available for production.",
   product_unavailable: "A required PCB Product is no longer available for production.",
-  not_found: "The PCB Card or a required record no longer exists.",
+  not_found: "The finished-product definition or a required record no longer exists.",
   invalid_production: "Planned quantity or the current PCB state is invalid or exceeds the supported range.",
   inventory_unavailable: "Inventory state is unavailable. The Work Order was not created.",
   invalid_configuration: "PCB configuration is invalid. The Work Order was not created.",
@@ -46,7 +45,6 @@ function failure(code: ProducePcbErrorCode): ProducePcbResult {
 
 export async function producePcb(input: ProducePcbInput): Promise<ProducePcbResult> {
   if (!isPcbCardId(input.pcbCardId) ||
-    (input.projectId !== null && !isPcbCardId(input.projectId)) ||
     !isPcbCardId(input.creationRequestId) ||
     !/^[0-9]+$/.test(input.plannedQuantity) ||
     BigInt(input.plannedQuantity) === 0n ||
@@ -57,7 +55,7 @@ export async function producePcb(input: ProducePcbInput): Promise<ProducePcbResu
     const { data, error } = await supabase.rpc("create_pcb_production_work_order", {
       p_pcb_card_id: input.pcbCardId,
       p_planned_quantity: input.plannedQuantity,
-      p_project_id: input.projectId,
+      p_project_id: null,
       p_creation_request_id: input.creationRequestId,
     });
     if (error) return failure(sqlstateCodes[error.code] ?? "unknown_outcome");

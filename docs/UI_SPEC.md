@@ -4,6 +4,14 @@ Status: Canonical UI/UX specification v1
 Purpose: Define how approved AlfaEV modules should behave visually and interactively while preserving the existing React/Tailwind visual language.  
 Rule: This is a UI behavior specification, not permission/security enforcement. Backend authorization and business rules remain authoritative.
 
+Warehouse rollout status: migrations 136–142 are deployed to alfaev-dev (142/142);
+DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented locally,
+and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
+is pending and non-Admin browser acceptance is incomplete. No frontend production
+deployment or warehouse production database rollout has occurred; production remains
+at its previously verified migration state. Finished Goods Project reservations are
+not implemented.
+
 ---
 
 # 1. UI Principles
@@ -70,7 +78,7 @@ Final navigation order:
 3. Nabavka
 4. Dobavljači
 5. Skladište
-6. PCB Cards
+6. Finished Product Calculator
 7. Radni Nalozi
 8. Dokumentacija
 9. Osnovna sredstva
@@ -738,7 +746,7 @@ On success:
 - request links to Product
 - Serial Number appears on Nabavka row
 - request status, quantities, Supplier, and requested-name snapshot remain unchanged
-- Inventory remains at the Product's initialized zero balance until the separate Admin Inventory workflow records physical stock
+- Inventory remains at the Product's three initialized zero warehouse balances until a separate authorized warehouse Inventory workflow records physical stock
 
 ---
 
@@ -947,7 +955,7 @@ Confirmation for significant Remove/Correction actions is recommended.
 Barcode format:
 
 - Code 128
-- value = 7-digit Serial Number
+- exact 3- or 7-digit Serial Number text
 
 Product detail should show:
 
@@ -978,7 +986,7 @@ Example:
 
 Behavior:
 
-1. scanner sends 7-digit value
+1. scanner sends exact 3- or 7-digit text
 2. submit on Enter
 3. validate format
 4. resolve Product
@@ -1003,13 +1011,13 @@ Scanner input should reset after each scan.
 
 ---
 
-# 22. PCB Cards UI
+# 22. Finished Product Calculator UI
 
 ## PCB list
 
 Columns:
 
-- PCB Card
+- Finished Product
 - Serial Number
 - Current Stock
 - Active BOM Version
@@ -1019,10 +1027,10 @@ Columns:
 
 Primary actions:
 
-- Create PCB Card
+- Create Finished Product Calculator
 - Produce
 
-The later Add PCB Card UI (Task 087) asks only for the required card Name/Code. It does not ask for Serial Number, Product Category, Brand, kind, Supplier, or initial stock. Task 086 creates the trusted backend operation only and adds no UI.
+The creation dialog asks for required Name/Code and an exact three-digit Serial Number in a text input. It does not ask for Product Category, Brand, kind, Supplier, or initial stock. Leading zeroes are preserved and the trusted backend remains authoritative for uniqueness and creation.
 
 ---
 
@@ -1098,11 +1106,11 @@ Do not suggest that old production will change.
 
 # 24. PCB Production UI
 
-Production form:
+Locally implemented Finished Product Calculator production form:
 
-- PCB Card
+- Finished Product Calculator definition
 - Planned Production Quantity
-- optional Project selected from open (`planned`, `in_progress`, `on_hold`) choices showing only Project Name/Status; the choice read exposes only Project ID/Name/Status and does not require Projects-module access beyond the active Admin or `pcb.produce` production authority
+- no Project picker, Project-choice query, or new Project association
 
 After Quantity input:
 
@@ -1114,7 +1122,7 @@ show calculated requirements table:
 - Available
 - Missing
 
-Available is current physical `InventoryBalance.quantity`, not Available after Commitments. Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory or complete production.
+Available is the trusted combined physical quantity eligible for production across Raw Materials, Customs, and Finished Goods, not Available after Commitments. Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory or complete production. Finish consumes in Raw → Customs → Finished Goods order and credits actual-good output to Finished Goods.
 
 Whether stock is currently sufficient or insufficient:
 
@@ -1137,7 +1145,7 @@ After creation:
 - navigate to the Work Order when `work_orders.view` is available, otherwise show only the generated Work Order number and Draft-created confirmation
 - do not refresh stock/history as though production completed
 
-The specialized Work Order shows frozen PCB Card, BOM version, planned quantity, output Product, and Project/General Stock. Its Materials table includes a Source column. Generated rows are labeled `BOM`, have read-only Quantity, and have no Remove control. An Admin or `work_orders.edit_draft` user receives the existing scanner/manual Product-entry control for supplemental rows labeled `Added material`; those rows have editable Quantity and Remove. Explain: `BOM materials are locked. Additional materials may be added.` The frozen production header remains read-only. Finish requires an explicit exact `Actual successfully completed quantity` from 0 through planned; its PDF and finished view include all consumed materials and show planned/output quantities.
+The specialized Work Order shows frozen calculator definition, BOM version, planned quantity, output Product, and General Stock for new production. Historical Project-linked production retains its original Project context and remains readable and finishable. Its Materials table includes a Source column. Generated rows are labeled `BOM`, have read-only Quantity, and have no Remove control. An Admin or `work_orders.edit_draft` user receives the existing scanner/manual Product-entry control for supplemental rows labeled `Added material`; those rows have editable Quantity and Remove. Explain: `BOM materials are locked. Additional materials may be added.` The frozen production header remains read-only. Finish requires an explicit exact `Actual successfully completed quantity` from 0 through planned; its PDF and finished view include all consumed materials and show planned/output quantities.
 
 ---
 
@@ -1681,3 +1689,50 @@ never a Project-exclusive allocation. The UI does not calculate deficits, alloca
 shortages among Projects, or create events during reads. Quantity-only changes
 intentionally produce no notification. Rows retain the existing unread/read,
 dismissal, pagination, keyboard, Sidebar badge, and private Realtime behavior.
+
+## Warehouse Inventory and Finished Product Calculator UI
+
+Tasks 001B–001C add the warehouse backend and six Admin permission-matrix choices.
+Tasks 001D–001F implement the Inventory tabs, calculator rename/creation, and
+warehouse-aware production. Migrations 136–142 are deployed to DEV (142/142), and DEV
+`finish-work-order` v6 is ACTIVE. The frontend remains local and read-only browser
+acceptance is complete; controlled Stage 2 mutation acceptance is pending and
+non-Admin browser acceptance is incomplete.
+
+- Keep `/inventory` and the established layout. Add permission-aware tabs named **Raw
+  Materials**, **Finished Goods**, and **Customs Warehouse**. A visible tab shows only
+  that warehouse's stock, balance, allowed adjustment actions, movement history,
+  source-lot details, search, loading, error, and empty states. Hidden tabs must not be
+  queried, and tab hiding is not backend authorization.
+- Raw Materials preserves existing Product visibility, including historical Calculator
+  stock. Finished Goods shows only Calculator-linked Products, including zero-stock
+  and archived outputs. Customs starts empty and lists positive stock or retained
+  committed movement history, remaining visible after depletion. Search respects membership.
+- Calculator list/detail label output quantity **Finished Goods stock** and show actual
+  Finished Goods quantity. BOM input/picker stock remains Raw Materials.
+- First Customs transfer can start from an existing authorized Product detail in
+  another warehouse. Customs-only discovery/intake has no new interface in this slice.
+- Successful adjustments/transfers and Work Order Finish invalidate affected
+  profile-scoped Inventory and Calculator queries for authoritative refetch, without
+  optimistic stock arithmetic, polling or clearing another profile's cache.
+- Shared responsive table/detail components and contained overflow remain preferred;
+  the change must not redesign unrelated pages.
+- User-facing **PCB Cards** text is **Finished Product Calculator**. The `/pcb`
+  route and existing PCB/BOM identities remain unchanged.
+- New calculator entry UI requires Name/Code and an exact three-digit Serial Number text
+  input. It preserves leading zeroes and validates only `000`–`999`; ordinary Product
+  creation/import continues to display generated seven-digit serial behavior.
+- Produce keeps Planned Production Quantity plus the existing BOM/precheck and Create
+  Production Work Order action. It has no Project selector/query and creates new
+  calculator production without a Project association.
+- Product/manual/barcode lookup fields used by Work Order materials accept exact three-
+  or seven-digit serial text and reject invalid, ambiguous, or missing identities.
+- Warehouse-specific Add/Remove/Correction controls appear only with the matching
+  adjustment permission. The backend remains authoritative.
+- Transfer appears only when the caller can adjust both the selected source and at
+  least one distinct destination. It requires a positive quantity and reason, calls the
+  trusted atomic transfer boundary, and reconciles both warehouses without an
+  optimistic balance update.
+- Tabs use `tablist`/`tab` semantics, arrow/Home/End keyboard operation, visible focus,
+  and contained horizontal overflow. Product links preserve warehouse selection, and
+  protected query keys include profile, warehouse, and Product identities.

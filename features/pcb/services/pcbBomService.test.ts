@@ -89,11 +89,11 @@ describe("PCB BOM service", () => {
 
   it("searches active choices through only the narrow RPC and validates stock", async () => {
     rpc.mockResolvedValueOnce({ data: [{ product_id: inputId, product_name: "Input",
-      serial_number: "0000002", product_kind: "component", current_stock: "3" }], error: null })
+      serial_number: "007", product_kind: "component", current_stock: "3" }], error: null })
       .mockResolvedValueOnce({ data: [{ product_id: inputId, product_name: "Input",
         serial_number: "0000002", product_kind: "component", current_stock: 3.5 }], error: null });
     expect(await searchPcbBomProductChoices(cardId, "  0000  ")).toMatchObject({ ok: true, value: [{
-      productId: inputId, currentStock: "3",
+      productId: inputId, serialNumber: "007", currentStock: "3",
     }] });
     expect(rpc).toHaveBeenCalledWith("search_pcb_bom_product_choices", {
       p_pcb_card_id: cardId, p_search: "0000",

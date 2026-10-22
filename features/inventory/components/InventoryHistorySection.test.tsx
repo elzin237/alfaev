@@ -123,7 +123,9 @@ describe("InventoryHistorySection", () => {
     expect(within(addRow).getByText("+10")).toBeInTheDocument();
     expect(within(addRow).getByText("—")).toBeInTheDocument();
     expect(historyMocks.useInventoryMovements)
-      .toHaveBeenCalledWith("product-archived");
+      .toHaveBeenCalledWith(
+        "product-archived", "10000000-0000-4000-8000-000000000001",
+      );
     expect(screen.queryByRole("button", {
       name: /update|delete|reverse|adjust/i,
     })).not.toBeInTheDocument();

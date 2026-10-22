@@ -19,7 +19,7 @@ export default function PcbBomHistory({ cardId }: { cardId: string }) {
       onRetry={() => void historyQuery.refetch()} />;
   } else if (historyQuery.data.value.length === 0) {
     content = <EmptyState title="No BOM history"
-      description="No BOM version has been saved for this PCB Card yet." />;
+      description="No BOM version has been saved for this finished-product definition yet." />;
   } else {
     content = <div className="overflow-x-auto rounded-2xl border border-zinc-200">
       <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">

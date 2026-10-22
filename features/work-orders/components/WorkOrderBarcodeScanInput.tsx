@@ -7,7 +7,7 @@ interface WorkOrderBarcodeScanInputProps {
   refocusOnEnable?: boolean;
 }
 
-const productSerialNumberPattern = /^[0-9]{7}$/;
+const productSerialNumberPattern = /^(?:[0-9]{3}|[0-9]{7})$/;
 
 function WorkOrderBarcodeScanInput({
   disabled = false,
@@ -42,7 +42,7 @@ function WorkOrderBarcodeScanInput({
         Scan Product Barcode
       </label>
       <p id="work-order-barcode-scan-help" className="mt-1 text-sm text-zinc-500">
-        Scan a 7-digit Product Serial Number or enter it manually.
+        Scan a 3- or 7-digit Product Serial Number or enter it manually.
       </p>
       <input
         ref={inputRef}
@@ -67,7 +67,7 @@ function WorkOrderBarcodeScanInput({
           event.preventDefault();
           event.stopPropagation();
           if (!productSerialNumberPattern.test(serialNumber)) {
-            setError("Enter a 7-digit Serial Number.");
+            setError("Enter a 3- or 7-digit Serial Number.");
             return;
           }
 

@@ -16,6 +16,7 @@ vi.mock("../services/inventoryMovementService", () => ({
 }));
 
 import { useInventoryMovements } from "./useInventoryMovements";
+const warehouseId = "10000000-0000-4000-8000-000000000001";
 
 function renderMovementsHook(productId = "product-1") {
   const queryClient = new QueryClient({
@@ -51,9 +52,10 @@ describe("useInventoryMovements", () => {
       "movements",
       "product",
       "profile-1",
+      warehouseId,
       "product-1",
     ])).toBeDefined();
-    expect(hookMocks.listInventoryMovements).toHaveBeenCalledWith("product-1");
+    expect(hookMocks.listInventoryMovements).toHaveBeenCalledWith("product-1", warehouseId);
   });
 
   it("does not read history without a loaded profile", () => {

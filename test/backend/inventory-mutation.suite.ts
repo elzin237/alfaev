@@ -173,7 +173,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       const balance = await database.query<InventoryBalanceRow>(
         `select product_id, quantity, updated_at
          from public.inventory_balances
-         where product_id = $1::uuid`,
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
       expect(balance.rows[0]).toMatchObject({
@@ -197,7 +198,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       const afterOuterRollback = await database.query<InventoryBalanceRow>(
         `select product_id, quantity, updated_at
          from public.inventory_balances
-         where product_id = $1::uuid`,
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
       const rolledBackMovement = await database.query<CountResultRow>(
@@ -289,7 +291,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
         const unchangedBalance = await database.query<{ quantity: string }>(
           `select quantity
            from public.inventory_balances
-           where product_id = $1::uuid`,
+           where product_id = $1::uuid
+             and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productId],
         );
         const movementCount = await database.query<CountResultRow>(
@@ -323,7 +326,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
       const afterOverflow = await database.query<{ quantity: string }>(
         `select quantity
          from public.inventory_balances
-         where product_id = $1::uuid`,
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
       expect(afterOverflow.rows).toEqual([{ quantity: "9223372036854775807" }]);
@@ -488,7 +492,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
                where movement.product_id = balance.product_id
              ) as movement_count
            from public.inventory_balances as balance
-           where balance.product_id = $1::uuid`,
+           where balance.product_id = $1::uuid
+             and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productId],
         );
         expect(committedWhileWaiting.rows).toEqual([{
@@ -513,7 +518,8 @@ export function registerInventoryPrimitiveTests(requireHarness: () => SecurityFi
                where movement.product_id = balance.product_id
              ) as movement_count
            from public.inventory_balances as balance
-           where balance.product_id = $1::uuid`,
+           where balance.product_id = $1::uuid
+             and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productId],
         );
         expect(finalState.rows).toEqual([{
@@ -728,7 +734,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
       const balance = await database.query<{ quantity: string }>(
         `select quantity
          from public.inventory_balances
-         where product_id = $1::uuid`,
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
 
@@ -1253,7 +1260,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
                and audit.action_type = 'inventory.manual_adjusted'
            ) as audit_count
          from public.inventory_balances as balance
-         where balance.product_id = $1::uuid`,
+         where balance.product_id = $1::uuid
+           and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
       expect(unchanged.rows).toEqual([{
@@ -1387,7 +1395,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
                  and audit.action_type = 'inventory.manual_adjusted'
              ) as audit_count
            from public.inventory_balances as balance
-           where balance.product_id = $1::uuid`,
+           where balance.product_id = $1::uuid
+             and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productId],
         );
         expect(stateWhileWaiting.rows).toEqual([{
@@ -1435,12 +1444,14 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
            from public.inventory_balances as balance
            join public.inventory_movements as movement
              on movement.product_id = balance.product_id
+            and movement.warehouse_id = balance.warehouse_id
             and movement.movement_type = 'manual_remove'
            join public.audit_logs as audit
              on audit.entity_id = balance.product_id
             and audit.action_type = 'inventory.manual_adjusted'
             and audit.after_data->>'movement_id' = movement.id::text
-           where balance.product_id = $1::uuid`,
+           where balance.product_id = $1::uuid
+             and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
           [productId],
         );
         expect(committedState.rows).toEqual([{
@@ -1561,7 +1572,8 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
                and audit.action_type = 'inventory.manual_adjusted'
            ) as audit_count
          from public.inventory_balances as balance
-         where balance.product_id = $1::uuid`,
+         where balance.product_id = $1::uuid
+           and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [productId],
       );
       expect(state.rows).toEqual([{
@@ -1690,6 +1702,7 @@ export function registerManualInventoryAdjustmentTests(requireHarness: () => Sec
            from public.products as product
            join public.inventory_balances as balance
              on balance.product_id = product.id
+            and balance.warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
            where product.id = $1::uuid`,
           [productId],
         );

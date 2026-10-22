@@ -334,7 +334,9 @@ export function registerInventoryPcbProjectE2eTests(
       await expectRejected(
         database,
         producer,
-        "update public.inventory_balances set quantity = 999 where product_id = $1::uuid",
+        `update public.inventory_balances set quantity = 999
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [domain.componentAId],
         "42501",
       );
@@ -379,7 +381,9 @@ export function registerInventoryPcbProjectE2eTests(
 
       const creationBalances = await database.query<{ product_id: string; quantity: string }>(
         `select product_id, quantity from public.inventory_balances
-         where product_id = any($1::uuid[]) order by product_id`,
+         where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid
+         order by product_id`,
         [[domain.outputProductId, domain.componentAId, domain.componentBId, domain.supplementalId]],
       );
       const creationMovementCount = await database.query<{ count: number }>(
@@ -859,7 +863,8 @@ export function registerInventoryPcbProjectE2eTests(
         });
       expect((await database.query<{ product_id: string; quantity: string }>(
         `select product_id, quantity from public.inventory_balances
-         where product_id = any($1::uuid[])`,
+         where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [[domain.outputProductId, domain.componentAId, domain.componentBId, domain.supplementalId]],
       )).rows).toEqual(expect.arrayContaining([
         { product_id: domain.componentAId, quantity: "78" },
@@ -979,7 +984,9 @@ export function registerInventoryPcbProjectE2eTests(
         row.production_actual_good_quantity === "0"
       )).toBe(true);
       const outputBeforeZero = (await database.query<{ quantity: string }>(
-        "select quantity from public.inventory_balances where product_id = $1::uuid",
+        `select quantity from public.inventory_balances
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [domain.outputProductId],
       )).rows[0]?.quantity;
       const generalReference = await addPdfCandidate(database, general.work_order_id);
@@ -1037,7 +1044,9 @@ export function registerInventoryPcbProjectE2eTests(
         BigInt(row.quantity_before) + BigInt(row.quantity_delta) === BigInt(row.quantity_after)
       )).toBe(true);
       expect((await database.query<{ quantity: string }>(
-        "select quantity from public.inventory_balances where product_id = $1::uuid",
+        `select quantity from public.inventory_balances
+         where product_id = $1::uuid
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [domain.outputProductId],
       )).rows).toEqual([{ quantity: outputBeforeZero }]);
       expect((await database.query<{ count: number }>(
@@ -1117,7 +1126,8 @@ export function registerInventoryPcbProjectE2eTests(
 
       const finalBalances = await database.query<{ product_id: string; quantity: string }>(
         `select product_id, quantity from public.inventory_balances
-         where product_id = any($1::uuid[])`,
+         where product_id = any($1::uuid[])
+           and warehouse_id = '10000000-0000-4000-8000-000000000001'::uuid`,
         [[domain.outputProductId, domain.componentAId, domain.componentBId, domain.supplementalId]],
       );
       expect(finalBalances.rows).toEqual(expect.arrayContaining([
