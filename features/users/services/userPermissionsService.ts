@@ -98,7 +98,7 @@ function isCompletePermissionMatrix(
   }
 
   return PERMISSION_KEYS.every(
-    (permissionKey, index) => rows[index]?.permission_key === permissionKey,
+    (permissionKey) => rows.some((row) => row.permission_key === permissionKey),
   );
 }
 
@@ -134,15 +134,21 @@ export async function getUserPermissionsAdmin(
       );
     }
 
+    // The RPC's database ordering may differ when a new permission is added.
+    // Validate the complete unique set above, then preserve canonical UI order.
+    const byKey = new Map(data.map((permission) => [permission.permission_key, permission]));
     return {
       ok: true,
-      value: data.map((permission) => ({
-        permissionKey: permission.permission_key,
-        module: permission.module,
-        label: permission.label,
-        description: permission.description,
-        granted: permission.granted,
-      })),
+      value: PERMISSION_KEYS.map((key) => {
+        const permission = byKey.get(key)!;
+        return {
+          permissionKey: permission.permission_key,
+          module: permission.module,
+          label: permission.label,
+          description: permission.description,
+          granted: permission.granted,
+        };
+      }),
     };
   } catch {
     return failure(

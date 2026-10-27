@@ -89,6 +89,35 @@ describe("userPermissionsService", () => {
     }
   });
 
+  it("accepts the deployed 39-permission RPC order and normalizes without changing grants", async () => {
+    const canonical = permissionRows();
+    const reserve = canonical.find(row => row.permission_key === "inventory.finished_goods.reserve")!;
+    const deployed = canonical.filter(row => row !== reserve);
+    deployed.splice(deployed.findIndex(row => row.permission_key === "inventory.barcodes.generate") + 1, 0, reserve);
+    expect(deployed).toHaveLength(39);
+    expect(deployed.map(row => row.permission_key)).not.toEqual([...PERMISSION_KEYS]);
+    userPermissionsServiceMocks.rpc.mockResolvedValue({ data: deployed, error: null });
+    const result = await getUserPermissionsAdmin(targetUserId);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.map(row => row.permissionKey)).toEqual([...PERMISSION_KEYS]);
+      expect(result.value.map(row => row.granted)).toEqual(canonical.map(row => row.granted));
+    }
+  });
+
+  it("accepts reordered valid rows but rejects unknown keys or a same-length duplicate set", async () => {
+    userPermissionsServiceMocks.rpc.mockResolvedValueOnce({ data: permissionRows().reverse(), error: null });
+    expect((await getUserPermissionsAdmin(targetUserId)).ok).toBe(true);
+    const unknown = permissionRows().map(row => ({ ...row }));
+    unknown[0] = { ...unknown[0]!, permission_key: "users.admin" as typeof PERMISSION_KEYS[number] };
+    const duplicate = permissionRows();
+    duplicate[1] = { ...duplicate[0]! };
+    for (const data of [unknown, duplicate]) {
+      userPermissionsServiceMocks.rpc.mockResolvedValueOnce({ data, error: null });
+      expect((await getUserPermissionsAdmin(targetUserId)).ok).toBe(false);
+    }
+  });
+
   it("maps missing users and provider failures to safe typed errors", async () => {
     userPermissionsServiceMocks.rpc
       .mockResolvedValueOnce({ data: null, error: { code: "P0002" } })
