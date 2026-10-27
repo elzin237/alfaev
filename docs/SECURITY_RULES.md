@@ -9,8 +9,11 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment/read backend code is local in undeployed migrations 143–146. Reservation
+frontend and durable recovery are implemented locally; activation migration 147 is
+prepared but unapplied. Application activation and real-browser mutation acceptance
+remain pending.
 
 ---
 
@@ -329,7 +332,7 @@ At Work Order Finish, require an active Admin or `work_orders.finish` and, befor
 - validate sufficient stock for the combined frozen-BOM plus supplemental quantity of every input Product
 - prevent race-condition overspending
 
-Atomic Finish consumes every frozen BOM row plus every persisted supplemental row. When both origins reference the same Product, validation and locking use their exact combined quantity. Consumption follows Raw Materials FIFO, Customs FIFO, then Finished Goods FIFO, recording each consumed Product/warehouse and source lot. Output stock is credited only to Finished Goods and only by actual-good quantity. Actual good zero is valid, still consumes every input, and creates no output movement. Atomic success creates:
+Atomic Finish consumes every frozen BOM row plus every persisted supplemental row. When both origins reference the same Product, validation and locking use their exact combined quantity. Ordinary inputs follow Raw Materials FIFO, Customs FIFO, then unreserved Finished Goods FIFO. Calculator-linked finished inputs use unreserved FG FIFO only, without recursive BOM expansion (local migration 148). Each consumed Product/warehouse and source lot is recorded. Output stock is credited only to Finished Goods and only by actual-good quantity. Actual good zero is valid, still consumes every input, and creates no output movement. Atomic success creates:
 
 - PcbProductionRun
 - input Inventory deductions
@@ -1257,6 +1260,103 @@ global deficit snapshot, and baseline-detection state; it does not expose recipi
 identities, Inventory internals, or unrelated Product fields. Increased/decreased
 events remain internal history and never become Dashboard notifications.
 
+## Task 001L — atomic automatic FG requirement reservations (local, undeployed)
+
+`mutate_project_requirement` is the only request-aware FG requirement write boundary.
+An active Admin or all of `projects.view`, `projects.edit`,
+`inventory.finished_goods.view`, and `inventory.finished_goods.reserve` is required
+for any FG-affecting change. Ordinary material authorization remains `projects.edit`
+or Admin. No permission is granted implicitly and no browser table writes are added.
+
+The request UUID locks original-actor/payload ownership before domain mutation.
+Expected Product/quantity state rejects stale requirement edits. Project, affected
+Products in UUID order, FG balances and reservation states serialize stock/demand
+changes. Excess is released before the immediate FGR06 check sees the new plan.
+Zero allocation and removed requirements have immutable, private replay receipts.
+Receipt replay returns historical results only; it never recreates cancelled or
+released reservations. Current authorization still applies. Legacy FG CRUD rejects
+the bypass; its ordinary-material behavior is retained through private helpers.
+
+Requirement recovery uses the existing backend/Auth-user/profile/Project scope and
+Web Lock, with a separate strictly validated pending-intent record. It is persisted
+and read back before dispatch; manual and automatic pending operations conflict.
+No tokens or stock snapshots are stored. Restart requires explicit exact replay.
+Malformed success and permission loss retain uncertainty. Records clear only after
+a conclusive backend outcome and fresh authorized planning/FG reconciliation. Device
+owners/XSS/storage clearing remain outside the browser journal's confidentiality and
+durability guarantee; they do not weaken backend authorization or idempotency.
+
+This is local implementation, not deployment or browser acceptance evidence.
+
+## Finished Goods reservations — Phase 3A non-executable boundary
+
+Local, undeployed migration 143 introduces a dedicated
+`inventory.finished_goods.reserve` capability; no existing adjustment, Finish or
+production permission implies it and no grants are assigned automatically.
+The permission registry recognizes it without implementing reservation UI.
+
+All three reservation mutation routines (the shared algorithm and reserve/release
+wrappers) deny EXECUTE to PUBLIC, anon, authenticated and service_role. An Admin JWT
+does not override that ACL. Database-owner execution in rollback-only local tests is
+not browser access. Existing application functions do not invoke these routines.
+This boundary MUST remain closed until Phase 3B protects every stock-debit, planning
+edit and lifecycle path. Current operational hard reservations remain unavailable.
+
+Both new tables have RLS enabled and no direct application/service table privileges.
+Only two STABLE SECURITY DEFINER, empty-search-path read RPCs are authenticated-facing.
+They require active Admin or both `projects.view` and `inventory.finished_goods.view`,
+scope results to the supplied Project, and expose neither request UUIDs nor actors.
+The internal mutation algorithm requires active Admin or all four of Project view,
+Project edit, FG view and the dedicated reserve permission; it rechecks after waits.
+Request replay checks original actor before payload comparison and never increments
+quantity or appends another receipt/audit. Events cannot be updated or deleted.
+
+No reservation fulfillment, debit protection, cancellation release or completion
+integration is claimed in Phase 3A. DEV remains migration 142; no remote rollout is
+authorized by the foundation's existence.
+
+## Finished Goods debit protection — local Phase 3B1
+
+Local migration 144 adds three private VOLATILE SECURITY DEFINER trigger helpers with
+empty search paths: stock protection, explicit demand protection, and Project lifecycle
+protection. No PUBLIC, anon, authenticated or service_role EXECUTE is granted. The
+foundation's reserve/release/helper routines remain private, including to Admin JWTs.
+The two replaced production helpers remain SECURITY INVOKER and non-browser-facing.
+
+All FG balance decreases check reserved stock under the balance row lock. Trusted
+prechecks/fingerprints allocate only unreserved quantities without exposing Project
+attribution. Demand safeguards serialize on the Project row. Cancellation's trusted
+`projects.archive`/Admin authority releases reservations as a lifecycle side effect,
+not as general reserve authority; it appends retained actor-attributed receipts/audits.
+Completion rejects unresolved reservations and reopening never recreates them.
+
+Application-table ACLs/RLS and production/adjustment permissions are not broadened.
+The function inventory recognizes exactly three additional trusted helpers (182 total
+application SECURITY DEFINER functions with migrations 143/144). Local backend
+acceptance passed; mutation activation and remote deployment remain unauthorized.
+
+## Atomic Finished Goods fulfillment — local Phase 3C
+
+Migration 145 adds exactly two private SECURITY DEFINER functions with empty search
+paths (184 application SECURITY DEFINER functions total). Fulfillment requires active
+Admin or Project view/edit plus FG view and dedicated reserve capability. It rechecks
+after waits and retains actor/delegated-permission locks. No browser/service EXECUTE,
+table access, permission grants, stock-guard bypass or RLS weakening is introduced.
+
+Request UUIDs share the reserve/release ownership namespace. Check original actor
+before payload differences; exact replay returns original immutable results without
+new movement, allocation, receipt, audit or shortage fanout. Version and exact identity
+checks prevent concurrent/stale execution against a different reservation or Project.
+
+The single transaction reduces only the matching reservation and debits FG via the
+existing FIFO primitive. Other Projects' protected stock remains guarded. Immutable
+fulfilled receipts have unique movement links; reciprocal deferred checks enforce
+source type/ID, Project/Product/warehouse, actor, quantity and allocation correspondence.
+Orphan or spoofed fulfillment movements cannot commit. Failures roll back all effects.
+The existing shortage queue/reconciler handles qualifying fulfillment consumption;
+its physical eligibility and notification authorization rules are unchanged.
+Everything remains local, disabled for application mutations and undeployed.
+
 ## Warehouse and Finished Product Calculator security
 
 Tasks 001B–001C establish warehouse identity, composite integrity, independent
@@ -1310,10 +1410,19 @@ complete, while controlled Stage 2 mutation and non-Admin acceptance remain pend
 - Customs stock may be production-eligible without a Raw Materials transfer, but this
   software rule is not evidence of legal clearance. Mandatory declarations, release
   evidence, validation, and responsible-actor requirements remain a compliance decision.
-- Automatic production allocation is Raw Materials FIFO, Customs FIFO, then Finished
-  Goods FIFO. Work Order Finish uses its existing trusted permission and does not grant
+- Automatic ordinary-input allocation is Raw Materials FIFO, Customs FIFO, then unreserved
+  Finished Goods FIFO. Calculator-linked finished inputs use unreserved FG FIFO only
+  (local migration 148, not deployed); no recursive BOM consumption is permitted.
+  Work Order Finish uses its existing trusted permission and does not grant
   general warehouse adjustment authority. Per-warehouse quantities stay behind trusted
   production/read projections.
+- `get_finished_goods_inventory_commitments()` requires an active Admin or effective
+  `inventory.finished_goods.view`, not `projects.view`. Its STABLE SECURITY DEFINER
+  body has an empty search path and exposes only Product ID and warehouse aggregates;
+  authenticated EXECUTE only, PUBLIC/anon/service_role denied. Private helpers remain
+  private, with no direct table grants or RLS changes. No foreign Project identity is
+  returned. Frontend SQL text projection preserves bigint values before JSON parsing;
+  profile-scoped cache invalidation refetches rather than incrementing cached totals.
 - Project availability aggregates Raw Materials plus Customs only when the caller may
   view both warehouses. Finished Goods is excluded, and no warehouse breakdown is
   exposed through Project planning. Shortage reconciliation remains trusted, deferred,
@@ -1323,3 +1432,46 @@ complete, while controlled Stage 2 mutation and non-Admin acceptance remain pend
   access to movements, the queue, episodes, or events. It reuses the private
   SECURITY DEFINER queue helper with an empty search path; existing RPC permissions,
   Raw-plus-Customs availability, and notification eligibility are unchanged.
+
+### Finished Goods reservation context — local Phase 3D1
+
+`get_project_finished_goods_reservation_context(uuid)` is STABLE SECURITY DEFINER
+with an empty search_path, explicit authenticated EXECUTE and PUBLIC/anon/service_role
+denial. Active Admin or both Project view and FG view are mandatory. No other
+warehouse, adjustment, production or reservation permission substitutes for these.
+Only explicitly required FG Products and the supplied Project's reservation identity
+are projected; all other Projects contribute anonymous aggregate quantities only.
+
+One consistent statement snapshot supplies physical FG, global reserved/free stock,
+own reservation/version and canonical explicit demand. Archived Product and closed
+Project history are not hidden; historical demand does not re-enter open commitments.
+The shared demand calculation is a private SECURITY INVOKER helper with empty
+search_path and no application/service EXECUTE. Existing RLS/table ACLs, immutable
+history, mutation ACLs and all mutation authorization remain unchanged.
+Historical Phase 3D1 checkpoint: read model implemented locally; frontend pending, mutation activation pending,
+DEV deployment pending. This read is not authority to reserve, release or fulfill.
+
+Phase 3D3B now implements local mutation UI with all four effective permissions
+or active Admin, open-Project controls, trusted Product eligibility, frozen request
+UUID/payload retries and captured-profile cache reconciliation. Prepared migration
+147 grants only the three public wrappers to authenticated, validating negative
+helper/table privileges; it is unapplied. Internal authorization, RLS, accounting and
+immutable receipts are unchanged. No live activation or browser acceptance is claimed.
+
+Phase 3D3C adds an untrusted browser recovery journal, not authentication or stock
+authority. Its exact schema contains only backend/Auth-user/profile/Project scope,
+original request UUID and immutable parameters, timestamps and resolution labels.
+No tokens, credentials, Product names or Inventory snapshots are persisted. Logout
+clears the active session/query cache but does not discard unresolved intentions.
+Other identities cannot view/replay them through the application. A token captured
+only in memory pins each HTTP request to its authenticated identity during switches.
+
+Persist/read-back before dispatch and exclusive Web Locks are mandatory. Unavailable
+or corrupted storage, unsupported locking and payload conflicts disable new conflicting
+operations. Never silently overwrite/delete unresolved recovery data or generate a
+replacement UUID. On restart all saved states require explicit replay; saved success
+is not proof. Clear only after verified backend outcome and new authorized state
+reconciliation. A permission denial/UUID conflict cannot resolve earlier uncertainty.
+Browser storage is not tamper-proof or confidential against device owners/XSS;
+backend authorization/idempotency remain final. Manual storage clearing/eviction is
+outside the durable guarantee and requires reconciliation guidance, not false success.

@@ -9,8 +9,9 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending.
 
 ---
 
@@ -547,7 +548,7 @@ At Finish the user enters actual successfully completed quantity from zero throu
 
 1. complete the production run
 2. record actual-good quantity and the exact frozen BOM version used
-3. deduct BOM components for the planned quantity plus every saved supplemental material quantity; aggregate a Product that appears in both origins and consume Raw Materials FIFO, then Customs FIFO, then Finished Goods FIFO
+3. deduct saved BOM inputs for the planned quantity plus supplemental quantities, aggregating duplicate Products; ordinary inputs follow Raw → Customs → unreserved FG FIFO, while Calculator-linked finished inputs use unreserved FG FIFO only without re-consuming their BOM (local migration 148)
 4. credit only actual-good output to Finished Goods Warehouse Inventory stock
 5. record Inventory movements for both component consumption and finished-goods output
 6. record actor and timestamp
@@ -918,6 +919,29 @@ existing Dashboard Alerts panel, unread badge, dismissal, pagination, and privat
 Realtime refresh. It presents the quantity as a shared global deficit and navigates to
 the Project route without an Activity fragment. DEV acceptance remains pending.
 
+## Finished Goods reservation foundation — local and disabled
+
+Phase 3A adds local migration 143: explicit existing Product-demand linkage,
+reservation state/immutable receipts, a dedicated capability, Project-scoped trusted
+reads and owner-only reserve/release algorithms with version and retry protection.
+Application mutation EXECUTE remains revoked, including for Admin/service roles.
+This is not an operational reservation feature: Phase 3A itself does not provide
+hard debit/lifecycle protection, physical fulfillment or reservation UI. No automatic production
+reservation, historical backfill or component-plan reduction is introduced.
+DEV remains 142/142; migration 143 is undeployed and tested locally with rollback.
+
+Phase 3B1 adds local migration 144 safeguards for FG debits, unreserved production
+allocation, explicit demand edits, cancellation release and unresolved-reservation
+completion denial. Local backend acceptance passed; reservation mutation APIs remain
+private and activation/deployment require separate review and authorization.
+
+Phase 3C adds local migration 145: atomic private fulfillment, FG FIFO provenance,
+immutable `fulfilled` receipts/movement linkage, and original-actor/version/request
+retry protection. The existing Project consumption model counts fulfillment once;
+existing deferred shortage reconciliation processes its demand effect. Raw plus
+Customs eligibility, Work Order/PCB priority and planned requirements are preserved.
+No reservation frontend, application activation or remote deployment is included.
+
 ## Three-warehouse Inventory foundation and Finished Product Calculator
 
 Tasks 001B–001C supply the warehouse-aware database foundation, Raw Materials-only
@@ -940,9 +964,13 @@ pending and non-Admin browser acceptance is incomplete; no frontend production
 deployment has occurred.
 - Existing stock/history migrates to Raw Materials without duplication or historical
   PCB-output reclassification.
-- Production may consume Raw Materials, Customs, or a finished Product held in Finished
-  Goods. Mixed-source deductions record the actual warehouse in the order Raw Materials
-  FIFO, Customs FIFO, then Finished Goods FIFO.
+- Ordinary production inputs use Raw Materials FIFO, Customs FIFO, then unreserved
+  Finished Goods FIFO. Calculator-linked finished inputs use unreserved FG only,
+  never their original BOM components. All source warehouses/lots remain recorded.
+  This sourcing correction and FG Inventory Physical / hard-Committed / Available
+  aggregate columns are implemented locally in migration 148, not deployed or
+  browser-accepted. Raw planning labels distinguish Raw physical from Raw + Customs
+  eligible stock; shortage calculations are unchanged.
 - Project availability and shared shortage use Raw Materials plus Customs; Finished
   Goods remains excluded. Eligible-warehouse transfers conserve availability, while
   transfers across the Finished Goods boundary reconcile once from final state.

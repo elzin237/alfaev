@@ -19,6 +19,10 @@ interface ActivityWaitRow extends QueryResultRow {
   wait_event_type: string | null;
 }
 
+const reservationsEnabled = process.env.FG_RESERVATION_FOUNDATION_LOCAL === "1"
+  || process.env.FG_HARD_RESERVATION_PROTECTION_LOCAL === "1"
+  || process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1";
+
 const expectedDelegablePermissionKeys = [
   "dashboard.view",
   "projects.view",
@@ -41,6 +45,8 @@ const expectedDelegablePermissionKeys = [
   "inventory.raw_materials.adjust",
   "inventory.finished_goods.view",
   "inventory.finished_goods.adjust",
+  ...(reservationsEnabled
+    ? ["inventory.finished_goods.reserve"] : []),
   "inventory.customs.view",
   "inventory.customs.adjust",
   "inventory.products.create",
@@ -317,7 +323,9 @@ export function registerPermissionEscalationAttackTests(
         );
         const permissionKeys = definitions.rows.map((row) => row.key);
 
-        expect(permissionKeys).toHaveLength(38);
+        expect(permissionKeys).toHaveLength(
+          reservationsEnabled ? 39 : 38,
+        );
         expect(new Set(permissionKeys)).toEqual(
           new Set(expectedDelegablePermissionKeys),
         );

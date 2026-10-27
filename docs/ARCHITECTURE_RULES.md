@@ -479,6 +479,38 @@ may be negative to expose shortages.
 
 ---
 
+### Finished Goods reservation foundation — Phase 3A
+
+Use the explicit Project requirement Product FK and quantity, not ProjectProduct
+names or inferred BOM output identities. Aggregate outstanding demand by Project and
+Product; only explicitly referenced Calculator outputs qualify for this FG foundation.
+Reservation state and immutable idempotency receipts are separate from the physical
+ledger. Reserve/release must not create Inventory movements or reduce requirements.
+
+Local migration 143 is deliberately non-executable for application mutation roles.
+Owner-only algorithm tests do not constitute operational hard debit protection.
+Phase 3B must protect adjustments, transfers, generic/PCB Finish, demand changes and
+Project/Product lifecycle before opening mutation EXECUTE. Local migration 144 adds
+these debit/demand/Project guards and reservation-aware allocation without activation.
+Phase 3A/3B1 local backend acceptance passed; mutation activation remains disabled.
+DEV remains 142/142 and no remote rollout is implied.
+
+### Atomic Finished Goods fulfillment — local Phase 3C
+
+Migration 145 privately fulfills one exact reservation/Project/Product. Lock request
+ownership, Project, Product, FG balance and reservation deterministically. Reduce that
+reservation before the locked physical debit so the unchanged hard-stock guard still
+protects every other Project; both changes roll back together on failure. Reuse the
+existing warehouse mutation/FIFO allocation primitives, never a parallel stock ledger.
+
+Use only `finished_goods_reservation_fulfillment` for this operation. Its immutable
+movement is counted once by the existing Project consumption calculation and queued
+through existing deduplicated, deferred shortage reconciliation. Raw plus Customs
+remains the eligible physical-stock formula. Never rewrite requirements or BOMs.
+Fulfilled receipts link uniquely to movements; allocations retain source provenance.
+Deferred reciprocal checks reject orphan/mismatched fulfillment provenance at commit.
+All mutation APIs remain private. Frontend integration and deployment remain pending.
+
 ## 15. Historical Integrity
 
 Do not silently rewrite historical business records.
@@ -701,8 +733,10 @@ than replace, that central Inventory transaction boundary.
   context, Products, warehouse balances, source lots, then destination output state.
   It rechecks actor authority after blocking locks and commits inputs, output, PDF,
   Work Order, provenance, and audit atomically.
-- Production source priority is Raw Materials FIFO, Customs FIFO, then Finished Goods
-  FIFO. The allocation fingerprint includes Product, warehouse, source lot, and exact
+- Ordinary-input production source priority is Raw Materials FIFO, Customs FIFO,
+  then unreserved Finished Goods FIFO. Calculator-linked finished inputs use unreserved
+  FG FIFO only, without recursively expanding their BOM (local migration 148).
+  The allocation fingerprint includes Product, warehouse, source lot, and exact
   quantity; mutation creates a separate movement for every Product/warehouse deduction.
 - Project availability and shared shortage use Raw Materials plus Customs; Finished
   Goods stays excluded. Combined reads require visibility of both eligible warehouses.

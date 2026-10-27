@@ -8,8 +8,9 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending.
 
 ---
 
@@ -674,7 +675,7 @@ At Finish, the user supplies exact bigint actual-good quantity with `0 <= actual
 - record actor and timestamp
 - record audit event
 
-Frozen and supplemental rows may reference the same Product because origin is part of their authoritative identity. Finish aggregates those rows by Product for deterministic physical-stock locking and sufficiency. It consumes Raw Materials FIFO, then Customs FIFO, then Finished Goods FIFO, with one input movement per consumed Product/warehouse and exact source-lot allocations. Actual good zero still consumes all saved inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes a historical linked Project. The operation is atomic: input deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
+Frozen and supplemental rows may reference the same Product because origin is part of their authoritative identity. Finish aggregates those rows by Product for deterministic physical-stock locking and sufficiency. Ordinary inputs consume Raw Materials FIFO, then Customs FIFO, then unreserved Finished Goods FIFO. Calculator-linked finished inputs use unreserved FG FIFO only, never recursive BOM consumption (local migration 148). Every consumed Product/warehouse has an input movement and exact source-lot allocations. Actual good zero still consumes all saved inputs and records completed production, but leaves output stock unchanged and creates no zero/positive output movement. Finish creates exactly one run linked to the Work Order, records normal `work_order.finished` plus `pcb_production.completed`, and never automatically completes a historical linked Project. The operation is atomic: input deductions, actual output, production record, Work Order/PDF state, and audits either all succeed or none do.
 
 Produced PCB cards are stock-tracked finished goods.
 
@@ -1092,6 +1093,95 @@ Users with history:
   movements coalesce by transaction/Product; quantity-only changes do not notify.
   This correction does not implement Finished Goods reservations.
 
+## Task 001L — automatic FG reservation on requirement edits (local, undeployed)
+
+Only Products with `product_kind = 'pcb_finished_good'` and an authoritative
+`pcb_cards.output_product_id` link qualify. Explicit requirements across all groups
+are summed per Project/Product; prior qualifying consumption, including fulfillment,
+is deducted once. Group names and Calculator BOMs never create inferred demand.
+
+Genuine additions/increases reserve the lesser of all uncovered outstanding demand
+and currently unreserved FG. Partial or zero stock does not reject the requirement.
+Reductions/removals release only reservation quantity above the new outstanding
+demand. Unchanged saves, exact retries, manual releases, manufacturing, adjustments,
+transfers, stock arrivals and reopening never opportunistically allocate stock.
+Existing manual Reserve/Release/Fulfill remains available under its existing rules.
+
+FG shortage = outstanding demand minus this Project's remaining reservation. Global
+reservations are not subtracted again. This is separate from the existing shared
+Raw + Customs planning shortage and its notifications; those formulas are unchanged.
+Reserve/release changes no physical balance, movement, source lot or allocation.
+Fulfillment deducts FG only, never the original components again. Closed Projects
+reject new requirement changes; cancellation releases, completion requires resolved
+reservations, and reopening never recreates reservations. Fulfillment/history is
+retained when requirements are reduced, removed or later re-added.
+
+Migration 149 and its editor integration remain local until separately reviewed,
+authorized and deployed; no DEV/browser acceptance is implied here.
+
+## Finished Goods reservations — disabled local Phase 3A foundation
+
+Existing explicit Product requirement rows, including selected finished goods, define
+stock demand. A free-text ProjectProduct grouping alone does not define an output
+Product or quantity. Reservations aggregate by Project/Product, not separately by
+matching group names, and cannot allocate the same outstanding demand twice.
+
+Local migration 143 provides private reserve/release algorithms and trusted reads,
+not operational hard reservations. Application/service roles cannot execute mutations,
+even for Admin callers. No existing Project receives an automatic reservation.
+Internal allocation is bounded independently by unreserved FG physical stock and
+same-Project/Product outstanding demand. New allocation rejects archived Products;
+release retains history and may release an archived Product. Reservation/release
+changes no Inventory balance, movement, source lot, allocation or requirement.
+
+The approved activation rules remain: all unrelated debits must respect reservations;
+cancellation releases them; completion requires explicit resolution; reopening never
+reclaims stock. Phase 3B must implement those guards before enabling mutations.
+Fulfillment must later consume matching reservation and physical stock atomically.
+No fulfillment or frontend is delivered by Phase 3A. Production still consumes planned
+inputs in Raw → Customs → Finished Goods FIFO order and credits actual-good output.
+DEV remains 142/142; migration 143 has not been deployed.
+
+## Finished Goods hard-reservation protection — local Phase 3B1
+
+Local migration 144 adds the previously deferred physical-debit and Project guards;
+it does not activate reservation APIs. Manual Remove, downward Correction, transfers
+out and generic/PCB consumption may not leave FG physical stock below its reserved
+quantity. Production planning uses only unreserved FG in unchanged warehouse/FIFO
+priority. Neither another Project nor the owning Project may consume reserved stock
+through ordinary operations; fulfillment must be a separate atomic operation.
+
+Requirement removal/repointing/reduction and same-Project physical consumption are
+rejected if they would invalidate explicit remaining reserved demand. No automatic
+BOM/component-plan reduction is introduced. Cancellation releases reservations with
+immutable receipts; completion requires explicit release/resolution, and reopening
+never reclaims stock. Other Project status rules and shortage formulas are unchanged.
+
+The local Phase 3A/3B1 acceptance gate passed. Migration 144 remains undeployed and
+mutations stay private. Its scope excludes fulfillment and reservation UI.
+
+## Finished Goods fulfillment — local Phase 3C, disabled
+
+Migration 145 fulfills an existing active reservation against its exact Project/Product
+and explicit outstanding requirement. Partial/full fulfillment reduces reservation and
+FG physical quantity atomically, using FG-only FIFO and immutable movement, allocation,
+receipt and AuditLog history. It never consumes another Project's reserved stock.
+Reserve/release still changes no physical stock; production never auto-reserves output.
+
+Qualifying consumption now also includes `finished_goods_reservation_fulfillment`.
+Outstanding demand remains max(explicit planned quantity minus qualifying physical
+consumption, 0), without changing planned requirements or Calculator BOMs. Fulfilled
+units cannot be reserved again as unfulfilled demand. Raw plus Customs physical stock,
+unrelated production priority and shortage notification eligibility remain unchanged.
+Fulfillment queues existing deferred reconciliation, with one event/notification per
+real episode transition and no retry duplicates.
+
+New fulfillment requires an open Project and active Calculator-linked output Product.
+Archived Products can still have reservations released; original fulfillment receipts
+remain replayable under current authorization without repeating physical effects.
+Fulfillment, reserve and release remain private and undeployed. Reservation frontend
+and application activation are not implemented.
+
 ## 16. Three-warehouse and Finished Product Calculator rules
 
 Tasks 001B–001C implement the fixed warehouse identities, warehouse-scoped ledger,
@@ -1121,8 +1211,10 @@ Task 001G adds the warehouse-aware Project availability formula locally.
 - Consumption may split across warehouses and every deduction records its actual source
   warehouse. Work Order Finish remains atomic and idempotent, and successful PCB
   production credits actual-good output to Finished Goods with output provenance.
-- Source allocation is exactly Raw Materials FIFO, then Customs FIFO, then Finished
-  Goods FIFO. A single requirement may be split across those warehouses.
+- For ordinary inputs, source allocation is Raw Materials FIFO, then Customs FIFO,
+  then unreserved Finished Goods FIFO; one requirement may split across warehouses.
+  Calculator-linked finished Products used as inputs source exclusively from
+  unreserved Finished Goods FIFO. Never recursively expand or consume their BOM.
 - Customs remains separately accounted and may be consumed without a Raw Materials
   transfer. Declaration/release references and responsible actor are recorded where
   applicable, but mandatory evidence and legal-release rules await compliance approval.
@@ -1135,6 +1227,14 @@ Task 001G adds the warehouse-aware Project availability formula locally.
   retained; migration 140 does not rerun baseline initialization or rewrite history.
 
 ### Finished Product Calculator
+
+Local accounting correction (migration 148, not deployed): manufacture consumes saved
+inputs once and credits actual-good output to Finished Goods. Later fulfillment/issue
+deducts only the finished Product, not its original components. Hard reservations are
+distinct from planning commitments: FG Physical is its warehouse balance, Committed
+is the sum of positive remaining hard reservations across Projects, and Available is
+Physical minus Committed. Raw planning continues to use Raw + Customs minus outstanding
+open-Project commitments; no shortage rule or historical warehouse balance is changed.
 
 - The user-visible name is **Finished Product Calculator**. Existing PCB/BOM
   entities, `/pcb`, trusted identifiers, and historical AuditLog rows remain unchanged.

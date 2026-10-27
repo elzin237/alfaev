@@ -3738,8 +3738,10 @@ Current checkpoint: migrations 136–142 are deployed to alfaev-dev (142/142), a
 read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance is
 pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented; they remain a separate future phase.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145, with the local
+migration-146 read model. Phase 3D2 implements the read-only Project frontend locally;
+reservation mutation controls and application activation remain pending.
 
 ## 001B — Warehouse schema and historical backfill
 
@@ -3812,3 +3814,331 @@ not implemented; they remain a separate future phase.
   shortage, UI, and historical-preservation gates on disposable/local infrastructure.
 - Deploy to DEV only after independent review and explicit authorization, then complete
   browser acceptance before any separately authorized production rollout.
+
+## 001K / Phase 3A — Finished Goods reservation foundation
+
+- Local migration 143 reuses explicit Project requirement Product IDs and exact
+  quantities; group names alone never become finished-product demand.
+- Add retained Project/Product/FG current state, immutable request-owned event
+  receipts, a dedicated permission and authenticated Project-scoped trusted reads.
+- Keep reserve/release algorithms non-executable by application/service roles. Local
+  database-owner rollback proofs are not browser mutation authorization.
+- DEV remains 142/142. Migration 143 is undeployed; no reservation UI or fulfillment
+  is implemented. Existing production and shortage contracts are unchanged.
+- Phase 3B must implement all debit and planning/lifecycle guards, cancellation release,
+  explicit completion resolution and non-reclaiming reopen behavior before activation.
+- Phase 3C must integrate atomic physical fulfillment and its provenance; frontend
+  work and any deployment require their own reviewed scope and authorization.
+
+## 001K / Phase 3B1 — Local hard-reservation safeguards
+
+- Local migration 144 adds a universal FG debit guard under the stock-row lock,
+  reservation-aware production quantity/FIFO/fingerprint planning, immediate explicit
+  demand checks and cancellation/completion/reopening safeguards.
+- Migration 143 remains unchanged and all reservation mutation APIs remain private.
+- Rollback-only trusted-RPC concurrency proofs use a temporary local database copy;
+  the existing local database must not be reset. Test queries are invalidated before
+  cleanup so timed-out async continuations cannot write outside their transaction.
+- Authorized residue disposition: retain local test Product
+  `e27050dc-358a-466a-b734-0a5167d04979` and its three zero-quantity warehouse
+  balances as known local testing artifacts. No cleanup or deletion is required for
+  reservation acceptance; preservation baselines must include these records.
+- The 41 unavailable historical baseline digests remain a documented evidence
+  limitation, not proof of historical preservation. Fresh current-state comparisons
+  do not reconstruct that missing evidence.
+- The Task 001K rollback-only maintenance SQL and Python launcher remain unexecuted;
+  their preparation is not a reservation runtime PASS or a prerequisite to acceptance.
+- Local Phase 3A/3B1 backend acceptance passed on 23 October 2026: 34 runtime
+  tests cover foundation/protection, fresh application-schema 0→144 (retaining
+  platform schemas), upgrade 142→143→144, and rollback/committed-winner races.
+  All migrations and fixtures ran only in uniquely owned disposable local clones;
+  source table/security/sequence manifests matched before/after, residue included.
+- The existing Node pg harness now supports the pinned container's Unix-socket
+  authentication through a bounded byte transport, with no password/HBA/network
+  changes. Connection-free checks passed 90/90; full unit passed 2205/2205,
+  typecheck/build and whitespace checks passed (existing bundle-size warning).
+- Migrations 143/144 remain unchanged and unapplied to the source database/DEV.
+  This is a backend acceptance PASS, not application activation or a complete
+  reservation feature. At the Phase 3B1 checkpoint, physical fulfillment and UI were
+  unfinished; Phase 3C follows below. Activation/deployment require separate review.
+- No remote rollout, fulfillment or reservation frontend is included.
+
+## 001K / Phase 3C — Atomic Finished Goods reservation fulfillment
+
+- Additive local migration 145 reuses the existing FG balance/FIFO ledger and explicit
+  Project/Product demand; migrations 136–144 remain unchanged. Fulfillment references
+  an exact reservation, Project, Product, quantity, expected version and request UUID.
+- Atomically reduce the matching reservation and FG stock, append FIFO allocations,
+  immutable `fulfilled` receipt/movement linkage and authorized AuditLog history.
+  Preserve other Projects' reserved stock; no guard bypass or parallel ledger.
+- Qualify `finished_goods_reservation_fulfillment` in canonical consumption and the
+  existing movement-demand/shortage triggers. Keep Raw plus Customs eligibility,
+  deferred queue deduplication, notification rules and unrelated production unchanged.
+- Local runtime acceptance passed: fulfillment tests, foundation/protection
+  regressions and committed-winner concurrency run only on owned disposable clones.
+  Fulfillment passed 13/13, foundation/protection regression 21/21 and concurrency
+  23/23 (including ten fulfillment committed-winner races). Fresh application-schema
+  0→145 and upgrade 142→143→144→145 passed, including unchanged pre-145 reserve/release
+  receipts and fulfillment of that existing reservation. Full unit passed 2211/2211;
+  typecheck/build and whitespace checks passed (existing bundle-size warning).
+  Source local stays at 142 with unchanged data/security/sequence manifests;
+  DEV is not contacted and its last verified baseline remains 142.
+- Keep all reservation/fulfillment mutations private. No fulfillment frontend,
+  application activation, deployment, source reset, residue cleanup or commit included.
+
+## 001K / Phase 3D1 — Trusted Finished Goods reservation read model
+
+- Local migration 146 adds `get_project_finished_goods_reservation_context(uuid)`:
+  one authorized row per explicitly required Calculator output Product, including
+  zero-stock and archived Products and completed/cancelled Project history.
+- Return Product identity/name/serial, exact planned/consumed/outstanding demand,
+  actual FG physical stock, globally reserved and available FG quantities, and only
+  this Project's reservation identity/quantity/version. An absent reservation has
+  NULL identity and version zero; retained zero reservations keep their real version.
+- A single private demand helper now shares the existing consumption formula with
+  open-Project commitments; closed history remains excluded from open commitments.
+  All stock/demand/reservation fields are read in one consistent statement snapshot.
+- Require active Admin or both Project view and FG view. No Raw/Customs, adjustment,
+  production or reservation capability substitutes for those views. No browser table
+  access or mutation EXECUTE is added. Existing state/history reads remain unchanged.
+- Read model implemented locally; frontend pending, mutation activation pending,
+  DEV deployment pending. Persistent local remains at its verified 142 baseline;
+  DEV last verified 142 and production are not contacted.
+- Local read acceptance passed 11/11, including fresh application-schema 0→146
+  (retaining platform schemas), populated 145→146 upgrade, closed/archived history,
+  exact quantities above 2^53, permission/ACL checks and concurrent read consistency.
+  Foundation/protection passed 21/21 and fulfillment 13/13 with 146 present.
+  Of 23 concurrency cases, 21 passed in the combined run; two failed only at the
+  fail-closed client-drain cleanup guard and both passed on an isolated rerun.
+  The first combined run also caught a missing required `product_kind` in the new
+  ordinary-Product fixture; that fixture was corrected before the 11/11 rerun.
+- Focused static/mock checks passed 103/103; full unit passed 2218/2218;
+  typecheck/build and whitespace checks passed (existing bundle-size warning).
+  Source table/security/sequence manifests matched, including retained residue.
+  Two clones from the first cleanup-guard failure remain retained, with zero clients
+  at read-only inspection; their removal awaits separate explicit approval:
+  `alfaev_fg_3b1_80032a9fd0f84d94b9a34f0081ef5413` (OID 204468) and
+  `alfaev_fg_3b1_e04f3cf198c5427d8cda148cbef55e9e` (OID 207526).
+  No persistent database reset, maintenance cleanup, activation or deployment occurred.
+
+## 001K / Phase 3D2 — Project Finished Goods frontend read integration
+
+- Add a read-only Finished Goods requirements section below Project Products on
+  Project detail. Show explicit planned/consumed/outstanding demand, current FG
+  physical/global reserved/available quantities and this Project's reserved quantity.
+  Explain that available stock is not a reservation. Show absent reservations and
+  retained zero-quantity states distinctly; preserve archived output rows and closed
+  Project history without inventing archive metadata absent from the RPC.
+- Use only `get_project_finished_goods_reservation_context(p_project_id uuid)`.
+  Request every quantity/version as a PostgREST response `::text` projection before
+  JSON decoding, then validate canonical decimal strings, exact bigint arithmetic,
+  identities/versions and the narrow response. No global JSON/client replacement,
+  database contract change, floating-point conversion or accounting change is needed.
+- Follow existing service/query/section conventions, shared loading/error/empty UI,
+  active Admin or both Project/FG view permission checks and profile/Project-scoped
+  caches. Do not render cached rows after access loss/uncertainty. Existing Project
+  planning/lifecycle successes invalidate the FG read cache; mount/focus/reconnect
+  and explicit refresh re-read the trusted RPC. No polling or Realtime is added.
+- Missing Projects remain owned by the Project detail boundary; backend denial,
+  transport/malformed response and undeployed-RPC states are safe visible errors,
+  not empty stock. The new section is read-only even on open Projects.
+- Implemented locally only. Migration 146 and browser acceptance require separately
+  authorized deployment/validation. Mutation controls/activation remain pending;
+  Phase 3D3 scope must separately review permission/version/idempotency-aware actions
+  before exposing any private mutation. No database access or clone cleanup belongs
+  to this frontend task.
+- Validation passed: 341 focused Project/warehouse-permission/commitment/static
+  tests, full unit 2275/2275 across 240 files, typecheck, build and whitespace checks.
+  Only the existing bundle-size warning remains. Tests include mocked HTTP through
+  the real Supabase SDK; no live PostgREST/DEV/browser acceptance is claimed.
+
+## 001K / Phase 3D3B — Reservation mutation UI and activation preparation
+
+- Reserve, Release and Fulfill controls are implemented locally in the existing
+  Project Finished Goods section. New operations require an open Project and active
+  Admin or Project view/edit plus FG view/reserve. Existing warehouse-authorized
+  Product detail supplies archive eligibility; Release remains valid for archived
+  outputs. Fulfillment does not require globally available stock to be positive.
+- Mutation quantities are positive deltas. Every bigint request is a decimal string;
+  every receipt quantity/version is projected as text before JSON decoding. No
+  inventory/context quantity is optimistically replaced with a historical receipt.
+- One immutable request UUID/payload is retained across uncertain retries, with a
+  synchronous duplicate-submit lock. Profile/auth-user/Project-scoped QueryClient
+  state retains unresolved operations across section remounts in the current app
+  session. At the Phase 3D3B checkpoint a full browser restart did not provide
+  durable request recovery; Phase 3D3C below closes that gap.
+- Confirmed outcomes invalidate authoritative FG, Inventory, planning and relevant
+  movement/material-use caches for the captured profile. Stale versions require a
+  refreshed, explicit new decision, never an automatic new version or UUID.
+- Migration 147 is prepared only: authenticated EXECUTE on the exact three public
+  wrappers, with positive wrapper and negative helper/table ACL validation. It is
+  NOT applied anywhere. Migrations 143–146 remain frozen; no accounting, permission
+  assignment, Material Usage RPC, source database or retained clone is changed.
+- Finished Goods fulfillment is not part of `list_project_material_usage`; detailed
+  fulfillment-history presentation is deferred. Existing authorized reservation
+  events and warehouse movement reads remain authoritative sources.
+- Backend-role activation runtime proof, independent migration review, separately
+  authorized deployment and real-browser mutation acceptance remain pending. No
+  DEV, live acceptance or complete feature rollout PASS is implied by local UI tests.
+
+## 001K / Phase 3D3C — Durable Finished Goods mutation recovery
+
+- A minimal localStorage intent journal is scoped to backend origin, authenticated
+  Auth user, verified profile and Project. Persist and read back the original UUID,
+  operation, exact RPC parameters (bigint decimal strings), creation/update times and
+  resolution state before dispatch. Store no session secrets, names or stock snapshots.
+- Validate the complete untrusted schema, identity, Project, UUIDs and bigint bounds.
+  Web Locks serialize dispatch and journal changes across same-origin tabs. Missing
+  Web Locks, storage denial, corruption, write loss or conflicting payloads fail closed;
+  no fallback UUID, silent deletion or automatic repair is allowed.
+- Recovery survives reload/restart and QueryClient clearing on sign-out. Only the
+  current authenticated identity can see/replay its saved request, with an explicit
+  click and original immutable payload. Capture the current identity's access token
+  in memory for the HTTP header; never persist it or let a client session switch
+  re-attribute an operation. Permissions/backend authorization remain authoritative.
+- Prepared/uncertain/confirmed-success/definite-failure labels are persisted but are
+  not backend proof. After restart, explicitly replay even a saved success label.
+  In the same session, a verified result with failed reconciliation retries only
+  the authorized read. Clear only after a conclusive backend result and a new
+  successful authoritative context read/cache reconciliation, never from receipts'
+  historical quantities. Permission/contract denial or UUID conflict keeps recovery
+  pending because it cannot resolve an earlier uncertain outcome.
+- Browser data clearing/eviction and malicious same-origin code cannot be made
+  tamper-proof by client persistence. Do not clear recovery data while unresolved;
+  corrupted records require owner/Admin reconciliation, not a reset button. No
+  confidentiality against a browser/device owner or XSS is claimed by key scoping.
+- Implemented locally only. Migration 147 remains unchanged/unapplied. Independent
+  activation review, authenticated-role backend proofs, authorized deployment and
+  real-browser acceptance remain pending. No database access belongs to this task.
+
+## 001L — Automatic Finished Goods Project reservations (local implementation)
+
+- Forward migration 149 adds one request-aware requirement RPC and immutable,
+  owner-bound operation receipts, including zero-allocation and deleted-row results.
+- Genuine additions/increases cover all uncovered Project/Product demand from free
+  FG; reductions/removals only release excess. Unchanged saves, retries, manual
+  releases, stock arrivals, production and reopening never trigger auto-allocation.
+- Requirement edits and reservation events/audits share one transaction. Existing
+  stock/demand/lifecycle guards and FG-only FIFO fulfillment remain in force.
+- FG changes require active Admin or all four Project view/edit and FG view/reserve
+  permissions. Legacy FG writes cannot bypass the integrated operation; ordinary
+  material planning retains its existing authority and Raw + Customs formulas.
+- The existing editor uses durable, identity-scoped request recovery and decimal
+  strings. FG shortage is outstanding demand minus this Project's reservation;
+  Inventory aggregate invalidation includes nested FG query keys.
+- Final local validation: 25/25 isolated runtime/security tests, including nine
+  committed-winner races, passed. The final explicit seven-function ACL and duplicate
+  event assertions also passed (2/2 focused rerun). Application SECURITY DEFINER
+  inventory is 190. Full unit: 2570/2570 across 252 files; typecheck, build and
+  git diff --check passed. Build retains the existing large-bundle warning.
+- Successful runs compared full public/Auth/Storage/security/migration/sequence
+  source manifests, including retained residue, and removed only their owned clones.
+  One earlier run timed out during post-test verification and its transport lease
+  expired; cleanup was refused. Its clone cleanup remains unverified and it was not
+  adopted/deleted by subsequent runs. No source-data mismatch was reported. This
+  resource limitation is not a claim that all earlier test resources were removed.
+- Migration 149: `20261026110000_auto_reserve_finished_goods_project_requirements.sql`,
+  20176 bytes, SHA-256 `d4442ccc921054b2f72e0a270ab239f0b6779e050bda6ad9927e2f7588c5ae23`.
+- LOCAL ONLY: migration 149 is undeployed. Independent review, separate DEV
+  authorization and real-browser acceptance remain required. DEV/production were
+  not contacted in this task; no maintenance cleanup, reset, deployment or commit.
+
+Task 001L file scope (all preceding uncommitted work retained):
+
+- `supabase/migrations/20261026110000_auto_reserve_finished_goods_project_requirements.sql`
+- `features/projects/services/projectRequirementMutationService.ts`
+- `features/projects/services/projectRequirementMutationService.test.ts`
+- `features/projects/services/projectRequirementRecoveryStore.ts`
+- `features/projects/services/projectRequirementRecoveryStore.test.ts`
+- `features/projects/services/projectPlanningService.ts`
+- `features/projects/services/finishedGoodsRecoveryStore.ts`
+- `features/projects/hooks/useProjectRequirementMutations.ts`
+- `features/projects/hooks/useProjectRequirementMutations.test.tsx`
+- `features/projects/hooks/useProjectPlanning.ts`
+- `features/projects/hooks/useProjectPlanning.test.tsx`
+- `features/projects/hooks/useProjectFinishedGoodsMutations.ts`
+- `features/projects/components/ProjectPlanningSection.tsx`
+- `features/projects/components/ProjectPlanningSection.test.tsx`
+- `features/projects/components/ProjectFinishedGoodsSection.tsx`
+- `features/projects/components/ProjectFinishedGoodsSection.test.tsx`
+- `test/automaticFinishedGoodsRequirementsMigration.test.ts`
+- `test/backend/automatic-finished-goods-requirements.backend.ts`
+- `test/backend/helpers/reservation-local-target.ts`
+- `test/backend/rls-policy-matrix.suite.ts`
+- `docs/BUILD_PLAN.md`
+- `docs/BUSINESS_RULES.md`
+- `docs/DATA_MODEL.md`
+- `docs/PERMISSIONS.md`
+- `docs/SECURITY_RULES.md`
+
+## 001K — Finished Goods accounting and Inventory UI correction
+
+- One focused local task; existing reservation implementation and retained residue
+  are preserved. Migrations 136–147 remain frozen. The reported DEV baseline is 147;
+  this task does not contact DEV/production or claim new deployment/browser acceptance.
+- Forward migration 148 restricts Calculator-linked finished manufacturing inputs to
+  unreserved FG FIFO only. Ordinary inputs retain Raw → Customs → unreserved FG FIFO.
+  Shared precheck/allocation definitions keep Finish and PDF fingerprints consistent;
+  manufacturing consumes saved inputs once, actual-good output credits FG, and later
+  fulfillment deducts only the finished Product. No historical stock relocation.
+- A narrow warehouse-authorized aggregate read supplies FG Physical / Committed /
+  Available without Project identity disclosure. Raw labels distinguish Raw physical
+  from eligible Raw + Customs and outstanding planning commitments. Quantity transport
+  is lossless; profile-scoped reservation invalidations refresh the aggregate cache.
+- Local validation PASS: 7/7 accounting/production/permission runtime cases and
+  23/23 rollback-only/committed-winner concurrency cases with migration 148; final
+  full unit 2530/2530 across 248 files, typecheck, build and git diff --check passed.
+  Focused frontend/production/security selection passed 1414 tests; the later
+  cache/drain checks also passed. Build retains the existing large-bundle warning.
+- Owned clone upgrade through 147→148 preserves business/sequence manifests and
+  table/RLS/policy/trigger metadata. SECURITY DEFINER inventory is exactly 186;
+  active FG-view-only aggregate access succeeds, Project context still requires
+  Project access, and inactive/anonymous callers and direct table access are denied.
+- Persistent source database manifests (public/Auth/Storage/migration/security and
+  sequences), retained residue and pre-existing clones remain untouched. Final
+  campaign resources were removed through positive ownership guards. An earlier run
+  refused one clone's deletion while a naturally closing client was still visible;
+  that clone was left untouched and may remain. A bounded 2-second natural drain,
+  ownership recheck and fail-closed refusal now handle this race; no forced backend
+  termination/drop or old-clone cleanup was performed. No persistent reset or
+  maintenance script was executed.
+- Migration 148: `20261026100000_correct_finished_goods_input_sourcing_and_inventory_reads.sql`,
+  8327 bytes, SHA-256 `ef14848ad3cba6ea13d1d79066383aefc0f7fc4f2ac89e971ea2f65bf8094f2d`.
+- Remaining release gates: independent migration review, separate DEV authorization,
+  then real-browser acceptance (including the existing pending reservation scenarios).
+
+Files changed by this correction only (repository-relative; all pre-existing work preserved):
+
+- `features/inventory/InventoryPage.tsx`
+- `features/inventory/InventoryPage.test.tsx`
+- `features/inventory/components/ProductList.tsx`
+- `features/inventory/components/ProductList.test.tsx`
+- `features/inventory/hooks/useInventoryBalance.ts`
+- `features/inventory/hooks/useInventoryBalance.test.tsx`
+- `features/inventory/hooks/useInventoryCommitments.ts`
+- `features/inventory/hooks/useInventoryCommitments.test.tsx`
+- `features/inventory/services/inventoryCommitmentService.ts`
+- `features/inventory/services/inventoryCommitmentService.test.ts`
+- `features/inventory/services/productService.ts`
+- `features/inventory/services/productService.test.ts`
+- `features/pcb/hooks/usePcbCreation.ts`
+- `features/pcb/hooks/usePcbCreation.test.tsx`
+- `features/work-orders/hooks/useWorkOrderDetail.ts`
+- `features/work-orders/hooks/useWorkOrderDetail.test.tsx`
+- `features/projects/hooks/useProjectFinishedGoodsMutations.test.tsx`
+- `supabase/migrations/20261026100000_correct_finished_goods_input_sourcing_and_inventory_reads.sql`
+- `test/backend/finished-goods-accounting.backend.ts`
+- `test/backend/finished-goods-reservation-concurrency.backend.ts`
+- `test/backend/helpers/reservation-local-target.ts`
+- `test/backend/rls-policy-matrix.suite.ts`
+- `test/finishedGoodsAccountingMigration.test.ts`
+- `test/reservationLocalTarget.test.ts`
+- `docs/APP_FLOW.md`
+- `docs/ARCHITECTURE_RULES.md`
+- `docs/BUILD_PLAN.md`
+- `docs/BUSINESS_RULES.md`
+- `docs/DATA_MODEL.md`
+- `docs/FEATURES.md`
+- `docs/PERMISSIONS.md`
+- `docs/SECURITY_RULES.md`
+- `docs/UI_SPEC.md`

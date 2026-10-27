@@ -964,8 +964,9 @@ Finished Goods.
    Products/imports continue to receive generated seven-digit serials.
 5. Produce asks for Planned Production Quantity and performs BOM/precheck; it does not
    offer a Project selector and creates a no-Project specialized Draft Work Order.
-6. Finish locks and revalidates the warehouse-aware allocation in the exact order Raw
-   Materials FIFO, Customs FIFO, then Finished Goods FIFO.
+6. Finish locks and revalidates ordinary inputs in Raw Materials FIFO, Customs FIFO,
+   then unreserved FG FIFO order. Calculator-linked finished inputs use unreserved
+   FG FIFO only without recursive BOM consumption (local migration 148, not deployed).
 7. One atomic Finish deducts every input from its actual warehouse, freezes allocation
    and PDF provenance, and credits actual-good output to Finished Goods. Failure or an
    idempotent retry cannot create partial or duplicate stock changes.
@@ -980,5 +981,6 @@ Warehouse migrations 136–142 are deployed to alfaev-dev (142/142), and DEV
 read-only browser acceptance is complete, controlled Stage 2 mutation acceptance is
 pending, and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending.

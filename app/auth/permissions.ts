@@ -20,6 +20,7 @@ export const PERMISSION_KEYS = [
   "inventory.raw_materials.adjust",
   "inventory.finished_goods.view",
   "inventory.finished_goods.adjust",
+  "inventory.finished_goods.reserve",
   "inventory.customs.view",
   "inventory.customs.adjust",
   "inventory.products.create",

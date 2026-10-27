@@ -32,6 +32,14 @@ const directSelectTables = [
 ] as const;
 
 const trustedOnlyTables = [
+  ...(process.env.FG_REQUIREMENTS_LOCAL === "1" ? ["project_requirement_mutation_receipts"] : []),
+  ...((process.env.FG_RESERVATION_FOUNDATION_LOCAL === "1"
+    || process.env.FG_HARD_RESERVATION_PROTECTION_LOCAL === "1"
+    || process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1"
+    || process.env.FG_RESERVATION_READ_LOCAL === "1"
+    || process.env.FG_ACCOUNTING_LOCAL === "1" || process.env.FG_REQUIREMENTS_LOCAL === "1") ? [
+    "finished_goods_project_reservations","finished_goods_project_reservation_events",
+  ] : []),
   "audit_logs",
   "inventory_source_allocations",
   "inventory_source_lots",
@@ -282,7 +290,13 @@ export function registerRlsPolicyMatrixTests(
           (routine) => !rlsEventTriggerHelpers.includes(routine),
         );
         expect(applicationFunctions).toHaveLength(
-          process.env.PROJECT_SHORTAGE_ALERTS === "1"
+          process.env.FG_REQUIREMENTS_LOCAL === "1" ? 190
+            : process.env.FG_ACCOUNTING_LOCAL === "1" ? 186
+            : process.env.FG_RESERVATION_READ_LOCAL === "1" ? 185
+            : process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1" ? 184
+            : process.env.FG_HARD_RESERVATION_PROTECTION_LOCAL === "1" ? 182
+            : process.env.FG_RESERVATION_FOUNDATION_LOCAL === "1" ? 179
+            : process.env.PROJECT_SHORTAGE_ALERTS === "1"
             ? process.env.INVENTORY_WAREHOUSE_OPERATIONS === "1"
               ? 174
               : 166
@@ -300,6 +314,66 @@ export function registerRlsPolicyMatrixTests(
           (routine) => routine.public_execute || routine.anonymous_execute,
         );
         expect(publicOrAnonymous).toEqual([]);
+        if (process.env.FG_REQUIREMENTS_LOCAL === "1") {
+          const expected = new Map([
+            ["create_project_requirement_private", false], ["update_project_requirement_private", false],
+            ["remove_project_requirement_private", false], ["create_project_product_component", true],
+            ["update_project_product_component", true], ["remove_project_product_component", true],
+            ["mutate_project_requirement", true],
+          ]);
+          const routines = applicationFunctions.filter(r => expected.has(r.function_name));
+          expect(routines).toHaveLength(7);
+          for (const routine of routines) expect(routine).toMatchObject({authenticated_execute:expected.get(routine.function_name),
+            service_role_execute:false,public_execute:false,anonymous_execute:false,settings:['search_path=""'],volatility:"v"});
+        }
+        if (process.env.FG_ACCOUNTING_LOCAL === "1") {
+          const aggregate = applicationFunctions.filter(routine => routine.function_name === "get_finished_goods_inventory_commitments");
+          expect(aggregate).toHaveLength(1);
+          expect(aggregate[0]).toMatchObject({arguments:"",volatility:"s",settings:['search_path=""'],
+            authenticated_execute:true,anonymous_execute:false,public_execute:false,service_role_execute:false});
+          expect(aggregate[0]?.result_type).toBe("TABLE(product_id uuid, physical_quantity bigint, committed_to_projects bigint, available_after_commitments bigint)");
+        }
+        if (process.env.FG_RESERVATION_FOUNDATION_LOCAL === "1"
+          || process.env.FG_HARD_RESERVATION_PROTECTION_LOCAL === "1"
+          || process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1"
+          || process.env.FG_RESERVATION_READ_LOCAL === "1" || process.env.FG_ACCOUNTING_LOCAL === "1") {
+          const expected = new Map([
+            ["change_finished_goods_project_reservation", false],
+            ["reserve_finished_goods_for_project", false],
+            ["release_finished_goods_project_reservation", false],
+            ["list_project_finished_goods_reservations", true],
+            ["list_project_finished_goods_reservation_events", true],
+          ]);
+          if (process.env.FG_HARD_RESERVATION_PROTECTION_LOCAL === "1"
+            || process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1"
+            || process.env.FG_RESERVATION_READ_LOCAL === "1" || process.env.FG_ACCOUNTING_LOCAL === "1") {
+            expected.set("protect_finished_goods_reserved_stock", false);
+            expected.set("protect_finished_goods_reservation_demand", false);
+            expected.set("protect_finished_goods_reservation_project_lifecycle", false);
+          }
+          if (process.env.FG_RESERVATION_FULFILLMENT_LOCAL === "1" || process.env.FG_RESERVATION_READ_LOCAL === "1" || process.env.FG_ACCOUNTING_LOCAL === "1") {
+            expected.set("fulfill_finished_goods_project_reservation", false);
+            expected.set("validate_finished_goods_fulfillment_link", false);
+          }
+          if (process.env.FG_RESERVATION_READ_LOCAL === "1" || process.env.FG_ACCOUNTING_LOCAL === "1") expected.set("get_project_finished_goods_reservation_context", true);
+          if (process.env.FG_ACCOUNTING_LOCAL === "1") {
+            // This mode includes migration 147; all earlier pre-activation modes
+            // retain their original explicit negative mutation-ACL assertions.
+            for (const name of ["reserve_finished_goods_for_project", "release_finished_goods_project_reservation",
+              "fulfill_finished_goods_project_reservation", "get_finished_goods_inventory_commitments"])
+              expected.set(name, true);
+          }
+          const additions = applicationFunctions.filter(routine => expected.has(routine.function_name));
+          expect(additions).toHaveLength(expected.size);
+          for (const routine of additions) {
+            expect(routine.authenticated_execute).toBe(expected.get(routine.function_name));
+            expect(routine.service_role_execute).toBe(false);
+            expect(routine.settings).toEqual(['search_path=""']);
+            expect(routine.volatility).toBe(routine.function_name.startsWith("list_")
+              || routine.function_name === "get_project_finished_goods_reservation_context"
+              || routine.function_name === "get_finished_goods_inventory_commitments" ? "s" : "v");
+          }
+        }
         for (const routine of applicationFunctions) {
           expect(routine.settings).toEqual(['search_path=""']);
           expect(routine.public_execute).toBe(false);

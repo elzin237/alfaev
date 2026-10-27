@@ -9,8 +9,9 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented. Existing route identities are retained.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending. Existing route identities are retained.
 
 ---
 

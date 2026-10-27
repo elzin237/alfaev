@@ -9,8 +9,9 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending.
 
 ---
 
@@ -1288,7 +1289,7 @@ Rules:
 - On successful Finish:
   - validate all frozen BOM and supplemental inputs
   - deduct every persisted WorkOrderItem input, aggregating rows that share a Product
-  - consume inputs in Raw Materials FIFO → Customs FIFO → Finished Goods FIFO order
+  - consume ordinary inputs in Raw Materials FIFO → Customs FIFO → unreserved Finished Goods FIFO order; Calculator-linked finished inputs use unreserved FG FIFO only, without BOM expansion (local migration 148)
   - credit `quantity_produced` actual-good output to the PcbCard output Product in Finished Goods
   - create InventoryMovement rows for every input and a positive output only when actual good is greater than zero
   - create AuditLog
@@ -1752,14 +1753,25 @@ PCB production.
 
 ## 16.3 Project Inventory Commitment / Availability
 
-For each Product X, expose Physical Quantity, Committed to Projects, and Available
-after Commitments. First calculate `outstanding_commitment(P, X)` independently for
+For Raw Materials planning, expose Raw Physical Quantity separately from Eligible
+Stock (Raw + Customs), Outstanding Project Commitments, and Available after
+Commitments (eligible minus commitments). First calculate `outstanding_commitment(P, X)` independently for
 each open Project P by subtracting only qualifying consumption attributed to that same
 Project/Product pair and clamping that individual result at zero. Then sum those
 per-Project values into `committed_to_projects(X)`. Consumption from one Project never
 reduces another Project's commitment. Available is not clamped and may be negative to
 expose a shortage. This is a read model, not a reservation ledger or Inventory
 mutation.
+
+Finished Goods instead uses the warehouse-level trusted read
+`get_finished_goods_inventory_commitments()` (local migration 148, not deployed).
+It returns only Product ID and bigint Physical/Committed/Available: FG balance,
+sum of positive remaining hard reservations, and their difference. Includes zero-stock
+and archived Calculator outputs under the existing membership rule, with no Project
+identities and no changes to private reservation tables. Production eligibility and
+source plans use only unreserved FG for Calculator-linked finished inputs; ordinary
+inputs retain Raw → Customs → unreserved FG FIFO. The shared plan remains authoritative
+for Finish and the warehouse/source-lot PDF fingerprint. No historical DML is performed.
 
 ---
 
@@ -2024,6 +2036,126 @@ Shortage notifications reference the exact immutable event and snapshot Project,
 Product, event type, and quantity. System notifications have no sender. Existing
 Activity and Issue-resolution notification targets remain unchanged.
 
+## Finished Goods Project reservation foundation — local Phase 3A
+
+Migration 143 is local and undeployed. Its DDL/runtime proof is rollback-only; DEV
+remains at migration 142. Operational hard reservations are NOT enabled.
+
+Explicit demand already exists through `ProjectProductComponent.product_id` and
+`required_quantity`, joined through `ProjectProduct.project_id`. Requirements may
+explicitly select `pcb_finished_good`. A ProjectProduct name is not a Product link.
+For a selected Calculator output Product, the private reservation algorithm uses the
+existing sum of explicit requirements minus qualifying same-Project/Product physical
+consumption, floored at zero. It never infers demand from names, serials, Categories,
+BOMs or manufacturing history, and never reduces a component/BOM plan automatically.
+
+- `finished_goods_project_reservations`: one retained identity per Project/Product;
+  fixed Finished Goods warehouse; nonnegative exact bigint quantity; monotonic version;
+  retained creation and update actors/timestamps. Zero quantity retains the identity.
+- `finished_goods_project_reservation_events`: immutable reserve/release receipts with
+  before/after quantities, version, original actor, request UUID and exact request
+  parameters. UUID uniqueness provides one-shot replay ownership. No backfill occurs.
+- Owner-only reserve/release algorithms check demand, free FG stock, current versions
+  and permissions, serialize by request UUID and the FG balance row, and append one
+  receipt plus AuditLog entry atomically. Exact replay returns its original result.
+- Trusted Project-scoped state/history reads require Project and FG view authority;
+  receipt request IDs and actor IDs are not part of the read projection.
+
+Phase 3B MUST guard every debit/transfer/production input path, demand edit/removal,
+Product lifecycle and Project cancellation/completion/reopening before granting
+mutation EXECUTE. Cancellation must release reservations; completion must require
+explicit resolution; reopening must not reclaim stock. These integrations are not
+implemented in Phase 3A. Fulfillment is a separate Phase 3C integration below;
+reservation UI remains unimplemented.
+
+## Finished Goods hard-reservation safeguards — local Phase 3B1
+
+Migration 144 supplements the unchanged Phase 3A foundation. It is local/undeployed;
+reservation mutation APIs remain private. A balance UPDATE trigger checks every FG
+physical debit against the aggregate retained reservation quantity while the stock
+row is locked. Ordinary consumption can use only physical minus reserved, regardless
+of which Project owns the reservation; fulfillment is a separate Phase 3C operation.
+
+Production prechecks and source allocation exclude reserved FG quantities while
+retaining Raw → Customs → Finished Goods FIFO order and the existing fingerprint/PDF
+projection. Requirement/group changes and qualifying Project consumption must leave
+explicit outstanding Product demand at least as large as that Project's reservation.
+These are immediate safety checks; existing deferred shortage reconciliation is unchanged.
+
+Cancellation releases outstanding reservations atomically, advances versions and
+appends immutable release receipts/audits. Completion rejects unresolved reservations
+with `FGR08`; reopening creates none. Archived Products remain in history, reject new
+reservations and permit release under the unchanged foundation contract.
+
+Phase 3A/3B1 local acceptance passed. No frontend or remote deployment is included,
+and no mutation EXECUTE grant is enabled.
+
+## Finished Goods fulfillment data — local migration 145
+
+The existing reservation event table additionally accepts `fulfilled`. Its quantity
+transition subtracts `requested_quantity`, like release, but only fulfillment has a
+non-NULL `inventory_movement_id`. That FK is unique, retained and immutable; historical
+reserve/release receipts keep NULL. No second fulfillment/demand/stock table is added.
+
+The linked movement uses `finished_goods_reservation_fulfillment` as movement/source
+type, the receipt ID as `source_id`, the exact Project/Product/FG warehouse, negative
+fulfilled quantity and original actor. Existing source allocations link the movement
+to FIFO lots and their frozen supplier/catalog snapshots. Deferred reciprocal triggers
+verify matching identities, quantity, actor, reservation and allocation totals.
+
+`fulfill_finished_goods_project_reservation(uuid,uuid,uuid,bigint,bigint,uuid)` takes
+reservation, Project, Product, quantity, expected version and request UUID. It returns
+reservation_id, project_id, product_id, reserved_quantity, reservation_version, event_id,
+movement_id, physical_quantity_before and physical_quantity_after. Exact replay returns
+the original immutable receipt/movement values, not later current-state quantities.
+Existing trusted reservation/history read signatures remain unchanged.
+
+Canonical commitment consumption includes this source exactly once, while physical
+Project availability remains Raw plus Customs. Requirements, BOMs, historical movement
+types and rows are not rewritten. Migration 145 is local, private and undeployed;
+frontend/application activation remains pending.
+
+## Finished Goods reservation read context — local migration 146
+
+`get_project_finished_goods_reservation_context(p_project_id uuid)` is a STABLE
+trusted read for active Admins or callers with both `projects.view` and
+`inventory.finished_goods.view`. It returns one row per explicitly required
+Calculator-linked `pcb_finished_good`, without filtering zero stock or archived
+Products. Completed/cancelled Project history remains readable.
+
+Exact projection: `product_id uuid`, `product_name text`, `serial_number text`,
+`planned_requirement numeric`, `actual_project_consumption numeric`,
+`outstanding_demand numeric`, `physical_quantity bigint`,
+`globally_reserved_quantity bigint`, `available_quantity bigint`,
+`project_reserved_quantity bigint`, `reservation_id uuid`, `reservation_version bigint`.
+The numeric demand fields are exact whole-quantity aggregates, not floating point;
+future frontend parsing must preserve exact integer values, including above 2^53.
+
+Physical means only the actual Finished Goods balance. Globally reserved sums
+positive retained reservations for that Product across all Projects; available is
+physical minus that aggregate, without clamping or exposing foreign Project IDs,
+reservation IDs or actors. Own reservation fields match only the requested Project.
+An absent state returns quantity/version zero and NULL identity; an existing zero
+state retains its identity/version. Existing history RPCs remain authoritative for
+events even if a requirement is later removed.
+
+One statement snapshot supplies every quantity. Private
+`calculate_project_product_demand(uuid,uuid)` shares the canonical explicit planned
+minus qualifying physical consumption formula with `calculate_open_project_commitments`.
+Historical outstanding demand is informational for closed Projects; the unchanged
+open-Project lifecycle filter still excludes them from global commitments/shortages.
+No parallel ledger, new mutation path or historical rewrite is introduced.
+
+Historical Phase 3D1 checkpoint: read model implemented locally; frontend pending, mutation activation pending,
+DEV deployment pending. Migrations 136–145 are unchanged.
+
+Phase 3D3B adds local mutation services/UI, not a new ledger. Positive bigint deltas,
+versions and receipt values remain lossless decimal strings at the JSON boundary.
+Historical retry receipts are never substituted for current stock. Prepared migration
+147 changes only wrapper EXECUTE grants and validates existing security boundaries;
+it remains unapplied. The Material Usage RPC is unchanged and does not include FG
+fulfillment; detailed fulfillment-history UI is deferred.
+
 ## Warehouse-aware Inventory model and production extensions
 
 Tasks 001B–001G implement the fixed warehouse reference, composite balance identity,
@@ -2089,3 +2221,14 @@ mutation/non-Admin acceptance still pending.
 - The existing PCB/BOM tables and identifiers remain canonical under the user-visible
   Finished Product Calculator name. New calculator production stores no Project link;
   historical Project-linked production remains readable and finishable.
+
+### Task 001L requirement-operation receipts (local migration 149)
+
+`project_requirement_mutation_receipts` retains request UUID, original actor,
+Project, FG-affecting flag, canonical immutable payload, original JSON result and
+creation timestamp. It intentionally retains the deleted requirement UUID as receipt
+data rather than a restrictive FK to a removable requirement. RLS is enabled and no
+application/service table privileges are granted. UPDATE/DELETE is forbidden.
+Existing reservation state/version/events remain the only hard-reservation ledger.
+No parallel stock balance or fulfillment counter is introduced. Zero allocation also
+has a receipt, so retry after later stock arrival cannot allocate new quantities.

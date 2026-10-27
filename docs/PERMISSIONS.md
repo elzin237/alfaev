@@ -334,6 +334,66 @@ both effective `dashboard.view` and `projects.view`. Inactive users are excluded
 does not grant direct access to shortage tables, Inventory, Projects, or other users'
 notification records.
 
+## Task 001L requirement mutation permission boundary (local migration 149)
+
+Any FG-affecting requirement create/update/replace/remove requires active Admin or
+all four `projects.view`, `projects.edit`, `inventory.finished_goods.view`, and
+`inventory.finished_goods.reserve` permissions. `projects.edit` alone never implies
+reservation authority. Ordinary-material requirement CRUD retains its existing
+authorization. The request-aware RPC is authenticated-facing with internal checks;
+receipt tables and calculation/write helpers remain private. No permission grants
+are assigned automatically. Deployment and browser acceptance are separate gates.
+
+## Finished Goods reservation capability — local Phase 3A
+
+`inventory.finished_goods.reserve` is independent of warehouse adjustment, Work Order
+Finish and production permissions. Migration 143 defines it as delegable but assigns
+no users automatically. The typed permission registry recognizes it; no reservation
+controls are implemented. Admin permission management remains read-only for Admins.
+
+Internal reservation mutations require active Admin or all of `projects.view`,
+`projects.edit`, `inventory.finished_goods.view`, and `inventory.finished_goods.reserve`.
+However, application/service EXECUTE is revoked for every mutation in Phase 3A, so
+even these permissions do not yet make reservations executable. Project-scoped reads
+require active Admin or Project view plus FG view. Neither adjustment nor reservation
+permission alone authorizes Project attribution reads.
+
+Migrations 143–145 are local/undeployed. Phase 3B1 supplies locally accepted
+debit/demand/lifecycle guards without changing mutation grants. Cancellation uses existing Admin or
+`projects.archive` authority for its atomic release side effect, not a general right
+to reserve stock.
+
+Private Phase 3C fulfillment requires an active Admin or all four of `projects.view`,
+`projects.edit`, `inventory.finished_goods.view` and `inventory.finished_goods.reserve`.
+Adjustment, Work Order Finish or Calculator production authority alone is insufficient.
+It rechecks authority after lock waits, locks the actor/current delegated permissions,
+and checks original request ownership before comparing replay payloads. Fulfillment
+and its provenance trigger helper deny PUBLIC/anon/authenticated/service_role EXECUTE;
+Admin JWTs do not bypass those ACLs. No new permission or automatic grant is added.
+Reservation UI and application activation remain absent.
+
+Local migration 148 adds `get_finished_goods_inventory_commitments()` for active Admin
+or effective `inventory.finished_goods.view` only. This warehouse aggregate does not
+require `projects.view` and exposes no Project identities; PUBLIC/anon/service_role
+EXECUTE and direct private-table access remain denied. It is not yet deployed.
+
+Phase 3D1's local `get_project_finished_goods_reservation_context(uuid)` requires an
+active Admin or BOTH `projects.view` and `inventory.finished_goods.view`. It does not
+require Raw Materials/Customs view. Warehouse adjustment, Work Order Finish,
+Calculator production or reservation permission alone cannot authorize this read.
+Product name/serial are included only under this trusted Project/FG boundary;
+foreign reservations are represented only by their aggregate quantity. PUBLIC/anon
+and service_role EXECUTE are revoked; authenticated EXECUTE is granted only for the
+new read, not for its private calculation helpers or reservation mutations.
+Historical Phase 3D1 checkpoint: read model implemented locally; frontend pending, mutation activation pending,
+DEV deployment pending. No additional permission key or automatic grant is added.
+
+Phase 3D3B implements local Reserve/Release/Fulfill controls under active Admin or
+all four Project view/edit and FG view/reserve permissions. Read authority alone
+never activates controls. Migration 147 is prepared, not applied: authenticated
+EXECUTE on only the three public mutation wrappers; helpers and tables stay private.
+No permission assignments, Admin permission editing or remote activation are added.
+
 ## 9. Warehouse permissions
 
 Task 001C implements six independently delegable warehouse capabilities while legacy

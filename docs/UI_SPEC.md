@@ -9,8 +9,9 @@ DEV `finish-work-order` v6 is ACTIVE. The warehouse frontend is implemented loca
 and read-only browser acceptance is complete. Controlled Stage 2 mutation acceptance
 is pending and non-Admin browser acceptance is incomplete. No frontend production
 deployment or warehouse production database rollout has occurred; production remains
-at its previously verified migration state. Finished Goods Project reservations are
-not implemented.
+at its previously verified migration state. Finished Goods Project reservation and
+fulfillment backend code is local in undeployed migrations 143–145; application
+activation and reservation frontend remain pending.
 
 ---
 
@@ -804,6 +805,15 @@ Referenced archived Supplier:
 
 ## Inventory list
 
+Local migration-148 UI correction (not DEV/browser-accepted): Finished Goods displays
+Physical Quantity, Committed to Projects (remaining hard reservations), and Available
+after Commitments = Physical − Committed, from one authorized warehouse aggregate.
+This is not Project planning demand. Raw Materials labels its own physical quantity
+and, for callers allowed both warehouses, Eligible Stock (Raw + Customs), Outstanding
+Project Commitments and Available after Commitments = eligible − outstanding.
+Customs does not expose either commitment projection. Missing reads show Unavailable,
+not zero. Bigint quantities are read as SQL text and formatted without rounding.
+
 Columns:
 
 - Serial Number / Šifra
@@ -1122,7 +1132,7 @@ show calculated requirements table:
 - Available
 - Missing
 
-Available is the trusted combined physical quantity eligible for production across Raw Materials, Customs, and Finished Goods, not Available after Commitments. Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory or complete production. Finish consumes in Raw → Customs → Finished Goods order and credits actual-good output to Finished Goods.
+Available is the trusted production-eligible quantity, not planning Available after Commitments. Ordinary inputs use Raw + Customs + unreserved Finished Goods; Calculator-linked finished inputs use unreserved FG only (local migration 148). Missing is `max(Required - Available, 0)`; display exact whole-number values. This precheck does not mutate Inventory. Finish uses the same eligibility and FIFO sourcing and credits actual-good output to FG without recursive BOM expansion.
 
 Whether stock is currently sufficient or insufficient:
 
