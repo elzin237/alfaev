@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
-  PERMISSION_KEYS,
+  SUPPORTED_PERMISSION_KEYS,
   type PermissionKey,
 } from "../../../app/auth/permissions";
 import { saveUserPermissionsAdmin } from "../services/userPermissionSaveService";
@@ -83,7 +83,7 @@ function UserPermissionEditor({
     }
 
     setDraftPermissionKeys(
-      PERMISSION_KEYS.filter((key) => nextPermissionKeys.has(key)),
+      SUPPORTED_PERMISSION_KEYS.filter((key) => nextPermissionKeys.has(key)),
     );
     setErrorMessage(null);
   };

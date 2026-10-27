@@ -10,7 +10,7 @@ import AddComponentDialog from "./components/AddComponentDialog";
 import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
 import ComponentImportDialog from "./components/ComponentImportDialog";
-import ProductList from "./components/ProductList";
+import InventoryTestProductList from "./components/InventoryTestProductList";
 import InventoryWarehouseTabs from "./components/InventoryWarehouseTabs";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useComponentImport } from "./hooks/useComponentImport";
@@ -24,7 +24,7 @@ import {
 import { findInventoryWarehouse } from "./inventoryWarehouses";
 import type { Brand } from "./services/brandService";
 
-function InventoryPage() {
+function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { testCommitmentsEnabledAfterActivation?: boolean }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const warehouseAccess = useInventoryWarehouseAccess();
   const legacyAccess = useInventoryLegacyViewPermission();
@@ -194,11 +194,15 @@ function InventoryPage() {
             onRetry={() => void commitmentsQuery.refetch()}
           />
         ) : null}
-        <ProductList
+        <InventoryTestProductList
           products={productsQuery.data.value}
           commitments={commitments}
           warehouseCode={selectedWarehouse.code}
           showCommitments={canShowCommitments}
+          warehouseId={selectedWarehouse.id}
+          search={debouncedProductSearch}
+          authorizedWarehouseIds={warehouseAccess.authorizedWarehouses.map(w => w.id)}
+          enabledAfterActivation={testCommitmentsEnabledAfterActivation}
         />
       </div>
     );

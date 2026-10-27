@@ -496,6 +496,10 @@ The trusted Inventory boundary consumes lots in `(received_at ASC, id ASC)` orde
 
 ## 7.1 InventoryBalance
 
+Test Calculator V1 adds separate time-limited quantity holds, not another physical
+balance or ledger. Its approved, unimplemented data contract is defined below under
+Test Calculator V1; every actual physical mutation still follows this section.
+
 Stores the current quantity for fast reads.
 
 Fields:
@@ -1164,6 +1168,9 @@ Admin updates Inventory manually when physical goods are entered into stock.
 ---
 
 # 10. Finished Product Calculator and BOMs
+
+This is the Normal Calculator at `/pcb`. The planned Product Calculator sidebar
+container also links a separate Test Calculator, which creates no PcbCard/output Product.
 
 ## 10.1 PcbCard
 
@@ -2232,3 +2239,241 @@ application/service table privileges are granted. UPDATE/DELETE is forbidden.
 Existing reservation state/version/events remain the only hard-reservation ledger.
 No parallel stock balance or fulfillment counter is introduced. Zero allocation also
 has a receipt, so retry after later stock arrival cannot allocate new quantities.
+
+## Test Calculator V1 — conceptual contract (approved, not implemented)
+
+No table, migration, RPC or permission is created by this specification. Test data
+must be separate from PcbCard, BOM, WorkOrder, Project requirements and physical Inventory.
+The names below describe concepts, not frozen SQL names or additional stock ledgers.
+
+### Test Calculation and items
+
+- Calculation: UUID identity, trimmed nonblank name, creator UserProfile, server
+  creation timestamp, original deadline date, timezone `Europe/Sarajevo`, and fixed
+  exclusive `expires_at timestamptz` derived from the next local midnight.
+- Items: parent identity, authoritative Product identity, historical name/serial/kind
+  snapshots, positive required quantity, reserved-at-save quantity and missing-at-save
+  quantity. Each Product occurs once; quantities are exact whole numbers, not JS floats.
+- A saved calculation and its items are immutable and retained after expiry. Required
+  is the entered total quantity, not an implicit production multiplier/BOM expansion.
+  Historical Product archival must not delete or hide the saved entry.
+
+### Warehouse holds and Save receipt
+
+- Warehouse-specific holds link calculation/item/Product to a canonical warehouse
+  and nonnegative reserved quantity. Sum of holds equals the item's reserved-at-save
+  quantity, which is at most required; missing-at-save equals required minus reserved.
+  Zero allocation still retains the item and receipt; a zero-valued hold need not exist.
+- Holds are not source-lot assignments or movements. Their original allocation remains
+  immutable; effective active quantity is original quantity only while database time
+  is strictly less than the parent's expiry, otherwise zero.
+- An immutable Save receipt retains a unique request UUID, original actor, canonical
+  exact payload and original result/calculation identity, including zero/partial saves.
+  It may be co-located with the immutable header; no separate table is mandated.
+- Exact authorized replay returns the original receipt, never another hold/audit or
+  allocation of new stock. Current effective state must be read separately; replay of
+  an expired calculation cannot renew it. Actor ownership precedes payload comparison.
+
+### Availability invariants and read contract
+
+Use the authoritative formulas in BUSINESS_RULES section 17: free quantity per
+warehouse is physical minus existing hard Project FG reservations minus active Tests;
+ordinary open-Project demand is deducted once from the combined Test admission budget.
+Physical balances/movements/lots/allocations, existing Project demand and FG reservation
+state remain separate. Every debit and competing reservation preserves the combined
+hard-stock bound; no saved Test changes physical or Project-consumption quantities.
+
+Inventory reads return Product/warehouse scope, physical quantity, existing Project
+planning/hard-reservation fields, active Test aggregate, additional availability,
+server as-of time and next relevant expiry. Use one consistent snapshot and exact
+decimal text for bigint/numeric transport. Do not expose Test creators, request UUIDs
+or calculation identities through warehouse aggregates. Preserve existing membership,
+ordering and permission filters; Raw+Customs combined values require both views.
+
+Saved allocation/missing snapshots and current active/expired quantities must have
+distinct field meanings. A status label is derived from the immutable expiry, not a
+background-maintained flag. No current-time partial index or scheduled release is the
+correctness boundary. RLS, private storage and trusted projections are mandatory.
+
+### TC-02 implemented local schema (migration 151; undeployed)
+
+`test_calculations` co-locates the immutable Save receipt with name, creator profile
+FK, server creation time, unique request UUID, object-shaped submitted payload and
+receipt, original deadline date, fixed Europe/Sarajevo timezone and mandatory expiry.
+Row checks require finite dates/timestamps, expiry after creation and exactly the
+next Sarajevo midnight. There is no current-time CHECK that would invalidate history.
+
+`test_calculation_items` retains Product FK, name/serial/kind snapshots, required,
+held and uncovered bigint quantities, created time and unique calculation/Product.
+Exact numeric-intermediate checks enforce required = held + uncovered without overflow.
+`test_calculation_holds` has explicit warehouse FK, nonnegative bigint quantity,
+created time and item/warehouse identity. A composite FK enforces matching item,
+calculation and Product; deferred insert checks require hold sums to equal item held.
+All relationships restrict deletion; no cascading removal of retained history exists.
+
+All three tables have RLS and no direct PUBLIC/anon/authenticated/service_role grants
+or read policies. Private SECURITY INVOKER triggers reject UPDATE/DELETE/TRUNCATE and
+check deferred totals. No SECURITY DEFINER mutation, public read/Save/Preview RPC,
+stock-protection trigger, live-expiry helper, job, seed calculation or movement exists
+yet. Indexes support history, expiry, creator, Product and warehouse hold lookup; none
+depend on the current time. Business authority/snapshot authenticity and complete
+Save payload validation remain the future trusted Save boundary, not JSON shape checks.
+
+### TC-03 local search/preview contracts (migration 152; undeployed)
+
+- `search_test_calculator_products(p_search text default null, p_limit integer default 50)`
+  returns Product ID/name/serial/kind and `finished_goods_only` or `raw_customs_fg`
+  policy. Limit is 1..100; search is literal case-insensitive name containment or
+  serial prefix, at most 200 characters. Only active, authorized selections appear;
+  zero stock does not hide an eligible Product. Unlinked finished-kind rows are excluded.
+- `preview_test_calculation(p_items jsonb)` accepts 1..100 distinct objects with exactly
+  `product_id` UUID string and positive decimal-string `quantity` within SQL bigint.
+  Reject numeric JSON quantities, duplicate IDs, unknown fields and invalid selections.
+  No calculation/exclusion context exists: callers cannot ignore their prior holds.
+- Per-Product output: identity/name/serial/kind, `required_quantity`,
+  `eligible_free_quantity` (sum of hard-free source quantities),
+  `project_priority_quantity` (ordinary open demand, zero for linked FG),
+  `eligible_availability` (free minus priority, floored at zero), `reservable_quantity`
+  (minimum of required and availability), and `missing_quantity` (required minus reservable).
+  All quantities are decimal TEXT, including numeric aggregates above bigint range.
+- `provisional_warehouse_quantities` lists authorized source warehouse ID/code and
+  decimal-string quantity in Raw -> Customs -> FG order, or FG only. This is a
+  quantity preview, not persistent holds/FIFO/lot allocation. `as_of` is database
+  statement time and `save_will_recalculate` is always true. Save must revalidate later.
+- Active Test totals join the immutable parent with `expires_at > as_of`; expired
+  rows stay intact. Existing hard FG reservations are subtracted only from FG,
+  ordinary Project demand once from the combined budget, and linked-FG demand is not
+  double-subtracted. Missing structural balances fail closed rather than becoming zero.
+
+Both RPCs are STABLE SECURITY DEFINER with empty search_path, explicit authenticated
+EXECUTE and PUBLIC/anon/service_role denial. They create no rows, locks for mutation,
+events, movements, Work Orders or permissions; no receipt payload or foreign identity
+is returned. Existing inventory/search contracts and Normal Calculator remain unchanged.
+
+### TC-04 local atomic Save (migration 153; undeployed)
+
+`save_test_calculation(p_request_id uuid, p_name text, p_items jsonb, p_deadline_date date)`
+returns an immutable JSON receipt. Items use the same strict decimal-string quantity
+contract as preview; canonical payload order is Product UUID, with trimmed name,
+normalized UUIDs, deadline date/timezone and original authenticated user identity.
+The private header stores this payload and receipt; items snapshot Product identity
+and required/held/uncovered quantities; positive holds store explicit warehouses.
+One `test_calculator.saved` audit is appended in the same transaction.
+
+A request advisory lock precedes deterministic Product UPDATE and warehouse-balance
+locks. Save recalculates current free stock, ordinary demand priority, hard Project
+FG reservations and unexpired Test holds after waits. Deadline is the exclusive
+next Sarajevo midnight, rechecked using database wall time. Full/partial/zero results
+are retained; all returned quantities are decimal strings, never JSON numbers.
+Exact original-actor replay returns the historical receipt without renewing expired
+holds; changed payload fails TCS01, expired new Save TCS02. Current authority is still
+required for replay. Private invoker-only deferred total checks run inside Save
+before it returns, preserving constraints and private-table ACLs at authenticated commit.
+No stock, movement, lot, allocation, Work Order or Project state is changed. Universal
+debit protection and Project/Test admission coexistence remain TC-05 through TC-07,
+not guarantees supplied by this local Save foundation.
+Save requires READ COMMITTED isolation; fixed transaction snapshots are rejected
+with 25000 rather than risking admission against holds committed during lock waits.
+
+### TC-05 local physical-stock guard (migration 154; undeployed)
+
+`active_test_warehouse_hold_quantity(uuid,uuid)` is a private VOLATILE SECURITY INVOKER
+numeric aggregate of immutable warehouse holds whose parent expiry is greater than
+one database wall-clock observation. It reveals no calculation identity and has no
+application/PUBLIC/service_role EXECUTE. `protect_test_calculator_warehouse_holds()`
+is a private VOLATILE SECURITY DEFINER trigger with empty search_path, attached to
+every `inventory_balances.quantity` decrease. It enforces new physical >= active
+Test holds, plus global hard Project reservations only in FG; violations raise IVB02.
+READ COMMITTED is required (25000 otherwise) to avoid stale post-wait snapshots.
+It acquires no Product/Project locks after the already-held balance row lock.
+Existing adjustment/transfer/debit FIFO and movement primitives are unchanged.
+Expiry removes effective protection without deleting history, moving holds or writing
+stock/audits. Production eligibility and Project reservation admission integration
+remain separate TC-06/TC-07 work; this guard alone does not activate the feature.
+
+### TC-06 local Test-aware production capacity (migration 155; undeployed)
+
+Private `get_production_free_warehouse_quantity(uuid,uuid)` returns numeric
+`max(physical - active Test holds - applicable hard Project FG reservations,0)`.
+It reuses the private wall-clock Test aggregate. Production eligible quantity sums
+these capacities for Raw/Customs/FG, or FG only for an authoritative linked output.
+The existing bigint return contract is preserved; numeric intermediates do not round.
+
+The warehouse source plan retains its exact return columns and FIFO priority. It
+locks Products in order, then balances and source lots, before reading current Test
+expiry/capacities; fixed-snapshot isolation is rejected. Captured warehouse capacities
+bound each FIFO lot prefix, so existing source fingerprints, PDF snapshots and Finish
+use the same plan. No physical/debit/output function, BOM expansion, consumption timing,
+historical allocation or official PDF is rewritten. Ordinary soft Project planning
+demand remains a Test-Save admission priority, not a production hard reservation.
+Precheck is current-state information, not a promise across separate transactions;
+Finish rechecks under locks and rejects a stale source fingerprint without partial debit.
+
+### TC-07 local Project/Test admission (migration 156; undeployed)
+
+Existing manual Reserve checks the requested increment against
+`max(FG physical - global hard FG Project reservations - active FG Test holds,0)`.
+Existing automatic requirement reservation caps its increment at the minimum of this
+capacity and this Project's uncovered outstanding demand. Full/partial/zero receipts
+retain their existing shape, actor binding and version semantics. Both evaluate the
+private wall-clock Test helper after Product/FG balance/state locks; non-READ-COMMITTED
+new admissions fail closed. Original immutable replay returns before admission and
+does not renew holds or top up allocations.
+
+No balance, movement, lot, allocation, demand formula, lifecycle function or receipt
+table is rewritten. Fulfillment still reduces its own reservation before an FG-only
+physical debit; the shared guard enforces
+`physical >= remaining Project reservations + active Test holds`.
+Release/expiry changes effective free stock without automatic
+allocation or deletion of Test history. Ordinary Raw/Customs planning stays soft.
+
+### TC-08 local Inventory aggregates (migration 157; undeployed)
+
+`get_inventory_test_commitments(p_warehouse_id uuid,p_search text default null)`
+returns Product/warehouse IDs, `quantity_scope`, `physical_quantity`,
+`project_commitment_quantity`, `available_after_projects`, `committed_to_tests`,
+`available_after_projects_and_tests`, `as_of` and nullable `next_expiry`.
+All five quantities are decimal TEXT, including aggregates beyond SQL bigint and
+signed planning shortages. Physical always means the requested warehouse balance.
+Scope applies to the aggregate planning/Test fields, not to that physical field.
+
+- Raw: existing Raw+Customs Project demand D; base availability Raw+Customs-D;
+  Test commitment T(Raw)+T(Customs); additional availability Raw+Customs-D-T(Raw)-T(Customs).
+  The user confirmed preserving D's existing Product/lifecycle scope, including
+  linked FG rows, rather than substituting the ordinary-input Test-Save admission D.
+- FG: hard Project reservations R; base availability FG-R; Test commitment T(FG);
+  additional availability FG-R-T(FG). No Raw/Customs stock or soft demand is used.
+- Customs: Project quantity zero; base availability Customs; Test commitment
+  T(Customs); additional availability Customs-T(Customs). No second demand deduction.
+
+One database wall-clock observation classifies positive holds with expires_at > as_of
+in the read snapshot; next_expiry is the earliest such expiry in the authorized
+Product/warehouse scope. Expired/zero/no holds give zero commitments and null expiry.
+No client clock, worker, status update, movement or history deletion is required.
+Membership, archival visibility, literal search and ordering reuse the existing
+warehouse search RPC. Missing Raw/Customs structural balances fail 55000, not zero.
+Existing Inventory contracts remain unchanged; calculation-history reads are separate
+contracts, not exposed by this aggregate.
+
+### Task 9/16 local retained history reads (migration 158; undeployed)
+
+`list_test_calculations(p_limit integer default 50,p_before_created_at timestamptz
+default null,p_before_id uuid default null)` returns headers newest-first by
+(created_at,id), with both cursor fields supplied together and a 1–100 limit.
+`get_test_calculation(p_calculation_id uuid)` returns one JSON detail or a not-found
+error after authorization. Null identities/invalid pagination are rejected.
+
+Headers expose calculation ID/name, current creator Full Name, created_at,
+deadline_date, deadline_timezone, expires_at, status and as_of. Product identities
+and name/serial/kind snapshots come from immutable saved items, never live Product
+labels; archived Products and inactive creators do not hide historical calculations.
+Detail items expose required_quantity, held_quantity and missing_quantity as exact
+decimal strings, plus saved warehouse ID/code/quantity allocations (also TEXT).
+No holds is an empty array; zero allocation is not confused with expired saved holds.
+
+Each call observes one database wall-clock as_of; status is active iff expires_at >
+as_of. Expired details keep original held/missing quantities and allocations; only
+the separate current Inventory aggregate excludes expired commitments. Reads never
+renew, release or modify holds. Creator display is current, not historically frozen.
+Private request UUIDs, canonical payloads and receipts are never projected. Shared
+history requires active Admin or Test view, not ownership or current warehouse views.

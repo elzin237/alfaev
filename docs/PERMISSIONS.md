@@ -417,3 +417,86 @@ all-warehouse grant. Existing Product creation/edit, Brand, barcode, PCB, and Wo
 permissions remain separate. Warehouse Add, Remove, and Correction require the matching
 warehouse `adjust` permission, and transfers require adjustment authority in both source
 and destination warehouses. Task 001D owns the permission-aware Inventory tabs.
+
+## 10. Test Calculator V1 permissions — private foundation only
+
+Task 2's local, undeployed migration 151 registers dedicated delegable definitions
+`test_calculator.view` and `test_calculator.manage` (singular keys supersede the
+specification's proposed plural spelling). No user assignments, application RPC
+grants or Test UI are added. All three new tables remain private even to an Admin JWT;
+the following authorized read/Save behavior belongs to later trusted operations.
+
+At the TC-02 checkpoint, typed frontend registration was deferred to coordinated
+frontend/rollout work: the strict Admin parser expected the deployed 39-key contract.
+It must not require 41 while DEV is unchanged. The database foundation can register
+definitions without activating a frontend capability; the compatibility update below
+supports both complete contracts without granting new authority.
+
+Task 16A local coordination checkpoint: that frontend compatibility layer is now
+prepared, not activated. `PERMISSION_KEYS` retains the complete legacy 39-key set;
+`SUPPORTED_PERMISSION_KEYS` adds only the two Test keys (41 total), and `PermissionKey`
+includes both. The Admin matrix parser accepts exactly complete 39- or 41-key sets,
+independent of row order, rejecting partial upgrades, duplicates and unknown keys.
+It never fabricates missing Test permission rows/grants on legacy DEV. Matrix grouping
+and draft edits preserve Test grants when the backend actually returns those rows.
+No permission assignments or remote activation have been performed.
+
+- Active Admin: view/history and Save, retaining existing read-only Admin permission UI.
+- Non-Admin history/list/detail: effective `test_calculator.view`. Saved calculations
+  are shared among authorized viewers, not restricted to the original creator.
+- Non-Admin preview/Save: BOTH Test view/manage plus the view permissions for every
+  eligible source pool read by that operation. Ordinary inputs require Raw Materials,
+  Customs and FG view; Calculator-linked finished-only inputs require FG view.
+  Do not silently select a different source policy based on hidden warehouses.
+- View alone cannot Save. `pcb.*`, `projects.*`, warehouse adjust, Work Order Finish
+  or existing FG reserve authority never substitutes for Test manage/view, and Test
+  authority never grants those existing mutation capabilities. Save deducts no stock.
+- History exposes saved Test items/results under Test view; current warehouse totals
+  still require their warehouse views. Combined Raw+Customs planning values require
+  both existing views. Warehouse Test aggregates need only their corresponding
+  Inventory read boundary, reveal no Test identities/creators, and grant no Test access.
+- Trusted RPCs recheck active identity and relevant permissions after waits and on
+  replay. Original actor ownership is required to replay a Save, even for a different
+  Admin; shared history read authority does not transfer request ownership.
+- Inactive/anonymous callers are denied. New tables have RLS and no direct application
+  writes; private helpers/receipts have no PUBLIC/anon/application EXECUTE/access.
+  Only reviewed public wrappers receive authenticated EXECUTE. No service-role or
+  Admin-JWT ACL bypass is introduced and no permissions are assigned automatically.
+
+No V1 edit, cancellation, deadline-extension, renewal or physical Test-consumption
+permission/operation exists. Separate authorization is required for later additions.
+
+TC-03 local migration 152 grants authenticated EXECUTE only on
+`search_test_calculator_products(text,integer)` and `preview_test_calculation(jsonb)`.
+Both require active Admin or Test view AND manage. A non-Admin additionally needs FG
+view for linked-FG selections, and Raw/Customs/FG views for ordinary selections.
+An FG-only caller's search cannot expose ordinary candidates, and a mixed unauthorized
+preview is denied as a whole. `pcb.edit` is not a substitute. No Project identities,
+Test receipts, table access, user permission assignments or Save capability are added.
+Deployment is pending; the typed frontend permission contract remains unchanged.
+
+TC-04 local migration 153 adds only authenticated EXECUTE on
+`save_test_calculation(uuid,text,jsonb,date)`. It requires an active Admin or Test
+view AND manage with FG view for linked outputs, all three warehouse views for
+ordinary inputs. Authority is rechecked after waits and on exact replay; only the
+original profile AND authenticated user may replay a request. Another Admin cannot
+retrieve its private receipt. PUBLIC/anon/service_role remain denied and private
+tables receive no grants. No user assignments or DEV activation are performed.
+
+TC-08 local migration 157 grants authenticated EXECUTE on
+`get_inventory_test_commitments(uuid,text)` only. It requires active Admin or the
+requested warehouse's view permission; Raw's combined Raw+Customs aggregate additionally
+requires Customs view. FG-only/Customs-only viewers cannot read another warehouse;
+Raw-only viewers must use existing Raw physical reads, not the combined new aggregate.
+`test_calculator.view/manage` is neither required nor sufficient for Inventory reads.
+No calculation/creator/receipt/profile identities are exposed. PUBLIC/anon/service_role
+are denied EXECUTE and all Test tables retain their existing RLS/ACL isolation.
+
+Task 9/16 local migration 158 grants authenticated EXECUTE only on
+`list_test_calculations(integer,timestamptz,uuid)` and `get_test_calculation(uuid)`.
+Both require active Admin or effective `test_calculator.view`; manage alone does not
+authorize history. Authorized viewers share saved history across creators, including
+expired calculations, without needing Inventory view for saved results. This grants
+neither current hidden-warehouse stock access nor another actor's retry receipt.
+Only current creator Full Name is exposed; unrelated UserProfile fields remain private.
+PUBLIC/anon/service_role remain denied; no assignments, table grants or DEV activation.

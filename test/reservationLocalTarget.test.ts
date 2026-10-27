@@ -327,12 +327,13 @@ describe("temporary database ownership and quiet-session gates",()=>{
 });
 
 describe("rollback and preservation",()=>{
-  it("advances only a positively owned clone through 150; source remains exactly 142",async()=>{
+  it("advances only a positively owned clone through 150 then atomic 158; source remains exactly 142",async()=>{
     const target=new ReservationLocalTarget(memoryIO().io),{pool}=leasePool(),{source}=fakeSource();
     await target.acquire(pool);await target.createTemporary(source,temporary);
     const session=(n:number,oid="777",db=temporary)=>({query:vi.fn()
       .mockResolvedValueOnce({rows:[{db,oid,owner_ok:true,role:"postgres",session_role:"postgres",port:5432,directory:pin.dataDirectory,cluster:pin.cluster}]})
-      .mockResolvedValueOnce({rows:[{n,latest:n===146?"20261023130000":n===147?"20261023140000":n===148?"20261026100000":n===149?"20261026110000":n===150?"20261026120000":pin.latestMigration}]})});
+      .mockResolvedValueOnce({rows:[{n,latest:n===146?"20261023130000":n===147?"20261023140000":n===148?"20261026100000":n===149?"20261026110000":n===150?"20261026120000":n===158?"20261027170000":pin.latestMigration}]})});
+    await expect(target.acceptClonePhase(session(158),temporary,158)).rejects.toThrow("phase mismatch");
     await expect(target.acceptClonePhase(session(147),temporary,147)).rejects.toThrow("phase mismatch");
     await expect(target.acceptClonePhase(session(146),temporary,999 as 146)).rejects.toThrow("Unexpected clone");
     const wrongOwner=session(146);wrongOwner.query.mockReset().mockResolvedValueOnce({rows:[{db:temporary,oid:"777",owner_ok:false,
@@ -355,6 +356,10 @@ describe("rollback and preservation",()=>{
     await target.acceptClonePhase(session(150),temporary,150);
     await target.verifySession(session(150),temporary);
     await expect(target.verifySession(session(149),temporary)).rejects.toThrow("exactly 150");
+    await target.acceptClonePhase(session(158),temporary,158);
+    await target.verifySession(session(158),temporary);
+    await expect(target.verifySession(session(150),temporary)).rejects.toThrow("exactly 158");
+    await expect(target.acceptClonePhase(session(158,"5","postgres"),"postgres",158)).rejects.toThrow("Unsafe temporary");
     await expect(target.acceptClonePhase(session(146,"5","postgres"),"postgres",146)).rejects.toThrow("Unsafe temporary");
     await expect(target.verifySession(session(147,"5","postgres"),"postgres")).rejects.toThrow("exactly 142");
     await target.verifySession(session(142,"5","postgres"),"postgres");

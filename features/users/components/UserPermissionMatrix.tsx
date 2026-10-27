@@ -16,6 +16,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{
   { module: "pcb", label: "Finished Product Calculator" },
   { module: "work_orders", label: "Radni Nalozi" },
   { module: "archive", label: "Archive" },
+  { module: "test_calculator", label: "Test Calculator" },
 ];
 
 export interface UserPermissionMatrixProps {

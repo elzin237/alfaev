@@ -40,4 +40,7 @@ export const PERMISSION_KEYS = [
   "archive.view",
 ] as const;
 
-export type PermissionKey = (typeof PERMISSION_KEYS)[number];
+// Keep the deployed 39-key contract intact during the migration-first transition.
+export const TEST_CALCULATOR_PERMISSION_KEYS = ["test_calculator.view", "test_calculator.manage"] as const;
+export const SUPPORTED_PERMISSION_KEYS = [...PERMISSION_KEYS, ...TEST_CALCULATOR_PERMISSION_KEYS] as const;
+export type PermissionKey = (typeof SUPPORTED_PERMISSION_KEYS)[number];

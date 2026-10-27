@@ -44,7 +44,7 @@ Final main navigation:
 3. Nabavka
 4. Dobavljači
 5. Skladište
-6. Finished Product Calculator
+6. Product Calculator (Normal / Test; Test Calculator V1 navigation pending implementation)
 7. Radni Nalozi
 8. Dokumentacija
 9. Osnovna sredstva
@@ -988,3 +988,29 @@ deployment has occurred.
 - Customs consumption records its warehouse and applicable declaration/release and
   responsible-actor context. The software does not certify legal clearance; mandatory
   customs evidence and validation remain subject to compliance confirmation.
+
+## Test Calculator V1 — approved scope, implementation pending
+
+Product Calculator is the planned sidebar container. Normal remains the existing
+Finished Product Calculator at `/pcb`, with unchanged definitions, BOMs and Work Order
+flow. Test is a separate blue-themed page with Normal / Test navigation, not another
+production mode or output Product creator.
+
+Create a named calculation from existing Products/components and total quantities.
+Prove Calculation previews requirements, eligible available/reservable stock and
+missing quantities without reservations. A mandatory Europe/Sarajevo deadline date
+precedes Save. One authoritative atomic Save recalculates and persists an immutable
+calculation, partial/zero warehouse holds and a retry receipt; no stock is deducted.
+
+Ordinary inputs use Raw -> Customs -> unreserved FG; Calculator-linked finished
+Products use FG only. Ordinary outstanding Project demand has admission priority,
+deducted once, without converting all Project planning to hard reservations. Tests
+protect their held warehouse quantities against competing consumption/reservations.
+
+Saved calculations are shared history for authorized Test viewers/Admins, with creator,
+timestamps, components, required/reserved/missing results and deadline. They become
+Expired at the next Sarajevo midnight, exclusive, and remain readable. No edit,
+extension, cancellation, actual Test consumption, auto-top-up/renewal or Test-missing
+Project notifications belong to V1. Inventory adds blue Committed to Tests and
+Available After Projects and Tests in every eligible source warehouse while preserving
+existing fields. BUSINESS_RULES section 17 owns formulas and exact scope.

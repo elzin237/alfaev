@@ -67,7 +67,7 @@ export const NAVIGATION = [
     },
   },
   {
-    label: "Finished Product Calculator",
+    label: "Product Calculator",
     path: "/pcb",
     icon: Cpu,
     access: { kind: "permission", permission: "pcb.view" },

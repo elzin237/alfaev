@@ -78,6 +78,21 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("UserPermissionEditor", () => {
+  it("preserves Test grants while editing existing permissions after the 41-key rollout", async () => {
+    const expanded: UserPermissionMatrixItem[] = [...permissions, ...(["test_calculator.view", "test_calculator.manage"] as const).map(permissionKey => ({
+      permissionKey, module: "test_calculator" as const, label: permissionKey, description: "Test permission", granted: true,
+    }))];
+    render(<QueryClientProvider client={new QueryClient()}><UserPermissionEditor permissions={expanded} userId={userId}
+      currentAdminProfileId={adminProfileId} isAdminTarget={false} onSaved={vi.fn()} /></QueryClientProvider>);
+    expect(screen.getByRole("group", { name: "Test Calculator" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Create Projects" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Permissions" }));
+    await waitFor(() => expect(permissionEditorMocks.saveUserPermissionsAdmin).toHaveBeenCalled());
+    expect(permissionEditorMocks.saveUserPermissionsAdmin.mock.calls[0]![0]).toMatchObject({
+      expectedPermissionKeys: ["projects.view", "test_calculator.view", "test_calculator.manage"],
+      desiredPermissionKeys: ["projects.view", "projects.create", "test_calculator.view", "test_calculator.manage"],
+    });
+  });
   it("edits a non-admin draft and saves complete expected and desired sets", async () => {
     const { queryClient, onSaved } = renderEditor();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");

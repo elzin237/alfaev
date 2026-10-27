@@ -3,6 +3,8 @@ import { Routes, Route } from "react-router";
 import AuthGuard from "../guards/AuthGuard";
 import AdminRoute from "../guards/AdminRoute";
 import PermissionRoute from "../guards/PermissionRoute";
+import TestCalculatorRoute from "../guards/TestCalculatorRoute";
+import { isTestCalculatorEnabled } from "../config/testCalculatorActivation";
 
 import LoginPage from "../../pages/auth/LoginPage";
 
@@ -15,6 +17,7 @@ import SupplierDetailPage from "../../features/suppliers/SupplierDetailPage";
 import InventoryPage from "../../features/inventory/InventoryPage";
 import ProductDetailPage from "../../features/inventory/ProductDetailPage";
 import PcbPage from "../../features/pcb/PcbPage";
+import TestCalculatorPage from "../../features/test-calculator/TestCalculatorPage";
 import PcbDetailPage from "../../features/pcb/PcbDetailPage";
 import PcbProductionPrecheckPage from "../../features/pcb/PcbProductionPrecheckPage";
 import WorkOrdersPage from "../../pages/work-orders/WorkOrdersPage";
@@ -29,6 +32,7 @@ import CalendarPage from "../../features/calendar/CalendarPage";
 import ArchivePage from "../../features/archive/ArchivePage";
 
 function AppRouter() {
+  const testCalculatorEnabled = isTestCalculatorEnabled();
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -59,8 +63,11 @@ function AppRouter() {
           "inventory.finished_goods.view",
           "inventory.customs.view",
         ]} />}>
-          <Route path="/inventory" element={<InventoryPage />} />
+          <Route path="/inventory" element={<InventoryPage testCommitmentsEnabledAfterActivation={testCalculatorEnabled} />} />
           <Route path="/inventory/:productId" element={<ProductDetailPage />} />
+        </Route>
+        <Route element={<TestCalculatorRoute />}>
+          <Route path="/pcb/test" element={<TestCalculatorPage enabledAfterActivation={testCalculatorEnabled} />} />
         </Route>
         <Route element={<PermissionRoute permission="pcb.view" />}>
           <Route path="/pcb" element={<PcbPage />} />

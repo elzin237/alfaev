@@ -746,3 +746,36 @@ than replace, that central Inventory transaction boundary.
   rewrite, or delete historical shortage records.
 - Serial identity is global and textual: exact three-digit calculator serials coexist
   with generated seven-digit ordinary Product serials, including archived identities.
+
+## Test Calculator V1 architecture — approved specification only
+
+- Add a narrow `features/test-calculator` module using established service/hook/TSX,
+  query-key, form, history and recovery conventions. Keep normal `/pcb` and its
+  entities/workflow; blue Test presentation is separate, not a second stock ledger.
+- Reuse shared exact-quantity validation/formatting and Product identity rules. The
+  existing BOM picker RPC requires a real Card/PCB authority; do not forge a Card or
+  broaden that RPC merely to reuse UI. Provide a narrow authorized Test projection.
+- The browser never orchestrates multiple reservation writes. One trusted idempotent
+  Save commits header/items/warehouse holds/receipt/audit atomically. Preview is
+  informational; backend Save independently recalculates every amount and deadline.
+- Keep planning demand, Project FG hard reservations, Test warehouse holds and
+  physical Inventory separate. Share one active-Test quantity helper/invariant across
+  new Test admission, existing FG reserve/automatic requirement allocation, all balance
+  decreases, production eligibility, FIFO planning, Finish and allocation fingerprints.
+- Admission must serialize the relevant stock, hard holds and current ordinary
+  Project-demand decision. Verify requirement/lifecycle-vs-Save races, not just two
+  Test saves. Use deterministic Product/warehouse ordering compatible with existing
+  Project-first paths; never acquire Project locks after balance/lot locks. Do not
+  retrofit soft Project demand into a universal physical debit prohibition.
+- Holds reserve warehouse quantities only. No source-lot selection/allocation,
+  movement, relocation or output is created by Save/expiry. Actual unrelated debit
+  paths retain their existing FIFO/provenance logic but cannot consume held stock.
+- Derive expiry everywhere from the saved instant and database time, rechecked after
+  lock waits. No cron, browser timer, status flag or expired-row cleanup is necessary
+  for stock safety; optional refresh timers are presentation only.
+- Extend authorized Inventory reads without breaking existing RPC return contracts.
+  Return coherent aggregate fields/as-of/next expiry, not private Test identities.
+  Cache keys include backend/profile/warehouse; mutation and expiry refreshes preserve
+  isolation, lossless quantities and existing search/membership rules.
+- Use forward migrations and focused gates; do not edit frozen migration history or
+  run repeated broad audits/full regressions after every small UI/documentation task.

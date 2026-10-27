@@ -6,7 +6,7 @@ vi.mock("../../../lib/supabase/client", () => ({
   supabase: { rpc: userPermissionsServiceMocks.rpc },
 }));
 
-import { PERMISSION_KEYS } from "../../../app/auth/permissions";
+import { PERMISSION_KEYS, SUPPORTED_PERMISSION_KEYS } from "../../../app/auth/permissions";
 import { getUserPermissionsAdmin } from "./userPermissionsService";
 
 const targetUserId = "00000000-0000-0000-0000-000000000201";
@@ -26,6 +26,29 @@ beforeEach(() => {
 });
 
 describe("userPermissionsService", () => {
+  it("accepts exactly the coordinated 41-key contract without fabricating missing grants on legacy DEV", async () => {
+    const additional = SUPPORTED_PERMISSION_KEYS.filter(k => !PERMISSION_KEYS.some(old => old === k)).map(permission_key => ({
+      permission_key, module: "test_calculator", label: permission_key, description: "Test permission", granted: false,
+    }));
+    const expanded = [...permissionRows(), ...additional];
+    userPermissionsServiceMocks.rpc.mockResolvedValueOnce({ data: expanded.reverse(), error: null });
+    const result = await getUserPermissionsAdmin(targetUserId);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.map(row => row.permissionKey)).toEqual([...SUPPORTED_PERMISSION_KEYS]);
+      expect(result.value.slice(-2).map(row => row.granted)).toEqual([false, false]);
+    }
+    for (const data of [[...permissionRows(), additional[0]], [...permissionRows().slice(1), ...additional],
+      [...permissionRows(), additional[0], additional[0]], [...permissionRows(), ...additional, additional[0]]]) {
+      userPermissionsServiceMocks.rpc.mockResolvedValueOnce({ data, error: null });
+      expect((await getUserPermissionsAdmin(targetUserId)).ok).toBe(false);
+    }
+    userPermissionsServiceMocks.rpc.mockResolvedValueOnce({ data: permissionRows(), error: null });
+    const legacy = await getUserPermissionsAdmin(targetUserId);
+    if (!legacy.ok) throw Error("Legacy matrix rejected");
+    expect(legacy.value).toHaveLength(39);
+    expect(legacy.value.some(row => row.module === "test_calculator")).toBe(false);
+  });
   it("maps the complete canonical matrix through the trusted read RPC", async () => {
     userPermissionsServiceMocks.rpc.mockResolvedValue({
       data: permissionRows(),

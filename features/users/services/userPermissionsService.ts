@@ -1,5 +1,6 @@
 import {
   PERMISSION_KEYS,
+  SUPPORTED_PERMISSION_KEYS,
   type PermissionKey,
 } from "../../../app/auth/permissions";
 import { supabase } from "../../../lib/supabase/client";
@@ -13,6 +14,7 @@ export const USER_PERMISSION_MODULES = [
   "pcb",
   "work_orders",
   "archive",
+  "test_calculator",
 ] as const;
 
 export type UserPermissionModule = (typeof USER_PERMISSION_MODULES)[number];
@@ -43,7 +45,7 @@ export type UserPermissionsResult =
   | { ok: false; error: UserPermissionsServiceError };
 
 function isPermissionKey(value: string): value is PermissionKey {
-  return PERMISSION_KEYS.some((permissionKey) => permissionKey === value);
+  return SUPPORTED_PERMISSION_KEYS.some((permissionKey) => permissionKey === value);
 }
 
 function isPermissionModule(value: string): value is UserPermissionModule {
@@ -89,7 +91,7 @@ function isPermissionMatrixRow(
 function isCompletePermissionMatrix(
   rows: unknown,
 ): rows is UserPermissionMatrixRow[] {
-  if (!Array.isArray(rows) || rows.length !== PERMISSION_KEYS.length) {
+  if (!Array.isArray(rows) || (rows.length !== PERMISSION_KEYS.length && rows.length !== SUPPORTED_PERMISSION_KEYS.length)) {
     return false;
   }
 
@@ -97,7 +99,8 @@ function isCompletePermissionMatrix(
     return false;
   }
 
-  return PERMISSION_KEYS.every(
+  const expected = rows.length === PERMISSION_KEYS.length ? PERMISSION_KEYS : SUPPORTED_PERMISSION_KEYS;
+  return expected.every(
     (permissionKey) => rows.some((row) => row.permission_key === permissionKey),
   );
 }
@@ -139,7 +142,7 @@ export async function getUserPermissionsAdmin(
     const byKey = new Map(data.map((permission) => [permission.permission_key, permission]));
     return {
       ok: true,
-      value: PERMISSION_KEYS.map((key) => {
+      value: SUPPORTED_PERMISSION_KEYS.filter(key => byKey.has(key)).map((key) => {
         const permission = byKey.get(key)!;
         return {
           permissionKey: permission.permission_key,

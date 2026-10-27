@@ -319,7 +319,11 @@ The locally implemented `/pcb/:pcbCardId/produce` workflow requires an active Ad
 
 Creation requires only an active Admin or `pcb.produce`, not `work_orders.create`. It freezes the exact PcbCard, active BOM version, positive bigint planned quantity, General Stock context, auto-generated description, and BOM-derived WorkOrderItems behind a durable unique client request UUID. Each BOM-derived row has authoritative `pcb_bom` origin and cannot be edited, deleted, replaced, or forged through a normal/manual path. An active Admin or user with `work_orders.edit_draft` may later manage a separate complete set of `manual` supplemental rows through a narrow trusted operation; `pcb.produce` alone does not grant that authority. The frozen header and production context remain unavailable to generic Draft editing. After creation, normal Work Order view, finish, and delete-Draft permissions apply; `pcb.produce` grants no broad Work Order access. The legacy `produce_pcb(uuid,text,uuid)` immediate-stock RPC is not executable by normal authenticated clients.
 
-PCB stock sufficiency uses current physical `InventoryBalance.quantity`, not Available after Commitments. Project commitments are a planning read model, not a physical-stock reservation.
+PCB stock sufficiency uses trusted production-eligible physical quantities under
+the warehouse/hard FG reservation rules, not Available after soft Project Commitments.
+The approved Test Calculator V1 extension must also exclude active Test holds, without
+changing the normal production workflow. Ordinary Project commitments remain a planning
+read model, distinct from hard FG Project reservations and time-limited Test holds.
 
 At Work Order Finish, require an active Admin or `work_orders.finish` and, before committing:
 
@@ -1475,3 +1479,166 @@ reconciliation. A permission denial/UUID conflict cannot resolve earlier uncerta
 Browser storage is not tamper-proof or confidential against device owners/XSS;
 backend authorization/idempotency remain final. Manual storage clearing/eviction is
 outside the durable guarantee and requires reconciliation guidance, not false success.
+
+## Test Calculator V1 security — approved, not implemented or activated
+
+The Test feature is a separate hard-hold domain, not authority to manufacture, change
+Project requirements, alter permissions or write Inventory. Apply the dedicated
+view/manage and eligible-warehouse boundaries in PERMISSIONS section 10. Shared Test
+history reads do not grant current hidden-warehouse data or another actor's replay.
+
+### Trusted Save and retry ownership
+
+- Preview writes nothing. One trusted Save must validate the entire bounded payload,
+  Product identity/activity, positive exact quantities, deadline, current permissions
+  and authoritative reservation/admission formulas. Browser proof is not authorization.
+- Lock the request UUID, reject cross-actor reuse with generic access denial before
+  payload comparison, and reject any changed immutable payload. Include name, Product
+  quantities and deadline in canonical request ownership. Zero/partial results also
+  get immutable receipts; replay must not create another hold or save audit.
+- Recheck and hold required current authority through the mutation after blocking
+  locks. Serialize all affected Product/warehouse capacity and ordinary Project-demand
+  admission decisions with compatible ordering. Test/Test, Test/debit, Test/Project
+  reservation and Test/requirement-lifecycle races must not overbook or deadlock.
+- Header, items, holds, receipt and immutable save audit commit/roll back together.
+  All tables retain RLS; application roles have no direct table writes. Public trusted
+  wrappers use explicit authenticated EXECUTE, SECURITY DEFINER and empty search_path;
+  helpers stay private. Do not weaken existing RLS/ACLs or grant service-role bypasses.
+
+### Universal protection and expiry
+
+- For every warehouse balance decrease, enforce physical >= active Test holds plus
+  existing hard FG Project reservations for that warehouse under its balance lock.
+  New/increased Test and FG Project reservations must enforce the same combined bound.
+  Protect adjustment removals/downward corrections, transfers, production and Project
+  fulfillment without disabling triggers, bypass flags or implicit Admin exceptions.
+- Shared production precheck/allocation/Finish/PDF-fingerprint projections must exclude
+  Test-held quantities while preserving FIFO and immutable historical provenance.
+  No Test Save/expiry creates movements, lot allocations, output, Work Orders or changes
+  the original component stock; Calculator-linked inputs never expand their BOM.
+- The authoritative deadline is a Sarajevo date converted to exclusive next local
+  midnight. Use server/database time, not browser time or transaction-start time cached
+  across a lock wait. Recheck after waits; expired holds contribute zero everywhere.
+  A background job/status update must never be necessary to release effective capacity.
+- Expiry is not deletion, renewal, a movement or a new audit mutation. Read original
+  allocation history as Expired. Later stock/Project changes do not top up, edit or
+  cancel immutable Test holds. Test shortages do not generate Project notifications.
+
+### Durable recovery and fail-closed projections
+
+Persist original request UUID/payload before dispatch using validated backend/Auth-user/
+profile-scoped recovery and cross-tab exclusion. Store exact decimal quantities and
+deadline, never tokens/credentials. Do not silently discard an uncertain request on
+logout, identity switch, reload or restart. Replay requires explicit action under the
+same current identity/authority; malformed success remains uncertain.
+
+Historical receipts are not live stock. Clear resolved intent only after conclusive
+backend outcome and new authorized reconciliation; an expired replay never reactivates
+holds. Corrupt/unavailable storage or unknown outcome blocks conflicting new Saves.
+Browser storage is not a defense against device owners/XSS/eviction; do not claim it is.
+
+Inventory aggregates use one authorized snapshot, exact bigint/numeric transport and
+current effective expiry. Redacted/failed data is Unavailable, not zero. Warehouse
+aggregates reveal no private calculation identity/creator/request or other Project
+identity. No existing Project shortage/history rewrite or backfill is part of V1.
+
+TC-02 implementation checkpoint: local undeployed migration 151 creates only the
+three private Test tables and `test_calculator.view` / `test_calculator.manage`
+definitions. No user gets an automatic grant. Both new trigger helpers are SECURITY
+INVOKER with empty search paths and no application/PUBLIC EXECUTE. RLS plus table
+revocations deny direct access even to Admin JWTs and service_role; no Test read or
+mutation wrapper is activated. Existing SECURITY DEFINER inventory and Inventory/FG
+protection remain unchanged. Stock protection, authority-enforcing RPCs and live
+expiry reads described above are required later work, not provided by this foundation.
+
+TC-03 local migration 152 adds only two authorized STABLE SECURITY DEFINER read RPCs
+with empty search paths; expected application SECURITY DEFINER inventory becomes 192
+on the local upgraded schema (190 existing plus two reads). Explicit authenticated
+EXECUTE never bypasses active Test view/manage and all eligible warehouse-view checks.
+PUBLIC/anon/service_role are denied EXECUTE and private tables remain inaccessible.
+Selection validation rejects duplicates, archived/missing/unlinked or unauthorized
+Products, malformed/extra fields and non-string/out-of-range quantities. Missing and
+unauthorized Product IDs share generic access denial; search filters unauthorized rows.
+Outputs contain only authorized Product identities and anonymous quantity aggregates.
+
+Preview calculates existing hard FG reservations, active Test holds at one statement
+time and ordinary demand priority without writes, row/advisory mutation locks or
+receipt inspection. Provisional warehouse quantities are not reservations or FIFO
+allocations. No caller-supplied context can exclude old holds. Save will recalculate;
+this read is never authority to deduct/reserve stock or a guarantee after expiry or
+concurrent changes. Nothing is activated or deployed to DEV by this local task.
+
+TC-04 local migration 153 adds one VOLATILE SECURITY DEFINER Save wrapper with
+empty search_path (local application inventory 193). Request ownership is checked
+before payload comparison. Advisory UUID serialization and Product/balance locks
+prevent duplicate or competing Saves from allocating the same stock. Current actor,
+required grants and warehouse authority are rechecked after waits; actor/grant rows
+are held through the transaction. The deadline is checked after waits and again
+before return. All immutable records and audit roll back on any failure.
+Private deferred total checks execute inside the trusted Save boundary; no invoker
+helper is elevated and no table/receipt read grant is added. Expired exact retries
+return only the original actor's receipt, never create new holds or recalculate it.
+This is not operational stock protection: other debit/production/Project admission
+paths still require TC-05 through TC-07 before activation. No DEV deployment occurs.
+
+TC-05 local migration 154 adds one private invoker-only numeric active-Test helper
+and one private SECURITY DEFINER trigger (local application inventory 194), both
+with empty search_path and no PUBLIC/anon/authenticated/service_role EXECUTE grants.
+Every existing quantity-decrease path hits the balance-row guard, including Admin
+adjustments, downward corrections, transfers and low-level trusted deltas. No Admin,
+fulfillment or transfer bypass exists. The existing FG Project guard is untouched.
+Database wall time is observed inside the VOLATILE guard after the UPDATE row-lock
+wait; fixed-snapshot transactions fail closed. No additional reverse-order locks,
+RLS changes, direct table grants, hold mutation or physical/provenance rewrite occurs.
+TC-06 must align production reads/plans with these holds, and TC-07 must protect Test
+holds during new/increased Project reservations before operational activation.
+
+TC-06 local migration 155 adds only a private SECURITY INVOKER production-capacity
+helper and replaces two existing invoker-only production helpers with the same
+signatures, empty search paths and private ACLs. No authenticated/PUBLIC/anon/
+service_role EXECUTE is added; application SECURITY DEFINER inventory stays 194.
+Production eligibility uses current database-time Test holds and existing hard FG
+reservations, never soft demand or private Test identities. The allocation planner
+reads expiry after Product/balance/lot waits and freezes per-warehouse free capacity
+for its FIFO plan; existing Finish and fingerprint checks plus the TC-05 row guard
+remain authoritative. No bypass, table grant, RLS change, reservation mutation or
+historical rewrite is introduced. Project/Test admission remains TC-07 before activation.
+
+TC-07 local migration 156 patches only the two reviewed post-lock FG admission checks
+inside `change_finished_goods_project_reservation` and `mutate_project_requirement`.
+Their exact signatures, owners, SECURITY DEFINER/search_path configuration and ACLs
+are preserved (application inventory remains 194); no grant, policy or table change
+is made. Migration source assertions reject drift rather than replacing unrelated
+logic. Active Test capacity is re-read using database wall time after stock/state
+waits; fixed-snapshot new admission fails closed. Existing Product/balance ordering
+serializes Save against manual/automatic reservations and fulfillment, without taking
+Project locks from Save. Original actor-bound receipt replay, permission/version/demand
+checks remain intact. No soft-demand hardening, physical deduction on Reserve/Release,
+Test-hold mutation, lifecycle policy change or automatic reallocation is introduced.
+This local foundation is not DEV/application activation; later V1 gates remain required.
+
+TC-08 local migration 157 adds one STABLE SECURITY DEFINER Inventory-only read with
+empty search_path (application inventory 195), authenticated EXECUTE only and explicit
+active identity plus warehouse-view checks. Raw combined quantities require Raw AND
+Customs views; FG and Customs require only their own views. No Test permission is
+required or substituted for Inventory authority. Existing membership/search filters
+remain in force, including archived visibility, zero FG outputs and Customs history.
+All quantities are exact TEXT; failed/unauthorized reads raise errors, never redacted
+zero substitutes. Only authorized Product/warehouse quantity aggregates and expiry
+timing are returned, not Test identities/creators/receipts/profile data. One server
+as-of time governs positive active holds and their earliest relevant expiry. No table
+grants, policies, mutation/accounting paths or historical rows change. There is no
+client-supplied as-of parameter or expiry worker dependency.
+
+Task 9/16 local migration 158 adds two STABLE SECURITY DEFINER history reads with
+empty search_path (application inventory 197). `list_test_calculations` and
+`get_test_calculation` require an active identity and Admin or Test view before
+returning any existence/data. Shared history is not restricted to its creator;
+Test manage or Inventory view alone does not authorize it. Current Inventory views
+are not required for saved historical quantities. Anonymous, PUBLIC and service_role
+EXECUTE are denied; no table/RLS/policy grants change.
+Explicit projections expose only saved item/warehouse results and the creator's
+current Full Name, never auth IDs, email, private request UUIDs/payloads or receipts.
+This does not broaden UserProfile access or transfer actor-bound replay ownership.
+Bounded keyset pagination and validated IDs fail closed. One server as-of classifies
+expiry; history reads make no mutations, notifications, renewals or stock allocations.

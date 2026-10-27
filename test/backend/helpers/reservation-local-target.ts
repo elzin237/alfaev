@@ -27,8 +27,8 @@ const containerEnvironment = ["PATH=/usr/bin:/bin", "LC_ALL=C", "TZ=UTC",
   "LOCALE_ARCHIVE=/nix/var/nix/profiles/default/lib/locale/locale-archive"];
 const temporaryPattern = /^alfaev_fg_3b1_[a-f0-9]{32}$/;
 const advisoryKey = "alfaev-fg-reservation-local-validation";
-export type ReservationClonePhase = 142 | 146 | 147 | 148 | 149 | 150;
-const phaseVersion = { 142: "20261022150000", 146: "20261023130000", 147: "20261023140000", 148: "20261026100000", 149: "20261026110000", 150: "20261026120000" } as const;
+export type ReservationClonePhase = 142 | 146 | 147 | 148 | 149 | 150 | 158;
+const phaseVersion = { 142: "20261022150000", 146: "20261023130000", 147: "20261023140000", 148: "20261026100000", 149: "20261026110000", 150: "20261026120000", 158: "20261027170000" } as const;
 
 // Transport only: pg still owns the real protocol, parameters, roles and sessions.
 // Existing container Perl forwards bytes to ONE fixed local Unix socket as OS postgres.
@@ -264,10 +264,10 @@ export class ReservationLocalTarget {
   }
   // Only newly owned clones may advance, after COMMIT and a fresh identity/parity
   // check on the setup session. Source postgres ALWAYS retains its 142 guard.
-  async acceptClonePhase(client: SqlClient, database: string, phase: 146 | 147 | 148 | 149 | 150) {
-    if (phase !== 146 && phase !== 147 && phase !== 148 && phase !== 149 && phase !== 150) throw new Error("Unexpected clone migration phase");
+  async acceptClonePhase(client: SqlClient, database: string, phase: 146 | 147 | 148 | 149 | 150 | 158) {
+    if (phase !== 146 && phase !== 147 && phase !== 148 && phase !== 149 && phase !== 150 && phase !== 158) throw new Error("Unexpected clone migration phase");
     this.verifyDocker();
-    this.assertOwnedClone(database, phase === 146 ? 142 : phase === 147 ? 146 : phase === 148 ? 147 : phase === 149 ? 148 : 149);
+    this.assertOwnedClone(database, phase === 146 ? 142 : phase === 147 ? 146 : phase === 148 ? 147 : phase === 149 ? 148 : phase === 150 ? 149 : 150);
     await this.checkSession(client, database, phase);
     this.phases.set(database, phase);
   }

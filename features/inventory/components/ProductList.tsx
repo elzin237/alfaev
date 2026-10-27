@@ -3,15 +3,18 @@ import { Link } from "react-router";
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { ProductListItem } from "../services/productService";
 import type { InventoryCommitment } from "../services/inventoryCommitmentService";
+import type { InventoryTestCommitment } from "../services/inventoryTestCommitmentService";
 
 export interface ProductListProps {
   products: ProductListItem[];
   warehouseCode?: string;
   commitments?: ReadonlyMap<string, InventoryCommitment>;
   showCommitments?: boolean;
+  showTestCommitments?: boolean;
+  testCommitments?: ReadonlyMap<string, InventoryTestCommitment>;
 }
 
-function ProductList({ products, warehouseCode, commitments, showCommitments = true }: ProductListProps) {
+function ProductList({ products, warehouseCode, commitments, showCommitments = true, showTestCommitments = false, testCommitments }: ProductListProps) {
   const rawMaterials = !warehouseCode || warehouseCode === "raw_materials";
   const headings = ["Serial Number", "Name", "Category", "Brand", rawMaterials ? "Raw Physical Quantity" : "Physical Quantity"];
   if (showCommitments) {
@@ -20,6 +23,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
       : rawMaterials ? ["Outstanding Project Demand", "Available After Demand (Raw + Customs)"]
         : ["Committed to Projects", "Available After Commitments"]));
   }
+  if (showTestCommitments) headings.push("Committed to Tests", "Available After Projects and Tests");
   headings.push("Status");
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
@@ -32,7 +36,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                   <th
                     key={heading}
                     scope="col"
-                    className="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500"
+                    className={`px-5 py-4 text-left text-xs font-semibold uppercase tracking-wide ${heading === "Committed to Tests" ? "text-blue-700" : "text-zinc-500"}`}
                   >
                     {heading}
                   </th>
@@ -43,6 +47,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
           <tbody className="divide-y divide-zinc-100 bg-white">
             {products.map((product) => {
               const commitment = commitments?.get(product.id);
+              const testCommitment = testCommitments?.get(product.id);
               return (
               <tr key={product.id} className="text-sm text-zinc-700">
                 <th scope="row" className="whitespace-nowrap px-5 py-4 text-left font-mono font-semibold text-zinc-900">
@@ -69,6 +74,12 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                         : ""}
                     </span>
                   ) : "Unavailable"}
+                </td>}
+                {showTestCommitments && <td className="whitespace-nowrap px-5 py-4 font-semibold tabular-nums text-blue-700">{testCommitment?.committedToTests ?? "Unavailable"}</td>}
+                {showTestCommitments && <td className="whitespace-nowrap px-5 py-4 tabular-nums">
+                  <span className={testCommitment?.availableAfterProjectsAndTests.startsWith("-") ? "font-semibold text-red-700" : undefined}>
+                    {testCommitment?.availableAfterProjectsAndTests ?? "Unavailable"}
+                  </span>
                 </td>}
                 <td className="whitespace-nowrap px-5 py-4">
                   <StatusBadge

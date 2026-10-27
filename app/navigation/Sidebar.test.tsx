@@ -161,7 +161,7 @@ describe("Sidebar permission visibility", () => {
         "Nabavka",
         "Dobavljači",
         "Skladište",
-        "Finished Product Calculator",
+        "Product Calculator",
         "Radni Nalozi",
         "Dokumentacija",
         "Osnovna sredstva",
@@ -170,6 +170,8 @@ describe("Sidebar permission visibility", () => {
         "Users",
       ]);
     expect(sidebarMocks.hasPermission).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "Product Calculator" })).toHaveAttribute("href", "/pcb");
+    expect(screen.queryByRole("link", { name: "Finished Product Calculator" })).not.toBeInTheDocument();
   });
 
   it("shows Calendar to an active non-admin without a Calendar permission check", () => {

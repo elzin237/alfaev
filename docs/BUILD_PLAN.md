@@ -4142,3 +4142,740 @@ Files changed by this correction only (repository-relative; all pre-existing wor
 - `docs/PERMISSIONS.md`
 - `docs/SECURITY_RULES.md`
 - `docs/UI_SPEC.md`
+
+# PHASE S — Test Calculator V1 (approved specification; implementation pending)
+
+This phase is separate from the Normal Calculator at `/pcb` and preserves existing
+warehouse, Project/FG accounting and history. BUSINESS_RULES section 17, DATA_MODEL's
+Test contract and PERMISSIONS section 10 define the approved rules. Test features are
+not implemented/deployed/activated by these documentation changes. Earlier task-status
+snapshots remain historical, not evidence of Test implementation or current remote state.
+
+Execution rule for EVERY TC task: maximum 15 minutes, stop safely and report partial
+progress if unfinished; do not silently expand scope/start the next task. Each has one
+deliverable/review gate. Use focused tests for the touched boundary, typecheck/build
+when applicable, and diff-check; no repeated broad audit/full regression after every
+small task. Consolidate wider regression at the explicit final test/review gates.
+
+## TC-01 — Lock Test Calculator V1 specification
+
+- Deliverable: canonical rules/contracts and this bounded plan (documentation only).
+- Acceptance: immutable partial/zero Save, ordinary Project priority, warehouse holds,
+  Sarajevo-date expiry/history, permissions and no physical consumption are explicit.
+- Dependencies: approved Task 1 requirements. Budget: maximum 15 minutes.
+- Status: specification recorded by Task 1; no runtime or feature PASS is implied.
+
+## TC-02 — Private database foundation and permissions
+
+- Deliverable: forward-only schema/permission foundation with no application Save activation.
+- Acceptance: separate immutable calculations/items/warehouse holds/receipt, exact
+  quantities, creator/deadline/expiry, RLS/private helpers, dedicated view/manage,
+  no implicit grants, no existing data/history rewrite. Receipt may share the header.
+- Dependencies: TC-01. Budget: maximum 15 minutes.
+
+- Implemented locally in migration 151: three private immutable Test tables, exact
+  quantities and composite/deferred consistency constraints, Sarajevo deadline/expiry,
+  restricted history references/indexes, and singular `test_calculator.view/manage`
+  database definitions. No Save/Preview/read RPC, stock protection, expiry job,
+  permission assignment or deployment. Typed frontend keys remain on the deployed
+  contract until coordinated frontend/rollout work to avoid breaking the Admin parser.
+  Focused local/static validation is recorded in the Task 2 report; this is not a
+  complete Test feature or activation/DEV acceptance PASS.
+- Foundation validation: 7/7 isolated local backend tests and 14/14 focused
+  static/permission-parser tests passed; typecheck and diff-check passed. Runtime
+  applied migration 151 only inside rollback transactions on newly owned local
+  clones upgraded through 150; source table/security/sequence manifests matched.
+  Each run's owned clone was removed; the final run independently confirmed its absence. Persistent
+  source migration 142, retained residue and old clones were not changed.
+- Migration: `20261027100000_add_test_calculator_foundation.sql`, 7671 bytes,
+  SHA-256 `e8d7b802a4b828cc685ddaaafc33371fa6d8c79ca76cf454fdcc80c6fb603684`.
+
+## TC-03 — Authorized Product picker and proof read
+
+- Deliverable: narrow trusted read for selectable inputs and authoritative preview.
+- Acceptance: correct Product linkage/sourcing, Project demand deducted once, exact
+  Required/Eligible/Reservable/Missing, correct warehouse permissions, zero writes.
+- Dependencies: TC-02. Budget: maximum 15 minutes.
+
+- Implemented locally in migration 152: `search_test_calculator_products(text,integer)`
+  and `preview_test_calculation(jsonb)`, active Test/warehouse authorization, exact
+  decimal-string quantities, active-hold/Project-priority arithmetic and provisional
+  warehouse ordering. No context can exclude existing holds; Save must recalculate.
+- Focused validation: 9/9 isolated local runtime/security cases and 11/11 combined
+  foundation/preview static tests passed, plus typecheck and diff-check. Search/preview
+  preserved table/security/sequence manifests; the newly owned clone was removed and
+  absence checked, persistent source/residue and existing clones remained unchanged.
+  No Save, stock protection, deadline mutation, UI, remote access or deployment.
+- Migration: `20261027110000_add_test_calculator_search_and_preview.sql`, 9803 bytes,
+  SHA-256 `1a11b4e6a66c860be33f4fbc526fc38c488b0adc46d94359d0bf98ea00e990d7`.
+
+## TC-04 — Atomic idempotent Save (local foundation; operational activation pending)
+
+- Deliverable: one Save transaction with immutable actor/request/payload receipt.
+- Acceptance: current recalculation, mandatory future expiry, deterministic locks,
+  partial/zero Save, one audit, original-actor exact replay, rollback on any failure;
+  no movement/FIFO/output/Work Order. No application activation yet.
+- Dependencies: TC-02, TC-03. Budget: maximum 15 minutes.
+- Local implementation: migration 153 adds `save_test_calculation(uuid,text,jsonb,date)`
+  with the explicitly requested authenticated EXECUTE boundary, active Test/warehouse
+  authorization, canonical original-actor receipts, deterministic Product/balance
+  locks and fresh post-wait availability/expiry checks. Quantities remain strings.
+  Private deferred hold checks are drained inside Save, without granting table reads.
+  No DEV deployment or operational Test protection is implied: TC-05 through TC-07
+  remain required before activation.
+- Verification: 13/13 focused owned-clone runtime tests and 14/14 foundation,
+  preview and Save static tests passed; typecheck and diff-check passed. Includes
+  authenticated committed duplicate/competing Saves, audit-failure rollback,
+  full/partial/zero quantities, Project/FG/Test coexistence at Save admission,
+  expired original replay, permissions, bigint, canonical payloads and Sarajevo DST.
+  Fixed-snapshot isolation is rejected: Save requires READ COMMITTED for fresh
+  post-wait state. The source manifest/residue remained unchanged; each newly owned
+  clone was removed and absence verified. No persistent reset or remote access.
+- Migration: `20261027120000_add_atomic_test_calculator_save.sql`, 14800 bytes,
+  SHA-256 `f1edf06661223a294e5a25002320000a7d065fca3ba19c463ee130b9f8dcc18d`.
+
+## TC-05 — Universal warehouse debit protection
+
+- Deliverable: shared active-Test physical-stock invariant on every eligible warehouse debit.
+- Acceptance: removal/correction/transfer cannot consume held stock; existing FG hard
+  protection retained, no bypass/relocation, expiry effective without jobs, provenance intact.
+- Dependencies: TC-04. Budget: maximum 15 minutes.
+- Local implementation: migration 154 adds one private wall-clock active-Test
+  warehouse sum and one private SECURITY DEFINER balance-decrease trigger.
+  Raw/Customs must retain active Test quantities; FG must retain Test plus hard
+  Project quantities. Existing FG protection, warehouse permissions and FIFO paths
+  remain intact. No holds move, expire by mutation, or get consumed by unrelated debits.
+  The guard uses the already-held balance lock, takes no reverse-order Product/Project
+  locks and rejects fixed-snapshot isolation (READ COMMITTED required).
+- Focused final validation: 14/14 isolated runtime cases and 17/17 Test Calculator
+  static cases passed, plus typecheck and diff-check. Controlled lock-wait cases cover
+  Save-first, debit-first and a direct balance UPDATE waiting behind Save. Transfers,
+  corrections, combined FG protection, expired history, bigint, FIFO and denial pass.
+  The successful run verified unchanged persistent-source manifests and removal/
+  absence of its own clone. An earlier runner context error leaked an unregistered
+  test client and timed out teardown; its clone cleanup is UNVERIFIED. That clone
+  was not adopted/deleted by the successful rerun. The new harness registers clients
+  before transaction setup; no prior databases/clones or retained residue were cleaned.
+- Migration: `20261027130000_protect_test_calculator_warehouse_holds.sql`, 2714 bytes,
+  SHA-256 `2372dbf1bcf5956eb7c5a38fb1f74425af4a7a3339287be0581ef4549f10efd3`.
+- Operational activation remains blocked on TC-06 production eligibility/fingerprint
+  agreement and TC-07 Project reservation admission/coexistence; neither is changed here.
+
+## TC-06 — Production eligibility and FIFO agreement
+
+- Deliverable: consistent Test-aware precheck, source plan, Finish and PDF fingerprint.
+- Acceptance: ordinary source priority unchanged, Calculator-linked FG-only, active
+  holds excluded, expired holds reusable, no recursive BOM/historical PDF rewrite.
+- Dependencies: TC-05. Budget: maximum 15 minutes.
+- Local implementation: migration 155 adds one private production warehouse-capacity
+  helper and replaces only production eligible quantity / warehouse source planning.
+  Free capacity excludes active Test holds everywhere and hard Project reservations
+  in FG. Ordinary Raw -> Customs -> FG priority and linked-output FG-only sourcing
+  remain unchanged; soft ordinary Project demand is not deducted from production.
+  Product/balance/lot locks precede wall-clock capacity reads, and per-plan warehouse
+  capacities cap the original FIFO prefix. Existing precheck, Finish and PDF/source
+  fingerprint callers reuse these functions; no accounting/UI/history rewrite.
+- Verification: 11/11 focused owned-clone backend tests and 20/20 Test Calculator
+  static tests passed; typecheck and diff-check passed. Covers active/expired holds
+  in all warehouses, Raw -> Customs -> FG fallback, linked FG-only inputs, hard FG
+  coexistence, unchanged soft demand, FIFO, precheck/PDF/Finish agreement, stale
+  fingerprints, planned input consumption once and actual-good FG credit. Controlled
+  Calculator Finish/Save races prove both committed orders preserve stock bounds.
+  Persistent-source manifests matched and every clone created by TC-06 was removed
+  with absence checked. The TC-05 uncertain prior clone was not adopted or deleted.
+- Migration: `20261027140000_protect_test_holds_in_production_plans.sql`, 6835 bytes,
+  SHA-256 `85ec4decbd570a7e5784617caec96a341ee94a230d1b13044007d8ae77b679c7`.
+  Migrations 1–154 remain unchanged. No deployment or operational activation;
+  TC-07 Project/Test admission coexistence and later V1 gates remain required.
+
+## TC-07 — Project reservation and planning coexistence
+
+- Deliverable: Test-aware manual/automatic FG reservation admission and demand serialization.
+- Acceptance: Project/Test races cannot double-reserve; existing hard reservations and
+  fulfillment remain valid, ordinary demand has priority for new Tests without globally
+  becoming hard; existing Project lifecycle/planning/shortage formulas remain unchanged.
+- Dependencies: TC-05, TC-06. Budget: maximum 15 minutes.
+- Local implementation: migration 156 changes only the existing manual and automatic
+  FG admission checks, using current free capacity = physical FG - Project hard
+  reservations - active FG Test holds, floored at zero. Source-text assertions fail
+  closed on unexpected definitions; owners, ACLs, security settings and all existing
+  actor-bound replay, version, permission, Project/Product/balance/state lock paths
+  remain intact. READ COMMITTED is required for new admission, not historical replay.
+  The private wall-clock Test helper is evaluated after existing stock/state waits.
+- Existing requirement Product locks remain compatible with Save's Product UPDATE
+  locks. Ordinary Project demand remains soft and its formulas are unchanged. Release,
+  fulfillment, cancellation and completion/reopening policies are not rewritten;
+  neither expiry, release nor new stock automatically tops up reservations.
+- Verification: 16/16 focused owned-clone runtime and 22/22 Test Calculator static
+  tests passed, plus typecheck and diff-check. Six committed lock-wait races cover
+  both orders of Save versus manual Reserve, automatic requirement reservation and
+  fulfillment. Includes full/partial/zero admission, retries/actor mismatch/stale
+  versions, expiry, bigint, reduction, FG-only FIFO fulfillment, Raw/Customs behavior
+  and no original BOM consumption. Existing function security metadata was compared
+  before/after. Persistent-source manifests matched; all TC-07 clones were removed
+  and absence verified. Uncertain/pre-existing clones and retained residue untouched.
+- Migration: `20261027150000_protect_test_holds_in_project_reservation_admission.sql`,
+  2413 bytes, SHA-256 `0b689ad1c11fb93f4e79861d240beb4df0a44406f86b52deab2fe74e2597fe05`.
+  Migrations 1–155 remain unchanged. No deployment or application activation; TC-08
+  onward (history/aggregates/UI/recovery/final acceptance gates) remains pending.
+
+## TC-08 — Expiry-aware history and Inventory aggregates
+
+- Deliverable: authorized retained Test history and consistent aggregate read contracts.
+- Acceptance: exact original vs active/Expired quantities, server time/next expiry,
+  no background release dependency, all eligible warehouses, correct combined Raw+Customs
+  scope, no identity leaks/permission-redacted zeros or broken existing RPC contracts.
+- Dependencies: TC-07. Budget: maximum 15 minutes.
+- Inventory read slice: local migration 157 adds only
+  `get_inventory_test_commitments(uuid,text default null)`. It reuses existing
+  warehouse membership/search/order and returns exact TEXT quantities, one database
+  as-of time and next positive active expiry. Raw combines Raw+Customs Test holds
+  and requires both views; FG uses hard Project reservations; Customs deducts only
+  its own Test holds. Existing Inventory RPCs/columns and accounting remain unchanged.
+  The user explicitly confirmed preserving existing Raw planning Product/lifecycle
+  scope (including linked-output rows), not replacing it with Test-Save admission D.
+- Inventory permission alone suffices; Test view/manage does not grant Inventory
+  access. Active Admin or the matching warehouse views are mandatory. No calculation,
+  creator, receipt or foreign profile identity is returned; private tables stay private.
+- At the TC-08 Inventory checkpoint only aggregates were implemented. The retained
+  list/detail history slice is completed locally by the separately requested Task
+  9/16 below; the TC-09 editor and TC-10 recovery/history frontend remain pending.
+- Validation: 10/10 focused owned-clone runtime and 24/24 Test Calculator static
+  tests passed, plus typecheck and diff-check. Includes overlapping mixed holds,
+  hard FG reservations, signed Raw planning, next relevant expiry, missing/expired
+  holds, all warehouse permission combinations, inactive/anonymous denial, archived
+  membership/search/order and exact aggregates beyond bigint. Before/after read
+  manifests confirm no data/security/sequence writes. PostgreSQL deterministic
+  boundary checks verify exclusive midnight and Sarajevo 23/25-hour DST days;
+  live reads test future-active and past-expired holds without changing server time.
+  Persistent-source manifests matched; all TC-08 clones were removed and absence
+  verified. Uncertain/prior clones, retained residue and maintenance scripts untouched.
+- Migration: `20261027160000_add_expiry_aware_inventory_test_commitments.sql`,
+  5238 bytes, SHA-256 `c6562a7c14d48c7752709c8c0e3a748dd1c064721c20c31f3f538ebbe1bf80fc`.
+  Migrations 1–156 remain unchanged. No frontend, accounting change, deployment or
+  application activation. TC-09 onward frontend/acceptance gates stay open.
+
+### Task 9/16 — Saved-calculation history reads (TC-08 history slice)
+
+- Local migration 158 adds `list_test_calculations(integer,timestamptz,uuid)` and
+  `get_test_calculation(uuid)`. List uses bounded newest-first keyset pagination;
+  detail returns immutable Product snapshots, required/held/missing decimal strings
+  and saved per-warehouse allocations. Expired history retains saved quantities.
+- Both require active Admin or `test_calculator.view`, share authorized history
+  across creators and do not require Inventory views for historical saved values.
+  Creator display is current Full Name only, not a frozen creator-name snapshot.
+  No request UUID, payload, receipt, auth identity or unrelated profile data escapes.
+- One database as-of time per call classifies active strictly by expires_at > as_of.
+  Reads never renew holds, allocate stock, create movements, audit or notifications.
+  Current active Inventory commitments remain the separate migration-157 contract.
+- Validation: 8/8 focused isolated-clone runtime tests and 30/30 focused static tests
+  passed, including shared view-only access, inactive/anonymous denial, exact bigint
+  and saved snapshots, keyset validation, private-field exclusion and unchanged
+  data/security/sequence manifests. Source preservation and owned-clone removal
+  were verified. Typecheck and diff-check passed; no broad regression suite run.
+- Migration `20261027170000_add_test_calculation_history_reads.sql`: 4488 bytes,
+  SHA-256 `a901832f3f1424b3aad3a19f232c5fb836e453028e924585a29fe0f68dfb4533`.
+  Migrations 1–157 unchanged. No Save/Preview/accounting changes, frontend,
+  deployment, DEV/production access, persistent reset or application activation.
+  This history-read task does not complete the separately numbered TC-09 editor.
+
+## TC-09 — Blue Test editor and proof/deadline UI
+
+- Deliverable: separate Test page/editor under Product Calculator Normal / Test navigation.
+- Acceptance: normal `/pcb` unchanged, exact input/preview quantities, mandatory Sarajevo
+  date, stale-proof invalidation, loading/permission/empty/error/accessibility states.
+- Dependencies: TC-03, TC-08. Budget: maximum 15 minutes.
+
+### Task 10/16 checkpoint — navigation and page foundation only
+
+- Implemented locally: sidebar label Product Calculator, Normal `/pcb` and separate
+  Test `/pcb/test` navigation, responsive blue Test presentation foundation with
+  disabled Create Test Calculation action and an explicitly unconnected history
+  placeholder. Normal titles, forms, production and definition routes are unchanged.
+- The Test route is closed for every identity, including Admin; active session and
+  profile checks fail closed. No Test RPC or new permission check runs. The strict
+  deployed 39-key registry/module/parser contract is unchanged. Before opening the
+  gate, coordinate the `test_calculator.view` / `test_calculator.manage` frontend
+  registry, permission editor/runtime invalidation and backend deployment: active
+  Admin or Test view for access, manage plus warehouse authority for creation.
+  Existing `pcb.view` only controls the current sidebar/Normal entry and is not
+  Test authorization; Test-only navigation must be integrated at that rollout.
+- Validation: 66/66 focused frontend tests, typecheck and whitespace checks passed.
+  Includes sidebar label, both destinations, unchanged Normal route boundaries,
+  Admin/non-Admin activation denial, invalid/loading identities, no Test RPCs,
+  current 39-permission response parsing and responsive wrapping/full-width classes.
+  These are component/router checks, not real-browser or DEV acceptance.
+- No editor, Preview/Save calls, history read integration, backend change, deployment
+  or activation. TC-09 editor and TC-10 durable Save/history UI remain unfinished;
+  this Task 10/16 checkpoint does not complete the planned TC-10 deliverable.
+
+### Task 11/16 checkpoint — reusable Test Calculation editor only
+
+- Added `TestCalculationEditor` with required name, 1–100 distinct eligible Product
+  rows, exact positive decimal-string quantities through SQL bigint max, required
+  Sarajevo deadline, add/remove controls and draft-only Prove boundary. Every draft
+  edit clears the prior-proof boundary through `onPreviewInvalidated`; search text
+  itself is not a draft edit. Save is always disabled and no intent is persisted.
+- Today is a valid deadline while its exclusive next Sarajevo midnight is future,
+  consistent with migration 153. Real calendar dates and the current Sarajevo date
+  are checked locally; client time/validation is advisory, never backend authority.
+- Typed `searchTestCalculatorProducts` uses only the existing authorized search RPC,
+  rejects malformed/duplicate/extra-field responses, preserves exact serial text and
+  authoritative source policy, and reports denied/unavailable results without zeros.
+  Its hook defaults disabled, debounces 200ms, hides unsettled/stale results and scopes
+  caches to authenticated user/profile. No direct tables or stock computations.
+- The reusable editor is tested independently, with its service mocked; it is not
+  mounted through the current disabled Create action. `/pcb/test` remains closed,
+  including for Admins, and the deployed 39-key permission contract is unchanged.
+  No Test search was sent to DEV. Coordinated activation/authorization is still required.
+- Focused editor/service/hook/draft/router/parser checks and typecheck/whitespace
+  checks passed. Preview integration, Save/recovery, history, Inventory columns and
+  browser acceptance remain pending. This user-numbered Task 11 does not implement
+  the separately planned TC-11 Inventory columns or complete TC-09 proof integration.
+  No migrations, database access, accounting changes, deployment, commit or push.
+
+### Task 12/16 checkpoint — trusted Prove Calculation preview integration
+
+- The reusable editor's Prove action now calls the typed migration-152 Preview
+  service through an imperative, explicit-opt-in hook. The default stays disabled;
+  `/pcb/test` and the page's Create action remain closed/disabled pending rollout.
+  Focused frontend tests mock services/RPC transport; no Test RPC was sent to DEV.
+- Sends only `p_items` Product IDs and exact positive bigint decimal strings. The
+  parser checks the exact response Product set, required quantities, numeric-string
+  arithmetic, provisional warehouse IDs/codes/allocations and one common server
+  timestamp. Denied, malformed and failed reads never become fabricated zero stock.
+  Aggregate numeric quantities beyond bigint remain lossless.
+- The blue responsive table shows Product identity, Quantity per calculation,
+  Required, Available, Reservable and Missing. V1 quantities are totals for one
+  calculation, so Quantity per calculation equals Required; there is no manufacturing
+  multiplier/BOM expansion. Available uses authoritative eligible_availability after
+  Project priority. Details preserve the provisional warehouse allocation breakdown.
+  These are allocations, not invented per-warehouse physical/free stock figures.
+- The exact server as_of timestamp and save_will_recalculate flag are preserved.
+  Migration 152 supplies no expiry/next-expiry timestamp: none is fabricated. The
+  Sarajevo deadline explanation remains separate and Save remains authoritative.
+  Copy explicitly says availability is provisional and recalculated on Save.
+- Actor/profile/draft-scoped reads never auto-run or retry. Pending submission is
+  single-flight; every draft edit invalidates proof. Generation checks discard late
+  responses after edits, reverting edits, identity changes or unmount. Errors clear
+  previous success. Save remains disabled even after a valid preview; no intent is
+  persisted and no stock, hold, movement, Work Order or notification is created.
+- 96/96 focused service/hook/editor/router/Normal/permission regressions, typecheck and
+  whitespace validation passed. Full suites and real-browser/DEV acceptance were not
+  run. Remaining: page/editor rollout wiring, coordinated Test permissions/database
+  activation, durable Save/recovery and saved-history integration. No deployment,
+  migrations, database access, commit or push; prior implementation remains intact.
+
+## TC-10 — Save recovery and retained history UI
+
+- Deliverable: Save/result/history flow with durable exact-request recovery.
+- Acceptance: persist before dispatch, original UUID/payload across restart, identity
+  and cross-tab isolation, partial/zero/uncertain states, fresh reconciliation, no V1
+  edit/extend/cancel/consume/renew/top-up. Use mocked services until activation review.
+- Dependencies: TC-04, TC-08, TC-09. Budget: maximum 15 minutes.
+
+### Task 13/16 checkpoint — atomic Save and durable recovery integration
+
+- Added typed migration-153 Save and migration-158 detail-reconciliation services.
+  Quantities stay canonical decimal strings through request, receipt and rendering;
+  full/partial/zero saved allocations need not match provisional Preview capacity.
+  Strict receipt checks bind request UUID/name/deadline/Product quantities, validate
+  allocation sums and exclude malformed/private-extra projections. Unknown/lost or
+  malformed responses remain uncertain, never proof of failure or permission for
+  a replacement UUID. Actor Authorization headers are captured in memory only.
+- Follows existing AlfaEV localStorage + exclusive Web Locks recovery patterns.
+  One backend-origin/Auth-user/profile-scoped journal stores only schema-validated
+  immutable intent, creation time and outcome state. Persist and exact read-back
+  precede dispatch. Missing/corrupt/unavailable storage, conflicting payloads or
+  unsupported locks fail closed; journals are not silently cleared on account change.
+  Web storage is not tamper-proof against owners/XSS/eviction; no stronger claim.
+- Save requires an exact current-preview draft fingerprint, valid future Sarajevo
+  expiry, active matching identity, explicit activation opt-in and no pending intent.
+  Duplicate clicks and conflicting tabs cannot mint another request. Draft/deadline
+  validity is rechecked after acquiring the lock. Form editing freezes once Save
+  begins; saved confirmation remains frozen rather than allowing accidental resave.
+- Restart never trusts stored confirmed-success state: explicit recovery replays the
+  same UUID and immutable payload, including expired deadlines. Within a live session
+  a verified receipt with failed refresh retries only reconciliation. A fresh bounded
+  authorized detail read must match saved snapshots/positive holds, then scoped
+  history/Inventory-Test cache invalidations must finish before only that matching
+  journal is cleared. Receipt quantities never replace live Inventory quantities.
+- Rejected/authorization-failed attempts retain the original journal too: a later
+  denial cannot prove an earlier uncertain attempt never committed. No automatic
+  discard/new UUID or repair is offered; unresolved rejected intent may require
+  authorized support reconciliation. Actor switches hide other identities' records;
+  old responses preserve their original journal without poisoning current state.
+- Exported shared cache prefixes `testCalculationHistoryPrefix(identity)` and
+  `inventoryTestCommitmentsPrefix(identity)` include backend, Auth user and profile.
+  Future history/Inventory hooks must reuse them. No history UI or Inventory Test
+  read hook exists yet; currently only the detail reconciliation read is integrated.
+- 158/158 focused mocked service/store/hook/editor and existing recovery/route/permission
+  regressions, typecheck and whitespace checks passed. These are connection-free
+  checks, not live browser/backend acceptance. `/pcb/test`, the page Create entry and
+  all service opt-ins remain closed/off by default; the 39-key registry is unchanged.
+  Remaining: saved-history UI, Inventory columns/reads, coordinated activation and
+  real-browser acceptance. No migrations, database access, stock movements, deployment,
+  persistent reset, maintenance execution, commit or push.
+
+### Task 14/16 checkpoint — saved history UI (TC-10 history slice)
+
+- Implemented typed migration-158 list/detail services and identity-scoped React
+  Query hooks. List uses exact (created_at,id) newest-first cursors, bounded pages,
+  explicit Load More, refresh/retry/loading/empty/error states and shared authorized
+  history across creators. No creator or expired-record filter is introduced.
+- Cursor timestamps retain PostgreSQL microseconds, including exact ordering and
+  exclusive-expiry comparisons. Quantities remain decimal strings and allocation
+  sums are checked with bigint; malformed, redacted or private-extra fields fail
+  closed. Reads pin the current actor token in memory and accept query cancellation.
+- The blue responsive list shows only name, authorized creator display, created
+  timestamp, Sarajevo deadline and server-snapshot Active/Expired status. Migration
+  158 does not return list totals, so no Required/Reserved/Missing totals are invented.
+  Selecting a row opens read-only saved Product snapshots and required/held/missing
+  quantities with warehouse allocations. Archived/current Product data is not read.
+  Expired allocations remain historical and are explicitly not active commitments.
+- Uses Task 13's backend/Auth-user/profile history prefix for both list and detail,
+  allowing confirmed-Save invalidation to refetch both. Identity changes hide cached
+  rows and do not automatically open the previous identity's selected calculation.
+  No journal read/write/clear, Save, cancellation, extension, renewal or delete occurs.
+- Status remains server-authoritative. Focus/reconnect/manual refresh and one-shot
+  server-expiry refresh obtain new reads; no worker, browser-clock reclassification
+  or historical deletion. Error states suspend automatic expiry retries.
+- Replaced the disconnected page placeholder with the gated history module. Its
+  default is disabled and mounts no Auth/query hooks; `/pcb/test` stays closed even
+  for Admins. No undeployed Test RPC was sent to DEV. Normal and the 39-key registry
+  remain unchanged. This checkpoint does not complete planned TC-14 security review.
+- 73/73 focused mocked history/recovery/route/Normal/permission tests, typecheck and
+  whitespace checks passed. No live browser/database acceptance or full suite run.
+  Remaining: Inventory Test columns/reads, coordinated deployment/permission/route
+  activation, page/editor entry wiring and browser acceptance. No database/migration
+  changes, DEV/production access, deployment, reset, clone cleanup, commit or push.
+
+## TC-11 — Inventory Test columns
+
+- Deliverable: blue Committed to Tests and additional availability across source warehouses.
+- Acceptance: existing fields preserved, formulas/scopes exact, no double demand
+  subtraction, lossless quantities, permission isolation, Save/expiry refetch and responsive UI.
+- Dependencies: TC-08, TC-10. Budget: maximum 15 minutes.
+
+### Task 15/16 checkpoint — gated Inventory Test columns (TC-11)
+
+- Local frontend integration uses only `get_inventory_test_commitments(uuid,text)`;
+  the two additive columns are **Committed to Tests** (blue) and **Available After
+  Projects and Tests**. Existing Inventory fields, source formulas, Product order,
+  warehouse membership and search remain unchanged.
+- RPC quantities remain exact decimal strings, including negative Raw planning
+  availability. Raw Test quantities cover Raw + Customs using the existing planning
+  scope; FG and Customs use their own warehouse scopes. No browser aggregation,
+  accounting substitution or fabricated zero values.
+- Reads require the active authenticated actor/profile and existing warehouse view
+  access (both Raw + Customs for Raw). Query keys reuse Task 13's backend/actor/profile
+  invalidation prefix and include warehouse and search. No private Test table reads.
+- Server `as_of` and the earliest relevant `next_expiry` drive conservative one-shot
+  revalidation. Old Test figures are unavailable while fetching, after expiry, on
+  read failure, and in hidden/inactive views; visibility/focus return requires a fresh
+  read. Confirmed Save uses the existing scoped cache invalidation.
+- Integration remains disabled by default at the Inventory page boundary, including
+  for Admins; the application router does not enable it. No undeployed Test RPC calls
+  are added to existing DEV Inventory. `/pcb/test` and Test permissions remain closed.
+- Validation: 99/99 focused frontend tests across 11 files, TypeScript typecheck,
+  and whitespace checks passed. Coverage includes existing Inventory/warehouse access,
+  scoped Save invalidation, route gating, expiry refresh and unavailable-state handling.
+- Mocked frontend verification only; coordinated backend/permission activation,
+  local acceptance gates and real-browser verification remain pending. This checkpoint
+  does not complete TC-15 (DEV rollout) or claim deployment/browser acceptance.
+
+## Task 16A — local activation readiness (not DEV rollout)
+
+- Verified the frozen, ordered migration 151–158 manifest against all eight recorded
+  SHA-256 identities. No database connection or current remote-state claim is made.
+- Prepared the strict 39/41-key permission compatibility layer and Test permission
+  matrix group; complete legacy responses stay usable, partial/unknown/duplicate sets
+  fail closed, and edits preserve the new keys. No grants are assigned remotely.
+- Single release-controlled switch: `app/config/testCalculatorActivation.ts`,
+  `TEST_CALCULATOR_RELEASE.enabled = false`. It is pinned to the alfaev-dev backend
+  origin and requires the reviewed 158 endpoint state; this metadata is not a live
+  migration probe. No URL, storage or environment switch opens it. The router feeds
+  the same activation result into the Test page and Inventory, and the route checks
+  it before mounting Test permission/data hooks. Admin cannot bypass the OFF switch.
+- When separately enabled, active Admin or Test view accesses shared history/detail.
+  Creation additionally requires Test manage; applicable warehouse permissions remain
+  authoritative in the backend. Create mounts the existing editor with search,
+  preview and durable Save enabled together. Confirmed Save retains its existing
+  history/Inventory invalidation and reconciliation; only then may the user explicitly
+  start another draft. Uncertain journals are never cleared to start a new request.
+  Actor/profile changes remount the workspace; view-only users never mount the editor.
+- Normal Calculator and existing Inventory remain usable while the gate is OFF;
+  `/pcb/test` is closed and makes no Test RPC calls. Local mocked validation is not
+  browser or deployed acceptance. Consolidated TC-12/13 and independent TC-14 gates
+  are not marked complete by this wiring task.
+- Validation: 131/131 targeted connection-free tests across 18 files passed,
+  including the eight frozen migration hashes/order, complete 39/41-key contracts,
+  Test-grant preservation, denied/view-only/Admin routing, Create/search/Preview/
+  durable Save/history/detail/Inventory refresh, original-request recovery and the
+  unchanged default-closed entrypoints. Typecheck and whitespace checks passed.
+  No database/runtime campaign or real-browser acceptance was executed here.
+
+Future deployment sequence — requires separate review and explicit authorization:
+
+1. Complete/approve remaining focused local security/concurrency acceptance and final
+   SQL/ACL review. Reverify DEV identity, current parity, all hashes and preservation
+   baselines read-only; do not assume the last reported remote state remains current.
+2. Run the current 39/41-compatible frontend locally with the switch OFF first,
+   so migration 151's new definitions cannot break the old strict Admin parser.
+   Confirm Normal/Inventory and legacy permission loads. Online frontend hosting
+   is deferred and is not a prerequisite for this localhost DEV acceptance.
+3. Apply only 151 → 158 through a reviewed coordinated deployment that does not
+   expose an intermediate Save-capable schema. Migration 153 grants authenticated
+   Save before 154–156 install all protection: use an atomic reviewed batch including
+   migration history, or a separately reviewed backend execution gate maintained
+   until all protections are installed. Frontend hiding is not that gate. The exact
+   deployment method must be approved before execution; no ad-hoc SQL is authorized.
+4. Read-only verify parity 158/158, expected function ACLs/RLS/security inventory,
+   no unexpected history/Inventory changes and no automatic Test records. Through
+   existing authorized Admin operations, assign Test view/manage and required
+   warehouse views only to approved acceptance identities; Admin needs no new grant.
+5. Only after these gates pass, explicitly authorize a release opening the single
+   backend-pinned switch and verify Test/Inventory entrypoints together. No Edge
+   deployment is implied. All other backends remain closed by the origin check.
+6. Separately authorize bounded real-browser fixtures/Save/replay/history/Inventory,
+   view-only/denied accounts, reload/restart/cross-tab recovery, partial/zero and
+   no-physical-stock-change checks. Natural Sarajevo expiry may require a later
+   timed observation; never change clocks/deadlines to force acceptance.
+
+Disable/rollback: release `enabled = false` to close new UI reads/actions; retain
+durable journals for later explicit recovery. This does not revoke backend EXECUTE,
+cancel saved holds or reverse migrations. An emergency backend Save revocation needs
+its own reviewed authorization. Keep all protection functions and immutable history
+intact until natural expiry; do not roll back schema or delete holds as a UI rollback.
+
+## Task 16B — final local acceptance and concrete atomic deployment proof
+
+- Local final-schema acceptance passed: 11 integrated RPC/security cases, 11
+  production cases and 16 Project/Test coexistence cases (38 distinct runtime cases).
+  Each campaign used only a new positively owned clone upgraded through migration
+  158, with exact 158-row ledger verification. No source/remote migration was applied.
+  Search, Preview, full/partial/zero Save, shared history/detail, Inventory aggregates,
+  authorization, signed/bigint transport, expired history and FG coexistence agree.
+- Production proof covers FIFO/source plans, PDF fingerprints, actual-good FG output,
+  FG-only linked inputs, no recursive BOM consumption and both committed Save/Finish
+  orders. Six committed Project/Test races cover manual/automatic admission and
+  fulfillment. Test Save creates no physical movement, lot rewrite or allocation;
+  additional demand cannot reclaim Test-held stock. Existing historical datasets and
+  sequence state match before/after the successful migration batch, except expected
+  schema/security, two permission definitions and eight migration-history rows.
+- One new combined test initially expected the stock error while its fixture had
+  already exhausted Project demand; the backend correctly returned FGR06. The fixture
+  was corrected to leave demand available, retaining the FGR07 capacity assertion.
+  Only that acceptance file was rerun; its final 11/11 cases passed. No business SQL
+  or accounting implementation was changed.
+- Connection-free validation: 173/173 focused tests passed across 12 files, including
+  legacy 39/new 41 permission matrices, permission preservation, release-OFF behavior,
+  Normal navigation, durable recovery, Inventory expiry/isolation, target guards and
+  atomic batch structure. Typecheck and whitespace checks passed.
+- Every owned clone's teardown verified source manifests and clone absence. A fresh
+  independent container-local read confirmed source cluster 7699375188763602981,
+  migration 142, 118 Products, 354 balances, physical stock 603 and the retained three
+  zero balances. All five clones created in this task are absent. No prior/uncertain
+  clone, retained residue or maintenance script was adopted, changed or deleted.
+
+Concrete deployment method (future authorization required):
+
+- `scripts/deployment/test-calculator-atomic-batch.ts` is a pure preparation module,
+  not a network-enabled launcher. It validates all eight frozen hashes/order and
+  prepares the unchanged 151–158 SQL plus their exact migration-ledger rows. Its
+  precondition requires 150/150 with latest 20261026120000 and no existing Save RPC;
+  final guards require 158/158, 197 application SECURITY DEFINER functions, expected Save
+  role grants and no automatic Test calculations. Bounded local settings and an
+  advisory transaction lock fail closed on drift or contention.
+- Freeze/review the generated body before connecting. At this checkpoint: 111338 UTF-8
+  bytes; SHA-256 `bed2647c7b227f0fdf8958f73af0602f5f0f5deb1870d77b8881a4685a6a37c4`.
+  This earlier body is superseded by the platform-aware guard checkpoint below.
+  Execute that body only through `psql -X --no-password --set=ON_ERROR_STOP=1
+  --single-transaction --file=<reviewed-batch-file>` using a separately verified,
+  explicitly authorized DEV-only connection. The body deliberately has no outer
+  BEGIN/COMMIT: the required psql option encloses DDL, grants, ledger and final guards
+  in ONE transaction. Do not substitute ordinary per-migration CLI push/autocommit.
+- PostgreSQL 17's installed client confirms support for `--single-transaction`.
+  Real server proof forced a batch failure after 153: all schema/ledger/data/security
+  changes rolled back. In a successful batch, an independent authenticated session
+  observed no Save function after uncommitted 153 and received 42883 when calling it.
+  Only after 158 and the final checks committed did Save become visible. Thus no
+  external authenticated client can use the intermediate 153–156 schema.
+- This closes the exposure-window design blocker locally; no backend gate needs to
+  be bypassed and no frozen migration needs rewriting. Any failure/uncertain DEV
+  outcome requires read-only inspection, never automatic retry or schema rollback.
+
+Release order remains A: compatible frontend with switch OFF; B: this atomic backend
+batch; C: read-only schema/ACL/RLS/history/Inventory preservation checks; D: separately
+authorized permission assignments; E: separately authorized DEV-pinned switch opening;
+F: bounded real-browser acceptance. Reverify current DEV identity/parity/baselines
+before B; no remote facts were refreshed here. The switch remains OFF.
+
+Disabling the UI does not revoke Save EXECUTE or release saved holds. If required,
+separately authorize revoking only authenticated Save EXECUTE; preserve history reads,
+all debit/admission protections, recovery journals and existing immutable holds until
+natural expiry. Do not down-migrate, delete holds or rewrite deadlines. Browser/HTTP
+acceptance and a natural midnight-crossing observation remain separate pending gates;
+local expiry proof uses real database time with past/future immutable fixtures and
+the previously recorded Sarajevo/DST boundary checks, not altered clocks.
+
+## Final DEV preparation — platform-aware atomic inventory guard
+
+- Corrected the batch guard without changing migrations 151–158. Application
+  SECURITY DEFINER counts remain 190 before the batch and 197 after. The exact
+  pre-existing `public.rls_auto_enable()` identity is excluded only after verifying
+  its postgres owner, zero-argument event_trigger return, plpgsql language, definer
+  status, pg_catalog search_path, default ACL and the enabled postgres-owned
+  `ensure_rls` ddl_command_end event with its three approved CREATE tags. A changed
+  identity, wiring or an additional definer fails closed. Source-only local schemas
+  may have no platform helper; an orphaned `ensure_rls` trigger is rejected.
+- Expected DEV inventory after commit is **197 application + 1 verified platform
+  event-trigger function = 198 public SECURITY DEFINER functions**, not a blindly
+  increased application count. No platform function, grant or event trigger is
+  modified by the prepared deployment body.
+- Current reviewed body: 114288 UTF-8 bytes; SHA-256
+  `983a56d1f50d38c7db9a2cc55b6cca5e9b7a2815db5d8ddfc533e1880326538c`.
+  The existing mandatory `psql -X --no-password --set=ON_ERROR_STOP=1
+  --single-transaction --file=<reviewed-batch-file>` execution contract is unchanged.
+- Validation: 101 focused connection-free tests and 11 integrated runtime tests
+  passed, plus typecheck and whitespace checks. One new positively owned local
+  clone reproduced the platform identity/wiring; security-setting drift, disabled
+  event wiring, ACL drift and an extra same-name overload were rejected. The forced
+  SQL failure rolled back the complete batch, the authenticated observer could not
+  see/call Save before commit, and the final inventory was 197 + 1. Platform metadata,
+  existing business datasets and sequences remained unchanged. Source manifests and
+  owned-clone removal were verified; existing databases, residue and clones retained.
+- Existing Vite serves HTTP 200 on `http://127.0.0.1:5174`; its served configuration
+  points to `https://yzysgbrpbhiapalgetau.supabase.co` and the served release switch
+  remains OFF. Startup is `npm run dev` (127.0.0.1, port 5174, strictPort).
+  No DEV query/deployment, activation or real-browser mutation was performed here.
+
+Remaining separately authorized localhost DEV sequence:
+
+1. Reverify alfaev-dev / yzysgbrpbhiapalgetau, ACTIVE_HEALTHY, exact 150/150 parity,
+   pending 151–158, frozen hashes, verified platform identity and current data/security
+   baselines. Regenerate and compare the reviewed body fingerprint above.
+2. Apply that body ONCE using the verified DEV-only connection and the required
+   single-transaction client options. Never use ordinary per-migration autocommit.
+   On an error or uncertain result, stop and inspect read-only; do not blindly retry.
+3. Read-only verify 158/158, 197 application + the unchanged platform function,
+   narrow RPC grants/private helpers, RLS, 41 permission definitions, empty Test
+   tables and unchanged existing stock, history, identities, roles and business data.
+4. Separately authorize required Test view/manage and warehouse permissions only
+   for approved non-Admin acceptance profiles; active Admin uses existing authority.
+5. Separately authorize changing only the existing DEV-pinned release switch to ON;
+   restart Vite if necessary and open `http://127.0.0.1:5174/pcb/test`. No online
+   frontend hosting or Edge deployment is required for this local frontend.
+6. Separately authorize bounded real-browser acceptance fixtures and mutations.
+   Verify history, recovery, Inventory expiry and denied/view-only identities.
+
+Disable remains the existing switch OFF, retaining recovery journals and immutable
+holds/history. UI disable does not revoke backend Save or release holds. Any emergency
+backend revocation needs separate approval; retain all protection through natural expiry.
+
+## DEV atomic deployment adapter — local preparation only
+
+- `scripts/deployment/test-calculator-dev-adapter.ts` reuses the installed CLI's
+  existing `/v1/projects/yzysgbrpbhiapalgetau/cli/login-role` flow with the existing
+  owner-controlled Supabase access token. There is no password reset, new owner
+  password requirement, network-unban operation or credential fallback. Live login
+  issuance is a separately authorized operational authentication change, not a
+  read-only probe, and was NOT requested during this preparation.
+- Default/native Node invocation is check-only. Actual execution requires exactly
+  `--execute-dev --approval=151-158-atomic-once`; there is no target/URL option.
+  Before authentication it verifies the exact healthy DEV identity, complete ordered
+  150 baseline/pending scope, eight frozen hashes, approved batch hash, 15 approved
+  business digests, warehouse totals and security inventory. It then checks fresh
+  business/security snapshots again after temporary-login initialization.
+- The temporary password is passed only through an isolated, in-memory child libpq
+  environment (never argv, a passfile, Docker configuration, logs or process.env).
+  Host/database/project-scoped user, TLS verify-full/system roots, connect timeout,
+  client path and clean environment are fixed. The postgres session-role transition
+  and database/session-user guard precede the unchanged reviewed body in the SAME
+  `psql -X --no-password --set=ON_ERROR_STOP=1 --single-transaction --file=-`
+  invocation. SQL is supplied on stdin; no credential or SQL file is persisted.
+- Client execution is bounded with TERM/KILL deadlines; raw API/libpq errors/output
+  are never printed. No automatic retry exists. Independent post-attempt reads run
+  even on execution failure; a failed/lost response never yields PASS. Verified
+  rollback, unverified outcome and completed-but-client-failed states are distinct.
+  A captured backend PID and unique application name identify the deployment
+  transaction; bounded independent checks must establish it is inactive/closed
+  before success or restoration can be claimed (a pooler's idle backend may remain).
+  No automatic repair, rollback deployment, Test Save or feature activation occurs.
+- Snapshots cover public/auth/storage table counts/digests, stock/over-reservation,
+  function definitions and ACLs, existing RLS/table ACLs, role memberships, event
+  triggers and permission assignments. Only the CLI login role's expected credential
+  expiry renewal is excluded from role-attribute comparison; ordinary roles and
+  memberships remain protected. Expected migration-driven definition changes and
+  two permission definitions are distinguished from unrelated changes.
+- Local validation: 33 adapter mock/static cases plus seven existing manifest/gate
+  cases passed (40 total); 11 integrated backend cases passed in newly owned
+  clone. Real container-local psql proved complete rollback after a forced failure
+  following the whole batch, then a separate successful atomic install. Independent
+  authenticated observation proved Save unavailable before commit. The production
+  read-only snapshot SQL ran against the local clone; only DEV identity/authentication
+  and DEV-specific business baseline values were mocked. No global database role
+  was created. Source manifests and owned-clone removal were verified.
+- Current reviewed batch hash remains
+  `983a56d1f50d38c7db9a2cc55b6cca5e9b7a2815db5d8ddfc533e1880326538c`;
+  migrations 151–158 and the existing batch module remain unchanged. The release
+  switch remains OFF; live TLS/temporary-login issuance is deliberately untested.
+
+Future execution (NEW explicit DEV authorization required, not performed here):
+
+```sh
+cd /Users/test/Desktop/internal-tool
+/usr/local/bin/node scripts/deployment/test-calculator-dev-adapter.ts --check-only
+/usr/local/bin/node scripts/deployment/test-calculator-dev-adapter.ts --execute-dev --approval=151-158-atomic-once
+```
+
+Authorization must include the established temporary CLI login initialization and
+one atomic 151–158 batch. Stop on any guard failure, authentication/TLS problem or
+uncertain client outcome; do not weaken TLS, recapture changed baselines as accepted,
+retry automatically or fall back to ordinary per-file push. Opening the release
+switch, permission assignment and browser mutation acceptance remain separate gates.
+
+## TC-12 — Focused isolated security and expiry acceptance
+
+- Deliverable: local proof of authorization, immutable Save/replay, expiry and rollback.
+- Acceptance: anonymous/inactive/unauthorized/direct-write denial, bigint bounds,
+  zero/partial results, DST/lock-wait expiry, source-history preservation; report actual
+  results only. Mutating clone lifecycle requires separate explicit authorization.
+- Dependencies: TC-07, TC-08, TC-10, TC-11. Budget: maximum 15 minutes.
+
+## TC-13 — Focused stock/concurrency regression
+
+- Deliverable: isolated committed-winner race and existing accounting compatibility proof.
+- Acceptance: Test/Test, Test/Project requirement-reservation-lifecycle, Test/Finish,
+  adjustment/transfer and expiry races; no overspend, false replay success or deadlock;
+  FIFO/PDF/Project/notification preservation. Preserve persistent data/residue/old clones.
+- Dependencies: TC-12; separate authorization for owned runtime resources.
+  Budget: maximum 15 minutes.
+
+## TC-14 — Independent review and DEV deployment preflight
+
+- Deliverable: reviewed final SQL/ACL/activation manifest and read-only DEV impact report.
+- Acceptance: TC-12/13 passed or genuine blockers reported, frozen migration identities,
+  exact grants/security inventory, no historical backfill/auto-Test holds/notifications;
+  necessary focused regression recorded. Do not deploy under preflight authorization.
+- Dependencies: TC-13. Budget: maximum 15 minutes.
+
+## TC-15 — Separately authorized DEV rollout
+
+- Deliverable: apply only reviewed migrations/activation grants to the exact DEV target.
+- Acceptance: explicit fresh deployment approval, exact dry run/hashes, one execution,
+  read-only parity/security/business-data preservation, stop on uncertain outcome.
+  No frontend/Edge/production deployment is implied.
+- Dependencies: TC-14 and explicit DEV execution authorization. Budget: maximum 15 minutes.
+
+## TC-16 — Separately authorized real-browser acceptance
+
+- Deliverable: bounded browser proof against DEV with exact approved retained test fixtures.
+- Acceptance: Normal unchanged; Test proof/Save/partial/zero/recovery/expiry/history and
+  Inventory values agree; physical stock/provenance unchanged by Save, permissions and
+  no-job expiry verified. No existing business-record changes or cleanup assumption.
+  Observe natural calendar-date expiry only if it occurs within the budget; otherwise
+  report that browser observation pending a separately authorized timed check. Do not
+  change server/browser clocks or shorten the approved deadline semantics to force a PASS.
+- Dependencies: TC-15 and separate fixture/browser mutation authorization.
+  Budget: maximum 15 minutes.

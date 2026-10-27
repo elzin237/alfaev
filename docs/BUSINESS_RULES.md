@@ -650,7 +650,12 @@ Required Quantity = Quantity Per Card × Planned Production Quantity
 
 Before production completes, AlfaEV must compare all required quantities with current Inventory.
 
-For PCB production precheck, Available is current physical `InventoryBalance.quantity`, not Available after Commitments. Missing is `max(Required - Available, 0)` for each BOM input. Project commitments do not reserve or mutate physical stock; all authoritative quantities remain exact whole numbers.
+For PCB production precheck, Available is trusted production-eligible physical stock
+under the current warehouse sourcing and hard FG reservation rules, not Available
+after soft Project Commitments. When Test Calculator V1 is implemented, active Test
+holds are also excluded. Missing is `max(Required - Available, 0)` for each BOM input.
+Ordinary Project planning does not itself reserve or mutate physical stock; all
+authoritative quantities remain exact whole numbers. The normal production flow is unchanged.
 
 ### Insufficient stock
 
@@ -1236,8 +1241,10 @@ is the sum of positive remaining hard reservations across Projects, and Availabl
 Physical minus Committed. Raw planning continues to use Raw + Customs minus outstanding
 open-Project commitments; no shortage rule or historical warehouse balance is changed.
 
-- The user-visible name is **Finished Product Calculator**. Existing PCB/BOM
-  entities, `/pcb`, trusted identifiers, and historical AuditLog rows remain unchanged.
+- The normal experience remains **Finished Product Calculator** at `/pcb`. The
+  approved Test Calculator V1 navigation renames only its sidebar container to
+  **Product Calculator**, with separate Normal / Test destinations; implementation
+  is pending. PCB/BOM entities, trusted identifiers and historical audits are unchanged.
 - New calculator entries require a trimmed Name/Code and a manually entered exact
   three-digit text Serial Number (`000`–`999`), preserving leading zeroes.
 - Ordinary Products and imports retain generated exact seven-digit serials. Authorized
@@ -1250,3 +1257,88 @@ open-Project commitments; no shortage rule or historical warehouse balance is ch
   production Draft; historical Project-linked Work Orders remain readable unchanged.
 - Migration 138 preflights historical PCB names for normalized duplicates before adding
   the unique index. No existing Product is renamed, merged, deleted, or assigned another Serial.
+
+## 17. Test Calculator V1 — approved specification, not implemented
+
+This section defines a new, separate blue-themed Test Calculator. It does not change
+the Normal Calculator's definition, BOM, `/pcb` route or production workflow. The
+sidebar container is Product Calculator with Normal / Test navigation. These are
+approved future requirements, not implementation, deployment or acceptance claims.
+
+### Creation, proof and immutable Save
+
+- Enter a required nonblank name and existing active Products/components with positive
+  exact whole-number quantities. Use authoritative Product kind and the
+  `pcb_cards.output_product_id` link, never names/categories, to identify Calculator outputs.
+- Prove Calculation previews Required, Eligible Available, Reservable and Missing.
+  Proof creates no hold, stock change or promise of availability. Save requires a
+  deadline date and recalculates current authority, demand, stock and expiry atomically.
+- Save creates one immutable calculation and its item/warehouse allocation results.
+  Partial and zero reservation are valid; display missing quantities explicitly.
+  A failure rolls back the entire Save, not just the failed item.
+- Save never deducts physical Inventory, creates InventoryMovement/FIFO allocations,
+  creates an output Product/Work Order, or recursively consumes a selected Product's BOM.
+- Saved calculations cannot be edited, extended, cancelled or consumed in V1.
+  No automatic top-up, renewal or allocation of later arrivals is permitted.
+
+### Sources, Project priority and formulas
+
+For Product X at the serialized Save decision, use:
+
+- `S(X)`: Raw Materials -> Customs -> Finished Goods for ordinary inputs;
+  Finished Goods only for Calculator-linked finished Products.
+- `P(w)`: physical balance in warehouse w.
+- `H(w)`: existing hard Project FG reservations when w is FG; zero otherwise.
+- `T(w,t)`: all saved Test holds in w with `expires_at > t`, using database time t.
+- `F(w,t) = max(P(w) - H(w) - T(w,t), 0)`.
+- `D(X)`: canonical global outstanding ordinary Project demand across open Projects;
+  zero for Calculator-linked FG admission, whose Project priority is represented by H.
+- `test_admission_capacity(X,t) = max(sum(F(w,t), w in S(X)) - D(X), 0)`.
+- `new_reserved(X) = min(required(X), test_admission_capacity(X,t))`.
+- `missing_at_save(X) = required(X) - new_reserved(X)`.
+
+Deduct ordinary global demand once per Product, not once per warehouse. Assign the
+admitted quantity across free warehouse quantities in the stated source priority.
+These are quantity holds, not source-lot allocations. Existing hard reservations and
+active Test holds are never reclaimed to satisfy a new Test.
+
+Project priority is admission priority for a new Save. Existing ordinary planning
+commitments remain soft; later requirement/lifecycle changes do not become globally
+forbidden by this rule and do not edit/cancel prior Test holds. Existing Project
+planning, physical-shortage formulas and FG reservation/fulfillment accounting remain
+unchanged. A shortage in a Test does not itself create Project shortage notifications.
+
+### Protection, expiry and history
+
+- Every protected warehouse debit must leave `P(w) >= T(w,t) + H(w)`. New FG Project
+  reservations must also respect Test-held FG; checking physical debits alone is insufficient.
+- Protect against unrelated removals/corrections, transfers, manufacturing consumption
+  and competing reservations. No silent relocation or bypass for an Admin/another workflow.
+- The mandatory deadline is a Europe/Sarajevo calendar date. Its exclusive expiry is
+  the next local midnight converted to a fixed `timestamptz` instant, not a fixed 24-hour
+  duration. The deadline day is included; at `t >= expires_at` the hold is expired.
+- Use database time, including a fresh check after lock waits. Reject a new Save if
+  its computed expiry is not future. Reads/debits/reservations exclude expired holds
+  without requiring a background job or a status-update write.
+- Expiry changes effective availability only. Keep the original saved allocation,
+  creator, timestamps, item quantities, deadline and receipt as readable history,
+  labelled Expired. No deletion, renewal or retroactive movement occurs.
+- Authorized Test Calculator viewers and active Admins may read saved calculation
+  history. Current warehouse stock remains subject to separate warehouse-view authority.
+
+### Inventory presentation (additional, not replacement accounting)
+
+Preserve existing Physical, Project commitment/reservation and availability fields.
+Add blue Committed to Tests and Available After Projects and Tests. For Raw planning,
+Test totals cover Raw + Customs and must be labelled with that combined scope:
+
+- Raw view: `Raw + Customs - existing Raw+Customs Project commitment - T(Raw,t) - T(Customs,t)`.
+- FG view: `P(FG) - global hard FG Project reservations - T(FG,t)`.
+- Customs view: `P(Customs) - T(Customs,t)`; do not subtract global Project demand again.
+
+Raw planning availability may be negative and is distinct from hard-free stock or the
+multi-warehouse Test admission capacity. Never clamp away a planning shortage or
+subtract FG reservations/Project demand twice. Preserve warehouse Product membership,
+search/order and permission boundaries; unavailable/redacted reads never become zeros.
+The existing Raw+Customs Project commitment projection keeps its current Product and
+lifecycle scope; D above is the separate ordinary-input Test admission priority.

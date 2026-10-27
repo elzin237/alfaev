@@ -8,6 +8,7 @@ import StatusBadge from "../../shared/components/StatusBadge";
 import CreatePcbCardDialog from "./components/CreatePcbCardDialog";
 import { usePcbCards } from "./hooks/usePcbCards";
 import { usePcbCreation } from "./hooks/usePcbCreation";
+import ProductCalculatorNavigation from "./components/ProductCalculatorNavigation";
 
 export default function PcbPage() {
   const cardsQuery = usePcbCards();
@@ -17,6 +18,7 @@ export default function PcbPage() {
 
   return (
     <div className="space-y-6">
+      <ProductCalculatorNavigation />
       <PageHeader title="Finished Product Calculator" description="Finished-product definitions, BOMs, and output Products."
         actions={canCreate ? <button type="button" onClick={() => { setSuccess(null); setDialogOpen(true); }}
           className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Finished Product Calculator</button> : undefined} />

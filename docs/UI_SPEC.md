@@ -1746,3 +1746,37 @@ non-Admin browser acceptance is incomplete.
 - Tabs use `tablist`/`tab` semantics, arrow/Home/End keyboard operation, visible focus,
   and contained horizontal overflow. Product links preserve warehouse selection, and
   protected query keys include profile, warehouse, and Product identities.
+
+## Test Calculator V1 UI — approved design, not implemented
+
+- Sidebar container: Product Calculator. Provide Normal / Test navigation, keeping
+  Normal's existing `/pcb` pages/forms unchanged. Test is a separate blue-themed page;
+  do not recolor Normal or redesign unrelated modules. Do not claim a new route is live.
+- Create Test Calculation: Name, authorized existing Product/component picker and
+  positive whole-number total quantities. Preserve exact serial text/leading zeroes.
+- Prove Calculation shows Product identity, Required, Eligible Available, Reservable
+  and Missing. It creates no hold and cannot promise stock. After draft changes,
+  invalidate the old proof; Save requires a proved current draft and deadline date.
+- Deadline is visibly Europe/Sarajevo: "Reserved through this date; expires at the
+  next local midnight." Server validation is authoritative; show the effective expiry.
+- Save shows pending/error/uncertain states and the authoritative saved partial/zero
+  reservation result. Missing is not presented as reserved. No physical deduction,
+  Work Order/output creation or production action belongs to this page.
+- History/list/detail is available to Test viewers/Admins, including other creators'
+  entries. Show creator, saved time, items/quantities, original Reserved/Missing,
+  deadline and Active/Expired status. Distinguish saved allocation from currently
+  active holds. No Edit, Extend, Cancel, Renew, Consume or automatic top-up controls.
+- Reuse identity-scoped durable exact-request recovery: explicit retry after restart,
+  no replacement UUID, no auto-replay under another account, and no clear-journal
+  shortcut for uncertain operations. Malformed/unavailable data never implies success.
+- Inventory retains existing Physical, Project and availability columns. Add blue
+  Committed to Tests and Available After Projects and Tests in Raw, FG and Customs,
+  following BUSINESS_RULES section 17 formulas. In Raw planning, label Test/availability
+  totals explicitly Raw + Customs; do not present them as Raw physical stock. Keep
+  FG Project reservations distinct from ordinary soft Project demand.
+- Keep negative Raw planning availability/shortage styling; Test commitments are blue
+  but also labelled in text. Permission-redacted/failed quantities show Unavailable,
+  never fabricated zero. Preserve search, Product membership, spacing, horizontal
+  overflow, keyboard focus, loading/empty/error states and profile-scoped cache isolation.
+- Refetch after Save and at the next server-provided expiry/on focus/reconnect. Never
+  optimistically move stock, fabricate release events or rely on a UI timer for safety.

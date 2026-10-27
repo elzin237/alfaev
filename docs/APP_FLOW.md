@@ -984,3 +984,33 @@ deployment or warehouse production database rollout has occurred; production rem
 at its previously verified migration state. Finished Goods Project reservation and
 fulfillment backend code is local in undeployed migrations 143–145; application
 activation and reservation frontend remain pending.
+
+## Test Calculator V1 flow — approved, not implemented
+
+1. Authorized user opens sidebar Product Calculator and chooses Normal or Test.
+   Normal continues to `/pcb`; its existing create/BOM/Produce flow is unchanged.
+   Test opens a separate blue-themed page and authorized saved-history list.
+2. Create Test Calculation: enter name, select active existing Products/components,
+   and enter positive exact total quantities. Do not create a PcbCard/output Product.
+3. Prove Calculation calls the authorized preview and displays Required, Eligible
+   Available, Reservable and Missing. Preview writes nothing and locks in no stock.
+   Edits invalidate the shown proof; require a current proof before enabling Save.
+4. Choose a mandatory deadline date, explicitly labelled Europe/Sarajevo. Show that
+   its whole local day is included and expiry is next local midnight, exclusive.
+5. Persist the original actor-scoped request UUID/immutable payload before dispatch.
+   One trusted Save revalidates authority, current ordinary Project priority, balances,
+   hard reservations, active Test holds and deadline after waits. Recalculate and
+   save all items, partial/zero holds, receipt and save audit together or roll back.
+6. Display actual saved Required/Reserved/Missing and deadline. Stock may differ from
+   preview; never imply full coverage on a partial Save or fabricate success/zeros.
+   Refetch authorized Inventory/Test data, never increment cached commitments manually.
+7. On an uncertain response/reload/restart, require explicit exact-request recovery
+   under the same identity. Do not generate another UUID, duplicate holds, clear an
+   unresolved journal, or use historical receipts as current stock. Reconcile first.
+8. At expiry, effective holds disappear from availability without a write/job. Refresh
+   views using server time/next expiry and on focus/reconnect. Keep the saved calculation
+   and original allocation visible as Expired; no edit/cancel/renew/top-up/consumption.
+
+Test Save and expiry create no Inventory movements, FIFO allocations, Work Orders,
+production output, Project demand changes or missing-Test Project notifications.
+Existing Project/FG accounting and notification workflows are not replaced.
