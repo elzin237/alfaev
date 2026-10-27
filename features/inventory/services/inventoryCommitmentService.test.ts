@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock("../../../lib/supabase/client", () => ({ supabase: { rpc: mocks.rpc } }));
 
-import { getInventoryCommitments, getProductProjectCommitments } from "./inventoryCommitmentService";
+import { getFinishedGoodsInventoryCommitments, getInventoryCommitments, getProductProjectCommitments } from "./inventoryCommitmentService";
 
 const productId = "11111111-1111-4111-8111-111111111111";
 const projectId = "22222222-2222-4222-8222-222222222222";
@@ -11,6 +11,26 @@ const projectId = "22222222-2222-4222-8222-222222222222";
 beforeEach(() => vi.resetAllMocks());
 
 describe("inventory commitment reads", () => {
+  it("reads warehouse-only FG aggregates with SQL text projection before JSON", async () => {
+    const select = vi.fn().mockResolvedValue({ data: [{ product_id: productId,
+      physical_quantity: "9223372036854775807", committed_to_projects: "9007199254740993",
+      available_after_commitments: "9214364837600034814" }], error: null });
+    mocks.rpc.mockReturnValue({ select });
+    expect(await getFinishedGoodsInventoryCommitments()).toEqual({ ok: true, value: [{ productId,
+      physicalQuantity: 9223372036854775807n, committedToProjects: 9007199254740993n,
+      availableAfterCommitments: 9214364837600034814n }] });
+    expect(mocks.rpc).toHaveBeenCalledWith("get_finished_goods_inventory_commitments");
+    expect(select).toHaveBeenCalledWith("product_id,physical_quantity::text,committed_to_projects::text,available_after_commitments::text");
+  });
+  it.each([
+    { physical_quantity: 2 }, { project_id: projectId }, { committed_to_projects: "3", available_after_commitments: "-1" },
+    { physical_quantity: "9223372036854775808", available_after_commitments: "9223372036854775808" },
+    { available_after_commitments: "1" },
+  ])("fails closed on malformed/leaking FG aggregates %j", async invalid => {
+    mocks.rpc.mockReturnValue({ select: vi.fn().mockResolvedValue({ data: [{ product_id: productId,
+      physical_quantity: "2", committed_to_projects: "0", available_after_commitments: "2", ...invalid }], error: null }) });
+    expect(await getFinishedGoodsInventoryCommitments()).toMatchObject({ ok: false });
+  });
   it("reads trusted totals and preserves signed, large whole-number arithmetic", async () => {
     mocks.rpc.mockResolvedValue({ data: [{
       product_id: productId,

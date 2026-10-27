@@ -4,6 +4,7 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { projectDetailQueryKey, projectListQueryKey } from "../projectQueryKeys";
+import { projectFinishedGoodsQueryKeys } from "../projectFinishedGoodsQueryKeys";
 import {
   cancelProject,
   getProject,
@@ -70,6 +71,7 @@ export function useProjectDetail(projectId: string) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
       queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
+      queryClient.invalidateQueries({ queryKey: projectFinishedGoodsQueryKeys.profile(profile?.id) }),
     ]);
   }
 

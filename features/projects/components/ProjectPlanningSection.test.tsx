@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   useProjectPlanning: vi.fn(),
+  useProjectFinishedGoods: vi.fn(),
+  fgQuery: { isError: false, data: { ok: true, value: [] } } as Record<string, unknown>,
   refetch: vi.fn(),
   choicesRefetch: vi.fn(),
   createGroup: vi.fn(),
@@ -14,6 +16,9 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../hooks/useProjectPlanning", () => ({
   useProjectPlanning: mocks.useProjectPlanning,
+}));
+vi.mock("../hooks/useProjectFinishedGoods", () => ({
+  useProjectFinishedGoods: mocks.useProjectFinishedGoods,
 }));
 
 import { ProjectPlanningSection } from "./ProjectPlanningSection";
@@ -77,6 +82,7 @@ function setPlanningState(options: {
   choiceError?: boolean;
 } = {}) {
   mocks.useProjectPlanning.mockReturnValue({
+    finishedGoodsCommitmentsQuery: mocks.fgQuery,
     planningQuery: {
       data: options.data ?? { ok: true, value: groups },
       isPending: options.isPending ?? false,
@@ -103,6 +109,8 @@ function setPlanningState(options: {
 }
 
 beforeEach(() => {
+  mocks.fgQuery = { isError: false, data: { ok: true, value: [{ productId: pcbId,
+    physicalQuantity: 4n, committedToProjects: 3n, availableAfterCommitments: 1n }] } };
   const success = { ok: true, value: { id: groupId } };
   for (const name of [
     "createGroup", "updateGroup", "removeGroup", "createRequirement",
@@ -125,8 +133,7 @@ describe("ProjectPlanningSection", () => {
     expect(productScroll).not.toHaveClass("h-[50rem]", "min-h-[50rem]");
     expect(within(section).getByRole("heading", { name: "B24" })).toBeInTheDocument();
     expect(within(section).getByText("Requirements: 2")).toBeInTheDocument();
-    expect(within(section).getByText("Shortages: 1")).toBeInTheDocument();
-    expect(within(section).getByText("Covered: 1")).toBeInTheDocument();
+    expect(within(section).queryByText(/Raw \+ Customs/)).not.toBeInTheDocument();
     const toggle = within(section).getByRole("button", { name: "Show 2 requirements" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(within(section).queryByRole("table")).not.toBeInTheDocument();
@@ -168,8 +175,7 @@ describe("ProjectPlanningSection", () => {
     const table = screen.getByRole("table");
     for (const heading of [
       "Serial Number", "Product", "Kind", "Category", "Brand", "Required",
-      "Eligible Stock (Raw + Customs)", "Committed to Projects",
-      "Available After Commitments", "Shortage",
+      "Committed to Projects", "Available After Commitments", "Shortage",
     ]) {
       expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument();
     }
@@ -179,18 +185,71 @@ describe("ProjectPlanningSection", () => {
     expect(shortageRow).toHaveTextContent("Control");
     expect(shortageRow).toHaveTextContent("Bosch");
     expect(shortageRow).toHaveTextContent("50");
-    expect(shortageRow).toHaveTextContent("10");
-    expect(shortageRow).toHaveTextContent("16");
-    expect(shortageRow).toHaveTextContent("-6");
-    expect(shortageRow).toHaveTextContent("Shortage: 6");
+    expect(within(shortageRow).getAllByRole("cell").map(cell => cell.textContent))
+      .toEqual(["Relay", "Component", "Control", "Bosch", "50", "16", "-6", "6"]);
+    expect(within(shortageRow).getByText("6")).toHaveClass("text-red-700");
     const coveredRow = within(table).getByRole("row", { name: /0000456/ });
     expect(coveredRow).toHaveTextContent("PCB Output");
     expect(coveredRow).toHaveTextContent("Finished PCB Product");
-    expect(coveredRow).toHaveTextContent("None");
+    expect(within(coveredRow).getAllByRole("cell").map(cell => cell.textContent))
+      .toEqual(["PCB Output", "Finished PCB Product", "PCB", "—", "20", "3", "1", "6"]);
+    expect(within(coveredRow).getByText("6")).toHaveClass("text-red-700");
+    expect(mocks.useProjectFinishedGoods).not.toHaveBeenCalled();
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(9);
+    expect(within(table).getByText(/global figures across Projects/)).toBeInTheDocument();
+    for (const name of ["FG Reserved", "FG Shortage"])
+      expect(within(table).queryByRole("columnheader", { name })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "Eligible Stock (Raw + Customs)" })).not.toBeInTheDocument();
+    expect(within(table).queryByRole("columnheader", { name: "Raw + Customs planning shortage" })).not.toBeInTheDocument();
+    expect(within(table).queryByText(/Shortage:/)).not.toBeInTheDocument();
     expect(coveredRow).not.toHaveClass("text-red-700");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { isPending: true },
+    { isError: true, data: { ok: true, value: [{ productId: pcbId, physicalQuantity: 4n, committedToProjects: 3n, availableAfterCommitments: 1n }] } },
+    { data: { ok: false, error: { message: "Access denied" } } },
+    { data: { ok: true, value: [] } },
+  ])("never substitutes Raw + Customs or fabricated zeros for unavailable FG aggregates: case %#", query => {
+    mocks.fgQuery = query;
+    setPlanningState();
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    const row = screen.getByRole("row", { name: /0000456/ });
+    expect(within(row).getAllByRole("cell").slice(-3).map(cell => cell.textContent))
+      .toEqual(["Unavailable", "Unavailable", "Unavailable"]);
+    expect(within(screen.getByRole("row", { name: /0000123/ })).getAllByRole("cell").slice(-3).map(cell => cell.textContent))
+      .toEqual(["16", "-6", "6"]);
+  });
+
+  it("keeps global FG demand and stock lossless and does not use the requirement row quantity", () => {
+    const demand = 900719925474099312345n;
+    const requirements = groups[0]!.requirements.map(r => r.productKind === "pcb_finished_good" ? {
+      ...r, requiredQuantity: 8n, inventoryContext: { ...r.inventoryContext!,
+        physicalQuantity: 999999999999999999999n, committedToProjects: demand,
+        availableAfterCommitments: 999999999999999999999n - demand },
+    } : r);
+    mocks.fgQuery = { data: { ok: true, value: [{ productId: pcbId, physicalQuantity: 9007199254740993n,
+      committedToProjects: 9007199254740992n, availableAfterCommitments: 1n }] } };
+    setPlanningState({ data: { ok: true, value: [{ ...groups[0]!, requirements }] } });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    expect(within(screen.getByRole("row", { name: /0000456/ })).getAllByRole("cell").slice(-4).map(cell => cell.textContent))
+      .toEqual(["8", "9007199254740992", "1", (demand - 9007199254740993n).toString()]);
+  });
+
+  it("shows FG reservation and availability but not shortage when global demand is permission-redacted", () => {
+    const requirements = groups[0]!.requirements.map(r => ({ ...r, inventoryContext: null }));
+    setPlanningState({ data: { ok: true, value: [{ ...groups[0]!, requirements }] } });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    expect(within(screen.getByRole("row", { name: /0000456/ })).getAllByRole("cell").slice(-3).map(cell => cell.textContent))
+      .toEqual(["3", "1", "Unavailable"]);
+    expect(within(screen.getByRole("row", { name: /0000123/ })).getAllByRole("cell").slice(-3).map(cell => cell.textContent))
+      .toEqual(["Unavailable", "Unavailable", "Unavailable"]);
   });
 
   it("edits Required quantity inline with bigint-safe text and refreshes authoritative context", async () => {
@@ -231,8 +290,7 @@ describe("ProjectPlanningSection", () => {
     expect(screen.getByRole("button", { name: "Edit required quantity for Relay" }))
       .toHaveTextContent(quantity);
     expect(screen.getByRole("status")).toHaveTextContent("Requirement quantity updated.");
-    expect(screen.getByText("Shortages: 0")).toBeInTheDocument();
-    expect(screen.getByText("Covered: 2")).toBeInTheDocument();
+    expect(screen.queryByText(/Raw \+ Customs/)).not.toBeInTheDocument();
   });
 
   it("cancels inline quantity editing without mutation and restores trigger focus", async () => {
@@ -370,7 +428,7 @@ describe("ProjectPlanningSection", () => {
     setPlanningState({ data: { ok: true, value: [{ ...groups[0]!, requirements }] } });
     render(<ProjectPlanningSection projectId={projectId} status="planned" />);
     expect(screen.getByText("Requirements: 2")).toBeInTheDocument();
-    expect(screen.queryByText(/Shortages:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw \+ Customs planning shortages:/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
   });
@@ -456,7 +514,7 @@ describe("ProjectPlanningSection", () => {
     }
     fireEvent.change(within(dialog).getByLabelText("Required Quantity"), { target: { value: "5" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
-    await waitFor(() => expect(mocks.createRequirement).toHaveBeenCalledWith(groupId, productId, 5));
+    await waitFor(() => expect(mocks.createRequirement).toHaveBeenCalledWith(groupId, productId, "5"));
   });
 
   it("preserves an existing historical Product choice while editing and confirms removal", async () => {
@@ -473,7 +531,7 @@ describe("ProjectPlanningSection", () => {
       .toHaveValue(productId);
     expect(within(dialog).getByLabelText("Product")).toHaveValue(productId);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
-    await waitFor(() => expect(mocks.updateRequirement).toHaveBeenCalledWith(componentId, productId, 50));
+    await waitFor(() => expect(mocks.updateRequirement).toHaveBeenCalledWith(componentId, productId, "50"));
     const removeButtons = screen.getAllByRole("button", { name: "Remove Requirement" });
     fireEvent.click(removeButtons[0]!);
     fireEvent.click(within(screen.getByRole("dialog", { name: "Remove Requirement" }))

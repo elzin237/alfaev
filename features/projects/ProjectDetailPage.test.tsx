@@ -16,6 +16,10 @@ vi.mock("./hooks/useProjectDetail", () => ({
 vi.mock("./components/ProjectPlanningSection", () => ({
   ProjectPlanningSection: () => null,
 }));
+vi.mock("./components/ProjectFinishedGoodsSection", () => ({
+  ProjectFinishedGoodsSection: ({ projectId, status }: { projectId: string; status: string }) =>
+    <section aria-label="Project Finished Goods"><h2>Finished Goods requirements</h2><p>FG context {projectId} / {status}</p></section>,
+}));
 vi.mock("./components/ProjectMaterialUsageSection", () => ({
   ProjectMaterialUsageSection: () => (
     <section aria-label="Material Usage">
@@ -129,6 +133,14 @@ afterEach(() => {
 });
 
 describe("ProjectDetailPage", () => {
+  it("mounts the read-only FG section only for an existing loaded Project, including closed history", () => {
+    setQueryState({ data: { ok: true, value: { ...project, status: "completed" } } });
+    const view = renderDetail();
+    expect(screen.getByRole("region", { name: "Project Finished Goods" })).toHaveTextContent(`FG context ${projectId} / completed`);
+    view.unmount();
+    setQueryState({ data: { ok: false, error: { code: "project_not_found", message: "The Project could not be found." } } });
+    renderDetail(); expect(screen.queryByRole("region", { name: "Project Finished Goods" })).not.toBeInTheDocument();
+  });
   it("renders all canonical core fields and record timestamps", () => {
     const { container } = renderDetail();
 

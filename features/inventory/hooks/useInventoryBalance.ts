@@ -45,7 +45,6 @@ export function useInventoryBalance(
         }),
         queryClient.invalidateQueries({
           queryKey: inventoryCommitmentsQueryKey(profile?.id),
-          exact: true,
         }),
         queryClient.invalidateQueries({
           queryKey: inventoryMovementListQueryKey(profile?.id, warehouseId, productId),
@@ -83,7 +82,7 @@ export function useInventoryBalance(
         queryClient.invalidateQueries({
           queryKey: ["inventory-source-lots", profile?.id ?? "anonymous"],
         }),
-        queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
+        queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id) }),
         queryClient.invalidateQueries({ queryKey: pcbCardListQueryKey(profile?.id), exact: true }),
         queryClient.invalidateQueries({ queryKey: pcbBomDetailQueryPrefix(profile?.id) }),
         queryClient.invalidateQueries({ queryKey: ["pcb", "bom-choices", profile?.id] }),

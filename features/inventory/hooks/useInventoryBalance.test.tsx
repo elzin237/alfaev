@@ -71,6 +71,18 @@ afterEach(() => {
 });
 
 describe("useInventoryBalance", () => {
+  it.each(["adjust","transfer"] as const)("%s invalidates nested FG totals for only the acting profile",async operation=>{
+    const {result,queryClient}=renderBalanceHook();
+    const own=["inventory","commitments","profile-1","warehouse","finished_goods"];
+    const foreign=["inventory","commitments","profile-2","warehouse","finished_goods"];
+    queryClient.setQueryData(own,"old");queryClient.setQueryData(foreign,"private");
+    await act(async()=>{
+      if(operation==="adjust")await result.current.adjust({adjustmentType:"add",quantity:1,reason:"Delivery"});
+      else await result.current.transfer({destinationWarehouseId:"customs",quantity:1,reason:"Transfer"});
+    });
+    expect(queryClient.getQueryState(own)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(foreign)?.isInvalidated).toBe(false);
+  });
   it("uses a profile/Product-scoped balance query", async () => {
     const { result, queryClient } = renderBalanceHook();
 
@@ -120,7 +132,7 @@ describe("useInventoryBalance", () => {
       queryKey: ["inventory", "products", "profile-1"],
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+      queryKey: ["inventory", "commitments", "profile-1"],
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "movements", "product", "profile-1", warehouseId, "product-1"],

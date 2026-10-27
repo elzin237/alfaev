@@ -12,8 +12,14 @@ export interface ProductListProps {
 }
 
 function ProductList({ products, warehouseCode, commitments, showCommitments = true }: ProductListProps) {
-  const headings = ["Serial Number", "Name", "Category", "Brand", "Physical Quantity"];
-  if (showCommitments) headings.push("Committed to Projects", "Available after Commitments");
+  const rawMaterials = !warehouseCode || warehouseCode === "raw_materials";
+  const headings = ["Serial Number", "Name", "Category", "Brand", rawMaterials ? "Raw Physical Quantity" : "Physical Quantity"];
+  if (showCommitments) {
+    headings.push(...(warehouseCode === "finished_goods"
+      ? ["Reserved to Projects", "Available FG"]
+      : rawMaterials ? ["Outstanding Project Demand", "Available After Demand (Raw + Customs)"]
+        : ["Committed to Projects", "Available After Commitments"]));
+  }
   headings.push("Status");
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
@@ -52,7 +58,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                 </td>
                 <td className="px-5 py-4">{product.category}</td>
                 <td className="px-5 py-4">{product.brandName ?? "—"}</td>
-                <td className="whitespace-nowrap px-5 py-4 tabular-nums">{product.quantity}</td>
+                <td className="whitespace-nowrap px-5 py-4 tabular-nums">{(warehouseCode === "finished_goods" && commitment ? commitment.physicalQuantity : product.quantity).toString()}</td>
                 {showCommitments && <td className="whitespace-nowrap px-5 py-4 tabular-nums">{commitment?.committedToProjects.toString() ?? "Unavailable"}</td>}
                 {showCommitments && <td className="whitespace-nowrap px-5 py-4 tabular-nums">
                   {commitment ? (

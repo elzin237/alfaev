@@ -44,11 +44,12 @@ function InventoryPage() {
     Boolean(selectedWarehouse),
   );
   const canShowCommitments = Boolean(
-    warehouseAccess.canReadProjectAvailability &&
-      selectedWarehouse?.code === "raw_materials",
+    selectedWarehouse?.code === "finished_goods" ||
+      (warehouseAccess.canReadProjectAvailability && selectedWarehouse?.code === "raw_materials"),
   );
   const commitmentsQuery = useInventoryCommitments(
     canShowCommitments,
+    selectedWarehouse?.code,
   );
   const archiveLockRef = useRef(false);
   const [isComponentDialogOpen, setIsComponentDialogOpen] = useState(false);

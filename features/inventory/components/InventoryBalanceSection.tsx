@@ -94,7 +94,7 @@ function InventoryBalanceSection({
         ) : (
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              Current Quantity
+              {warehouse.code === "raw_materials" ? "Raw Physical Quantity" : "Current Quantity"}
             </p>
             <p className="mt-2 text-3xl font-bold text-zinc-900">
               {balanceQuery.data.value.quantity}
@@ -120,8 +120,8 @@ function InventoryBalanceSection({
             <div className="grid gap-3 sm:grid-cols-3">
               {([
                 ["Eligible Stock (Raw + Customs)", commitment.physicalQuantity],
-                ["Committed to Projects", commitment.committedToProjects],
-                ["Available after Commitments", commitment.availableAfterCommitments],
+                ["Outstanding Project Demand", commitment.committedToProjects],
+                ["Available After Demand (Raw + Customs)", commitment.availableAfterCommitments],
               ] as const).map(([label, value]) => (
                 <div key={label} className="rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-5">
                   <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</p>

@@ -7,11 +7,17 @@ const productServiceMocks = vi.hoisted(() => ({
   order: vi.fn(),
   eq: vi.fn(),
   maybeSingle: vi.fn(),
+  rpcSelect: vi.fn(),
 }));
 
 vi.mock("../../../lib/supabase/client", () => ({
   supabase: {
-    rpc: productServiceMocks.rpc,
+    rpc: (...args: unknown[]) => {
+      const result = productServiceMocks.rpc(...args);
+      return Object.assign(Promise.resolve(result), {
+        select: (columns: string) => { productServiceMocks.rpcSelect(columns); return result; },
+      });
+    },
     from: productServiceMocks.from,
   },
 }));
@@ -36,6 +42,13 @@ beforeEach(() => {
 
 describe("productService", () => {
   const warehouseId = "10000000-0000-4000-8000-000000000001";
+  it("projects list stock as SQL text and preserves the SQL bigint boundary without rounding",async()=>{
+    productServiceMocks.rpc.mockResolvedValue({data:[{id:"large",serial_number:"007",name:"Calculator",
+      category:"PCB",brand_name:null,product_kind:"pcb_finished_good",is_active:true,quantity:"9223372036854775807"}],error:null});
+    const result=await listProducts("10000000-0000-4000-8000-000000000002");
+    expect(result).toMatchObject({ok:true,value:[{quantity:9223372036854775807n}]});
+    expect(productServiceMocks.rpcSelect).toHaveBeenCalledWith("id,serial_number,name,category,brand_name,product_kind,is_active,quantity::text");
+  });
   it("calls only the trusted create_product RPC with normalized allowed inputs", async () => {
     productServiceMocks.rpc.mockResolvedValue({
       data: [{ product_id: "product-1", serial_number: "0000123" }],

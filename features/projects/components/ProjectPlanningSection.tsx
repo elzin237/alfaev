@@ -5,6 +5,7 @@ import ConfirmDialog from "../../../shared/components/ConfirmDialog";
 import EmptyState from "../../../shared/components/EmptyState";
 import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
+import type { InventoryCommitment } from "../../inventory/services/inventoryCommitmentService";
 import type { ProjectStatus } from "../projectStatus";
 import { useProjectPlanning } from "../hooks/useProjectPlanning";
 import type {
@@ -52,29 +53,16 @@ function requirementCountLabel(count: number): string {
 function RequirementSummary({ requirements }: {
   requirements: ProjectRequirement[];
 }) {
-  const hasInventoryContext = requirements.length > 0 &&
-    requirements.every((requirement) => requirement.inventoryContext !== null);
-  const shortages = hasInventoryContext
-    ? requirements.filter(
-        (requirement) => requirement.inventoryContext!.availableAfterCommitments < 0n,
-      ).length
-    : null;
-
   return (
     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-zinc-600">
       <span>Requirements: {requirements.length}</span>
-      {shortages !== null && (
-        <>
-          <span>Shortages: {shortages}</span>
-          <span>Covered: {requirements.length - shortages}</span>
-        </>
-      )}
     </div>
   );
 }
 
 function RequirementsTable({
   group,
+  finishedGoodsCommitments,
   canManage,
   onEdit,
   onUpdateQuantity,
@@ -82,6 +70,7 @@ function RequirementsTable({
   onRemove,
 }: {
   group: ProjectPlanningGroup;
+  finishedGoodsCommitments: InventoryCommitment[] | undefined;
   canManage: boolean;
   onEdit: (requirement: ProjectRequirement) => void;
   onUpdateQuantity: (
@@ -164,14 +153,16 @@ function RequirementsTable({
       data-testid={`requirements-scroll-${group.id}`}
       className="mt-4 max-h-[28rem] max-w-full overflow-auto rounded-2xl border border-zinc-200"
     >
-      <table className="min-w-[78rem] divide-y divide-zinc-200 text-sm">
-        <caption className="sr-only">Requirements for {group.name}</caption>
+      <table className="w-full min-w-[72rem] divide-y divide-zinc-200 text-sm">
+        <caption className="caption-top px-3 py-2 text-left text-xs text-zinc-600">
+          Requirements for {group.name}. Committed to Projects, Available After Commitments and Shortage are global figures across Projects, not this requirement row.
+        </caption>
         <thead className="sticky top-0 z-10 bg-zinc-50">
           <tr>
             {[
               "Serial Number", "Product", "Kind", "Category", "Brand",
-              "Required", "Eligible Stock (Raw + Customs)", "Committed to Projects",
-              "Available After Commitments", "Shortage",
+              "Required",
+              "Committed to Projects", "Available After Commitments", "Shortage",
               ...(canManage ? ["Actions"] : []),
             ].map((heading) => (
               <th
@@ -187,9 +178,16 @@ function RequirementsTable({
         <tbody className="divide-y divide-zinc-100 bg-white">
           {group.requirements.map((requirement) => {
             const context = requirement.inventoryContext;
-            const shortage = context && context.availableAfterCommitments < 0n
-              ? -context.availableAfterCommitments
-              : 0n;
+            const finished = requirement.productKind === "pcb_finished_good";
+            const fg = finishedGoodsCommitments?.find(row => row.productId === requirement.productId);
+            const committed = finished ? fg?.committedToProjects : context?.committedToProjects;
+            const available = finished ? fg?.availableAfterCommitments : context?.availableAfterCommitments;
+            // Planning's commitment is global outstanding demand, even for FG.
+            // Never substitute its Raw + Customs physical quantity for FG stock.
+            const deficit = finished
+              ? fg && context ? context.committedToProjects - fg.physicalQuantity : undefined
+              : available === undefined ? undefined : -available;
+            const shortage = deficit === undefined ? undefined : deficit > 0n ? deficit : 0n;
             return (
               <tr key={requirement.id} className="text-zinc-700">
                 <th scope="row" className="whitespace-nowrap px-3 py-3 text-left font-mono font-semibold text-zinc-900">
@@ -265,21 +263,14 @@ function RequirementsTable({
                     </button>
                   ) : requirement.requiredQuantity.toString()}
                 </td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">{committed?.toString() ?? "Unavailable"}</td>
+                <td className="whitespace-nowrap px-3 py-3 tabular-nums">{available?.toString() ?? "Unavailable"}</td>
                 <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                  {context?.physicalQuantity.toString() ?? "Unavailable"}
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                  {context?.committedToProjects.toString() ?? "Unavailable"}
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                  {context?.availableAfterCommitments.toString() ?? "Unavailable"}
-                </td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
-                  {context ? shortage > 0n ? (
-                    <span className="inline-flex rounded-lg bg-red-50 px-2 py-1 font-semibold text-red-700">
-                      Shortage: {shortage.toString()}
+                  {shortage === undefined ? "Unavailable" : (
+                    <span className={shortage > 0n ? "inline-flex rounded-lg bg-red-50 px-2 py-1 font-semibold text-red-700" : undefined}>
+                      {shortage.toString()}
                     </span>
-                  ) : "None" : "Unavailable"}
+                  )}
                 </td>
                 {canManage && (
                   <td className="whitespace-nowrap px-3 py-3">
@@ -426,7 +417,7 @@ function RequirementDialog({
   search: string;
   onSearch: (value: string) => void;
   onClose: () => void;
-  onSubmit: (productId: string, quantity: number) => Promise<MutationResult>;
+  onSubmit: (productId: string, quantity: string) => Promise<MutationResult>;
   onSucceeded: () => void;
 }) {
   const titleId = useId();
@@ -448,13 +439,11 @@ function RequirementDialog({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (lockRef.current) return;
-    const parsed = Number(quantity);
     if (!productId) {
       setError("Select a Product.");
       return;
     }
-    if (!/^[1-9][0-9]*$/.test(quantity) ||
-      !Number.isSafeInteger(parsed)) {
+    if (!isPositiveBigintQuantity(quantity)) {
       setError("Required Quantity must be a positive whole number.");
       return;
     }
@@ -462,7 +451,7 @@ function RequirementDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const result = await onSubmit(productId, parsed);
+      const result = await onSubmit(productId, quantity);
       if (!result.ok) {
         setError(result.error.message);
         return;
@@ -493,7 +482,8 @@ function RequirementDialog({
           {editor.mode === "create" ? "Add Requirement" : "Edit Requirement"}
         </h2>
         <p className="mt-2 text-sm text-zinc-500">
-          Plan a required Product for {editor.group.name}. No stock is changed.
+          Plan a required Product for {editor.group.name}. No physical stock is changed.
+          Finished Goods may be automatically reserved up to outstanding demand.
         </p>
         <form className="mt-6 space-y-5" noValidate onSubmit={(event) => void submit(event)}>
           <div>
@@ -596,7 +586,9 @@ export function ProjectPlanningSection({
   const planning = useProjectPlanning(
     projectId, status, requirementEditor !== null, choiceSearch,
   );
-  const { planningQuery, choicesQuery, canManage } = planning;
+  const { planningQuery, choicesQuery, canManage, finishedGoodsCommitmentsQuery } = planning;
+  const finishedGoodsCommitments = !finishedGoodsCommitmentsQuery.isError && finishedGoodsCommitmentsQuery.data?.ok
+    ? finishedGoodsCommitmentsQuery.data.value : undefined;
   const groups = planningQuery.data?.ok ? planningQuery.data.value : [];
   const choices = choicesQuery.data?.ok ? choicesQuery.data.value : [];
   const choicesError = choicesQuery.isError
@@ -673,6 +665,15 @@ export function ProjectPlanningSection({
         )}
       </div>
       {success && <p role="status" className="text-sm font-medium text-emerald-700">{success}</p>}
+      {(planning.requirementRecovery?.pending || planning.requirementRecovery?.error) && <div role="alert"
+        className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm">
+        <p>{planning.requirementRecovery.error ?? "A saved Finished Goods requirement request needs reconciliation. Its original UUID and payload are retained."}</p>
+        <p>Do not create a replacement request or clear browser data. Return to this account and Project to recover it.</p>
+        <button type="button" className={buttonClass} disabled={planning.requirementRecovery.busy}
+          onClick={() => void (planning.requirementRecovery.pending ? planning.requirementRecovery.retry() : planning.requirementRecovery.checkRecovery())}>
+          {planning.requirementRecovery.pending ? "Retry saved requirement request" : "Check requirement recovery"}
+        </button>
+      </div>}
 
       {planningQuery.isPending ? (
         <LoadingState message="Loading Project Products..." />
@@ -744,6 +745,7 @@ export function ProjectPlanningSection({
                     <div id={`project-requirements-${group.id}`}>
                       <RequirementsTable
                         group={group}
+                        finishedGoodsCommitments={finishedGoodsCommitments}
                         canManage={canManage}
                         onEdit={(requirement) => openRequirement({ mode: "edit", group, requirement })}
                         onUpdateQuantity={(requirement, quantity) => planning.updateRequirement(

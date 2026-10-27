@@ -50,12 +50,16 @@ describe("PCB creation permission and cache", () => {
     const pcbKey = ["pcb", "cards", "profile-1"];
     const productKey = ["inventory", "products", "profile-1", ""];
     const commitmentKey = ["inventory", "commitments", "profile-1"];
-    for (const key of [pcbKey, productKey, commitmentKey]) client.setQueryData(key, "cached");
+    const fgKey=[...commitmentKey,"warehouse","finished_goods"];
+    const foreign=["inventory","commitments","profile-2","warehouse","finished_goods"];
+    for (const key of [pcbKey, productKey, commitmentKey, fgKey, foreign]) client.setQueryData(key, "cached");
     const invalidate = vi.spyOn(client, "invalidateQueries");
     await act(async () => { await result.current.create("Card", "007"); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: pcbKey, exact: true });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "profile-1"] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: commitmentKey, exact: true });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: commitmentKey });
+    expect(client.getQueryState(fgKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(foreign)?.isInvalidated).toBe(false);
     invalidate.mockClear();
     mocks.createPcbCard.mockResolvedValue({ ok: false, error: { code: "pcb_create_failed", message: "Failed" } });
     await act(async () => { await result.current.create("Card", "007"); });

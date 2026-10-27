@@ -4,6 +4,7 @@ import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { inventoryCommitmentsQueryKey } from "../../inventory/inventoryCommitmentQueryKeys";
+import { useInventoryCommitments } from "../../inventory/hooks/useInventoryCommitments";
 import type { ProjectStatus } from "../projectStatus";
 import {
   projectPlanningChoicesQueryKey,
@@ -21,6 +22,8 @@ import {
   type PlanningResult,
 } from "../services/projectPlanningService";
 import { isProjectId } from "../services/projectService";
+import { projectFinishedGoodsQueryKeys } from "../projectFinishedGoodsQueryKeys";
+import { useProjectRequirementMutations } from "./useProjectRequirementMutations";
 
 export function useProjectPlanning(
   projectId: string,
@@ -30,6 +33,7 @@ export function useProjectPlanning(
 ) {
   const { session, profile, isAdmin } = useAuth();
   const queryClient = useQueryClient();
+  const requirementRecovery = useProjectRequirementMutations(projectId);
   const planningKey = projectPlanningQueryKey(profile?.id, projectId);
   const permission = useQuery({
     queryKey: permissionQueryKey(
@@ -51,6 +55,13 @@ export function useProjectPlanning(
     staleTime: 60_000,
   });
   const normalizedSearch = choiceSearch.trim();
+  const groups = planningQuery.data?.ok ? planningQuery.data.value : [];
+  const finishedGoodsCommitmentsQuery = useInventoryCommitments(
+    Boolean(session && groups.some(group => group.requirements.some(
+      requirement => requirement.productKind === "pcb_finished_good",
+    ))),
+    "finished_goods",
+  );
   const choicesQuery = useQuery({
     queryKey: projectPlanningChoicesQueryKey(
       profile?.id, projectId, normalizedSearch,
@@ -67,19 +78,26 @@ export function useProjectPlanning(
     if (result.ok) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: planningKey, exact: true }),
+        queryClient.invalidateQueries({ queryKey: projectFinishedGoodsQueryKeys.profile(profile?.id) }),
         queryClient.invalidateQueries({
           queryKey: inventoryCommitmentsQueryKey(profile?.id),
-          exact: true,
         }),
       ]);
     }
     return result;
   }
 
+  const locate = (id: string) => groups.flatMap(group => group.requirements.map(requirement => ({group,requirement})))
+    .find(item => item.requirement.id === id);
+  const isFinished = (id: string) => groups.some(group => group.requirements.some(r => r.productId === id && r.productKind === "pcb_finished_good")) ||
+    (choicesQuery.data?.ok && choicesQuery.data.value.some(p => p.productId === id && p.productKind === "pcb_finished_good"));
+
   return {
     planningQuery,
+    finishedGoodsCommitmentsQuery,
     choicesQuery,
     canManage,
+    requirementRecovery,
     createGroup: (name: string) => changed(
       () => createProjectProduct(projectId, name),
     ),
@@ -90,17 +108,31 @@ export function useProjectPlanning(
       () => removeProjectProduct(id),
     ),
     createRequirement: (
-      groupId: string, productId: string, quantity: number,
+      groupId: string, productId: string, quantity: number | string,
     ) => changed(
-      () => createProjectRequirement(groupId, productId, quantity),
+      () => isFinished(productId) ? requirementRecovery.execute({operation:"create",projectId,groupId,
+        componentId:null,productId,quantity:String(quantity),expectedProductId:null,expectedQuantity:null})
+        : createProjectRequirement(groupId, productId, quantity),
     ),
     updateRequirement: (
       id: string, productId: string, quantity: number | string,
     ) => changed(
-      () => updateProjectRequirement(id, productId, quantity),
+      () => {
+        const old=locate(id);
+        return old && (old.requirement.productKind === "pcb_finished_good" || isFinished(productId))
+          ? requirementRecovery.execute({operation:"update",projectId,groupId:old.group.id,componentId:id,productId,
+            quantity:String(quantity),expectedProductId:old.requirement.productId,expectedQuantity:old.requirement.requiredQuantity.toString()})
+          : updateProjectRequirement(id, productId, quantity);
+      },
     ),
     removeRequirement: (id: string) => changed(
-      () => removeProjectRequirement(id),
+      () => {
+        const old=locate(id);
+        return old?.requirement.productKind === "pcb_finished_good"
+          ? requirementRecovery.execute({operation:"remove",projectId,groupId:old.group.id,componentId:id,productId:null,
+            quantity:null,expectedProductId:old.requirement.productId,expectedQuantity:old.requirement.requiredQuantity.toString()})
+          : removeProjectRequirement(id);
+      },
     ),
   };
 }

@@ -26,7 +26,7 @@ export function usePcbCreation() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: pcbCardListQueryKey(profile?.id), exact: true }),
         queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profile?.id) }),
-        queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
+        queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id) }),
       ]);
     }
     return result;

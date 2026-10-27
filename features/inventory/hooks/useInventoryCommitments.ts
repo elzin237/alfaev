@@ -2,13 +2,17 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { inventoryCommitmentsQueryKey, productProjectCommitmentsQueryKey } from "../inventoryCommitmentQueryKeys";
-import { getInventoryCommitments, getProductProjectCommitments } from "../services/inventoryCommitmentService";
+import { getFinishedGoodsInventoryCommitments, getInventoryCommitments, getProductProjectCommitments } from "../services/inventoryCommitmentService";
 
-export function useInventoryCommitments(enabled = true) {
+export function useInventoryCommitments(enabled = true, warehouseCode = "raw_materials") {
   const { profile } = useAuth();
+  const finishedGoods = warehouseCode === "finished_goods";
   return useQuery({
-    queryKey: inventoryCommitmentsQueryKey(profile?.id),
-    queryFn: getInventoryCommitments,
+    // Nested under the existing invalidation prefix used by Reserve/Release/Fulfill.
+    queryKey: finishedGoods
+      ? [...inventoryCommitmentsQueryKey(profile?.id), "warehouse", "finished_goods"]
+      : inventoryCommitmentsQueryKey(profile?.id),
+    queryFn: finishedGoods ? getFinishedGoodsInventoryCommitments : getInventoryCommitments,
     enabled: Boolean(enabled && profile?.isActive),
     staleTime: 30_000,
   });

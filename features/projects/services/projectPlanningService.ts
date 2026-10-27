@@ -132,6 +132,7 @@ function mutationError(code: string | undefined): PlanningError {
     case "23505": return failure("duplicate_requirement");
     case "PPL03": return failure("children_present");
     case "PPL04": return failure("product_unavailable");
+    case "FGA01": return {code:"mutation_failed",message:"Refresh this Project to use the atomic Finished Goods requirement editor."};
     case "P0002": return failure("not_found");
     case "22023":
     case "23514": return failure("invalid_input");
@@ -280,7 +281,7 @@ export function removeProjectProduct(id: string) {
 }
 
 export function createProjectRequirement(
-  groupId: string, productId: string, quantity: number,
+  groupId: string, productId: string, quantity: number | string,
 ) {
   return mutate("create_project_product_component", {
     p_project_product_id: groupId,

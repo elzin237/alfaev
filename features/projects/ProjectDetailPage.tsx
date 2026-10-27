@@ -10,6 +10,7 @@ import ProjectEditDialog from "./components/ProjectEditDialog";
 import { ProjectActivitySection } from "./components/ProjectActivitySection";
 import { ProjectMaterialUsageSection } from "./components/ProjectMaterialUsageSection";
 import { ProjectPlanningSection } from "./components/ProjectPlanningSection";
+import { ProjectFinishedGoodsSection } from "./components/ProjectFinishedGoodsSection";
 import { useProjectDetail } from "./hooks/useProjectDetail";
 import { parseProjectActivityHash } from "./projectActivityDeepLink";
 import {
@@ -247,6 +248,8 @@ function ProjectDetailPage() {
         </div>
 
         <ProjectPlanningSection projectId={project.id} status={project.status} />
+
+        <ProjectFinishedGoodsSection projectId={project.id} status={project.status} />
 
         <ProjectMaterialUsageSection projectId={project.id} />
 

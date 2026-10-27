@@ -21,7 +21,8 @@ export interface ProductListItem {
   brandName: string | null;
   productKind: ProductKind;
   isActive: boolean;
-  quantity: number;
+  // Safe small values retain compatibility; large SQL bigint values stay bigint.
+  quantity: number | bigint;
 }
 
 export interface ProductDetail extends Product {
@@ -166,6 +167,14 @@ function parseQuantity(value: unknown): number | null {
     : null;
 }
 
+function parseListQuantity(value: unknown): number | bigint | null {
+  if (typeof value !== "string") return parseQuantity(value);
+  if (!/^(0|[1-9][0-9]*)$/.test(value)) return null;
+  const quantity = BigInt(value);
+  if (quantity > 9223372036854775807n) return null;
+  return quantity <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(quantity) : quantity;
+}
+
 function isProductRow(value: unknown): value is ProductRow {
   if (typeof value !== "object" || value === null) return false;
 
@@ -186,12 +195,12 @@ function isProductRow(value: unknown): value is ProductRow {
     "is_active" in value &&
     typeof value.is_active === "boolean" &&
     "quantity" in value &&
-    parseQuantity(value.quantity) !== null
+    parseListQuantity(value.quantity) !== null
   );
 }
 
 function mapProduct(row: ProductRow): ProductListItem | null {
-  const quantity = parseQuantity(row.quantity);
+  const quantity = parseListQuantity(row.quantity);
   if (quantity === null) return null;
 
   return {
@@ -472,7 +481,7 @@ export async function listProducts(
     const { data, error } = await supabase.rpc("search_inventory_products_by_warehouse", {
       p_warehouse_id: warehouseId,
       p_search: normalizedSearch || null,
-    });
+    }).select("id,serial_number,name,category,brand_name,product_kind,is_active,quantity::text");
 
     if (error || !Array.isArray(data)) {
       return listFailure();

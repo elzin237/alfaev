@@ -122,6 +122,9 @@ describe("InventoryBalanceSection", () => {
     });
     render(<InventoryBalanceSection productId="product-1" productIsActive />);
     expect(screen.getByText("Eligible Stock (Raw + Customs)")).toBeInTheDocument();
+    expect(screen.getByText("Raw Physical Quantity")).toBeInTheDocument();
+    expect(screen.getByText("Outstanding Project Demand")).toBeInTheDocument();
+    expect(screen.getByText("Available After Demand (Raw + Customs)")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Shortage");
     expect(screen.getByRole("alert")).toHaveTextContent(
       "eligible Raw Materials and Customs stock",

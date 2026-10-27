@@ -72,6 +72,29 @@ export async function getInventoryCommitments(): Promise<CommitmentResult<Invent
   }
 }
 
+// Cast before JSON encoding: PostgreSQL bigint must never pass through a lossy JS number.
+export async function getFinishedGoodsInventoryCommitments(): Promise<CommitmentResult<InventoryCommitment[]>> {
+  try {
+    const { data, error } = await supabase.rpc("get_finished_goods_inventory_commitments")
+      .select("product_id,physical_quantity::text,committed_to_projects::text,available_after_commitments::text");
+    if (error || !Array.isArray(data)) return { ok: false, error: loadError };
+    const keys = ["product_id", "physical_quantity", "committed_to_projects", "available_after_commitments"];
+    const values = data.map((row: unknown) => {
+      if (!record(row) || Object.keys(row).length !== keys.length ||
+        keys.some((key) => typeof row[key] !== "string")) return null;
+      const parsed = parseInventoryCommitment(row);
+      return parsed && parsed.physicalQuantity <= 9223372036854775807n &&
+        parsed.availableAfterCommitments >= 0n ? parsed : null;
+    });
+    if (values.some((value) => value === null)) return { ok: false, error: loadError };
+    const parsed = values as InventoryCommitment[];
+    if (new Set(parsed.map((value) => value.productId)).size !== parsed.length) return { ok: false, error: loadError };
+    return { ok: true, value: parsed };
+  } catch {
+    return { ok: false, error: loadError };
+  }
+}
+
 export async function getProductProjectCommitments(productId: string): Promise<CommitmentResult<ProjectCommitment[]>> {
   if (!uuidPattern.test(productId)) return { ok: false, error: loadError };
   try {

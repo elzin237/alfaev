@@ -201,6 +201,28 @@ afterEach(() => {
 });
 
 describe("InventoryPage", () => {
+  it("shows trusted hard commitments for an FG-only viewer without Raw/Customs/Project access",()=>{
+    setHookState({productsData:{ok:true,value:[archivedProduct]}});
+    inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({authorizedWarehouses:[{
+      id:"10000000-0000-4000-8000-000000000002",code:"finished_goods",label:"Finished Goods",
+      viewPermission:"inventory.finished_goods.view",adjustPermission:"inventory.finished_goods.adjust"}],
+      adjustableWarehouseIds:new Set(),canReadProjectAvailability:false,isPending:false,isError:false});
+    renderInventory("/inventory?warehouse=finished_goods");
+    expect(inventoryMocks.useInventoryCommitments).toHaveBeenCalledWith(true,"finished_goods");
+    expect(screen.getByRole("columnheader",{name:"Physical Quantity"})).toBeInTheDocument();
+    expect(screen.getByRole("columnheader",{name:"Reserved to Projects"})).toBeInTheDocument();
+    expect(screen.queryByText("Eligible Stock (Raw + Customs)")).not.toBeInTheDocument();
+  });
+  it("never requests commitments for a Customs-only viewer",()=>{
+    setHookState({productsData:{ok:true,value:[activeProduct]}});
+    inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({authorizedWarehouses:[{
+      id:"10000000-0000-4000-8000-000000000003",code:"customs",label:"Customs Warehouse",
+      viewPermission:"inventory.customs.view",adjustPermission:"inventory.customs.adjust"}],
+      adjustableWarehouseIds:new Set(),canReadProjectAvailability:false,isPending:false,isError:false});
+    renderInventory("/inventory?warehouse=customs");
+    expect(inventoryMocks.useInventoryCommitments).toHaveBeenCalledWith(false,"customs");
+    expect(screen.queryByRole("columnheader",{name:"Committed to Projects"})).not.toBeInTheDocument();
+  });
   it("shows only authorized warehouse tabs and never enables a hidden warehouse request", () => {
     inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({
       profileId: "profile-1",
@@ -351,9 +373,10 @@ describe("InventoryPage", () => {
     expect(within(archivedRow).getByText("Bosch")).toBeInTheDocument();
     expect(within(archivedRow).getAllByText("27").length).toBeGreaterThan(0);
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByText("Physical Quantity")).toBeInTheDocument();
-    expect(screen.getByText("Committed to Projects")).toBeInTheDocument();
-    expect(screen.getByText("Available after Commitments")).toBeInTheDocument();
+    expect(screen.getByText("Raw Physical Quantity")).toBeInTheDocument();
+    expect(screen.queryByText("Eligible Stock (Raw + Customs)")).not.toBeInTheDocument();
+    expect(screen.getByText("Outstanding Project Demand")).toBeInTheDocument();
+    expect(screen.getByText("Available After Demand (Raw + Customs)")).toBeInTheDocument();
   });
 
   it("debounces server-backed Product search and distinguishes no matches from an empty Inventory", () => {

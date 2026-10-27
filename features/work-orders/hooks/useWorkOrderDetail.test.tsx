@@ -850,6 +850,9 @@ describe("useWorkOrderDetail", () => {
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const removeQueries = vi.spyOn(queryClient, "removeQueries");
     const exactVersion = "2026-09-22T10:00:00.123456+00:00";
+    const fgKey=["inventory","commitments","profile-1","warehouse","finished_goods"];
+    const foreign=["inventory","commitments","profile-2","warehouse","finished_goods"];
+    queryClient.setQueryData(fgKey,"old");queryClient.setQueryData(foreign,"private");
 
     await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
     await act(async () => {
@@ -896,6 +899,9 @@ describe("useWorkOrderDetail", () => {
     });
     await waitFor(() => expect(result.current.canFinishDraft).toBe(false));
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "commitments", "profile-1"] });
+    expect(queryClient.getQueryState(fgKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(foreign)?.isInvalidated).toBe(false);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "balances", "detail", "profile-1"] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "products", "detail", "profile-1"] });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["inventory", "movements", "product", "profile-1"] });

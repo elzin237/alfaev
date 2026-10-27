@@ -337,7 +337,7 @@ export function useWorkOrderDetail(workOrderId: string) {
             queryKey: projectListQueryKey(profile?.id),
             exact: true,
           }),
-          queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id), exact: true }),
+          queryClient.invalidateQueries({ queryKey: inventoryCommitmentsQueryKey(profile?.id) }),
           queryClient.invalidateQueries({ queryKey: productListQueryPrefix(profile?.id) }),
           queryClient.invalidateQueries({ queryKey: ["inventory", "products", "detail", profile?.id] }),
           queryClient.invalidateQueries({ queryKey: ["inventory", "balances", "detail", profile?.id] }),
