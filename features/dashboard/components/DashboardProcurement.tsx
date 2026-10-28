@@ -26,7 +26,7 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
         actionLabel="View all"
         actionTo="/procurement"
         icon={ShoppingCart}
-        title="Nabavka"
+        title="Procurement"
         titleId="dashboard-procurement-title"
       />
 
@@ -70,7 +70,7 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
                       {request.requestedName}
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
-                      Serial Number / Šifra:{" "}
+                      Serial Number:{" "}
                       <span className="font-mono font-medium text-zinc-700">
                         {request.productSerialNumber ?? "Not assigned"}
                       </span>

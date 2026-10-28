@@ -9,7 +9,7 @@ import {
 import { validatePdfFile } from "./documentationPdfService";
 
 const formSchema = z.object({
-  name: z.string().trim().min(1, "Naziv is required."),
+  name: z.string().trim().min(1, "Name is required."),
   category: categorySchema,
   documentDate: z.iso.date(),
   amount: z.string().refine((value) => normalizeAmount(value) !== null, "Enter a non-negative decimal amount."),
@@ -75,22 +75,22 @@ function DocumentationFormDialog({ open, record, onClose, onSubmit, onSuccess }:
       className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-6 shadow-xl">
       <h2 id={titleId} className="text-xl font-bold">{record ? "Edit Document" : "Add Document"}</h2>
       <form noValidate onSubmit={(event) => void submit(event)} className="mt-5 space-y-4">
-        <label className="block text-sm font-medium">Naziv
+        <label className="block text-sm font-medium">Name
           <input {...nameField} ref={(element) => { nameField.ref(element); nameRef.current = element; }}
             className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
           {errors.name && <span role="alert" className="text-red-700">{errors.name.message}</span>}
         </label>
-        <label className="block text-sm font-medium">Kategorija
+        <label className="block text-sm font-medium">Category
           <select {...register("category")} className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2">
             {categorySchema.options.map((value) => <option key={value} value={value}>{categoryLabels[value]}</option>)}
           </select>
           {errors.category && <span role="alert" className="text-red-700">Select a category.</span>}
         </label>
-        <label className="block text-sm font-medium">Datum
+        <label className="block text-sm font-medium">Date
           <input type="date" {...register("documentDate")} className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
           {errors.documentDate && <span role="alert" className="text-red-700">Select a valid date.</span>}
         </label>
-        <label className="block text-sm font-medium">Iznos
+        <label className="block text-sm font-medium">Amount
           <input type="text" inputMode="decimal" {...register("amount")}
             className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
           {errors.amount && <span role="alert" className="text-red-700">{errors.amount.message}</span>}

@@ -5,7 +5,7 @@ const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 export const categorySchema = z.enum(["uvoz", "izvoz", "nabavka", "troskovi"]);
 export type DocumentationCategory = z.infer<typeof categorySchema>;
 export const categoryLabels: Record<DocumentationCategory, string> = {
-  uvoz: "Uvoz", izvoz: "Izvoz", nabavka: "Nabavka", troskovi: "Troškovi",
+  uvoz: "Import", izvoz: "Export", nabavka: "Procurement", troskovi: "Expenses",
 };
 
 // Keep PostgreSQL numeric as decimal text. Never round-trip through Number.

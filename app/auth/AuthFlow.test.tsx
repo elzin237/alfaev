@@ -105,10 +105,10 @@ describe("Supabase login flow", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "user@example.com" },
     });
-    fireEvent.change(screen.getByLabelText("Lozinka"), {
+    fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "correct-password" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Prijava u sistem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log In" }));
 
     expect(authServiceMocks.signIn).toHaveBeenCalledWith({
       email: "user@example.com",
@@ -140,15 +140,15 @@ describe("Supabase login flow", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "user@example.com" },
     });
-    fireEvent.change(screen.getByLabelText("Lozinka"), {
+    fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "incorrect-password" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Prijava u sistem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log In" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The email or password is incorrect.",
     );
-    expect(screen.getByRole("heading", { name: "Prijava u sistem" }))
+    expect(screen.getByRole("heading", { name: "Log In" }))
       .toBeInTheDocument();
   });
 
@@ -171,10 +171,10 @@ describe("Supabase login flow", () => {
     fireEvent.change(screen.getByLabelText("Email"), {
       target: { value: "inactive@example.com" },
     });
-    fireEvent.change(screen.getByLabelText("Lozinka"), {
+    fireEvent.change(screen.getByLabelText("Password"), {
       target: { value: "valid-password" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Prijava u sistem" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log In" }));
 
     expect(screen.queryByRole("heading", { name: "Protected content" }))
       .not.toBeInTheDocument();

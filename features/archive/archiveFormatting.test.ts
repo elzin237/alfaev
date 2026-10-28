@@ -16,7 +16,7 @@ describe("Archive formatting", () => {
     ["user_profile", "User"],
     ["user_permission", "Permissions"],
     ["product_inventory", "Inventory"],
-    ["procurement_request", "Nabavka"],
+    ["procurement_request", "Procurement"],
   ])("maps known entity type %s to %s", (raw, label) => {
     expect(formatArchiveModule(raw)).toBe(label);
   });

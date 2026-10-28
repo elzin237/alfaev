@@ -161,7 +161,7 @@ function ProcurementPage() {
   return (
     <section className="space-y-6">
       <PageHeader
-        title="Nabavka"
+        title="Procurement"
         description="Track active, partly delivered, and resolved Procurement requests."
         actions={canCreate ? (
           <button
@@ -196,7 +196,7 @@ function ProcurementPage() {
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Name or Serial Number / Šifra"
+            placeholder="Name or Serial Number"
             className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           />
         </div>

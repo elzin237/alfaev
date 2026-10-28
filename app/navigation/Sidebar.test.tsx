@@ -158,13 +158,13 @@ describe("Sidebar permission visibility", () => {
       .toEqual([
         "Dashboard",
         "Projects",
-        "Nabavka",
-        "Dobavljači",
-        "Skladište",
+        "Procurement",
+        "Suppliers",
+        "Inventory",
         "Product Calculator",
-        "Radni Nalozi",
-        "Dokumentacija",
-        "Osnovna sredstva",
+        "Work Orders",
+        "Documentation",
+        "Fixed Assets",
         "Calendar",
         "Archive",
         "Users",
@@ -188,9 +188,9 @@ describe("Sidebar permission visibility", () => {
     );
     expect(screen.queryByRole("link", { name: "Users" }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Dokumentacija" }))
+    expect(screen.queryByRole("link", { name: "Documentation" }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Osnovna sredstva" }))
+    expect(screen.queryByRole("link", { name: "Fixed Assets" }))
       .not.toBeInTheDocument();
   });
 
@@ -284,7 +284,7 @@ describe("Sidebar permission visibility", () => {
 
     renderSidebar();
 
-    expect(await screen.findByRole("link", { name: /Nabavka/ }))
+    expect(await screen.findByRole("link", { name: /Procurement/ }))
       .toBeInTheDocument();
     await waitFor(() => expect(
       sidebarMocks.useProcurementSidebarBadge,
@@ -459,7 +459,7 @@ describe("Sidebar permission visibility", () => {
     expect(screen.queryAllByRole("link")).toHaveLength(0);
   });
 
-  it("keeps the Nabavka badge styling and navigation unchanged", () => {
+  it("keeps the Procurement badge styling and navigation unchanged", () => {
     sidebarMocks.useAuth.mockReturnValue(
       createAuthState({
         profile: { ...createProfile(firstUser), isAdmin: true },
@@ -487,7 +487,7 @@ describe("Sidebar permission visibility", () => {
     const procurementBadge = screen.getByLabelText("5 unresolved Procurement requests");
     expect(dashboardBadge.className).toBe(procurementBadge.className);
     expect(screen.getByRole("link", { name: /Dashboard/ })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: /Nabavka/ })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Procurement/ })).toHaveAttribute(
       "href",
       "/procurement",
     );
@@ -524,7 +524,7 @@ describe("Sidebar permission visibility", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByRole("link", { name: "Nabavka" }))
+    expect(screen.getByRole("link", { name: "Procurement" }))
       .toBeInTheDocument();
     expect(screen.queryByLabelText(/unresolved Procurement requests/))
       .not.toBeInTheDocument();

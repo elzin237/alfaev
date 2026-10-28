@@ -110,7 +110,7 @@ function DocumentationPage() {
   else if (query.data.value.length === 0) content = <EmptyState title="No documents" description="No Documentation records have been added." />;
   else content = <div className="overflow-x-auto rounded-3xl border border-zinc-200 bg-white shadow-sm">
     <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
-      <thead className="bg-zinc-50"><tr>{["Naziv", "Kategorija", "Datum", "Iznos", "PDF", "Status", "Actions"].map((label) =>
+      <thead className="bg-zinc-50"><tr>{["Name", "Category", "Date", "Amount", "PDF", "Status", "Actions"].map((label) =>
         <th key={label} scope="col" className="px-4 py-3 font-semibold text-zinc-600">{label}</th>)}</tr></thead>
       <tbody className="divide-y divide-zinc-100">{query.data.value.map((record) => <tr key={record.id}>
         <td className="px-4 py-3 font-semibold">{record.name}</td>
@@ -144,7 +144,7 @@ function DocumentationPage() {
   </div>;
 
   return <section className="space-y-6">
-    <PageHeader title="Dokumentacija" description="Admin-only company documents and private PDFs."
+    <PageHeader title="Documentation" description="Admin-only company documents and private PDFs."
       actions={<button type="button" onClick={() => { setEditing(null); setFormOpen(true); }}
         className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white">Add Document</button>} />
     {notice && <p role="status" className="rounded-xl bg-emerald-50 p-4 text-emerald-800">{notice}</p>}

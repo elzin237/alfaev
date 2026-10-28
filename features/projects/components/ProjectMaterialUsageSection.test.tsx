@@ -40,7 +40,7 @@ describe("ProjectMaterialUsageSection", () => {
     render(<ProjectMaterialUsageSection projectId={projectId} />);
     const section = screen.getByRole("region", { name: "Material Usage" });
     expect(within(section).getAllByRole("columnheader").map((cell) => cell.textContent))
-      .toEqual(["Serial Number / Šifra", "Product", "Quantity"]);
+      .toEqual(["Serial Number", "Product", "Quantity"]);
     expect(within(section).getByText("0000042")).toBeInTheDocument();
     expect(within(section).getByText("Archived Control Module")).toBeInTheDocument();
     expect(within(section).getByText("18446744073709551614")).toBeInTheDocument();

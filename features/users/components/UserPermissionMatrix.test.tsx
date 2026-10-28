@@ -14,11 +14,11 @@ import UserPermissionMatrix from "./UserPermissionMatrix";
 const groupLabels = [
   "Dashboard",
   "Projects",
-  "Nabavka",
-  "Dobavljači",
-  "Skladište",
+  "Procurement",
+  "Suppliers",
+  "Inventory",
   "Finished Product Calculator",
-  "Radni Nalozi",
+  "Work Orders",
   "Archive",
 ];
 
@@ -49,6 +49,24 @@ function permissionMatrix(): UserPermissionMatrixItem[] {
 afterEach(cleanup);
 
 describe("UserPermissionMatrix", () => {
+  it("displays legacy backend Procurement metadata in English without changing grants or keys", () => {
+    const permission: UserPermissionMatrixItem = {
+      permissionKey: "procurement.view", module: "procurement",
+      label: "View Nabavka", description: "View Nabavka requests.", granted: false,
+    };
+    const onPermissionChange = vi.fn();
+    render(<UserPermissionMatrix permissions={[permission]} isAdminTarget={false}
+      onPermissionChange={onPermissionChange} />);
+
+    const checkbox = screen.getByRole("checkbox", { name: "View Procurement" });
+    expect(screen.getByText("View Procurement requests.")).toBeInTheDocument();
+    expect(screen.queryByText(/Nabavka/)).not.toBeInTheDocument();
+    fireEvent.click(checkbox);
+    expect(onPermissionChange).toHaveBeenCalledWith("procurement.view", true);
+    expect(permission).toEqual({ permissionKey: "procurement.view", module: "procurement",
+      label: "View Nabavka", description: "View Nabavka requests.", granted: false });
+  });
+
   it("renders all delegable permissions once in canonical group order", () => {
     const onPermissionChange = vi.fn();
 

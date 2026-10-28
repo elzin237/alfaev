@@ -10,14 +10,20 @@ const PERMISSION_GROUPS: ReadonlyArray<{
 }> = [
   { module: "dashboard", label: "Dashboard" },
   { module: "projects", label: "Projects" },
-  { module: "procurement", label: "Nabavka" },
-  { module: "suppliers", label: "Dobavljači" },
-  { module: "inventory", label: "Skladište" },
+  { module: "procurement", label: "Procurement" },
+  { module: "suppliers", label: "Suppliers" },
+  { module: "inventory", label: "Inventory" },
   { module: "pcb", label: "Finished Product Calculator" },
-  { module: "work_orders", label: "Radni Nalozi" },
+  { module: "work_orders", label: "Work Orders" },
   { module: "archive", label: "Archive" },
   { module: "test_calculator", label: "Test Calculator" },
 ];
+
+// Legacy permission metadata is immutable backend configuration, not business
+// content. Translate its display copy without changing permission keys/grants.
+function permissionDisplayText(value: string): string {
+  return value.replace(/\bNabavka\b/g, "Procurement");
+}
 
 export interface UserPermissionMatrixProps {
   permissions: readonly UserPermissionMatrixItem[];
@@ -79,7 +85,7 @@ function UserPermissionMatrix({
                   >
                     <input
                       type="checkbox"
-                      aria-label={permission.label}
+                      aria-label={permissionDisplayText(permission.label)}
                       checked={permission.granted}
                       disabled={isReadOnly}
                       onChange={(event) => {
@@ -92,10 +98,10 @@ function UserPermissionMatrix({
                     />
                     <span>
                       <span className="block text-sm font-semibold text-zinc-800">
-                        {permission.label}
+                        {permissionDisplayText(permission.label)}
                       </span>
                       <span className="mt-0.5 block text-xs leading-5 text-zinc-500">
-                        {permission.description}
+                        {permissionDisplayText(permission.description)}
                       </span>
                     </span>
                   </label>

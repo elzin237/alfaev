@@ -13,7 +13,7 @@ import {
 } from "./fixedAssetService";
 
 const formSchema = z.object({
-  name: z.string().trim().min(1, "Naziv is required."),
+  name: z.string().trim().min(1, "Name is required."),
   category: fixedAssetCategorySchema,
   purchaseDate: z.iso.date(),
   quantity: z.string().refine(
@@ -84,13 +84,13 @@ function FixedAssetFormDialog({ open, asset, onClose, onSubmit, onSuccess }: Pro
         className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-6 shadow-xl">
         <h2 id={titleId} className="text-xl font-bold">{asset ? "Edit Asset" : "Add Asset"}</h2>
         <form noValidate onSubmit={(event) => void submit(event)} className="mt-5 space-y-4">
-          <label className="block text-sm font-medium">Naziv
+          <label className="block text-sm font-medium">Name
             <input {...nameRegistration} ref={(element) => {
               nameRegistration.ref(element); nameRef.current = element;
             }} className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
             {errors.name && <span role="alert" className="text-red-700">{errors.name.message}</span>}
           </label>
-          <label className="block text-sm font-medium">Kategorija
+          <label className="block text-sm font-medium">Category
             <select {...register("category")} className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2">
               {fixedAssetCategorySchema.options.map((value) => (
                 <option key={value} value={value}>{fixedAssetCategoryLabels[value]}</option>
@@ -98,12 +98,12 @@ function FixedAssetFormDialog({ open, asset, onClose, onSubmit, onSuccess }: Pro
             </select>
             {errors.category && <span role="alert" className="text-red-700">Select a category.</span>}
           </label>
-          <label className="block text-sm font-medium">Datum nabavke
+          <label className="block text-sm font-medium">Purchase Date
             <input type="date" {...register("purchaseDate")}
               className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
             {errors.purchaseDate && <span role="alert" className="text-red-700">Select a valid date.</span>}
           </label>
-          <label className="block text-sm font-medium">Količina
+          <label className="block text-sm font-medium">Quantity
             <input type="text" inputMode="numeric" {...register("quantity")}
               className="mt-1 w-full rounded-xl border border-zinc-300 px-3 py-2" />
             {errors.quantity && <span role="alert" className="text-red-700">{errors.quantity.message}</span>}

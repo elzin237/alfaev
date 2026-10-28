@@ -6,9 +6,9 @@ const uuid = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 export const fixedAssetCategorySchema = z.enum(["oprema", "uredjaji", "alati"]);
 export type FixedAssetCategory = z.infer<typeof fixedAssetCategorySchema>;
 export const fixedAssetCategoryLabels: Record<FixedAssetCategory, string> = {
-  oprema: "Oprema",
-  uredjaji: "Uređaji",
-  alati: "Alati",
+  oprema: "Equipment",
+  uredjaji: "Devices",
+  alati: "Tools",
 };
 
 export function normalizeFixedAssetQuantity(input: string): string | null {

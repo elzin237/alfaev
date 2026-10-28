@@ -75,13 +75,12 @@ function LoginPage() {
               </div>
 
               <h2 className="text-4xl font-semibold leading-tight lg:text-6xl">
-                Centralizovano upravljanje projektima, proizvodnjom i
-                dokumentacijom.
+                Centralized project, production and documentation management.
               </h2>
 
               <p className="mt-8 max-w-xl text-lg leading-relaxed text-zinc-400 lg:text-xl">
-                Jedinstveno radno okruženje za planiranje, praćenje i kontrolu
-                svih poslovnih procesa unutar ALFA PROTEH sistema.
+                A unified workspace for planning, monitoring and managing
+                all business processes across ALFA PROTEH.
               </p>
             </div>
           </div>
@@ -97,11 +96,11 @@ function LoginPage() {
           <div className="w-full max-w-xl">
             <div className="mb-10">
               <h2 className="text-4xl font-bold text-zinc-900 lg:text-5xl">
-                Prijava u sistem
+                Log In
               </h2>
 
               <p className="mt-3 text-base text-zinc-500 lg:text-lg">
-                Unesite svoje pristupne podatke za nastavak rada.
+                Enter your credentials to continue.
               </p>
             </div>
 
@@ -122,7 +121,7 @@ function LoginPage() {
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     required
-                    placeholder="Unesite email adresu"
+                    placeholder="Enter your email address"
                     className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
                   />
                 </div>
@@ -132,7 +131,7 @@ function LoginPage() {
                     htmlFor="login-password"
                     className="mb-3 block text-sm font-semibold uppercase tracking-wide text-zinc-600"
                   >
-                    Lozinka
+                    Password
                   </label>
 
                   <input
@@ -142,7 +141,7 @@ function LoginPage() {
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     required
-                    placeholder="Unesite lozinku"
+                    placeholder="Enter your password"
                     className="w-full rounded-2xl border border-zinc-300 px-5 py-5 text-lg outline-none transition focus:border-red-600 focus:ring-4 focus:ring-red-600/10"
                   />
                 </div>
@@ -162,7 +161,7 @@ function LoginPage() {
                   aria-busy={isSubmitting}
                   className="w-full rounded-2xl bg-red-600 py-5 text-lg font-semibold text-white transition hover:-translate-y-0.5 hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:translate-y-0 disabled:hover:bg-red-600"
                 >
-                  {isSubmitting ? "Prijava u toku..." : "Prijava u sistem"}
+                  {isSubmitting ? "Logging in..." : "Log In"}
                 </button>
               </form>
             </div>

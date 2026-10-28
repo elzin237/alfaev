@@ -153,7 +153,7 @@ function ProjectQuickSearch({ enabled }: ProjectQuickSearchProps) {
             if (normalizedQuery) setOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Pretraga projekata..."
+          placeholder="Search projects..."
           className="min-w-0 flex-1 bg-transparent text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
         />
       </div>

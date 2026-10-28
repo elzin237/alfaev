@@ -5,6 +5,6 @@ test("redirects unauthenticated users to login", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/login$/);
   await expect(
-    page.getByRole("heading", { name: "Prijava u sistem" }),
+    page.getByRole("heading", { name: "Log In" }),
   ).toBeVisible();
 });

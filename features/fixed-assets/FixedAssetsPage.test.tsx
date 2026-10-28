@@ -50,12 +50,12 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("Osnovna sredstva page", () => {
+describe("Fixed Assets page", () => {
   it("renders all categories, quantity, date and archived read-only state", () => {
     render(<FixedAssetsPage />);
-    expect(screen.getByText("Oprema")).toBeInTheDocument();
-    expect(screen.getByText("Uređaji")).toBeInTheDocument();
-    expect(screen.getByText("Alati")).toBeInTheDocument();
+    expect(screen.getByText("Equipment")).toBeInTheDocument();
+    expect(screen.getByText("Devices")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toBeInTheDocument();
     expect(screen.getAllByText("2026-09-16")).toHaveLength(3);
     expect(screen.getAllByText("42")).toHaveLength(3);
     const oldRow = screen.getByText("Old device").closest("tr")!;
@@ -94,17 +94,17 @@ describe("Osnovna sredstva page", () => {
     render(<FixedAssetsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Add Asset" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Naziv is required.")).toBeInTheDocument();
+    expect(await screen.findByText("Name is required.")).toBeInTheDocument();
     expect(mocks.create).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("textbox", { name: /Naziv/ }), { target: { value: "  Lathe  " } });
-    fireEvent.change(screen.getByLabelText(/Datum nabavke/), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Name/ }), { target: { value: "  Lathe  " } });
+    fireEvent.change(screen.getByLabelText(/Purchase Date/), { target: { value: "2026-09-16" } });
     for (const invalid of ["0", "-1", "1.5", "9007199254740992"]) {
-      fireEvent.change(screen.getByRole("textbox", { name: /Količina/ }), { target: { value: invalid } });
+      fireEvent.change(screen.getByRole("textbox", { name: /Quantity/ }), { target: { value: invalid } });
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
       expect(await screen.findByText(/Enter a positive whole-number quantity/)).toBeInTheDocument();
       expect(mocks.create).not.toHaveBeenCalled();
     }
-    fireEvent.change(screen.getByRole("textbox", { name: /Količina/ }), { target: { value: "0007" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Quantity/ }), { target: { value: "0007" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith({
       name: "Lathe", category: "oprema", purchaseDate: "2026-09-16", quantity: "7",
@@ -121,9 +121,9 @@ describe("Osnovna sredstva page", () => {
     mocks.create.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     render(<FixedAssetsPage />);
     fireEvent.click(screen.getByRole("button", { name: "Add Asset" }));
-    fireEvent.change(screen.getByLabelText("Naziv"), { target: { value: "Lathe" } });
-    fireEvent.change(screen.getByLabelText("Datum nabavke"), { target: { value: "2026-09-16" } });
-    fireEvent.change(screen.getByLabelText("Količina"), { target: { value: "2" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Lathe" } });
+    fireEvent.change(screen.getByLabelText("Purchase Date"), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByLabelText("Quantity"), { target: { value: "2" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1));
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
@@ -134,8 +134,8 @@ describe("Osnovna sredstva page", () => {
   it("edits only active assets and preserves safe error display", async () => {
     render(<FixedAssetsPage />);
     fireEvent.click(within(screen.getByText("Lathe").closest("tr")!).getByRole("button", { name: "Edit" }));
-    expect(screen.getByLabelText("Naziv")).toHaveValue("Lathe");
-    expect(screen.getByLabelText("Količina")).toHaveValue("42");
+    expect(screen.getByLabelText("Name")).toHaveValue("Lathe");
+    expect(screen.getByLabelText("Quantity")).toHaveValue("42");
     mocks.update.mockResolvedValueOnce({ ok: false, error: "Archived Fixed Assets cannot be changed." });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Archived Fixed Assets cannot be changed.")).toBeInTheDocument();

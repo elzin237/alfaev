@@ -92,7 +92,7 @@ function Topbar({
           </h2>
 
           <p className="hidden text-sm text-zinc-500 sm:block">
-            Dobrodošli u ALFAEV sistem
+            Welcome to AlfaEV
           </p>
         </div>
       </div>
@@ -127,7 +127,7 @@ function Topbar({
           className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-sm font-medium text-zinc-700 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <LogOut size={18} />
-          <span>{isSigningOut ? "Odjava u toku..." : "Odjava"}</span>
+          <span>{isSigningOut ? "Logging out..." : "Log Out"}</span>
         </button>
 
         {logoutError && (

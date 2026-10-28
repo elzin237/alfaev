@@ -83,7 +83,7 @@ function FixedAssetsPage() {
       <div className="overflow-x-auto rounded-3xl border border-zinc-200 bg-white shadow-sm">
         <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
           <thead className="bg-zinc-50"><tr>
-            {["Naziv", "Kategorija", "Datum nabavke", "Količina", "Status", "Actions"].map((label) => (
+            {["Name", "Category", "Purchase Date", "Quantity", "Status", "Actions"].map((label) => (
               <th key={label} scope="col" className="px-4 py-3 font-semibold text-zinc-600">{label}</th>
             ))}
           </tr></thead>
@@ -113,7 +113,7 @@ function FixedAssetsPage() {
   }
 
   return <section className="space-y-6">
-    <PageHeader title="Osnovna sredstva"
+    <PageHeader title="Fixed Assets"
       description="Admin-only company assets, separate from warehouse Inventory."
       actions={<button type="button" onClick={() => { setEditing(null); setFormOpen(true); }}
         className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white">Add Asset</button>} />

@@ -164,7 +164,7 @@ describe("ProcurementPage", () => {
     const table = screen.getByRole("table");
 
     for (const heading of [
-      "Serial Number / Šifra",
+      "Serial Number",
       "Name",
       "Supplier",
       "Requested Quantity",

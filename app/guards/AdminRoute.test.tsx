@@ -153,7 +153,7 @@ describe("AdminRoute", () => {
     expect(routeMocks.hasPermission).not.toHaveBeenCalled();
   });
 
-  it("wraps Dokumentacija without consulting delegable permissions", () => {
+  it("wraps Documentation without consulting delegable permissions", () => {
     routeMocks.useAuth.mockReturnValue(createAuthState({
       profile: { ...profile, isAdmin: false }, isAdmin: false,
     }));

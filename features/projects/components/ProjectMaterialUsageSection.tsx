@@ -55,7 +55,7 @@ export function ProjectMaterialUsageSection({ projectId }: { projectId: string }
         <table className="min-w-[36rem] w-full divide-y divide-zinc-200 text-left text-sm">
           <thead className="sticky top-0 z-10 bg-zinc-50 text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
-              <th scope="col" className="px-4 py-3">Serial Number / Šifra</th>
+              <th scope="col" className="px-4 py-3">Serial Number</th>
               <th scope="col" className="px-4 py-3">Product</th>
               <th scope="col" className="px-4 py-3">Quantity</th>
             </tr>

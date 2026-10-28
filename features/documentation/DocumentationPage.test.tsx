@@ -60,12 +60,12 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe("Dokumentacija page", () => {
+describe("Documentation page", () => {
   it("shows exact decimal text, localized categories and read-only archived PDF actions", () => {
     render(<DocumentationPage />);
     expect(screen.getAllByText("12345678901234567890.123456789")).toHaveLength(2);
-    expect(screen.getByText("Uvoz")).toBeInTheDocument();
-    expect(screen.getByText("Izvoz")).toBeInTheDocument();
+    expect(screen.getByText("Import")).toBeInTheDocument();
+    expect(screen.getByText("Export")).toBeInTheDocument();
     const archivedRow = screen.getByText("Old export").closest("tr");
     expect(archivedRow).toHaveTextContent("Archived");
     expect(archivedRow).toHaveTextContent("Open");
@@ -258,9 +258,9 @@ describe("Dokumentacija page", () => {
     mocks.upload.mockResolvedValue({ ok: false, error: "PDF failed." });
     render(<DocumentationPage />);
     fireEvent.click(screen.getByRole("button", { name: "Add Document" }));
-    fireEvent.change(screen.getByLabelText("Naziv"), { target: { value: "  Invoice  " } });
-    fireEvent.change(screen.getByLabelText("Datum"), { target: { value: "2026-09-16" } });
-    fireEvent.change(screen.getByLabelText("Iznos"), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "  Invoice  " } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "0" } });
     const file = new File(["%PDF-"], "invoice.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("PDF (optional)"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
@@ -277,15 +277,15 @@ describe("Dokumentacija page", () => {
     render(<DocumentationPage />);
     fireEvent.click(screen.getByRole("button", { name: "Add Document" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Naziv is required.")).toBeInTheDocument();
+    expect(await screen.findByText("Name is required.")).toBeInTheDocument();
     expect(mocks.create).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("textbox", { name: /Naziv/ }), { target: { value: "Invoice" } });
-    fireEvent.change(screen.getByLabelText(/Datum/), { target: { value: "2026-09-16" } });
-    fireEvent.change(screen.getByRole("textbox", { name: /Iznos/ }), { target: { value: "-1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Name/ }), { target: { value: "Invoice" } });
+    fireEvent.change(screen.getByLabelText(/Date/), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Amount/ }), { target: { value: "-1" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("Enter a non-negative decimal amount.")).toBeInTheDocument();
     expect(mocks.create).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("textbox", { name: /Iznos/ }), { target: { value: "1e3" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Amount/ }), { target: { value: "1e3" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(mocks.create).not.toHaveBeenCalled();
   });
@@ -294,9 +294,9 @@ describe("Dokumentacija page", () => {
     mocks.update.mockResolvedValue({ ok: true, value: active.id });
     render(<DocumentationPage />);
     fireEvent.click(within(screen.getByText("Import invoice").closest("tr")!).getByRole("button", { name: "Edit" }));
-    expect(screen.getByLabelText("Naziv")).toHaveValue("Import invoice");
-    expect(screen.getByLabelText("Iznos")).toHaveValue(active.amount);
-    fireEvent.change(screen.getByLabelText("Iznos"), { target: { value: "0001.2300" } });
+    expect(screen.getByLabelText("Name")).toHaveValue("Import invoice");
+    expect(screen.getByLabelText("Amount")).toHaveValue(active.amount);
+    fireEvent.change(screen.getByLabelText("Amount"), { target: { value: "0001.2300" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.update).toHaveBeenCalledWith(active.id, expect.objectContaining({ amount: "1.23" })));
     expect(mocks.invalidateQueries).toHaveBeenCalledWith({ queryKey: ["documentation", "admin-profile", "list"], exact: true });

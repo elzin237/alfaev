@@ -387,7 +387,7 @@ describe("InventoryPage", () => {
     const search = screen.getByRole("searchbox", { name: "Search Products" });
     expect(search).toHaveAttribute(
       "placeholder",
-      "Name, Category, Serial Number / Šifra, or Catalog Number",
+      "Name, Category, Serial Number, or Catalog Number",
     );
     expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith(
       "10000000-0000-4000-8000-000000000001", "", true,

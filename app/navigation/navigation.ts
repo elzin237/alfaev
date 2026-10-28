@@ -42,19 +42,19 @@ export const NAVIGATION = [
     access: { kind: "permission", permission: "projects.view" },
   },
   {
-    label: "Nabavka",
+    label: "Procurement",
     path: "/procurement",
     icon: ShoppingCart,
     access: { kind: "permission", permission: "procurement.view" },
   },
   {
-    label: "Dobavljači",
+    label: "Suppliers",
     path: "/suppliers",
     icon: Truck,
     access: { kind: "permission", permission: "suppliers.view" },
   },
   {
-    label: "Skladište",
+    label: "Inventory",
     path: "/inventory",
     icon: Warehouse,
     access: {
@@ -73,19 +73,19 @@ export const NAVIGATION = [
     access: { kind: "permission", permission: "pcb.view" },
   },
   {
-    label: "Radni Nalozi",
+    label: "Work Orders",
     path: "/work-orders",
     icon: ClipboardList,
     access: { kind: "permission", permission: "work_orders.view" },
   },
   {
-    label: "Dokumentacija",
+    label: "Documentation",
     path: "/documents",
     icon: FileText,
     access: { kind: "admin" },
   },
   {
-    label: "Osnovna sredstva",
+    label: "Fixed Assets",
     path: "/fixed-assets",
     icon: PackageCheck,
     access: { kind: "admin" },

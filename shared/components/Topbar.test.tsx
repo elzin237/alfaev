@@ -119,7 +119,7 @@ describe("Topbar", () => {
     topbarMocks.signOut.mockResolvedValue({ ok: true, value: undefined });
 
     render(<Topbar setSidebarOpen={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Odjava" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log Out" }));
 
     await waitFor(() => {
       expect(topbarMocks.signOut).toHaveBeenCalledOnce();
@@ -141,13 +141,13 @@ describe("Topbar", () => {
     );
 
     render(<Topbar setSidebarOpen={vi.fn()} />);
-    const logoutButton = screen.getByRole("button", { name: "Odjava" });
+    const logoutButton = screen.getByRole("button", { name: "Log Out" });
 
     fireEvent.click(logoutButton);
     fireEvent.click(logoutButton);
 
     expect(topbarMocks.signOut).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "Odjava u toku..." }))
+    expect(screen.getByRole("button", { name: "Logging out..." }))
       .toBeDisabled();
 
     resolveSignOut?.({ ok: true, value: undefined });
@@ -168,7 +168,7 @@ describe("Topbar", () => {
     });
 
     render(<Topbar setSidebarOpen={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Odjava" }));
+    fireEvent.click(screen.getByRole("button", { name: "Log Out" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The authentication request could not be completed.",

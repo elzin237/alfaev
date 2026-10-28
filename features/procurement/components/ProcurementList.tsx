@@ -22,7 +22,7 @@ function ProcurementList({
           <thead className="bg-zinc-50">
             <tr>
               {[
-                "Serial Number / Šifra",
+                "Serial Number",
                 "Name",
                 "Supplier",
                 "Requested Quantity",

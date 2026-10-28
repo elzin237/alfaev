@@ -239,7 +239,7 @@ describe("DashboardPage", () => {
     expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Nabavka" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Procurement" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Activity" }))
       .not.toBeInTheDocument();
@@ -265,7 +265,7 @@ describe("DashboardPage", () => {
       "The Dashboard overview could not be loaded.",
     );
     for (const widget of [
-      "Projects", "Recent Work Orders", "Nabavka", "Inventory",
+      "Projects", "Recent Work Orders", "Procurement", "Inventory",
       "Recent Activity", "Upcoming Calendar",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
@@ -340,7 +340,7 @@ describe("DashboardPage", () => {
     expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Nabavka" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Procurement" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Activity" }))
       .toBeInTheDocument();
@@ -351,7 +351,7 @@ describe("DashboardPage", () => {
   it("renders Procurement without Inventory when only that Task 142 section is authorized", () => {
     setSuccess(null, null, procurement, null, null, calendar);
     renderPage();
-    expect(screen.getByRole("region", { name: "Nabavka" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Procurement" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
     expect(screen.queryByText("No operational overview is available for your account."))
       .not.toBeInTheDocument();
@@ -360,7 +360,7 @@ describe("DashboardPage", () => {
   it("renders Inventory without Procurement when only that Task 142 section is authorized", () => {
     setSuccess(null, null, null, inventory, null, calendar);
     renderPage();
-    expect(screen.queryByRole("region", { name: "Nabavka" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Procurement" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
     expect(screen.queryByText("No operational overview is available for your account."))
       .not.toBeInTheDocument();
@@ -370,7 +370,7 @@ describe("DashboardPage", () => {
     setSuccess(null, null, null, null, null, { upcoming: [] });
     renderPage();
     for (const widget of [
-      "Projects", "Recent Work Orders", "Nabavka", "Inventory", "Recent Activity",
+      "Projects", "Recent Work Orders", "Procurement", "Inventory", "Recent Activity",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
     }

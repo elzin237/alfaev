@@ -257,7 +257,7 @@ function CreateExistingProductRequestDialog({
                 setValue("productId", "", { shouldValidate: false });
               }}
               disabled={isSubmitting}
-              placeholder="Product Name or Serial Number / Šifra"
+              placeholder="Product Name or Serial Number"
               className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:bg-zinc-100"
             />
           </div>
@@ -313,7 +313,7 @@ function CreateExistingProductRequestDialog({
             <dl className="grid gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:grid-cols-2">
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Serial Number / Šifra
+                  Serial Number
                 </dt>
                 <dd className="mt-1 font-mono font-semibold text-zinc-900">
                   {selectedProduct.serialNumber}
@@ -355,7 +355,7 @@ function CreateExistingProductRequestDialog({
             <dl className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
               <div>
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Serial Number / Šifra
+                  Serial Number
                 </dt>
                 <dd className="mt-1 font-semibold text-zinc-900">
                   Not assigned

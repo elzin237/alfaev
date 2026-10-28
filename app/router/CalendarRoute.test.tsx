@@ -87,7 +87,7 @@ describe("Calendar route", () => {
     setAuthState({ isActive: false, session: null });
     renderCalendarRoute();
 
-    expect(screen.getByRole("heading", { name: "Prijava u sistem" }))
+    expect(screen.getByRole("heading", { name: "Log In" }))
       .toBeInTheDocument();
     expect(screen.queryByText("Calendar route content")).not.toBeInTheDocument();
   });
@@ -96,7 +96,7 @@ describe("Calendar route", () => {
     setAuthState({ isActive: false, isAdmin: true });
     renderCalendarRoute();
 
-    expect(await screen.findByRole("heading", { name: "Prijava u sistem" }))
+    expect(await screen.findByRole("heading", { name: "Log In" }))
       .toBeInTheDocument();
     expect(calendarRouteMocks.signOut).toHaveBeenCalledOnce();
     expect(screen.queryByText("Calendar route content")).not.toBeInTheDocument();
