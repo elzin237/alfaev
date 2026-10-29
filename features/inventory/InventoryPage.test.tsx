@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 // Legacy list regression coverage; the StockHealthProductList suite exercises ON.
 vi.mock("../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:()=>false}));
+vi.mock("./components/AllInventoryView", () => ({ default: () => <p>Combined Inventory view</p> }));
 
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
@@ -164,7 +165,7 @@ function setHookState(options: {
   });
 }
 
-function renderInventory(path = "/inventory") {
+function renderInventory(path = "/inventory?warehouse=raw_materials") {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <InventoryPage />
@@ -203,6 +204,18 @@ afterEach(() => {
 });
 
 describe("InventoryPage", () => {
+  it("defaults to All, disables the separate selected-warehouse reads and navigates back to Raw", () => {
+    renderInventory("/inventory");
+    expect(screen.getByRole("tab", { name: /^All$/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Combined Inventory view")).toBeInTheDocument();
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("10000000-0000-4000-8000-000000000001", "", false);
+    expect(inventoryMocks.useInventoryCommitments).toHaveBeenLastCalledWith(false, "raw_materials");
+    fireEvent.click(screen.getByRole("tab", { name: "Raw Materials" }));
+    expect(screen.queryByText("Combined Inventory view")).not.toBeInTheDocument();
+    expect(inventoryMocks.useProducts).toHaveBeenLastCalledWith("10000000-0000-4000-8000-000000000001", "", true);
+    fireEvent.click(screen.getByRole("tab", { name: /^All$/ }));
+    expect(screen.getByText("Combined Inventory view")).toBeInTheDocument();
+  });
   it("shows trusted hard commitments for an FG-only viewer without Raw/Customs/Project access",()=>{
     setHookState({productsData:{ok:true,value:[archivedProduct]}});
     inventoryMocks.useInventoryWarehouseAccess.mockReturnValue({authorizedWarehouses:[{

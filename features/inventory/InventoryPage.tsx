@@ -12,6 +12,7 @@ import BrandList from "./components/BrandList";
 import ComponentImportDialog from "./components/ComponentImportDialog";
 import InventoryStockHealthProductList from "./components/InventoryStockHealthProductList";
 import InventoryWarehouseTabs from "./components/InventoryWarehouseTabs";
+import AllInventoryView from "./components/AllInventoryView";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useComponentImport } from "./hooks/useComponentImport";
 import { useProductCreation } from "./hooks/useProductCreation";
@@ -29,6 +30,7 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
   const warehouseAccess = useInventoryWarehouseAccess();
   const legacyAccess = useInventoryLegacyViewPermission();
   const requestedWarehouse = findInventoryWarehouse(searchParams.get("warehouse"));
+  const allSelected = !searchParams.has("warehouse") || searchParams.get("warehouse") === "all";
   const selectedWarehouse = warehouseAccess.authorizedWarehouses.find(
     (warehouse) => warehouse.id === requestedWarehouse?.id,
   ) ?? warehouseAccess.authorizedWarehouses[0];
@@ -41,14 +43,14 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
   const productsQuery = useProducts(
     selectedWarehouse?.id ?? "",
     debouncedProductSearch,
-    Boolean(selectedWarehouse),
+    Boolean(selectedWarehouse) && !allSelected,
   );
   const canShowCommitments = Boolean(
     selectedWarehouse?.code === "finished_goods" ||
       (warehouseAccess.canReadProjectAvailability && selectedWarehouse?.code === "raw_materials"),
   );
   const commitmentsQuery = useInventoryCommitments(
-    canShowCommitments,
+    canShowCommitments && !allSelected,
     selectedWarehouse?.code,
   );
   const archiveLockRef = useRef(false);
@@ -64,13 +66,13 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedWarehouse || requestedWarehouse?.id === selectedWarehouse.id) return;
+    if (allSelected || !selectedWarehouse || requestedWarehouse?.id === selectedWarehouse.id) return;
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.set("warehouse", selectedWarehouse.code);
       return next;
     }, { replace: true });
-  }, [requestedWarehouse?.id, selectedWarehouse, setSearchParams]);
+  }, [allSelected, requestedWarehouse?.id, selectedWarehouse, setSearchParams]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -145,6 +147,8 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
     productContent = (
       <ErrorState title="Access denied" message="You do not have permission to view any Inventory warehouse." />
     );
+  } else if (allSelected) {
+    productContent = <AllInventoryView key={warehouseAccess.profileId} authorizedWarehouseIds={warehouseAccess.authorizedWarehouses.map(w => w.id)} search={debouncedProductSearch} testsEnabled={testCommitmentsEnabledAfterActivation} />;
   } else if (productsQuery.isPending) {
     productContent = <LoadingState message="Loading Products..." />;
   } else if (productsQuery.isError || !productsQuery.data?.ok) {
@@ -290,6 +294,8 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
           <InventoryWarehouseTabs
             warehouses={warehouseAccess.authorizedWarehouses}
             selectedWarehouseId={selectedWarehouse.id}
+            allSelected={allSelected}
+            onSelectAll={() => setSearchParams(current => { const next = new URLSearchParams(current); next.set("warehouse", "all"); return next; })}
             onSelect={(warehouse) => {
               setSearchParams((current) => {
                 const next = new URLSearchParams(current);
@@ -304,7 +310,7 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
             Products
           </h2>
           <p className="mt-1 text-sm leading-6 text-zinc-500">
-            {selectedWarehouse
+            {allSelected ? "Active and archived Products across authorized warehouses, with separate warehouse quantities." : selectedWarehouse
               ? `Active and archived Products with ${selectedWarehouse.label} stock.`
               : "Active and archived Inventory Products."}
           </p>

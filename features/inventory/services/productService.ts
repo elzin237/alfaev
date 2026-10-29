@@ -1,4 +1,5 @@
 import { supabase } from "../../../lib/supabase/client";
+import { INVENTORY_WAREHOUSES } from "../inventoryWarehouses";
 
 export type ProductKind = "component" | "pcb_finished_good";
 
@@ -503,6 +504,35 @@ export async function listProducts(
   } catch {
     return listFailure();
   }
+}
+
+// All Inventory must never silently accept the PostgREST row cap. One bounded
+// response supplies rows and an exact total; larger catalogs fail closed.
+export async function listCompleteWarehouseProducts(
+  warehouseId: string, search: string, token: string, signal?: AbortSignal,
+): Promise<ProductListResult> {
+  const unavailable: ProductListResult = { ok: false, error: { code: "product_list_failed",
+    message: "A complete warehouse list could not be verified. All Inventory requires an exact, untruncated response (up to 1,000 Products per warehouse)." } };
+  if (!token || !INVENTORY_WAREHOUSES.some(warehouse => warehouse.id === warehouseId)) return unavailable;
+  const controller = new AbortController(), abort = () => controller.abort();
+  const timer = setTimeout(abort, 15_000);
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  try {
+    const { data, error, count } = await supabase.rpc("search_inventory_products_by_warehouse", {
+      p_warehouse_id: warehouseId, p_search: search.trim() || null,
+    }, { count: "exact" }).select("id,warehouse_id,serial_number,name,category,brand_name,product_kind,is_active,quantity::text")
+      .setHeader("Authorization", `Bearer ${token}`).range(0, 999).abortSignal(controller.signal);
+    if (error || !Array.isArray(data) || !Number.isSafeInteger(count) || count !== data.length || count > 1000) return unavailable;
+    const ids = new Set<string>(), products: ProductListItem[] = [];
+    for (const row of data) {
+      if (!isProductRow(row) || row.warehouse_id !== warehouseId || ids.has(row.id) || typeof row.quantity !== "string") return unavailable;
+      const product = mapProduct(row); if (!product) return unavailable;
+      ids.add(row.id); products.push(product);
+    }
+    return { ok: true, value: products.sort((a, b) => a.serialNumber.localeCompare(b.serialNumber) || a.id.localeCompare(b.id)) };
+  } catch { return unavailable; }
+  finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
 }
 
 export async function getProduct(
