@@ -130,18 +130,20 @@ function ProjectDetailPage() {
 
     content = (
       <>
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
+          <section aria-label="Project overview" className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Project
+                  Project Overview
                 </p>
-                <h2 className="mt-2 text-2xl font-bold text-zinc-900">
-                  {project.name}
-                </h2>
+                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                  <h2 className="min-w-0 text-2xl font-bold tracking-tight text-zinc-900 [overflow-wrap:anywhere] sm:text-3xl">
+                    {project.name}
+                  </h2>
+                  <StatusBadge label={status.label} tone={status.tone} />
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
+              {(showEdit || showCancel || showReopen) && <div role="group" aria-label="Project actions" className="flex shrink-0 flex-wrap items-center gap-2">
                 {showEdit && (
                   <button
                     type="button"
@@ -150,7 +152,7 @@ function ProjectDetailPage() {
                       setActionError(null);
                       setIsEditOpen(true);
                     }}
-                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                    className="min-h-11 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
                   >
                     Edit Project
                   </button>
@@ -163,7 +165,7 @@ function ProjectDetailPage() {
                       setActionError(null);
                       setIsCancelOpen(true);
                     }}
-                    className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                    className="min-h-11 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
                   >
                     Cancel Project
                   </button>
@@ -176,76 +178,63 @@ function ProjectDetailPage() {
                       setActionError(null);
                       setIsReopenOpen(true);
                     }}
-                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                    className="min-h-11 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
                   >
                     Reopen Project
                   </button>
                 )}
-              </div>
+              </div>}
             </div>
 
-            <dl className="mt-8 grid gap-6 sm:grid-cols-2">
-              <div>
+            <dl className="mt-5 grid min-w-0 gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:grid-cols-3 sm:gap-5">
+              <div className="min-w-0">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                   Customer
                 </dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900 [overflow-wrap:anywhere]">
                   {project.customerName}
                 </dd>
               </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Status
-                </dt>
-                <dd className="mt-2">
-                  <StatusBadge label={status.label} tone={status.tone} />
-                </dd>
-              </div>
-              <div>
+              <div className="min-w-0 sm:border-l sm:border-zinc-200 sm:pl-5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                   Start Date
                 </dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900">
                   <time dateTime={project.startDate}>
                     {formatProjectDate(project.startDate)}
                   </time>
                 </dd>
               </div>
-              <div>
+              <div className="min-w-0 sm:border-l sm:border-zinc-200 sm:pl-5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                   Delivery Date
                 </dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900">
                   <time dateTime={project.deliveryDate}>
                     {formatProjectDate(project.deliveryDate)}
                   </time>
                 </dd>
               </div>
             </dl>
-          </section>
-
-          <aside className="h-fit rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold text-zinc-900">Project record</h2>
-            <dl className="mt-5 space-y-5">
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <dl aria-label="Project record metadata" className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs leading-5 text-zinc-500">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">
                   Created
                 </dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900">
-                  {formatTimestamp(project.createdAt)}
+                <dd>
+                  <time dateTime={project.createdAt}>{formatTimestamp(project.createdAt)}</time>
                 </dd>
               </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">
                   Last updated
                 </dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900">
-                  {formatTimestamp(project.updatedAt)}
+                <dd>
+                  <time dateTime={project.updatedAt}>{formatTimestamp(project.updatedAt)}</time>
                 </dd>
               </div>
             </dl>
-          </aside>
-        </div>
+          </section>
 
         <ProjectPlanningSection projectId={project.id} status={project.status} />
 

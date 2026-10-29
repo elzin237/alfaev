@@ -117,18 +117,24 @@ function ProductDetailPage() {
     const product = productQuery.data.value;
     content = (
       <>
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
-          <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="font-mono text-sm font-semibold text-zinc-500">
-                  {product.serialNumber}
-                </p>
-                <h2 className="mt-2 text-2xl font-bold text-zinc-900">
-                  {product.name}
-                </h2>
+          <section aria-label="Product overview" className="min-w-0 rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Product Overview</p>
+                  <p className="inline-flex min-w-0 flex-wrap items-center gap-x-2 text-sm">
+                    <span className="text-xs font-medium text-zinc-500">Serial</span>
+                    <span className="font-mono font-semibold text-zinc-700 [overflow-wrap:anywhere]">{product.serialNumber}</span>
+                  </p>
+                </div>
+                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+                  <h2 className="min-w-0 text-2xl font-bold tracking-tight text-zinc-900 [overflow-wrap:anywhere] sm:text-3xl">
+                    {product.name}
+                  </h2>
+                  <StatusBadge label={product.isActive ? "Active" : "Archived"} tone={product.isActive ? "success" : "neutral"} />
+                </div>
               </div>
-              <div className="flex flex-wrap gap-3">
+              {(canEdit || canArchive) && <div role="group" aria-label="Product actions" className="flex shrink-0 flex-wrap items-center gap-2">
                 {canEdit && (
                   <button
                     type="button"
@@ -137,7 +143,7 @@ function ProductDetailPage() {
                       setActionError(null);
                       setIsEditOpen(true);
                     }}
-                    className="rounded-xl bg-zinc-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
+                    className="min-h-11 rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-zinc-400 focus:ring-offset-2"
                   >
                     Edit Product
                   </button>
@@ -150,68 +156,50 @@ function ProductDetailPage() {
                       setActionError(null);
                       setIsArchiveOpen(true);
                     }}
-                    className="rounded-xl bg-red-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
+                    className="min-h-11 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-offset-2"
                   >
                     Archive Product
                   </button>
                 )}
-              </div>
+              </div>}
             </div>
 
-            <dl className="mt-8 grid gap-6 sm:grid-cols-2">
-              <div>
+            <dl className="mt-5 grid min-w-0 gap-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:grid-cols-3 sm:gap-5">
+              <div className="min-w-0">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Category</dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">{product.category}</dd>
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900 [overflow-wrap:anywhere]">{product.category}</dd>
               </div>
-              <div>
+              <div className="min-w-0 sm:border-l sm:border-zinc-200 sm:pl-5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Brand</dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900 [overflow-wrap:anywhere]">
                   {product.brandName ?? "Not assigned"}
                   {product.brandName && product.brandIsActive === false
                     ? " (archived)"
                     : ""}
                 </dd>
               </div>
-              <div>
+              <div className="min-w-0 sm:border-l sm:border-zinc-200 sm:pl-5">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Product kind</dt>
-                <dd className="mt-2 text-sm font-medium text-zinc-900">{formatProductKind(product.productKind)}</dd>
+                <dd className="mt-1 text-sm font-semibold leading-6 text-zinc-900">{formatProductKind(product.productKind)}</dd>
               </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Serial Number</dt>
-                <dd className="mt-2 font-mono text-sm font-semibold text-zinc-900">{product.serialNumber}</dd>
+            </dl>
+            <dl aria-label="Product record metadata" className="mt-4 flex flex-wrap gap-x-6 gap-y-2 text-xs leading-5 text-zinc-500">
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">Created</dt>
+                <dd><time dateTime={product.createdAt}>{formatDate(product.createdAt)}</time></dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">Last updated</dt>
+                <dd><time dateTime={product.updatedAt}>{formatDate(product.updatedAt)}</time></dd>
+              </div>
+              <div className="flex flex-wrap gap-x-2">
+                <dt className="font-medium">Archived at</dt>
+                <dd>
+                  {product.archivedAt ? <time dateTime={product.archivedAt}>{formatDate(product.archivedAt)}</time> : "Not archived"}
+                </dd>
               </div>
             </dl>
           </section>
-
-          <aside className="h-fit rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <h2 className="text-xl font-bold text-zinc-900">Product status</h2>
-            <dl className="mt-5 space-y-5">
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Status</dt>
-                <dd className="mt-2">
-                  <StatusBadge
-                    label={product.isActive ? "Active" : "Archived"}
-                    tone={product.isActive ? "success" : "neutral"}
-                  />
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Created</dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900">{formatDate(product.createdAt)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Last updated</dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900">{formatDate(product.updatedAt)}</dd>
-              </div>
-              <div>
-                <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Archived at</dt>
-                <dd className="mt-1 text-sm font-medium text-zinc-900">
-                  {product.archivedAt ? formatDate(product.archivedAt) : "Not archived"}
-                </dd>
-              </div>
-            </dl>
-          </aside>
-        </div>
 
         <InventoryBalanceSection
           productId={product.id}

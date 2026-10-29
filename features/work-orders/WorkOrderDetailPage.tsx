@@ -118,7 +118,7 @@ function WorkOrderDetailPage() {
           description={workOrder.status === "draft"
             ? "Draft Work Order"
             : "Finished Work Order"}
-          actions={(
+          actions={productionContext && workOrder.status === "draft" ? undefined : (
             <StatusBadge
               label={workOrder.status === "draft" ? "Draft" : "Finished"}
               tone={workOrder.status === "draft" ? "neutral" : "success"}

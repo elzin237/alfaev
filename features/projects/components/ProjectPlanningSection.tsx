@@ -35,6 +35,18 @@ const inputClass =
 const compactActionClass =
   "whitespace-nowrap rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-300";
 const postgresBigintMax = "9223372036854775807";
+const requirementColumns = [
+  { label: "Serial", description: "Product Serial Number." },
+  { label: "Product", description: "Product name for this requirement." },
+  { label: "Kind", description: "Product kind: Component or Finished PCB Product." },
+  { label: "Category", description: "Product category." },
+  { label: "Brand", description: "Product brand." },
+  { label: "Required", description: "Required quantity for this requirement row in the current Project Product group." },
+  { label: "Committed", description: "Committed to Projects (global): outstanding Project demand for components; active hard FG Project reservations for Finished PCB Products. Not specific to this requirement row." },
+  { label: "Available", description: "Available After Commitments (global): Raw + Customs physical stock minus outstanding Project demand for components; FG physical stock minus hard FG Project reservations for Finished PCB Products. Before Test holds." },
+  { label: "Shortage", description: "Global shared shortage across Projects: outstanding demand minus Raw + Customs physical stock for components, or FG physical stock for Finished PCB Products, never below zero. Not specific to this requirement row." },
+];
+const requirementNumericClass = "w-24 min-w-24 whitespace-nowrap px-2 py-3 text-center tabular-nums";
 
 function isPositiveBigintQuantity(value: string): boolean {
   return /^[1-9][0-9]*$/.test(value) &&
@@ -81,6 +93,7 @@ function RequirementsTable({
   onRemove: (requirement: ProjectRequirement) => void;
 }) {
   const quantityErrorId = useId();
+  const columnHelpId = useId();
   const quantityInputRef = useRef<HTMLInputElement>(null);
   const editTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const returnFocusRequirementIdRef = useRef<string | null>(null);
@@ -153,24 +166,24 @@ function RequirementsTable({
       data-testid={`requirements-scroll-${group.id}`}
       className="mt-4 max-h-[28rem] max-w-full overflow-auto rounded-2xl border border-zinc-200"
     >
-      <table className="w-full min-w-[72rem] divide-y divide-zinc-200 text-sm">
+      <table className="min-w-full divide-y divide-zinc-200 text-sm">
         <caption className="caption-top px-3 py-2 text-left text-xs text-zinc-600">
           Requirements for {group.name}. Committed to Projects, Available After Commitments and Shortage are global figures across Projects, not this requirement row.
         </caption>
         <thead className="sticky top-0 z-10 bg-zinc-50">
           <tr>
-            {[
-              "Serial Number", "Product", "Kind", "Category", "Brand",
-              "Required",
-              "Committed to Projects", "Available After Commitments", "Shortage",
-              ...(canManage ? ["Actions"] : []),
-            ].map((heading) => (
+            {[...requirementColumns, ...(canManage ? [{ label: "Actions", description: "Edit or remove this requirement, subject to your permissions." }] : [])].map(({ label, description }, index) => (
               <th
-                key={heading}
+                key={label}
                 scope="col"
-                className="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500"
+                aria-label={label}
+                aria-describedby={`${columnHelpId}-${index}`}
+                className="whitespace-nowrap px-2 py-3 text-center text-xs font-semibold uppercase tracking-wide text-zinc-500"
               >
-                {heading}
+                <span tabIndex={0} title={description} aria-describedby={`${columnHelpId}-${index}`} className="group relative inline-block rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500">
+                  {label}
+                  <span role="tooltip" id={`${columnHelpId}-${index}`} className={`pointer-events-none absolute top-full z-20 mt-2 hidden w-56 rounded-lg bg-zinc-900 px-3 py-2 text-left text-xs font-normal normal-case leading-5 whitespace-normal tracking-normal text-white shadow-lg group-hover:block group-focus:block ${index < 2 ? "left-0" : "right-0"}`}>{description}</span>
+                </span>
               </th>
             ))}
           </tr>
@@ -190,19 +203,19 @@ function RequirementsTable({
             const shortage = deficit === undefined ? undefined : deficit > 0n ? deficit : 0n;
             return (
               <tr key={requirement.id} className="text-zinc-700">
-                <th scope="row" className="whitespace-nowrap px-3 py-3 text-left font-mono font-semibold text-zinc-900">
+                <th scope="row" className="w-24 min-w-24 whitespace-nowrap px-2 py-3 text-center font-mono font-semibold text-zinc-900">
                   {requirement.serialNumber}
                 </th>
-                <td className="px-3 py-3 font-semibold text-zinc-900">
+                <td className="min-w-40 max-w-56 px-2 py-3 text-center font-semibold text-zinc-900 [overflow-wrap:anywhere]">
                   {requirement.productName}
                 </td>
-                <td className="whitespace-nowrap px-3 py-3">{kindLabel(requirement.productKind)}</td>
-                <td className="px-3 py-3">{context?.category ?? "Unavailable"}</td>
-                <td className="px-3 py-3">{context ? context.brandName ?? "—" : "Unavailable"}</td>
-                <td className="whitespace-nowrap px-3 py-3 font-semibold tabular-nums text-zinc-900">
+                <td className="whitespace-nowrap px-2 py-3 text-center">{kindLabel(requirement.productKind)}</td>
+                <td className="max-w-40 px-2 py-3 text-center [overflow-wrap:anywhere]">{context?.category ?? "Unavailable"}</td>
+                <td className="max-w-40 px-2 py-3 text-center [overflow-wrap:anywhere]">{context ? context.brandName ?? "—" : "Unavailable"}</td>
+                <td className={`${requirementNumericClass} font-semibold text-zinc-900`}>
                   {canManage && editingRequirementId === requirement.id ? (
                     <form
-                      className="flex min-w-max items-start gap-2"
+                      className="flex min-w-max items-start justify-center gap-2"
                       aria-busy={saving}
                       onSubmit={(event) => void saveQuantity(event, requirement)}
                       onKeyDown={(event) => {
@@ -227,7 +240,7 @@ function RequirementsTable({
                           disabled={saving}
                           aria-invalid={Boolean(quantityError)}
                           aria-describedby={quantityError ? quantityErrorId : undefined}
-                          className="w-24 rounded-lg border border-zinc-300 px-2 py-1.5 text-sm font-semibold tabular-nums outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                          className="w-24 rounded-lg border border-zinc-300 px-2 py-1.5 text-center text-sm font-semibold tabular-nums outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                           onChange={(event) => {
                             setQuantity(event.target.value);
                             setQuantityError(null);
@@ -263,9 +276,9 @@ function RequirementsTable({
                     </button>
                   ) : requirement.requiredQuantity.toString()}
                 </td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">{committed?.toString() ?? "Unavailable"}</td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">{available?.toString() ?? "Unavailable"}</td>
-                <td className="whitespace-nowrap px-3 py-3 tabular-nums">
+                <td className={requirementNumericClass}>{committed?.toString() ?? "Unavailable"}</td>
+                <td className={requirementNumericClass}>{available?.toString() ?? "Unavailable"}</td>
+                <td className={requirementNumericClass}>
                   {shortage === undefined ? "Unavailable" : (
                     <span className={shortage > 0n ? "inline-flex rounded-lg bg-red-50 px-2 py-1 font-semibold text-red-700" : undefined}>
                       {shortage.toString()}
@@ -273,8 +286,8 @@ function RequirementsTable({
                   )}
                 </td>
                 {canManage && (
-                  <td className="whitespace-nowrap px-3 py-3">
-                    <div className="flex gap-2">
+                  <td className="whitespace-nowrap px-2 py-3 text-center">
+                    <div className="flex justify-center gap-2">
                       <button
                         type="button"
                         className={compactActionClass}

@@ -197,6 +197,48 @@ afterEach(() => {
 });
 
 describe("ProductDetailPage", () => {
+  it("combines Product identity, one status badge, attributes and record metadata in a compact overview", () => {
+    renderDetail();
+    const overview = screen.getByRole("region", { name: "Product overview" });
+    expect(overview).toHaveClass("min-w-0", "p-5", "sm:p-6");
+    const title = within(overview).getByRole("heading", { name: activeProduct.name });
+    expect(title).toHaveClass("text-2xl", "font-bold", "sm:text-3xl", "[overflow-wrap:anywhere]");
+    expect(title.parentElement).toContainElement(within(overview).getByText("Active"));
+    expect(within(overview).getAllByText("Active")).toHaveLength(1);
+    expect(within(overview).getAllByText(activeProduct.serialNumber)).toHaveLength(1);
+    expect(within(overview).getByText(activeProduct.serialNumber)).toHaveClass("font-mono", "font-semibold");
+    const fields = overview.querySelector("dl")!;
+    expect(fields).toHaveClass("grid", "sm:grid-cols-3", "gap-4");
+    for (const label of ["Category", "Brand", "Product kind"]) expect(within(fields).getByText(label)).toBeInTheDocument();
+    const metadata = within(overview).getByLabelText("Product record metadata");
+    expect(metadata).toHaveClass("flex-wrap", "text-xs", "text-zinc-500");
+    expect(metadata.querySelector(`time[datetime="${activeProduct.createdAt}"]`)).toHaveTextContent(new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(activeProduct.createdAt)));
+    expect(metadata.querySelector(`time[datetime="${activeProduct.updatedAt}"]`)).toBeInTheDocument();
+    expect(within(metadata).getByText("Not archived")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Product status" })).not.toBeInTheDocument();
+    expect(overview.querySelector("aside")).toBeNull();
+    const actions = within(overview).getByRole("group", { name: "Product actions" });
+    expect(actions).toHaveClass("flex-wrap", "items-center", "gap-2");
+    expect(within(actions).getByRole("button", { name: "Edit Product" })).toHaveClass("bg-zinc-900", "focus:ring-2");
+    expect(within(actions).getByRole("button", { name: "Archive Product" })).toHaveClass("bg-red-600", "focus:ring-2");
+    expect(overview).not.toContainElement(screen.getByRole("region", { name: "Product Inventory balance" }));
+    expect(overview).not.toContainElement(screen.getByRole("tablist", { name: "Inventory warehouses" }));
+  });
+
+  it("wraps long Product names and attributes while preserving archived history read-only", () => {
+    const name = "LONG-PRODUCT-".repeat(15), category = "Long Product category ".repeat(12);
+    const archivedAt = "2026-09-03T12:00:00.000Z";
+    setHookState({ canEdit: false, product: { ...activeProduct, name, category, isActive: false, archivedAt } });
+    renderDetail();
+    const overview = screen.getByRole("region", { name: "Product overview" });
+    expect(within(overview).getByRole("heading", { name })).toHaveClass("min-w-0", "[overflow-wrap:anywhere]");
+    expect(within(overview).getByText(category.trim())).toHaveClass("[overflow-wrap:anywhere]");
+    expect(within(overview).getAllByText("Archived")).toHaveLength(1);
+    expect(overview.querySelector(`time[datetime="${archivedAt}"]`)).toBeInTheDocument();
+    expect(within(overview).queryByRole("group", { name: "Product actions" })).not.toBeInTheDocument();
+    expect(within(overview).queryByRole("button")).not.toBeInTheDocument();
+  });
+
   it.each(INVENTORY_WAREHOUSES)("wires minimum configuration to the selected $label balance card", warehouse => {
     detailPageMocks.useInventoryWarehouseAccess.mockReturnValue({
       ...detailPageMocks.useInventoryWarehouseAccess(), authorizedWarehouses: INVENTORY_WAREHOUSES,
@@ -275,7 +317,7 @@ describe("ProductDetailPage", () => {
     renderDetail();
 
     expect(screen.getByRole("heading", { name: "Controller" })).toBeInTheDocument();
-    expect(screen.getAllByText("0000001")).toHaveLength(2);
+    expect(screen.getAllByText("0000001")).toHaveLength(1);
     expect(screen.getByText("Control")).toBeInTheDocument();
     expect(screen.getByText("Not assigned")).toBeInTheDocument();
     expect(screen.getByText("Component")).toBeInTheDocument();

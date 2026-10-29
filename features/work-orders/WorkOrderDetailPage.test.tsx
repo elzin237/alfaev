@@ -28,6 +28,11 @@ const pageMocks = vi.hoisted(() => ({
 vi.mock("./hooks/useWorkOrderDetail", () => ({
   useWorkOrderDetail: pageMocks.useWorkOrderDetail,
 }));
+// Keep Draft workflow tests independent of the locally activated availability
+// feature's AuthProvider. Its enabled states have their own focused suite.
+vi.mock("../../app/config/workOrderAvailabilityActivation", () => ({
+  isWorkOrderAvailabilityEnabled: () => false,
+}));
 
 import WorkOrderDetailPage from "./WorkOrderDetailPage";
 import WorkOrderDraftShell from "./components/WorkOrderDraftShell";
@@ -193,6 +198,23 @@ afterEach(() => {
 });
 
 describe("WorkOrderDetailPage", () => {
+  it("uses the compact overview only for saved PCB Drafts and shows one real Draft status badge", () => {
+    pageMocks.useWorkOrderDetail.mockReturnValue(successfulHook({
+      productionContextQuery: { isPending: false, isError: false, data: { ok: true, value: {
+        workOrderId, pcbCardId: "00000000-0000-4000-8000-000000000060", pcbCardName: "Controller",
+        bomVersionId: "00000000-0000-4000-8000-000000000061", bomVersionNumber: "2", plannedQuantity: "10",
+        outputProductId: "00000000-0000-4000-8000-000000000062", outputSerialNumber: "0000999", outputProductName: "Controller", actualGoodQuantity: null,
+      } } },
+    }));
+    renderPage();
+    const overview = screen.getByRole("region", { name: "Work Order overview" });
+    expect(within(overview).getByRole("heading", { name: "Controller" })).toBeInTheDocument();
+    expect(screen.getAllByText("Draft")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: "Draft details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "PCB production plan" })).not.toBeInTheDocument();
+    expect(overview).not.toContainElement(screen.getByRole("heading", { name: "Materials" }));
+    expect(screen.getByRole("link", { name: "Back to Work Orders" })).toHaveAttribute("href", "/work-orders");
+  });
   it("renders a frozen PCB production Draft and submits exact actual-good quantity", async () => {
     const onFinishConfirm = vi.fn().mockResolvedValue({ ok: true, value: {
       ...finishSuccess, projectId: null,
@@ -229,7 +251,8 @@ describe("WorkOrderDetailPage", () => {
       onDelete={vi.fn()}
       onFinishConfirm={onFinishConfirm}
     />);
-    expect(await screen.findByText("PCB production plan")).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Work Order overview" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Draft details" })).not.toBeInTheDocument();
     expect(screen.getByText("General Stock")).toBeInTheDocument();
     expect(screen.getByText(
       "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory.",
@@ -528,6 +551,8 @@ describe("WorkOrderDetailPage", () => {
       .toBeInTheDocument();
     expect(screen.queryByText("RN-1999-9999")).not.toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Draft details" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Work Order overview" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Back to Work Orders" }))
       .toHaveAttribute("href", "/work-orders");
   });

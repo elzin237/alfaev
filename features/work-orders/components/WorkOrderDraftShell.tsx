@@ -6,6 +6,7 @@ import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
 import WorkOrderDeleteDraftDialog from "./WorkOrderDeleteDraftDialog";
 import WorkOrderFinishDialog from "./WorkOrderFinishDialog";
 import WorkOrderMaterialsAvailability from "./WorkOrderMaterialsAvailability";
+import PcbWorkOrderOverview from "./PcbWorkOrderOverview";
 import type { DraftWorkOrderMaterial } from "./WorkOrderMaterialRow";
 import type {
   DraftWorkOrderDeleteResult,
@@ -408,18 +409,7 @@ function WorkOrderDraftShell({
 
   return (
     <div className="space-y-6">
-      {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
-        <h2 className="text-xl font-bold text-zinc-900">PCB production plan</h2>
-        <p className="mt-2 text-sm text-sky-900">The production plan and BOM materials are locked. Additional materials may be added to the Draft.</p>
-        <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <ReadOnlyValue label="Finished Product" value={productionContext.pcbCardName} />
-          <ReadOnlyValue label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
-          <ReadOnlyValue label="Planned Quantity" value={productionContext.plannedQuantity} />
-          <ReadOnlyValue label="Output Product" value={`${productionContext.outputSerialNumber} — ${productionContext.outputProductName}`} />
-          <ReadOnlyValue label="Destination" value={workOrder.projectName ?? "General Stock"} />
-        </dl>
-      </section>}
-      <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+      {productionContext ? <PcbWorkOrderOverview workOrder={workOrder} productionContext={productionContext} /> : <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 className="text-xl font-bold text-zinc-900">Draft details</h2>
         {canEdit && !productionContext ? (
           <form id="work-order-draft-form" className="mt-6 grid gap-6 lg:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void handleSave(); }}>
@@ -439,7 +429,7 @@ function WorkOrderDraftShell({
         ) : (
           <dl className="mt-6 grid gap-6 sm:grid-cols-2"><ReadOnlyValue label="Project" value={workOrder.projectName ?? "Not selected"} /><ReadOnlyValue label="Customer" value={workOrder.customerName} /><div className="sm:col-span-2"><ReadOnlyValue label="Short Description" value={workOrder.description} /></div></dl>
         )}
-      </section>
+      </section>}
 
       <section aria-labelledby="work-order-materials-heading" className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 id="work-order-materials-heading" className="text-xl font-bold text-zinc-900">Materials</h2>

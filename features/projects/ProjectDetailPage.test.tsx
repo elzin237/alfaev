@@ -133,6 +133,43 @@ afterEach(() => {
 });
 
 describe("ProjectDetailPage", () => {
+  it("combines identity, status, dates and subtle record metadata in one compact overview", () => {
+    setQueryState({ canEdit: true, canCancel: true });
+    renderDetail();
+    const overview = screen.getByRole("region", { name: "Project overview" });
+    expect(overview).toHaveClass("min-w-0", "p-5", "sm:p-6");
+    const title = within(overview).getByRole("heading", { name: project.name });
+    expect(title).toHaveClass("font-bold", "text-2xl", "sm:text-3xl", "[overflow-wrap:anywhere]");
+    expect(title.parentElement).toContainElement(within(overview).getByText("Planned"));
+    expect(within(overview).getAllByText("Planned")).toHaveLength(1);
+    const fields = overview.querySelector("dl")!;
+    expect(fields).toHaveClass("grid", "sm:grid-cols-3", "gap-4");
+    for (const label of ["Customer", "Start Date", "Delivery Date"]) expect(within(fields).getByText(label)).toBeInTheDocument();
+    const metadata = within(overview).getByLabelText("Project record metadata");
+    expect(metadata).toHaveClass("flex-wrap", "text-xs", "text-zinc-500");
+    expect(metadata.querySelector(`time[datetime="${project.createdAt}"]`)).toHaveTextContent(new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(project.createdAt)));
+    expect(metadata.querySelector(`time[datetime="${project.updatedAt}"]`)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Project record" })).not.toBeInTheDocument();
+    expect(overview.querySelector("aside")).toBeNull();
+    const actions = within(overview).getByRole("group", { name: "Project actions" });
+    expect(actions).toHaveClass("flex-wrap", "items-center", "gap-2");
+    expect(within(actions).getByRole("button", { name: "Edit Project" })).toHaveClass("bg-zinc-900", "focus:ring-2");
+    expect(within(actions).getByRole("button", { name: "Cancel Project" })).toHaveClass("bg-red-600", "focus:ring-2");
+    expect(overview).not.toContainElement(screen.getByRole("region", { name: "Project Finished Goods" }));
+    expect(overview).not.toContainElement(screen.getByRole("region", { name: "Material Usage" }));
+  });
+
+  it("allows long identifiers and customer names to wrap without fixed-height cards", () => {
+    const name = "PROJECT-" + "LONG-IDENTIFIER-".repeat(12), customerName = "Long customer name ".repeat(12);
+    setQueryState({ data: { ok: true, value: { ...project, name, customerName } } });
+    renderDetail();
+    const overview = screen.getByRole("region", { name: "Project overview" });
+    expect(within(overview).getByRole("heading", { name })).toHaveClass("min-w-0", "[overflow-wrap:anywhere]");
+    expect(within(overview).getByText(customerName.trim())).toHaveClass("[overflow-wrap:anywhere]");
+    expect(within(overview).queryByRole("group", { name: "Project actions" })).not.toBeInTheDocument();
+    expect(overview).not.toHaveClass("h-fit", "h-full");
+  });
+
   it("mounts the read-only FG section only for an existing loaded Project, including closed history", () => {
     setQueryState({ data: { ok: true, value: { ...project, status: "completed" } } });
     const view = renderDetail();

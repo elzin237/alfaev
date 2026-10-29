@@ -7,6 +7,7 @@ import type {
   FinishedWorkOrderMovement,
 } from "../services/finishedWorkOrderService";
 import type { PcbProductionWorkOrderContext } from "../services/pcbProductionWorkOrderService";
+import FinishedPcbProductionSummary from "./FinishedPcbProductionSummary";
 
 interface FinishedWorkOrderViewProps {
   detail: FinishedWorkOrderDetail;
@@ -41,35 +42,32 @@ function FinishedWorkOrderView({
 }: FinishedWorkOrderViewProps) {
   return (
     <div className="space-y-6">
-      {productionContext && <section className="rounded-3xl border border-sky-200 bg-sky-50 p-6 shadow-sm sm:p-8">
-        <h2 className="text-xl font-bold text-zinc-900">PCB production result</h2>
-        <dl className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          <ReadOnlyField label="Finished Product" value={productionContext.pcbCardName} />
-          <ReadOnlyField label="BOM Version" value={`v${productionContext.bomVersionNumber}`} />
-          <ReadOnlyField label="Planned Quantity" value={productionContext.plannedQuantity} />
-          <ReadOnlyField label="Actual Completed" value={productionContext.actualGoodQuantity ?? "Not recorded"} />
-          <ReadOnlyField label="Output Product" value={`${productionContext.outputSerialNumber} — ${productionContext.outputProductName}`} />
-          <ReadOnlyField label="Destination" value={detail.projectName ?? "General Stock"} />
-        </dl>
-      </section>}
-      <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-        <h2 className="text-xl font-bold text-zinc-900">Work Order Details</h2>
-        <dl className="mt-6 grid gap-6 sm:grid-cols-2">
-          <ReadOnlyField label="Project" value={detail.projectName ?? "General Stock"} />
-          <ReadOnlyField label="Customer" value={detail.customerName ?? "Not required"} />
-          <ReadOnlyField
-            label="Finished Date"
-            value={dateTimeFormatter.format(new Date(detail.finishedAt))}
-          />
-          <ReadOnlyField
-            label="Finished By"
-            value={detail.finishedByFullName}
-          />
-          <div className="sm:col-span-2">
-            <ReadOnlyField label="Description" value={detail.description} />
-          </div>
-        </dl>
-      </section>
+      {productionContext ? (
+        <FinishedPcbProductionSummary
+          detail={detail}
+          productionContext={productionContext}
+          finishedDate={dateTimeFormatter.format(new Date(detail.finishedAt))}
+        />
+      ) : (
+        <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
+          <h2 className="text-xl font-bold text-zinc-900">Work Order Details</h2>
+          <dl className="mt-6 grid gap-6 sm:grid-cols-2">
+            <ReadOnlyField label="Project" value={detail.projectName ?? "General Stock"} />
+            <ReadOnlyField label="Customer" value={detail.customerName ?? "Not required"} />
+            <ReadOnlyField
+              label="Finished Date"
+              value={dateTimeFormatter.format(new Date(detail.finishedAt))}
+            />
+            <ReadOnlyField
+              label="Finished By"
+              value={detail.finishedByFullName}
+            />
+            <div className="sm:col-span-2">
+              <ReadOnlyField label="Description" value={detail.description} />
+            </div>
+          </dl>
+        </section>
+      )}
 
       <section aria-labelledby="finished-materials-heading" className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 id="finished-materials-heading" className="text-xl font-bold text-zinc-900">

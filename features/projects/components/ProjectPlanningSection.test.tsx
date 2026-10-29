@@ -123,6 +123,35 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe("ProjectPlanningSection", () => {
+  it("uses compact centered requirement columns with accessible global-figure descriptions", () => {
+    setPlanningState({ canManage: true });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("columnheader").map(header => header.getAttribute("aria-label"))).toEqual([
+      "Serial", "Product", "Kind", "Category", "Brand", "Required", "Committed", "Available", "Shortage", "Actions",
+    ]);
+    for (const header of within(table).getAllByRole("columnheader")) {
+      expect(header).toHaveClass("text-center", "px-2", "py-3", "whitespace-nowrap");
+      const help = header.querySelector("[tabindex='0']")!;
+      expect(help).toHaveAttribute("title"); expect(help).toHaveClass("focus-visible:outline-2");
+      expect(document.getElementById(help.getAttribute("aria-describedby")!)).toHaveAttribute("role", "tooltip");
+    }
+    expect(within(table).getByRole("columnheader", { name: "Committed" })).toHaveAccessibleDescription(/Committed to Projects \(global\).*hard FG Project reservations/);
+    expect(within(table).getByRole("columnheader", { name: "Available" })).toHaveAccessibleDescription(/Available After Commitments \(global\).*Raw \+ Customs.*FG physical/);
+    expect(within(table).getByRole("columnheader", { name: "Shortage" })).toHaveAccessibleDescription(/Global shared shortage.*Not specific to this requirement row/);
+    for (const record of within(table).getAllByRole("row").slice(1)) {
+      for (const cell of [within(record).getByRole("rowheader"), ...within(record).getAllByRole("cell")]) expect(cell).toHaveClass("text-center", "px-2", "py-3");
+      const cells = within(record).getAllByRole("cell");
+      for (const cell of cells.slice(4, 8)) expect(cell).toHaveClass("min-w-24", "tabular-nums");
+      expect(within(record).getByRole("button", { name: "Edit Requirement" }).parentElement).toHaveClass("justify-center");
+    }
+    expect(table).toHaveClass("min-w-full");
+    expect(table).not.toHaveClass("min-w-[72rem]");
+    expect(screen.getByTestId(`requirements-scroll-${groupId}`)).toHaveClass("overflow-auto", "max-h-[28rem]");
+    expect(mocks.updateRequirement).not.toHaveBeenCalled();
+  });
+
   it("shows compact requirement totals and starts collapsed", () => {
     render(<ProjectPlanningSection projectId={projectId} status="planned" />);
     const section = screen.getByRole("region", { name: "Products" });
@@ -174,8 +203,8 @@ describe("ProjectPlanningSection", () => {
     expect(toggle).toHaveAccessibleName("Hide requirements");
     const table = screen.getByRole("table");
     for (const heading of [
-      "Serial Number", "Product", "Kind", "Category", "Brand", "Required",
-      "Committed to Projects", "Available After Commitments", "Shortage",
+      "Serial", "Product", "Kind", "Category", "Brand", "Required",
+      "Committed", "Available", "Shortage",
     ]) {
       expect(within(table).getByRole("columnheader", { name: heading })).toBeInTheDocument();
     }
@@ -290,7 +319,7 @@ describe("ProjectPlanningSection", () => {
     expect(screen.getByRole("button", { name: "Edit required quantity for Relay" }))
       .toHaveTextContent(quantity);
     expect(screen.getByRole("status")).toHaveTextContent("Requirement quantity updated.");
-    expect(screen.queryByText(/Raw \+ Customs/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raw \+ Customs planning shortages:/)).not.toBeInTheDocument();
   });
 
   it("cancels inline quantity editing without mutation and restores trigger focus", async () => {
