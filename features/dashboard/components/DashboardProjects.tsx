@@ -5,6 +5,8 @@ import StatusBadge from "../../../shared/components/StatusBadge";
 import { getProjectStatusPresentation } from "../../projects/projectStatus";
 import type { DashboardProjectsSection } from "../services/dashboardService";
 import DashboardSectionHeader from "./DashboardSectionHeader";
+import DashboardEmptyState from "./DashboardEmptyState";
+import DashboardProjectDonut from "./DashboardProjectDonut";
 
 export interface DashboardProjectsProps {
   section: DashboardProjectsSection | null;
@@ -68,51 +70,30 @@ function DashboardProjects({ section }: DashboardProjectsProps) {
   return (
     <section
       aria-labelledby="dashboard-projects-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
+      className="h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
     >
       <DashboardSectionHeader
         actionLabel="View all projects"
         actionTo="/projects"
         icon={FolderKanban}
-        title="Projects"
+        title="Projects Overview"
         titleId="dashboard-projects-title"
       />
 
-      <div className="border-b border-zinc-100 px-5 py-4">
-        <div className="flex items-end justify-between gap-4">
-          <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">
-            Project status overview
-          </h3>
-          <p className="text-xs font-medium tabular-nums text-zinc-500">
-            {totalProjects} {totalProjects === 1 ? "project" : "projects"}
-          </p>
-        </div>
-        <div
-          role="img"
-          aria-label={`Project status distribution based on ${totalProjects} ${totalProjects === 1 ? "project" : "projects"}`}
-          className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-zinc-100 ring-1 ring-inset ring-zinc-200"
-        >
-          {totalProjects > 0 && statusCounts.map(({ key, label, segmentClassName }) => {
-            const count = section.statusCounts[key];
-            if (count === 0) return null;
-            return (
-              <span
-                key={key}
-                title={`${label}: ${count}`}
-                className={segmentClassName}
-                style={{ width: `${(count / totalProjects) * 100}%` }}
-              />
-            );
-          })}
-        </div>
-        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5">
+      <div className="grid gap-5 px-4 pb-4 @5xl:grid-cols-[minmax(15rem,.9fr)_minmax(0,1fr)]">
+      <div className="flex flex-wrap items-center justify-center gap-4 py-2">
+        <DashboardProjectDonut total={totalProjects} segments={statusCounts.map((status, index) => ({
+          label: status.label, value: section.statusCounts[status.key],
+          color: ["#0ea5e9", "#ef4444", "#fbbf24", "#10b981", "#a1a1aa"][index]!,
+        }))} />
+        <dl className="min-w-28 flex-1 space-y-2.5">
           {statusCounts.map(({ key, label, markerClassName }) => (
-            <div key={key} className="min-w-0">
-              <dt className="flex items-center gap-2 text-[0.68rem] font-bold uppercase tracking-wide text-zinc-500">
+            <div key={key} className="flex min-w-0 items-center justify-between gap-3">
+              <dt className="flex items-center gap-2 text-xs text-zinc-600">
                 <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${markerClassName}`} />
-                <span className="truncate">{label}</span>
+                <span className="break-words">{label}</span>
               </dt>
-              <dd className="mt-1 pl-4 text-lg font-bold leading-none tabular-nums text-zinc-950">
+              <dd className="text-xs font-bold tabular-nums text-zinc-800">
                 {section.statusCounts[key]}
               </dd>
             </div>
@@ -120,12 +101,12 @@ function DashboardProjects({ section }: DashboardProjectsProps) {
         </dl>
       </div>
 
-      <div className="px-5 py-4">
-        <h3 className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">
+      <div className="min-w-0">
+        <h3 className="mb-2 text-xs font-semibold text-zinc-700">
           Recent Projects
         </h3>
         {section.recent.length === 0 ? (
-          <p className="mt-3 text-sm text-zinc-500">No projects yet.</p>
+          <DashboardEmptyState icon={FolderKanban} title="No projects yet." description="Your authorized Project overview will appear here as work gets underway." />
         ) : (
           <ul className="mt-1.5 divide-y divide-zinc-100">
             {section.recent.map((project) => {
@@ -133,16 +114,16 @@ function DashboardProjects({ section }: DashboardProjectsProps) {
               return (
                 <li
                   key={project.id}
-                  className="grid gap-2 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center sm:gap-4"
+                  className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 basis-40">
                     <Link
                       to={`/projects/${project.id}`}
-                      className="rounded-sm font-semibold text-zinc-900 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
+                      className="break-words rounded-sm text-xs font-semibold text-zinc-900 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
                     >
                       {project.name}
                     </Link>
-                    <p className="mt-0.5 truncate text-sm text-zinc-500">
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-500">
                       {project.customerName}
                     </p>
                   </div>
@@ -156,6 +137,7 @@ function DashboardProjects({ section }: DashboardProjectsProps) {
             })}
           </ul>
         )}
+      </div>
       </div>
     </section>
   );

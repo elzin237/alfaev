@@ -45,7 +45,7 @@ describe("DashboardProjects", () => {
 
   it("renders every status count and human-readable recent status", () => {
     render(<DashboardProjects section={section} />, { wrapper: MemoryRouter });
-    const widget = screen.getByRole("region", { name: "Projects" });
+    const widget = screen.getByRole("region", { name: "Projects Overview" });
 
     for (const [label, count] of [
       ["Planned", "1"],
@@ -100,7 +100,7 @@ describe("DashboardProjects", () => {
     });
     expect(screen.getByRole("img", {
       name: "Project status distribution based on 15 projects",
-    }).children).toHaveLength(5);
+    }).querySelectorAll("[data-project-segment]")).toHaveLength(5);
 
     rerender(<DashboardProjects section={{
       statusCounts: {
@@ -114,6 +114,6 @@ describe("DashboardProjects", () => {
     }} />);
     expect(screen.getByRole("img", {
       name: "Project status distribution based on 0 projects",
-    }).children).toHaveLength(0);
+    }).querySelectorAll("[data-project-segment]")).toHaveLength(0);
   });
 });

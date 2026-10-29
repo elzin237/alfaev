@@ -1,4 +1,4 @@
-import { CheckCircle2, ShoppingCart } from "lucide-react";
+import { ShoppingCart } from "lucide-react";
 
 import StatusBadge from "../../../shared/components/StatusBadge";
 import { getProcurementStatusDisplay } from "../../procurement/procurementStatus";
@@ -20,42 +20,26 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
   return (
     <section
       aria-labelledby="dashboard-procurement-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
+      className="h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
     >
       <DashboardSectionHeader
         actionLabel="View all"
         actionTo="/procurement"
         icon={ShoppingCart}
-        title="Procurement"
+        title="Procurement Requests"
         titleId="dashboard-procurement-title"
       />
 
-      <div className="border-b border-zinc-100 bg-zinc-50/60 px-5 py-4">
-        <dl className="flex items-center justify-between gap-4">
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-[0.08em] text-zinc-500">
-              Unresolved
-            </dt>
-            <dd className="mt-1 text-3xl font-bold leading-none tabular-nums text-zinc-950">
-              {section.unresolvedCount}
-            </dd>
+      <div className="px-4 pb-3">
+        <div className="mb-3 rounded-lg bg-slate-50 px-4 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-500">
+            <span>Requests over time</span><span className="flex gap-3"><span className="flex items-center gap-1"><i aria-hidden="true" className="size-2 rounded-full bg-blue-500" />Created</span><span className="flex items-center gap-1"><i aria-hidden="true" className="size-2 rounded-full bg-emerald-500" />Resolved</span></span>
           </div>
-          {section.unresolvedCount === 0 && (
-            <span
-              aria-hidden="true"
-              className="flex size-10 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100"
-            >
-              <CheckCircle2 className="size-5" strokeWidth={1.8} />
-            </span>
-          )}
-        </dl>
-      </div>
-
-      <div className="px-5 py-4">
+          <p className="py-5 text-center text-xs leading-5 text-zinc-500">Time-series data unavailable.<br />A trusted lifecycle aggregate is required.</p>
+        </div>
+        <p className="mb-2 text-[11px] font-semibold text-zinc-500">Unresolved requests · Recently updated</p>
         {section.unresolved.length === 0 ? (
-          <p className="text-sm text-zinc-500">
-            No unresolved procurement requests.
-          </p>
+          <p className="py-3 text-xs text-zinc-500">No unresolved procurement requests.</p>
         ) : (
           <ul className="divide-y divide-zinc-100">
             {section.unresolved.map((request) => {
@@ -63,10 +47,10 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
               return (
                 <li
                   key={request.id}
-                  className="grid gap-3 py-3.5 lg:grid-cols-[minmax(0,1fr)_auto_auto] lg:items-center lg:gap-4"
+                  className="flex min-w-0 flex-wrap items-start justify-between gap-2 py-2 text-xs"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-zinc-900">
+                  <div className="min-w-0 flex-1 basis-40">
+                    <p className="break-words font-semibold text-zinc-900">
                       {request.requestedName}
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
@@ -77,7 +61,7 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
                     </p>
                   </div>
 
-                  <dl className="grid grid-cols-3 gap-3 text-xs">
+                  <dl className="grid w-full min-w-0 grid-cols-3 gap-3 text-xs">
                     {[
                       ["Requested", request.requestedQuantity],
                       ["Delivered", request.deliveredQuantity],
@@ -85,7 +69,7 @@ function DashboardProcurement({ section }: DashboardProcurementProps) {
                     ].map(([label, quantity]) => (
                       <div key={label}>
                         <dt className="text-zinc-500">{label}</dt>
-                        <dd className="mt-0.5 font-semibold tabular-nums text-zinc-900">
+                        <dd className="mt-0.5 break-all font-semibold tabular-nums text-zinc-900">
                           {quantity}
                         </dd>
                       </div>

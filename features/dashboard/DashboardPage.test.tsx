@@ -1,6 +1,12 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
+// Preserve coverage of the legacy Dashboard while the separate activated panels
+// suite verifies the released Low Stock path and authorization boundaries.
+vi.mock("../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:()=>false}));
+vi.mock("./hooks/useDashboardRawCatalog", () => ({
+  useDashboardRawCatalog: (products: unknown[]) => ({ products, status: "ready", query: {} }),
+}));
 
 const mocks = vi.hoisted(() => ({ refetch: vi.fn(), useDashboard: vi.fn() }));
 
@@ -150,6 +156,20 @@ afterEach(() => {
 });
 
 describe("DashboardPage", () => {
+  it("uses the reference row order, preserves every destination, and uses content-width grids", () => {
+    renderPage();
+    const projectPanel = screen.getByRole("region", { name: "Projects Overview" });
+    const inventoryPanel = screen.getByRole("region", { name: "Inventory Attention" });
+    const workPanel = screen.getByRole("region", { name: "Recent Work Orders" });
+    expect(inventoryPanel.compareDocumentPosition(projectPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(inventoryPanel.compareDocumentPosition(workPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Dashboard summary" })).toHaveClass("@4xl:grid-cols-4");
+    expect(screen.getByRole("heading", { name: "Warehouse Stock Overview" })).toBeInTheDocument();
+    for (const href of ["/projects", "/inventory", "/work-orders", "/procurement", "/archive", "/calendar"]) {
+      expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
+    }
+  });
+
   it("places Alerts in the content heading independently of Dashboard data", () => {
     mocks.useDashboard.mockReturnValue({
       data: undefined,
@@ -236,11 +256,11 @@ describe("DashboardPage", () => {
     renderPage();
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Dashboard...");
-    expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Projects Overview" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Procurement" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Procurement Requests" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Inventory Attention" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Activity" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Upcoming Calendar" }))
@@ -265,7 +285,7 @@ describe("DashboardPage", () => {
       "The Dashboard overview could not be loaded.",
     );
     for (const widget of [
-      "Projects", "Recent Work Orders", "Procurement", "Inventory",
+      "Projects Overview", "Recent Work Orders", "Procurement Requests", "Inventory Attention",
       "Recent Activity", "Upcoming Calendar",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
@@ -315,7 +335,7 @@ describe("DashboardPage", () => {
   it("preserves Projects when Work Orders are backend-hidden", () => {
     setSuccess(projects, null, null, null, null, calendar);
     renderPage();
-    expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projects Overview" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
     const summary = screen.getByRole("region", { name: "Dashboard summary" });
@@ -326,7 +346,7 @@ describe("DashboardPage", () => {
   it("preserves Work Orders when Projects are backend-hidden", () => {
     setSuccess(null, workOrders, null, null, null, calendar);
     renderPage();
-    expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Projects Overview" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
     const summary = screen.getByRole("region", { name: "Dashboard summary" });
@@ -337,11 +357,11 @@ describe("DashboardPage", () => {
   it("composes Activity and Calendar alongside every Task 141 and Task 142 widget", () => {
     renderPage();
     expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projects Overview" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Procurement" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Procurement Requests" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Inventory Attention" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Activity" }))
       .toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Upcoming Calendar" }))
@@ -351,8 +371,8 @@ describe("DashboardPage", () => {
   it("renders Procurement without Inventory when only that Task 142 section is authorized", () => {
     setSuccess(null, null, procurement, null, null, calendar);
     renderPage();
-    expect(screen.getByRole("region", { name: "Procurement" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Inventory" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Procurement Requests" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Inventory Attention" })).not.toBeInTheDocument();
     expect(screen.queryByText("No operational overview is available for your account."))
       .not.toBeInTheDocument();
   });
@@ -360,8 +380,8 @@ describe("DashboardPage", () => {
   it("renders Inventory without Procurement when only that Task 142 section is authorized", () => {
     setSuccess(null, null, null, inventory, null, calendar);
     renderPage();
-    expect(screen.queryByRole("region", { name: "Procurement" })).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Inventory" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Procurement Requests" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Inventory Attention" })).toBeInTheDocument();
     expect(screen.queryByText("No operational overview is available for your account."))
       .not.toBeInTheDocument();
   });
@@ -370,7 +390,7 @@ describe("DashboardPage", () => {
     setSuccess(null, null, null, null, null, { upcoming: [] });
     renderPage();
     for (const widget of [
-      "Projects", "Recent Work Orders", "Procurement", "Inventory", "Recent Activity",
+      "Projects Overview", "Recent Work Orders", "Procurement Requests", "Inventory Attention", "Recent Activity",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
     }

@@ -59,11 +59,11 @@ describe("DashboardProcurement", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders the authoritative unresolved count and all backend rows in order", () => {
+  it("keeps all backend rows in order without repeating the summary KPI", () => {
     render(<DashboardProcurement section={section} />, { wrapper: MemoryRouter });
 
-    const unresolvedLabel = screen.getByText("Unresolved");
-    expect(unresolvedLabel.nextElementSibling).toHaveTextContent("17");
+    expect(screen.queryByText("Unresolved", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByText("Unresolved requests · Recently updated")).toBeInTheDocument();
     const renderedNames = requests.map((request) =>
       screen.getByText(request.requestedName));
     expect(renderedNames.map((node) => node.textContent))
@@ -89,7 +89,7 @@ describe("DashboardProcurement", () => {
     expect(firstRequestRow).not.toBeNull();
     expect(within(firstRequestRow!).getByText("1", { selector: "dd" }))
       .toBeInTheDocument();
-    expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+    expect(screen.queryByText("Resolved", { selector: "span.inline-flex" })).not.toBeInTheDocument();
   });
 
   it("formats the updated timestamp and provides only the implemented list route", () => {
@@ -110,7 +110,7 @@ describe("DashboardProcurement", () => {
     );
     expect(screen.getByText("No unresolved procurement requests."))
       .toBeInTheDocument();
-    expect(screen.getByText("Unresolved").nextElementSibling).toHaveTextContent("0");
+    expect(screen.queryByText("Unresolved", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText(/supplier|contact|urgent|overdue|critical/i))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();

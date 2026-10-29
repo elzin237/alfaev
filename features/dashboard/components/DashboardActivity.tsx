@@ -2,6 +2,7 @@ import { Activity, History } from "lucide-react";
 
 import type { DashboardActivitySection } from "../services/dashboardService";
 import DashboardSectionHeader from "./DashboardSectionHeader";
+import DashboardEmptyState from "./DashboardEmptyState";
 
 export interface DashboardActivityProps {
   section: DashboardActivitySection | null;
@@ -18,7 +19,7 @@ function DashboardActivity({ section }: DashboardActivityProps) {
   return (
     <section
       aria-labelledby="dashboard-activity-title"
-      className="overflow-hidden rounded-2xl border border-zinc-200/90 bg-white shadow-[0_1px_2px_rgba(24,24,27,0.04),0_12px_30px_rgba(24,24,27,0.04)]"
+      className="h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
     >
       <DashboardSectionHeader
         actionLabel="View all activity"
@@ -28,35 +29,35 @@ function DashboardActivity({ section }: DashboardActivityProps) {
         titleId="dashboard-activity-title"
       />
 
-      <div className="px-5 py-4">
+      <div className="px-4 pb-3">
         {section.recent.length === 0 ? (
-          <p className="text-sm text-zinc-500">No recent activity.</p>
+          <DashboardEmptyState icon={Activity} title="No recent activity." description="Activity available to your account will appear here as your team works." />
         ) : (
           <ul className="divide-y divide-zinc-100">
             {section.recent.map((activity) => (
               <li
                 key={activity.auditLogId}
-                className="grid gap-2 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4"
+                className="flex min-w-0 flex-wrap items-start justify-between gap-x-2 gap-y-1 py-1.5"
               >
-                <div className="flex min-w-0 items-start gap-3">
+                <div className="flex min-w-0 flex-1 basis-48 items-start gap-3">
                   <span
                     aria-hidden="true"
-                    className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-zinc-500"
+                    className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-500"
                   >
                     <History className="size-3.5" strokeWidth={1.8} />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-semibold leading-5 text-zinc-900">
+                    <p className="break-words text-xs font-medium leading-4 text-zinc-800">
                       {activity.summary}
                     </p>
-                    <p className="mt-0.5 truncate text-xs text-zinc-500">
+                    <p className="mt-0.5 truncate text-[10px] text-zinc-500">
                       By <span className="font-medium text-zinc-700">{activity.actorFullName}</span>
                     </p>
                   </div>
                 </div>
                 <time
                   dateTime={activity.createdAt}
-                  className="text-xs text-zinc-500 sm:text-right"
+                  className="text-[10px] text-zinc-500 sm:text-right"
                 >
                   {dateTimeFormatter.format(new Date(activity.createdAt))}
                 </time>

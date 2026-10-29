@@ -12,20 +12,13 @@ function DashboardSummaryMetric({
   value,
 }: DashboardSummaryMetricProps) {
   return (
-    <div className="flex min-w-0 items-center gap-3 rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgba(24,24,27,0.04),0_8px_24px_rgba(24,24,27,0.035)]">
-      <span
-        aria-hidden="true"
-        className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 ring-1 ring-inset ring-red-100"
-      >
-        <Icon className="size-5" strokeWidth={1.8} />
+    <div className="flex min-w-0 items-center gap-4 rounded-xl border border-zinc-200/70 bg-white px-4 py-4 shadow-sm">
+      <span aria-hidden="true" className={`flex size-12 shrink-0 items-center justify-center rounded-2xl ${label === "Active Projects" ? "bg-emerald-50 text-emerald-600" : label === "Active Products" ? "bg-blue-50 text-blue-600" : label === "Unresolved Procurement" ? "bg-amber-50 text-amber-600" : "bg-red-50 text-red-600"}`}>
+        <Icon className="size-6" strokeWidth={1.8} />
       </span>
       <dl className="min-w-0">
-        <dt className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-zinc-500">
-          {label}
-        </dt>
-        <dd className="mt-0.5 text-2xl font-bold leading-none tabular-nums text-zinc-950">
-          {value}
-        </dd>
+        <dt className="break-words text-xs font-semibold leading-5 text-zinc-800">{label}</dt>
+        <dd className="mt-0.5 break-all text-3xl font-bold leading-none tracking-tight tabular-nums text-zinc-950">{value}</dd>
       </dl>
     </div>
   );
