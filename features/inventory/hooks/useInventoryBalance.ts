@@ -6,6 +6,7 @@ import { inventoryCommitmentsQueryKey } from "../inventoryCommitmentQueryKeys";
 import { inventoryMovementListQueryKey } from "../inventoryMovementQueryKeys";
 import { inventorySourceLotsQueryKey } from "../inventorySourceQueryKeys";
 import { productDetailQueryKey, productListQueryPrefix } from "../productQueryKeys";
+import { invalidatePhysicalStockHealth } from "../stockHealthQueryKeys";
 import { pcbBomDetailQueryPrefix, pcbCardListQueryKey } from "../../pcb/pcbQueryKeys";
 import {
   adjustInventory,
@@ -35,6 +36,7 @@ export function useInventoryBalance(
     const result = await adjustInventory(productId, warehouseId, input);
 
     if (result.ok) {
+      await invalidatePhysicalStockHealth(queryClient, profile?.id);
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: balanceQueryKey,
@@ -68,6 +70,7 @@ export function useInventoryBalance(
   async function transfer(input: InventoryTransferInput) {
     const result = await transferInventory(productId, warehouseId, input);
     if (result.ok) {
+      await invalidatePhysicalStockHealth(queryClient, profile?.id);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: listQueryPrefix }),
         queryClient.invalidateQueries({

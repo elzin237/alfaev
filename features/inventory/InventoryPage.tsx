@@ -10,7 +10,7 @@ import AddComponentDialog from "./components/AddComponentDialog";
 import BrandFormDialog from "./components/BrandFormDialog";
 import BrandList from "./components/BrandList";
 import ComponentImportDialog from "./components/ComponentImportDialog";
-import InventoryTestProductList from "./components/InventoryTestProductList";
+import InventoryStockHealthProductList from "./components/InventoryStockHealthProductList";
 import InventoryWarehouseTabs from "./components/InventoryWarehouseTabs";
 import { useBrandManagement } from "./hooks/useBrandManagement";
 import { useComponentImport } from "./hooks/useComponentImport";
@@ -194,7 +194,8 @@ function InventoryPage({ testCommitmentsEnabledAfterActivation = false }: { test
             onRetry={() => void commitmentsQuery.refetch()}
           />
         ) : null}
-        <InventoryTestProductList
+        <InventoryStockHealthProductList
+          key={`${warehouseAccess.profileId}:${selectedWarehouse.id}`}
           products={productsQuery.data.value}
           commitments={commitments}
           warehouseCode={selectedWarehouse.code}

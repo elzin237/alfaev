@@ -1,9 +1,11 @@
 import { Link } from "react-router";
+import type { ReactNode } from "react";
 
 import StatusBadge from "../../../shared/components/StatusBadge";
 import type { ProductListItem } from "../services/productService";
 import type { InventoryCommitment } from "../services/inventoryCommitmentService";
 import type { InventoryTestCommitment } from "../services/inventoryTestCommitmentService";
+import type { InventoryStockHealth } from "../services/inventoryStockHealthService";
 
 export interface ProductListProps {
   products: ProductListItem[];
@@ -12,9 +14,12 @@ export interface ProductListProps {
   showCommitments?: boolean;
   showTestCommitments?: boolean;
   testCommitments?: ReadonlyMap<string, InventoryTestCommitment>;
+  showStockHealth?: boolean;
+  stockHealth?: ReadonlyMap<string, InventoryStockHealth>;
+  renderMinimum?: (product: ProductListItem, health: InventoryStockHealth | undefined) => ReactNode;
 }
 
-function ProductList({ products, warehouseCode, commitments, showCommitments = true, showTestCommitments = false, testCommitments }: ProductListProps) {
+function ProductList({ products, warehouseCode, commitments, showCommitments = true, showTestCommitments = false, testCommitments, showStockHealth = false, stockHealth, renderMinimum }: ProductListProps) {
   const rawMaterials = !warehouseCode || warehouseCode === "raw_materials";
   const headings = ["Serial Number", "Name", "Category", "Brand", rawMaterials ? "Raw Physical Quantity" : "Physical Quantity"];
   if (showCommitments) {
@@ -24,6 +29,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
         : ["Committed to Projects", "Available After Commitments"]));
   }
   if (showTestCommitments) headings.push("Committed to Tests", "Available After Projects and Tests");
+  if (showStockHealth) headings.push("Minimum Stock", "Stock Health");
   headings.push("Status");
   return (
     <div className="overflow-hidden rounded-3xl border border-zinc-200 bg-white shadow-sm">
@@ -48,6 +54,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
             {products.map((product) => {
               const commitment = commitments?.get(product.id);
               const testCommitment = testCommitments?.get(product.id);
+              const health = stockHealth?.get(product.id);
               return (
               <tr key={product.id} className="text-sm text-zinc-700">
                 <th scope="row" className="whitespace-nowrap px-5 py-4 text-left font-mono font-semibold text-zinc-900">
@@ -80,6 +87,13 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                   <span className={testCommitment?.availableAfterProjectsAndTests.startsWith("-") ? "font-semibold text-red-700" : undefined}>
                     {testCommitment?.availableAfterProjectsAndTests ?? "Unavailable"}
                   </span>
+                </td>}
+                {showStockHealth && <td className="px-5 py-4 tabular-nums">
+                  {renderMinimum ? renderMinimum(product, health) : health ? health.minimumQuantity ?? "Not Configured" : "Unavailable"}
+                </td>}
+                {showStockHealth && <td className="whitespace-nowrap px-5 py-4">
+                  {health ? <StatusBadge label={{HEALTHY:"Healthy",LOW_STOCK:"Low Stock",OUT_OF_STOCK:"Out of Stock",NOT_CONFIGURED:"Not Configured"}[health.status]}
+                    tone={{HEALTHY:"success",LOW_STOCK:"warning",OUT_OF_STOCK:"danger",NOT_CONFIGURED:"neutral"}[health.status] as "success"|"warning"|"danger"|"neutral"} /> : "Unavailable"}
                 </td>}
                 <td className="whitespace-nowrap px-5 py-4">
                   <StatusBadge

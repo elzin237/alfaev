@@ -540,6 +540,23 @@ duplicates under concurrent creation.
 
 ## 6. Inventory Quantity Rules
 
+### Low Stock V1 — locked LS-01 configuration rules
+
+Minimum stock is advisory metadata per applicable Product/warehouse pair, not a
+physical reservation or debit limit. Configured minimums are positive SQL bigint
+quantities; zero/negative/fractional values are rejected. An absent setting or a
+cleared null minimum means Not Configured. For configured settings: physical zero
+means Out of Stock; positive physical below minimum means Low Stock; physical at
+or above minimum means Healthy. Compare only the selected warehouse's physical
+balance, never Project demand, FG reservations or Test holds.
+
+Existing authoritative warehouse listing membership is required; configuring a
+minimum never creates membership or balances. Archived Products retain settings
+but reject set/clear operations. Configuration cannot create stock, movements,
+reservations, procurement requests or notifications, or reconcile Project shortages.
+LS-01 implements only local configuration; stock-health reads/UI and Dashboard
+integration remain future work. No DEV deployment is implied.
+
 Inventory quantity must never go below zero.
 
 Inventory mutations come from:

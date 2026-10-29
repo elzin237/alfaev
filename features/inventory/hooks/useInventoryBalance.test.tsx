@@ -220,3 +220,6 @@ describe("useInventoryBalance", () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 });
+// Existing invalidation contract with the optional Low Stock release disabled.
+// Its enabled scoped invalidation is covered by useInventoryStockHealth tests.
+vi.mock("../../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:()=>false}));

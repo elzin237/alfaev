@@ -1,5 +1,36 @@
 # AlfaEV — SECURITY_RULES.md
 
+## Low Stock V1 — LS-02 physical stock-health boundary
+
+Migration 160 is additive and read-only: two STABLE SECURITY DEFINER read RPCs with
+empty search_path and explicit active-profile authorization. Private classification
+and membership projection helpers remain SECURITY INVOKER and have no PUBLIC,
+anon, authenticated or service_role EXECUTE grants. Configuration-table RLS/ACLs
+remain unchanged. All quantity/version/count transport is decimal text.
+Dashboard authorization filters warehouses before building one materialized health
+projection for summary and attention, under one statement MVCC snapshot. Inventory
+results are bounded, default to active Products and require explicit archived access
+through the filter. Reads never mutate configuration, stock, reservation, shortage,
+notification, audit, provenance or security state. Existing Dashboard/Inventory RPCs
+and all physical accounting remain unchanged. UI integration/deployment are separate.
+
+## Low Stock V1 — LS-01 private configuration boundary
+
+Local migration 159 adds only `inventory_stock_minimums` and the trusted
+`set_inventory_stock_minimum(uuid,uuid,text,text)` operation. Enable RLS and revoke
+all table privileges from PUBLIC, anon, authenticated and service_role; grant only
+authenticated RPC EXECUTE, with SECURITY DEFINER and empty search_path. Require an
+active authenticated actor, active Product, canonical warehouse membership and
+Admin OR (`inventory.products.edit` AND the applicable warehouse view). Revalidate
+actor/grants after Product locking. Serialize first writes on the Product row and
+enforce expected-version equality; do not use an unconditional upsert.
+
+All quantities/versions cross JSON as decimal text. Clear stores null without
+deleting metadata. Archived Products cannot be set/cleared. Configuration writes
+must never change balances, provenance, demand, reservations, Test holds, AuditLog,
+notification/reconciliation queues or existing RLS/ACL/permission definitions.
+No health-read RPC, UI or remote activation is included in LS-01.
+
 Status: Canonical security rules v1  
 Purpose: Define mandatory security controls for AlfaEV.  
 Precedence: These rules override implementation convenience. Codex must not weaken them to make a task easier.

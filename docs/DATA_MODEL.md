@@ -1,5 +1,59 @@
 # AlfaEV — DATA_MODEL.md
 
+## Low Stock V1 — LS-02 local read contracts (migration 160)
+
+`get_inventory_stock_health(p_warehouse_id uuid, p_search text DEFAULT NULL,
+p_health_status text DEFAULT NULL, p_active boolean DEFAULT true,
+p_limit integer DEFAULT 100, p_offset integer DEFAULT 0)` returns Product ID,
+serial_number, product_name, is_active, warehouse ID/code/name, physical_quantity,
+nullable minimum_quantity, health_status and nullable configuration_version.
+Quantities/versions are decimal TEXT; absent settings have null version, while an
+explicit clear retains its version. Limits are 1–200; offset is nonnegative;
+search is at most 200 characters. Status accepts the four exact uppercase values
+or null for all. Active=true is the default; false means archived-only, null both.
+Membership/search reuse `search_inventory_products_by_warehouse`; stable order is
+case-insensitive Product name then Product ID. Separate pages are fresh reads,
+not a promise of a cross-request snapshot during concurrent edits.
+
+`get_dashboard_stock_health(p_critical_limit integer DEFAULT 10)` returns JSON
+`{as_of, warehouses: [...], critical_items: [...]}`. Each authorized warehouse has
+ID/code/name, product_count and healthy_count/low_stock_count/out_of_stock_count/
+not_configured_count as decimal strings. Counts are active Product/warehouse pairs,
+never summed stock units. Critical rows contain Product identity, warehouse identity,
+physical/minimum text, status and configuration-version text; only configured OUT
+then LOW rows qualify. Limit is 1–100; ties sort by case-insensitive Product name,
+warehouse ID, Product ID. One materialized projection and STABLE statement snapshot
+feed both sections. Archived Products are excluded from Dashboard. No historical
+trend, private creator/receipt or other Project data is returned.
+
+Both contracts reuse one private physical-stock classifier; neither subtracts
+planning demand, FG reservations or Test holds. No existing RPC is modified.
+These contracts are local only and do not activate UI or deploy migration 160.
+
+## Low Stock V1 — LS-01 local configuration foundation (migration 159)
+
+`inventory_stock_minimums` is private advisory metadata with composite primary key
+`(product_id, warehouse_id)`, restrictive Product/warehouse FKs, nullable positive
+`minimum_quantity bigint`, positive `version bigint`, created/updated timestamps
+and restrictive creator/updater UserProfile FKs. A warehouse-first index supports
+future warehouse reads. RLS is enabled; no browser table access is granted.
+
+`set_inventory_stock_minimum(p_product_id uuid, p_warehouse_id uuid,
+p_minimum_quantity text, p_expected_version text)` accepts a positive bigint decimal
+string (leading zeros normalize) or null to clear. Expected version is null only
+when no row exists; otherwise it must equal the current positive version. First
+write, including an explicit clear, creates version 1; every accepted later write
+increments version. Clearing retains the row, creator and metadata. Version overflow
+fails closed. Response: Product/warehouse IDs, nullable minimum and version as decimal
+TEXT, created_at and updated_at. Conflicts use SQLSTATE ISM01; reconcile current
+configuration before resubmission, never silently overwrite a concurrent edit.
+
+Product-first locking serializes first writes and updates and rejects archived
+Products after lock waits. Membership reuses the authorized warehouse listing RPC.
+Only this new configuration table is written: existing catalog, Inventory, AuditLog,
+Project, reservation, Test, procurement and notification data remain unchanged.
+This migration is local only; health reads, filters, UI and deployment are not included.
+
 Status: Canonical logical data model v1  
 Purpose: Define the relational entities, relationships, invariants, and historical-data rules required by the locked AlfaEV feature scope.  
 Rule: This document defines the logical model. Physical database syntax, indexes, RLS policies, RPCs/functions, and migrations are specified later after the production tech stack is locked.

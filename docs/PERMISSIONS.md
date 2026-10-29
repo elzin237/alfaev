@@ -1,5 +1,29 @@
 # AlfaEV — PERMISSIONS.md
 
+## Low Stock V1 — LS-02 read authorization
+
+Inventory stock-health read requires an active authenticated Admin or the selected
+warehouse's view permission; no edit or combined Raw+Customs permission is needed
+because quantities are strictly warehouse-physical. Dashboard stock-health requires
+active Admin or dashboard.view, and includes only warehouses for which that actor
+has the applicable warehouse view. Unauthorized warehouses are omitted entirely,
+not represented by zero counts. An authorized warehouse with no active members has
+real zero counts. Dashboard-only users can receive empty arrays. Private helpers and
+configuration tables have no direct browser grants; only the two trusted read RPCs
+grant authenticated EXECUTE. No permission definitions or assignments are changed.
+
+## Low Stock V1 — LS-01 configuration authorization
+
+Set/clear requires an authenticated active profile and either active Admin status,
+or BOTH `inventory.products.edit` and the selected warehouse's `.view` permission:
+`inventory.raw_materials.view`, `inventory.customs.view`, or
+`inventory.finished_goods.view`. No new permission keys/grants are added. Stock
+adjust permission alone does not authorize minimum configuration. Configuration
+does not confer adjustment, reservation, Test, procurement or notification authority.
+Actor/grants are revalidated after Product-lock waits. The configuration table has
+no direct browser access; only the trusted configuration RPC grants authenticated
+EXECUTE. Anonymous, inactive and service-role callers receive no new access.
+
 Status: Canonical authorization model v1.1  
 Purpose: Define the permission architecture and the initial per-user permission checklist.
 

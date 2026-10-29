@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
+// Legacy list regression coverage; the StockHealthProductList suite exercises ON.
+vi.mock("../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:()=>false}));
 
 const inventoryMocks = vi.hoisted(() => ({
   useBrandManagement: vi.fn(),
