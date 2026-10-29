@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
+import type { ReactNode } from "react";
+import { INVENTORY_WAREHOUSES } from "./inventoryWarehouses";
 
 const detailPageMocks = vi.hoisted(() => ({
   useProductDetail: vi.fn(),
@@ -10,6 +12,7 @@ const detailPageMocks = vi.hoisted(() => ({
   update: vi.fn(),
   useInventoryWarehouseAccess: vi.fn(),
   useInventoryLegacyViewPermission: vi.fn(),
+  stockHealth: vi.fn(),
 }));
 
 vi.mock("./hooks/useProductDetail", () => ({
@@ -31,15 +34,21 @@ vi.mock("./components/ProductSuppliersSection", () => ({
   ),
 }));
 vi.mock("./components/InventoryBalanceSection", () => ({
-  default: ({ productId, productIsActive }: {
+  default: ({ productId, productIsActive, stockHealth }: {
     productId: string;
     productIsActive: boolean;
+    stockHealth?: ReactNode;
   }) => (
     <section aria-label="Product Inventory balance">
       Balance for {productId} — {productIsActive ? "active" : "archived"}
+      {stockHealth}
     </section>
   ),
 }));
+vi.mock("./components/ProductStockHealthSection", () => ({ default: (props: unknown) => {
+  detailPageMocks.stockHealth(props);
+  return <div>Warehouse minimum configuration</div>;
+} }));
 vi.mock("./components/InventoryHistorySection", () => ({
   default: ({ productId }: { productId: string }) => (
     <section aria-label="Product Inventory history">
@@ -188,6 +197,27 @@ afterEach(() => {
 });
 
 describe("ProductDetailPage", () => {
+  it.each(INVENTORY_WAREHOUSES)("wires minimum configuration to the selected $label balance card", warehouse => {
+    detailPageMocks.useInventoryWarehouseAccess.mockReturnValue({
+      ...detailPageMocks.useInventoryWarehouseAccess(), authorizedWarehouses: INVENTORY_WAREHOUSES,
+    });
+    renderDetail(`/inventory/product-1?warehouse=${warehouse.code}`);
+    expect(detailPageMocks.stockHealth).toHaveBeenLastCalledWith({
+      productId: activeProduct.id, serialNumber: activeProduct.serialNumber,
+      productIsActive: true, warehouseId: warehouse.id,
+    });
+    expect(within(screen.getByRole("region", { name: "Product Inventory balance" }))
+      .getByText("Warehouse minimum configuration")).toBeInTheDocument();
+  });
+
+  it("does not mount warehouse minimum configuration when warehouse access is denied", () => {
+    detailPageMocks.useInventoryWarehouseAccess.mockReturnValue({
+      ...detailPageMocks.useInventoryWarehouseAccess(), authorizedWarehouses: [],
+    });
+    renderDetail();
+    expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
+    expect(detailPageMocks.stockHealth).not.toHaveBeenCalled();
+  });
   it("renders loading without exposing Product content", () => {
     setHookState({ isPending: true });
     renderDetail();

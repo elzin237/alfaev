@@ -7,6 +7,7 @@ import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
 import StatusBadge from "../../shared/components/StatusBadge";
 import InventoryBalanceSection from "./components/InventoryBalanceSection";
+import ProductStockHealthSection from "./components/ProductStockHealthSection";
 import InventoryHistorySection from "./components/InventoryHistorySection";
 import ProductBarcodeSection from "./components/ProductBarcodeSection";
 import ProductEditDialog from "./components/ProductEditDialog";
@@ -215,6 +216,12 @@ function ProductDetailPage() {
         <InventoryBalanceSection
           productId={product.id}
           productIsActive={product.isActive}
+          stockHealth={<ProductStockHealthSection
+            productId={product.id}
+            serialNumber={product.serialNumber}
+            productIsActive={product.isActive}
+            warehouseId={selectedWarehouse.id}
+          />}
           warehouse={selectedWarehouse}
           canAdjust={warehouseAccess.adjustableWarehouseIds.has(selectedWarehouse.id)}
           transferDestinations={INVENTORY_WAREHOUSES.filter(

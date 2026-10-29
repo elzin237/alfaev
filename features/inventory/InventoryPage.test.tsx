@@ -224,8 +224,8 @@ describe("InventoryPage", () => {
       adjustableWarehouseIds:new Set(),canReadProjectAvailability:false,isPending:false,isError:false});
     renderInventory("/inventory?warehouse=finished_goods");
     expect(inventoryMocks.useInventoryCommitments).toHaveBeenCalledWith(true,"finished_goods");
-    expect(screen.getByRole("columnheader",{name:"Physical Quantity"})).toBeInTheDocument();
-    expect(screen.getByRole("columnheader",{name:"Reserved to Projects"})).toBeInTheDocument();
+    expect(screen.getByRole("columnheader",{name:"Physical"})).toBeInTheDocument();
+    expect(screen.getByRole("columnheader",{name:"FG Reserved"})).toBeInTheDocument();
     expect(screen.queryByText("Eligible Stock (Raw + Customs)")).not.toBeInTheDocument();
   });
   it("never requests commitments for a Customs-only viewer",()=>{
@@ -388,10 +388,10 @@ describe("InventoryPage", () => {
     expect(within(archivedRow).getByText("Bosch")).toBeInTheDocument();
     expect(within(archivedRow).getAllByText("27").length).toBeGreaterThan(0);
     expect(within(archivedRow).getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByText("Raw Physical Quantity")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader",{name:"Physical"})).toHaveAccessibleDescription(/Raw Physical Quantity/);
     expect(screen.queryByText("Eligible Stock (Raw + Customs)")).not.toBeInTheDocument();
-    expect(screen.getByText("Outstanding Project Demand")).toBeInTheDocument();
-    expect(screen.getByText("Available After Demand (Raw + Customs)")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader",{name:"Project Demand"})).toHaveAccessibleDescription(/Outstanding Project Demand/);
+    expect(screen.getByRole("columnheader",{name:"Available"})).toHaveAccessibleDescription(/Raw \+ Customs/);
   });
 
   it("debounces server-backed Product search and distinguishes no matches from an empty Inventory", () => {

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
 import ErrorState from "../../../shared/components/ErrorState";
@@ -17,6 +17,7 @@ export interface InventoryBalanceSectionProps {
   canAdjust?: boolean;
   transferDestinations?: readonly InventoryWarehouse[];
   canReadCommitments?: boolean;
+  stockHealth?: ReactNode;
 }
 
 function InventoryBalanceSection({
@@ -32,6 +33,7 @@ function InventoryBalanceSection({
   canAdjust,
   transferDestinations = [],
   canReadCommitments = true,
+  stockHealth,
 }: InventoryBalanceSectionProps) {
   const { isAdmin } = useAuth();
   const canWarehouseAdjust = canAdjust ?? isAdmin;
@@ -94,12 +96,13 @@ function InventoryBalanceSection({
         ) : (
           <div className="rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-6">
             <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-              {warehouse.code === "raw_materials" ? "Raw Physical Quantity" : "Current Quantity"}
+              {warehouse.code === "raw_materials" ? "Raw Physical Quantity" : "Physical Quantity"}
             </p>
-            <p className="mt-2 text-3xl font-bold text-zinc-900">
+            <p className="mt-2 text-3xl font-bold tabular-nums text-zinc-900">
               {balanceQuery.data.value.quantity}
             </p>
-            <p className="mt-2 text-xs text-zinc-500">
+            {stockHealth}
+            <p className="mt-4 text-xs text-zinc-500">
               Balance updated {new Date(balanceQuery.data.value.updatedAt).toLocaleString("en-GB")}
             </p>
           </div>

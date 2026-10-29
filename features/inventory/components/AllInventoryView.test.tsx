@@ -15,6 +15,34 @@ beforeEach(() => { vi.resetAllMocks(); mocks.read.mockReturnValue(defaults()); m
 afterEach(cleanup);
 const renderView = (ids: string[] = INVENTORY_WAREHOUSES.map(w => w.id)) => render(<MemoryRouter><AllInventoryView authorizedWarehouseIds={ids} search="part" testsEnabled /></MemoryRouter>);
 describe("All Inventory union table", () => {
+  it("uses compact centered headers with keyboard-accessible full meanings", () => {
+    render(<MemoryRouter><AllInventoryTable rows={[row(0)]} testsEnabled /></MemoryRouter>);
+    expect(screen.getAllByRole("columnheader").map(header => header.getAttribute("aria-label"))).toEqual([
+      "WH", "Serial", "Product", "Category", "Brand", "Physical", "Project Demand", "FG Reserved", "Available", "Available FG", "Test Holds", "After Tests", "Health", "Status",
+    ]);
+    for (const header of screen.getAllByRole("columnheader")) {
+      expect(header).toHaveClass("text-center", "px-2");
+      const label = header.querySelector("[tabindex='0']")!;
+      expect(label).toHaveClass("focus-visible:outline-2");
+      expect(label).toHaveAttribute("title");
+      expect(document.getElementById(label.getAttribute("aria-describedby")!)).toHaveAttribute("role", "tooltip");
+    }
+    expect(screen.getByRole("columnheader", { name: "Available" })).toHaveAccessibleDescription(/Raw \+ Customs.*minus outstanding Project demand/);
+    expect(screen.getByRole("columnheader", { name: "FG Reserved" })).toHaveAccessibleDescription(/active hard Finished Goods/);
+    expect(screen.getByRole("columnheader", { name: "After Tests" })).toHaveAccessibleDescription(/Customs minus Customs Test holds/);
+  });
+  it("centers identifiers, quantities, badges and Product names without changing links or widths", () => {
+    render(<MemoryRouter><AllInventoryTable rows={[row(0)]} testsEnabled /></MemoryRouter>);
+    const record = screen.getAllByRole("row")[1]!;
+    expect(within(record).getByRole("rowheader")).toHaveClass("text-center");
+    within(record).getAllByRole("cell").forEach((cell, index) => {
+      expect(cell).toHaveClass("text-center", "px-2");
+      if (index >= 4) expect(cell).toHaveClass("min-w-24", "whitespace-nowrap");
+    });
+    expect(within(record).getByText("9223372036854775807")).toBeInTheDocument();
+    expect(within(record).getByRole("link", { name: "Component" })).toHaveClass("mx-auto", "text-center", "font-semibold", "w-50");
+    expect(within(record).getByRole("link", { name: "Component" })).toHaveAttribute("href", "/inventory/same?warehouse=raw_materials");
+  });
   it("contains all rows in a focusable, approximately ten-row two-axis viewport with sticky headers", () => {
     render(<MemoryRouter><AllInventoryTable rows={Array.from({ length: 20 }, (_, i) => row(0, `scroll-${i}`))} testsEnabled /></MemoryRouter>);
     const viewport = screen.getByRole("region", { name: "All Inventory results" });
@@ -32,12 +60,12 @@ describe("All Inventory union table", () => {
     render(<MemoryRouter><AllInventoryTable rows={[long]} testsEnabled /></MemoryRouter>);
     const headers = screen.getAllByRole("columnheader"), record = screen.getAllByRole("row")[1]!;
     const identity = [within(record).getByRole("rowheader"), ...within(record).getAllByRole("cell").slice(0, 2)];
-    expect(headers[0]).toHaveClass("left-0", "z-40", "w-22");
-    expect(headers[1]).toHaveClass("left-22", "z-40", "w-28");
-    expect(headers[2]).toHaveClass("md:left-50", "md:z-40", "w-56");
-    expect(identity[0]).toHaveClass("sticky", "left-0", "z-10", "bg-white", "w-22");
-    expect(identity[1]).toHaveClass("sticky", "left-22", "z-10", "bg-white", "w-28");
-    expect(identity[2]).toHaveClass("md:sticky", "md:left-50", "md:z-10", "bg-white", "w-56");
+    expect(headers[0]).toHaveClass("left-0", "z-40", "w-12");
+    expect(headers[1]).toHaveClass("left-12", "z-40", "w-24");
+    expect(headers[2]).toHaveClass("md:left-36", "md:z-40", "w-56");
+    expect(identity[0]).toHaveClass("sticky", "left-0", "z-10", "bg-white", "w-12");
+    expect(identity[1]).toHaveClass("sticky", "left-12", "z-10", "bg-white", "w-24");
+    expect(identity[2]).toHaveClass("md:sticky", "md:left-36", "md:z-10", "bg-white", "w-56");
     const link = within(record).getByRole("link", { name: long.product.name });
     expect(link).toHaveClass("truncate", "w-50"); expect(link).toHaveAttribute("title", long.product.name);
     expect(link).toHaveAttribute("href", "/inventory/same?warehouse=finished_goods");
@@ -51,9 +79,10 @@ describe("All Inventory union table", () => {
   it("keeps pre-activation Test and Low Stock columns disabled", () => {
     mocks.gate.mockReturnValue(false);
     render(<MemoryRouter><AllInventoryTable rows={[row(0)]} testsEnabled={false} /></MemoryRouter>);
-    expect(screen.queryByRole("columnheader", { name: "Committed to Tests" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Test Holds" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Minimum Stock" })).not.toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Physical Stock" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Health" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Physical" })).toBeInTheDocument();
   });
   it("renders authoritative union fields without merging Raw physical with planning or FG reservations", () => {
     const raw = row(0), fg = row(1), customs = row(2);
@@ -65,14 +94,16 @@ describe("All Inventory union table", () => {
     render(<MemoryRouter><AllInventoryTable rows={[raw, fg, customs]} testsEnabled /></MemoryRouter>);
     const records = screen.getAllByRole("row").slice(1);
     const cells = (i: number) => within(records[i]!).getAllByRole("cell").map(cell => cell.textContent);
-    expect(cells(0).slice(4, 13)).toEqual(["20", "5", "—", "18", "—", "2", "16", "4", "Healthy"]);
+    expect(cells(0).slice(4, 12)).toEqual(["20", "5", "—", "18", "—", "2", "16", "Healthy"]);
+    expect(screen.queryByRole("columnheader", { name: "Minimum Stock" })).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Health" })).toBeInTheDocument();
     expect(cells(1).slice(4, 9)).toEqual(["3", "—", "2", "—", "1"]);
     expect(cells(2).slice(4, 9)).toEqual(["3", "—", "—", "—", "—"]);
     expect(within(records[0]!).getByText("2")).toHaveClass("text-blue-700");
   });
   it("keeps duplicate Products in separate canonical R/F/C rows with exact quantities and originating links", () => {
     render(<MemoryRouter><AllInventoryTable rows={[row(0), row(1), row(2)]} testsEnabled /></MemoryRouter>);
-    expect(screen.getAllByRole("columnheader")[0]).toHaveTextContent("Warehouse");
+    expect(screen.getAllByRole("columnheader")[0]).toHaveAccessibleName("WH");
     for (const [i, label] of ["R", "F", "C"].entries()) {
       const record = screen.getAllByRole("row")[i + 1]!;
       expect(within(record).getByRole("rowheader")).toHaveTextContent(label);
@@ -91,6 +122,17 @@ describe("All Inventory union table", () => {
     expect(mocks.read).toHaveBeenLastCalledWith([INVENTORY_WAREHOUSES[0]!.id], "part", "raw_materials", true);
     fireEvent.change(screen.getByLabelText("Product status"), { target: { value: "archived" } });
     expect(screen.getAllByRole("row")).toHaveLength(2);
+  });
+  it("keeps the authoritative Stock Health filter after removing the minimum column", () => {
+    const healthy = row(0, "healthy"), low = row(1, "low");
+    healthy.health = { productId: "healthy", warehouseId: healthy.warehouse.id, productName: "Component", isActive: true, physicalQuantity: "20", minimumQuantity: "4", version: "1", status: "HEALTHY" };
+    low.health = { ...healthy.health, productId: "low", warehouseId: low.warehouse.id, productName: "Calculator", status: "LOW_STOCK" };
+    mocks.read.mockReturnValue({ ...defaults(), rows: [healthy, low] }); renderView();
+    fireEvent.change(screen.getByLabelText("Stock Health"), { target: { value: "LOW_STOCK" } });
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute("href", "/inventory/low?warehouse=finished_goods");
+    expect(screen.queryByRole("link", { name: "Component" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Minimum Stock" })).not.toBeInTheDocument();
   });
   it("paginates Product/warehouse pairs without omission or duplication", () => {
     mocks.read.mockReturnValue({ ...defaults(), rows: Array.from({ length: 51 }, (_, i) => row(0, `id-${i}`)) });

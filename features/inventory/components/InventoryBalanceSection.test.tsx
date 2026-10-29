@@ -92,6 +92,14 @@ afterEach(() => {
 });
 
 describe("InventoryBalanceSection", () => {
+  it("places warehouse minimum configuration directly below physical quantity in the balance card", () => {
+    render(<InventoryBalanceSection productId="product-1" productIsActive canReadCommitments={false}
+      stockHealth={<div data-testid="stock-health">Minimum Stock</div>} />);
+    const health = screen.getByTestId("stock-health");
+    expect(health.previousElementSibling).toHaveTextContent("10");
+    expect(health.parentElement).toHaveTextContent("Raw Physical Quantity");
+    expect(health.nextElementSibling).toHaveTextContent("Balance updated");
+  });
   it("starts first Customs intake from authorized Raw Product detail without requiring Customs list membership", async () => {
     setSectionState({ isAdmin: false });
     render(<InventoryBalanceSection productId="product-1" productIsActive

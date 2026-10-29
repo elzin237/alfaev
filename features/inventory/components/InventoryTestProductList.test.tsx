@@ -25,9 +25,9 @@ describe("gated Inventory Test columns", () => {
   });
   it.each(INVENTORY_WAREHOUSES.map(w => w.code))("adds exact blue/signed columns without altering existing %s figures", code => {
     renderList(code);
-    const headings = screen.getAllByRole("columnheader").map(x => x.textContent);
-    expect(headings.slice(-3)).toEqual(["Committed to Tests", "Available After Projects and Tests", "Status"]);
-    expect(screen.getByRole("columnheader", { name: "Committed to Tests" })).toHaveClass("text-blue-700");
+    const headings = screen.getAllByRole("columnheader").map(x => x.getAttribute("aria-label") ?? x.textContent);
+    expect(headings.slice(-3)).toEqual(code === "customs" ? ["Committed to Tests", "Available After Projects and Tests", "Status"] : ["Test Holds", "Net Available", "Status"]);
+    expect(screen.getByRole("columnheader", { name: code === "customs" ? "Committed to Tests" : "Test Holds" })).toHaveClass("text-blue-700");
     expect(screen.getByText("9007199254740993")).toHaveClass("text-blue-700");
     expect(screen.getByText("-9007199254740991")).toHaveClass("text-red-700");
     expect(screen.getByText("12")).toBeInTheDocument(); expect(screen.getByText("Archived")).toBeInTheDocument();
