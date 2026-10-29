@@ -10,6 +10,8 @@ import { useDashboardRawCatalog } from "../hooks/useDashboardRawCatalog";
 export interface DashboardInventoryProps {
   section: DashboardInventorySection | null;
   stockHealth?: DashboardStockHealth;
+  compact?: boolean;
+  embedded?: boolean;
 }
 
 const dateTimeFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -39,25 +41,27 @@ function RawCatalog({ section }: { section: DashboardInventorySection }) {
   </div>;
 }
 
-function DashboardInventory({ section, stockHealth }: DashboardInventoryProps) {
+function DashboardInventory({ section, stockHealth, compact = false, embedded = false }: DashboardInventoryProps) {
   if(stockHealth?.warehouses.length===0)return null;
   if (section === null && !stockHealth) return null;
 
   return (
     <section
       aria-labelledby="dashboard-inventory-title"
-      className="h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
+      className={compact ? "flex min-h-0 min-w-0 flex-col" : "h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"}
     >
-      <DashboardSectionHeader
+      {embedded ? <h3 id="dashboard-inventory-title" className="px-4 py-3 text-xs font-semibold text-zinc-700">{stockHealth ? "Critical Items" : "Inventory Attention"}</h3> : <DashboardSectionHeader
         actionLabel="View all inventory"
         actionTo={stockHealth ? `/inventory?warehouse=${stockHealth.warehouses[0]!.warehouseCode}` : "/inventory"}
         icon={Package}
         title={stockHealth ? "Critical Inventory Items" : "Inventory Attention"}
         titleId="dashboard-inventory-title"
-      />
+        compact={compact}
+      />}
 
+      <div role="region" aria-label="Inventory attention content" tabIndex={0} className={`${embedded ? "max-h-96" : ""} min-h-0 flex-1 overflow-auto focus-visible:outline-2 focus-visible:outline-red-500`}>
       <div className="px-4 pb-3">
-        {stockHealth ? <DashboardCriticalInventoryTable health={stockHealth}/> : <>
+        {stockHealth ? <DashboardCriticalInventoryTable health={stockHealth} compact={compact}/> : <>
         <h3 className="mb-2 text-xs text-zinc-500">Project-demand attention</h3>
         <div className="overflow-x-auto rounded-md border border-zinc-100">
           <table className="w-full text-left text-[11px]">
@@ -68,7 +72,8 @@ function DashboardInventory({ section, stockHealth }: DashboardInventoryProps) {
         </>}
       </div>
 
-      {section && <RawCatalog section={section} />}
+      {section && (compact ? <details className="border-t border-zinc-100 text-[11px] text-zinc-500"><summary className="cursor-pointer rounded px-4 py-2 font-medium focus-visible:outline-2 focus-visible:outline-red-500">Recent Raw Materials catalog updates</summary><RawCatalog section={section} /></details> : <RawCatalog section={section} />)}
+      </div>
     </section>
   );
 }

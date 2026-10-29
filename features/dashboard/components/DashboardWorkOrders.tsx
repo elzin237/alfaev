@@ -21,22 +21,23 @@ function DashboardWorkOrders({ section }: DashboardWorkOrdersProps) {
   return (
     <section
       aria-labelledby="dashboard-work-orders-title"
-      className="h-full min-w-0 overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
+      className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-200/70 bg-white shadow-sm"
     >
       <DashboardSectionHeader
         actionLabel="View all work orders"
         actionTo="/work-orders"
         icon={ClipboardList}
         title="Recent Work Orders"
+        description="Latest work orders and their status."
         titleId="dashboard-work-orders-title"
       />
 
-      <div className="px-4 pb-3">
+      <div role="region" aria-label="Recent Work Orders content" tabIndex={0} className="min-h-0 flex-1 overflow-auto px-4 pb-3 focus-visible:outline-2 focus-visible:outline-red-500">
         {section.recent.length === 0 ? (
           <DashboardEmptyState icon={ClipboardList} title="No Work Orders yet." description="Your most recently updated Work Orders will appear here as work gets underway." />
         ) : (
-          <div className="overflow-x-auto"><table className="w-full min-w-80 text-left text-xs">
-            <thead className="bg-slate-50 text-[10px] text-zinc-500"><tr>{["Work Order", "Customer", "Status", "Last activity"].map(label => <th key={label} scope="col" className="px-2 py-2 font-semibold">{label}</th>)}</tr></thead>
+          <div className="overflow-x-auto rounded-lg border border-zinc-100"><table className="w-full min-w-64 text-left text-xs">
+            <thead className="bg-slate-50 text-[10px] text-zinc-500"><tr>{["Work Order / Customer", "Status", "Last activity"].map(label => <th key={label} scope="col" className="px-2 py-2 font-semibold">{label}</th>)}</tr></thead>
             <tbody className="divide-y divide-zinc-100">
             {section.recent.map((workOrder) => {
               const isFinished = workOrder.status === "finished";
@@ -46,15 +47,15 @@ function DashboardWorkOrders({ section }: DashboardWorkOrdersProps) {
                   key={workOrder.id}
                   className="align-top"
                 >
-                  <td className="px-2 py-2.5">
+                  <td className="px-2 py-3.5">
                       <Link
                         to={`/work-orders/${workOrder.id}`}
-                        className="break-words rounded-sm font-semibold text-zinc-950 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
+                        className="whitespace-nowrap rounded-sm font-semibold text-zinc-950 underline-offset-4 transition hover:text-red-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 focus-visible:ring-offset-2"
                       >
                         {workOrder.workOrderNumber}
                       </Link>
+                      <p title={workOrder.customerNameSnapshot ?? "Not set"} className="mt-1 max-w-32 truncate text-[11px] text-zinc-500">{workOrder.customerNameSnapshot ?? "Not set"}</p>
                   </td>
-                  <td className="max-w-32 break-words px-2 py-2.5 text-zinc-500">{workOrder.customerNameSnapshot ?? "Not set"}</td>
                   <td className="px-2 py-2.5">
                   <StatusBadge
                     label={isFinished ? "Finished" : "Draft"}

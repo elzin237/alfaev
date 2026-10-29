@@ -45,7 +45,7 @@ describe("DashboardProjects", () => {
 
   it("renders every status count and human-readable recent status", () => {
     render(<DashboardProjects section={section} />, { wrapper: MemoryRouter });
-    const widget = screen.getByRole("region", { name: "Projects Overview" });
+    const widget = screen.getByRole("region", { name: "Projects & Production" });
 
     for (const [label, count] of [
       ["Planned", "1"],
@@ -59,8 +59,7 @@ describe("DashboardProjects", () => {
       expect(term).not.toBeNull();
       expect(term!.nextElementSibling).toHaveTextContent(count);
     }
-    expect(within(widget).getByText("In Progress", { selector: "span.inline-flex" }))
-      .toBeInTheDocument();
+    expect(within(widget).getAllByText("In Progress", { selector: "span.inline-flex" })).toHaveLength(2);
     expect(within(widget).getByText("On Hold", { selector: "span.inline-flex" }))
       .toBeInTheDocument();
   });
@@ -94,13 +93,13 @@ describe("DashboardProjects", () => {
     expect(screen.queryByText(/planning|material|create|archive/i)).not.toBeInTheDocument();
   });
 
-  it("renders a real-count distribution and handles a zero total without fake segments", () => {
+  it("keeps every real status count visible and handles an empty portfolio without invented progress", () => {
     const { rerender } = render(<DashboardProjects section={section} />, {
       wrapper: MemoryRouter,
     });
-    expect(screen.getByRole("img", {
-      name: "Project status distribution based on 15 projects",
-    }).querySelectorAll("[data-project-segment]")).toHaveLength(5);
+    expect(screen.getByText("All Project statuses")).toBeInTheDocument();
+    expect(screen.getAllByRole("definition").map(node=>node.textContent)).toEqual(["1","2","3","4","5"]);
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
 
     rerender(<DashboardProjects section={{
       statusCounts: {
@@ -112,8 +111,7 @@ describe("DashboardProjects", () => {
       },
       recent: [],
     }} />);
-    expect(screen.getByRole("img", {
-      name: "Project status distribution based on 0 projects",
-    }).querySelectorAll("[data-project-segment]")).toHaveLength(0);
+    expect(screen.getAllByRole("definition").map(node=>node.textContent)).toEqual(["0","0","0","0","0"]);
+    expect(screen.getByText("No projects yet.")).toBeInTheDocument();
   });
 });

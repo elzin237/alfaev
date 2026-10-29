@@ -2,14 +2,9 @@ import { ClipboardList, FolderKanban, Package, ShoppingCart } from "lucide-react
 
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
-import DashboardActivity from "./components/DashboardActivity";
 import DashboardAlertsControl from "./components/DashboardAlertsControl";
-import DashboardCalendar from "./components/DashboardCalendar";
-import DashboardStockHealthPanels from "./components/DashboardStockHealthPanels";
-import DashboardProcurement from "./components/DashboardProcurement";
-import DashboardProjects from "./components/DashboardProjects";
+import DashboardOperations from "./components/DashboardOperations";
 import DashboardSummaryMetric from "./components/DashboardSummaryMetric";
-import DashboardWorkOrders from "./components/DashboardWorkOrders";
 import { useDashboard } from "./hooks/useDashboard";
 
 function DashboardPage() {
@@ -34,8 +29,6 @@ function DashboardPage() {
       workOrders,
       procurement,
       inventory,
-      activity,
-      calendar,
     } = dashboardQuery.data.value;
     const summaryVisible = projects !== null || workOrders !== null || procurement !== null || inventory !== null;
     const activeProjectCount = projects === null
@@ -55,6 +48,7 @@ function DashboardPage() {
                 icon={FolderKanban}
                 label="Active Projects"
                 value={activeProjectCount}
+                description="Planned, in progress and on hold"
               />
             )}
             {workOrders !== null && (
@@ -62,6 +56,7 @@ function DashboardPage() {
                 icon={ClipboardList}
                 label="Recent Work Orders"
                 value={workOrders.recent.length}
+                description="Most recently updated Work Orders"
               />
             )}
             {procurement !== null && (
@@ -69,6 +64,7 @@ function DashboardPage() {
                 icon={ShoppingCart}
                 label="Unresolved Procurement"
                 value={procurement.unresolvedCount}
+                description="Requests awaiting completion"
               />
             )}
             {inventory !== null && (
@@ -76,22 +72,12 @@ function DashboardPage() {
                 icon={Package}
                 label="Active Products"
                 value={inventory.activeProductCount}
+                description="Active Products in the catalog"
               />
             )}
           </section>
         )}
-        <DashboardStockHealthPanels legacyInventory={inventory} />
-        {(projects !== null || procurement !== null) && (
-          <div className={`grid items-stretch gap-4 ${projects !== null && procurement !== null ? "@4xl:grid-cols-[1.45fr_1fr]" : ""}`}>
-            <DashboardProjects section={projects} />
-            <DashboardProcurement section={procurement} />
-          </div>
-        )}
-        <div className="grid items-stretch gap-4 @3xl:grid-cols-2 @6xl:grid-cols-3">
-          <DashboardWorkOrders section={workOrders} />
-          <DashboardActivity section={activity} />
-          <DashboardCalendar section={calendar} />
-        </div>
+        <DashboardOperations data={dashboardQuery.data.value} />
       </div>
     );
   }
@@ -100,11 +86,11 @@ function DashboardPage() {
     <section className="min-w-0 space-y-4">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-950">
-            Dashboard
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-950 sm:text-3xl">
+            Operations Dashboard
           </h1>
           <p className="mt-1 text-sm leading-5 text-zinc-500">
-            Overview of your operations, inventory, procurement and projects.
+            Production, inventory and procurement at a glance.
           </p>
         </div>
         <DashboardAlertsControl />

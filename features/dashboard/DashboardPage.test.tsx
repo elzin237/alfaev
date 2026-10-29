@@ -156,15 +156,42 @@ afterEach(() => {
 });
 
 describe("DashboardPage", () => {
-  it("uses the reference row order, preserves every destination, and uses content-width grids", () => {
+  it("fits every widget into the modular desktop grid while preserving destinations and accessible content", () => {
     renderPage();
-    const projectPanel = screen.getByRole("region", { name: "Projects Overview" });
+    const projectPanel = screen.getByRole("region", { name: "Projects & Production" });
     const inventoryPanel = screen.getByRole("region", { name: "Inventory Attention" });
     const workPanel = screen.getByRole("region", { name: "Recent Work Orders" });
-    expect(inventoryPanel.compareDocumentPosition(projectPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(inventoryPanel.compareDocumentPosition(workPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(projectPanel.compareDocumentPosition(workPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(workPanel.compareDocumentPosition(inventoryPanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const grid = screen.getByLabelText("Operations overview");
+    expect(grid).toHaveClass("grid-flow-row-dense", "items-stretch", "@2xl:grid-cols-2", "@5xl:grid-cols-12", "@5xl:auto-rows-[140px]");
+    expect(grid.children).toHaveLength(3);
+    for (const [index, name, columns, rows] of [
+      [0, "Projects & Production", 4, 3],
+      [1, "Recent Work Orders", 4, 3],
+      [2, "Procurement Requests", 4, 3],
+    ] as const) {
+      expect(grid.children[index]).toContainElement(screen.getByRole("region", { name }));
+      expect(grid.children[index]).toHaveClass(`@5xl:col-span-${columns}`, `@5xl:row-span-${rows}`, "min-h-0");
+    }
+    for (const label of ["Projects overview content", "Recent Work Orders content", "Procurement Requests content", "Inventory attention content", "Upcoming Calendar content", "Recent Activity content"]) {
+      expect(screen.getByRole("region", { name: label })).toHaveAttribute("tabindex", "0");
+    }
     expect(screen.getByRole("region", { name: "Dashboard summary" })).toHaveClass("@4xl:grid-cols-4");
-    expect(screen.getByRole("heading", { name: "Warehouse Stock Overview" })).toBeInTheDocument();
+    for (const metric of screen.getByRole("region", { name: "Dashboard summary" }).children) {
+      expect(metric).toHaveClass("@5xl:h-[140px]");
+    }
+    const inventoryHealth = screen.getByRole("region", { name: "Inventory Health" });
+    expect(inventoryHealth).toContainElement(inventoryPanel);
+    expect(inventoryHealth).toContainElement(screen.getByRole("region", { name: "Warehouse Overview" }));
+    expect(grid).not.toContainElement(inventoryHealth);
+    expect(within(inventoryHealth).getByRole("link", { name: "View inventory" })).toHaveAttribute("href", "/inventory");
+    const lowerRow = screen.getByLabelText("Calendar and recent activity");
+    expect(inventoryHealth.compareDocumentPosition(lowerRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lowerRow).toHaveClass("@2xl:grid-cols-2", "items-stretch", "gap-4");
+    expect(lowerRow.children).toHaveLength(2);
+    expect(lowerRow.children[0]).toBe(screen.getByRole("region", { name: "Upcoming Calendar" }));
+    expect(lowerRow.children[1]).toBe(screen.getByRole("region", { name: "Recent Activity" }));
     for (const href of ["/projects", "/inventory", "/work-orders", "/procurement", "/archive", "/calendar"]) {
       expect(document.querySelector(`a[href="${href}"]`)).not.toBeNull();
     }
@@ -179,7 +206,7 @@ describe("DashboardPage", () => {
     });
     renderPage();
 
-    const heading = screen.getByRole("heading", { name: "Dashboard" });
+    const heading = screen.getByRole("heading", { name: "Operations Dashboard" });
     const header = heading.closest("header");
     expect(header).not.toBeNull();
     expect(within(header!).getByRole("button", { name: "Alerts test control" }))
@@ -256,7 +283,7 @@ describe("DashboardPage", () => {
     renderPage();
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Dashboard...");
-    expect(screen.queryByRole("region", { name: "Projects Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Projects & Production" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Procurement Requests" })).not.toBeInTheDocument();
@@ -285,7 +312,7 @@ describe("DashboardPage", () => {
       "The Dashboard overview could not be loaded.",
     );
     for (const widget of [
-      "Projects Overview", "Recent Work Orders", "Procurement Requests", "Inventory Attention",
+      "Projects & Production", "Recent Work Orders", "Procurement Requests", "Inventory Attention",
       "Recent Activity", "Upcoming Calendar",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
@@ -335,7 +362,7 @@ describe("DashboardPage", () => {
   it("preserves Projects when Work Orders are backend-hidden", () => {
     setSuccess(projects, null, null, null, null, calendar);
     renderPage();
-    expect(screen.getByRole("region", { name: "Projects Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projects & Production" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Recent Work Orders" }))
       .not.toBeInTheDocument();
     const summary = screen.getByRole("region", { name: "Dashboard summary" });
@@ -346,7 +373,7 @@ describe("DashboardPage", () => {
   it("preserves Work Orders when Projects are backend-hidden", () => {
     setSuccess(null, workOrders, null, null, null, calendar);
     renderPage();
-    expect(screen.queryByRole("region", { name: "Projects Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Projects & Production" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
     const summary = screen.getByRole("region", { name: "Dashboard summary" });
@@ -356,8 +383,8 @@ describe("DashboardPage", () => {
 
   it("composes Activity and Calendar alongside every Task 141 and Task 142 widget", () => {
     renderPage();
-    expect(screen.getByRole("heading", { name: "Dashboard" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Projects Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Operations Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Projects & Production" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Recent Work Orders" }))
       .toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Procurement Requests" })).toBeInTheDocument();
@@ -390,7 +417,7 @@ describe("DashboardPage", () => {
     setSuccess(null, null, null, null, null, { upcoming: [] });
     renderPage();
     for (const widget of [
-      "Projects Overview", "Recent Work Orders", "Procurement Requests", "Inventory Attention", "Recent Activity",
+      "Projects & Production", "Recent Work Orders", "Procurement Requests", "Inventory Attention", "Recent Activity",
     ]) {
       expect(screen.queryByRole("region", { name: widget })).not.toBeInTheDocument();
     }

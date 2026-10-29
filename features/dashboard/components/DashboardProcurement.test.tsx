@@ -52,6 +52,17 @@ const section: DashboardProcurementSection = {
 afterEach(cleanup);
 
 describe("DashboardProcurement", () => {
+  it("keeps exact request quantities, statuses and timestamps available in compact Action Center details", () => {
+    const {container}=render(<DashboardProcurement section={section} compact />,{wrapper:MemoryRouter});
+    expect(screen.getByText("9007199254740992 remaining")).toBeInTheDocument();
+    expect(screen.getByText("9007199254740993")).toBeInTheDocument();
+    expect(screen.getAllByText("Request details")).toHaveLength(requests.length);
+    expect(screen.getByText("Partly Delivered")).toBeInTheDocument();
+    expect(screen.getByText("Procurement trends · unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("link",{name:"Newest Request"})).toHaveAttribute("href","/procurement");
+    expect(container.querySelector('time[datetime="2026-10-02T10:00:00Z"]')).toBeInTheDocument();
+    expect(container.querySelector('a[href^="/procurement/"]')).toBeNull();
+  });
   it("renders nothing when the backend section is unauthorized", () => {
     const { container } = render(<DashboardProcurement section={null} />, {
       wrapper: MemoryRouter,
