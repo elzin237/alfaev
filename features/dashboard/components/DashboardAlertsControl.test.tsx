@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  activeTracking:false,
+  combinedAlerts: false,
   useInbox: vi.fn(),
   useUnreadCount: vi.fn(),
   refetchInbox: vi.fn(),
@@ -11,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
   navigate: vi.fn(),
 }));
+vi.mock("../../../app/config/workOrderActiveShortagesActivation",()=>({isWorkOrderActiveShortagesEnabled:()=>mocks.activeTracking}));
+vi.mock("../../../app/config/workOrderNotificationsActivation",()=>({isWorkOrderNotificationsEnabled:()=>mocks.combinedAlerts}));
 
 vi.mock("react-router", async (importOriginal) => {
   const original = await importOriginal<typeof import("react-router")>();
@@ -107,6 +111,174 @@ function access(profileId = profileOne, canRead = true, permissionsPending = fal
   return { profileId, canRead, permissionsPending };
 }
 
+it("WO-08 keeps a read active shortage visible, labels separate metrics and offers no dismissal",()=>{
+  mocks.activeTracking=true;mocks.combinedAlerts=true;
+  const row:ProjectAlertNotification={targetType:"work_order",notificationKind:"work_order_shortage",
+    notificationId:profileOne,alertId:profileOne,episodeId:profileOne,episodeStatus:"active",projectId:null,projectName:null,
+    workOrderId:profileOne,workOrderNumber:"RN-2026-0041",productId:profileOne,productName:"Relay",
+    shortageEventType:"opened",shortageQuantity:"15",createdAt:"2026-10-29T10:00:00Z",readAt:"2026-10-29T10:01:00Z",activityId:null,activityTitle:null};
+  mocks.useUnreadCount.mockReturnValue({access:access(),unreadCountQuery:{data:{exactValue:2n,displayValue:"2",hasUnread:true,
+    projectUnread:3n,asOf:"2026-10-29T10:00:00Z"},isPending:false,isError:false,isFetching:false,refetch:mocks.refetchCount}});
+  inbox([row]);render(<DashboardAlertsControl/>);
+  fireEvent.click(screen.getByRole("button",{name:"Alerts, 5 alerts"}));
+  expect(screen.getByText("Active shortage")).toBeInTheDocument();
+  expect(screen.getByText("Project notifications:")).toHaveTextContent("Project notifications: 3");
+  expect(screen.queryByRole("button",{name:/Actions for RN/})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:/Material shortage — Work Order/}));
+  expect(mocks.navigate).toHaveBeenCalledWith(`/work-orders/${profileOne}`);
+  expect(mocks.markRead).not.toHaveBeenCalled();
+});
+
+it("WO-08 resolved items remain read and expose the existing manual dismissal control",()=>{
+  mocks.activeTracking=true;mocks.combinedAlerts=true;
+  const row:ProjectAlertNotification={targetType:"work_order",notificationKind:"work_order_shortage",
+    notificationId:profileOne,alertId:profileOne,episodeId:profileOne,episodeStatus:"resolved",projectId:null,projectName:null,
+    workOrderId:profileOne,workOrderNumber:"RN-2026-0041",productId:profileOne,productName:"Relay",
+    shortageEventType:"resolved",shortageQuantity:"0",createdAt:"2026-10-29T10:00:00Z",readAt:"2026-10-29T10:01:00Z",activityId:null,activityTitle:null};
+  inbox([row]);render(<DashboardAlertsControl/>);fireEvent.click(screen.getByRole("button",{name:/Alerts,/}));
+  expect(screen.getByText("Resolved")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button",{name:"Actions for RN-2026-0041"}));
+  expect(screen.getByRole("menuitem",{name:"Dismiss notification"})).toBeInTheDocument();
+});
+
+it("WO-08 never displays a stale red badge as a current count after a failed refresh",()=>{
+  mocks.activeTracking=true;mocks.combinedAlerts=true;
+  mocks.useUnreadCount.mockReturnValue({access:access(),unreadCountQuery:{data:{exactValue:2n,displayValue:"2",hasUnread:true,
+    projectUnread:3n,asOf:"2026-10-29T10:00:00Z"},isPending:false,isError:true,isFetching:false,refetch:mocks.refetchCount}});
+  render(<DashboardAlertsControl/>);
+  const button = screen.getByRole("button",{name:"Alerts, alert count unavailable"});
+  expect(within(button).queryByText("5")).not.toBeInTheDocument();
+  fireEvent.click(button);
+  expect(screen.getByText(/Count unavailable/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry alert counts" }));
+  expect(mocks.refetchCount).toHaveBeenCalledTimes(2);
+});
+
+function trackingCounts(active: bigint, project: bigint | undefined, options: {
+  isPending?: boolean; isFetching?: boolean; isError?: boolean; profileId?: string; canRead?: boolean;
+} = {}) {
+  mocks.activeTracking = true;
+  mocks.combinedAlerts = true;
+  mocks.useUnreadCount.mockReturnValue({
+    access: access(options.profileId, options.canRead ?? true),
+    unreadCountQuery: {
+      data: { exactValue: active, displayValue: active.toString(), hasUnread: active > 0n,
+        projectUnread: project, asOf: "2026-10-29T10:00:00Z" },
+      isPending: options.isPending ?? false, isFetching: options.isFetching ?? false,
+      isError: options.isError ?? false, refetch: mocks.refetchCount,
+    },
+  });
+}
+
+describe("WO-09 combined Alerts control", () => {
+  it("shows only Alerts and one combined badge when collapsed, with a breakdown in the panel", () => {
+    trackingCounts(1n, 2n);
+    // The total comes from the count RPC, not the paginated inbox length.
+    inbox([notification(1)]);
+    render(<DashboardAlertsControl />);
+    const button = screen.getByRole("button", { name: "Alerts, 3 alerts" });
+    expect(button).toHaveTextContent(/^Alerts3$/);
+    expect(button).toHaveClass("whitespace-nowrap");
+    expect(button).not.toHaveClass("flex-wrap");
+    expect(screen.queryByText(/Last checked/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Work Order shortages:")).not.toBeInTheDocument();
+    fireEvent.click(button);
+    expect(screen.getByText("Work Order shortages:")).toHaveTextContent("Work Order shortages: 1");
+    expect(screen.getByText("Project notifications:")).toHaveTextContent("Project notifications: 2");
+    expect(screen.getByText(/Last checked/)).toBeInTheDocument();
+  });
+
+  it("keeps active shortages counted after read, then follows Project-read and resolution counts", () => {
+    trackingCounts(1n, 2n);
+    const { rerender } = render(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, 3 alerts" })).toHaveTextContent("3");
+    // Authoritative read receipt refresh: active episode count is unaffected.
+    trackingCounts(1n, 2n);
+    rerender(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, 3 alerts" })).toHaveTextContent("3");
+    trackingCounts(1n, 1n);
+    rerender(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, 2 alerts" })).toHaveTextContent("2");
+    trackingCounts(0n, 1n);
+    rerender(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, 1 alert" })).toHaveTextContent("1");
+    trackingCounts(0n, 0n);
+    rerender(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, no active shortages or unread Project notifications" }))
+      .toHaveTextContent(/^Alerts$/);
+  });
+
+  it("preserves exact bigint counts while retaining the compact 99+ badge", () => {
+    trackingCounts(9007199254740993n, 2n);
+    render(<DashboardAlertsControl />);
+    const button = screen.getByRole("button", { name: "Alerts, 9007199254740995 alerts" });
+    expect(button).toHaveTextContent(/^Alerts99\+$/);
+    fireEvent.click(button);
+    expect(screen.getByText("Work Order shortages:")).toHaveTextContent("9007199254740993");
+  });
+
+  it("reading an unread active shortage navigates without reducing the combined badge", async () => {
+    trackingCounts(1n, 2n);
+    const row: ProjectAlertNotification = {
+      targetType: "work_order", notificationKind: "work_order_shortage",
+      notificationId: profileOne, alertId: profileOne, episodeId: profileOne, episodeStatus: "active",
+      projectId: null, projectName: null, workOrderId: profileOne, workOrderNumber: "RN-2026-0041",
+      productId: profileOne, productName: "Relay", shortageEventType: "opened", shortageQuantity: "15",
+      createdAt: "2026-10-29T10:00:00Z", readAt: null, activityId: null, activityTitle: null,
+    };
+    mocks.markRead.mockResolvedValue({ ok: true, value: {
+      notificationId: profileOne, readAt: "2026-10-29T10:01:00Z",
+    } });
+    inbox([row, notification(2), notification(3)]);
+    render(<DashboardAlertsControl />);
+    fireEvent.click(screen.getByRole("button", { name: "Alerts, 3 alerts" }));
+    expect(screen.queryByRole("button", { name: "Actions for RN-2026-0041" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Material shortage — Work Order/ }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith(`/work-orders/${profileOne}`));
+    expect(mocks.markRead).toHaveBeenCalledWith(profileOne);
+    expect(screen.getByRole("button", { name: "Alerts, 3 alerts" })).toHaveTextContent("3");
+  });
+
+  it.each([
+    { isPending: true }, { isFetching: true }, { isError: true }, {},
+  ])("never fabricates a total with an unavailable count (%j)", (options) => {
+    trackingCounts(1n, undefined, options);
+    render(<DashboardAlertsControl />);
+    const button = screen.getByRole("button", { name: /Alerts, (updating alert counts|alert count unavailable)/ });
+    expect(button).toHaveTextContent(/^Alerts$/);
+    fireEvent.click(button);
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+  });
+
+  it("hides stale complete counts during refresh and does not leak them after permission loss", () => {
+    trackingCounts(1n, 2n, { isFetching: true });
+    const { rerender } = render(<DashboardAlertsControl />);
+    expect(screen.getByRole("button", { name: "Alerts, updating alert counts" })).toHaveTextContent(/^Alerts$/);
+    fireEvent.click(screen.getByRole("button", { name: /Alerts,/ }));
+    expect(screen.getByText("Updating alert counts…")).toBeInTheDocument();
+    trackingCounts(1n, 2n, { profileId: profileTwo, canRead: false });
+    inbox([], { profileId: profileTwo, canRead: false });
+    rerender(<DashboardAlertsControl />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Alerts,/ })).not.toBeInTheDocument();
+  });
+
+  it.each([375, 768])("keeps the panel within a %ipx viewport", (width) => {
+    const previousWidth = window.innerWidth;
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+      trackingCounts(1n, 2n);
+      render(<DashboardAlertsControl />);
+      fireEvent.click(screen.getByRole("button", { name: "Alerts, 3 alerts" }));
+      const panel = screen.getByRole("dialog");
+      expect(panel).toHaveClass("w-[min(26rem,calc(100vw-1.5rem))]");
+      expect(Number.parseFloat(panel.style.left)).toBeGreaterThanOrEqual(12);
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: previousWidth });
+    }
+  });
+});
+
 function unread(
   displayValue = "0",
   hasUnread = false,
@@ -153,6 +325,8 @@ function inbox(
 }
 
 beforeEach(() => {
+  mocks.activeTracking=false;
+  mocks.combinedAlerts=false;
   unread();
   inbox();
   mocks.markRead.mockResolvedValue({
@@ -177,6 +351,19 @@ afterEach(() => {
 });
 
 describe("DashboardAlertsControl", () => {
+  it("presents Work Order shortage history and opens the Work Order target",()=>{
+    mocks.combinedAlerts=true;
+    const base=notification(1);
+    inbox([{notificationId:base.notificationId,alertId:base.alertId,targetType:"work_order",notificationKind:"work_order_shortage",
+      projectId:null,projectName:null,workOrderId:base.projectId,workOrderNumber:"RN-2026-0010",productId:base.alertId,
+      productName:"Relay",shortageEventType:"opened",shortageQuantity:"9007199254740993",createdAt:base.createdAt,
+      readAt:base.createdAt,activityId:null,activityTitle:null}]);
+    render(<DashboardAlertsControl />);fireEvent.click(screen.getByRole("button",{name:"Alerts, no unread notifications"}));
+    expect(screen.getByText("Relay is short by 9007199254740993 units.")).toBeInTheDocument();
+    expect(screen.getByText(/Recorded at event time/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:/Material shortage — Work Order RN-2026-0010/}));
+    expect(mocks.navigate).toHaveBeenCalledWith(`/work-orders/${base.projectId}`);
+  });
   it.each([
     ["0", false, "Alerts, no unread notifications", null],
     ["1", true, "Alerts, 1 unread notification", "1"],

@@ -2,6 +2,8 @@ import type { RefObject } from "react";
 
 import type { ProjectAlertNotification } from "../services/projectAlertService";
 import DashboardAlertActionsMenu from "./DashboardAlertActionsMenu";
+import { dashboardAlertLabel } from "../services/projectAlertService";
+import { isWorkOrderNotificationsEnabled } from "../../../app/config/workOrderNotificationsActivation";
 
 const alertTimestampFormatter = new Intl.DateTimeFormat("en-GB", {
   dateStyle: "medium",
@@ -18,6 +20,13 @@ interface DashboardAlertsPanelProps {
   isPending: boolean;
   isInitialError: boolean;
   isAccessDenied: boolean;
+  countSummary?: {
+    status: "ready" | "loading" | "error";
+    activeShortages: string | null;
+    projectUnread: string | null;
+    asOf?: string;
+  };
+  onRetryCounts?: () => void;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   isNextPageError: boolean;
@@ -43,6 +52,8 @@ function DashboardAlertsPanel({
   isPending,
   isInitialError,
   isAccessDenied,
+  countSummary,
+  onRetryCounts,
   hasNextPage,
   isFetchingNextPage,
   isNextPageError,
@@ -54,6 +65,7 @@ function DashboardAlertsPanel({
   onRetry,
   onLoadMore,
 }: DashboardAlertsPanelProps) {
+  const combined=isWorkOrderNotificationsEnabled();
   return (
     <section
       ref={panelRef}
@@ -73,8 +85,26 @@ function DashboardAlertsPanel({
           tabIndex={-1}
           className="text-base font-bold text-zinc-950 focus:outline-none"
         >
-          Project alerts
+          {combined ? "Alerts" : "Project alerts"}
         </h2>
+        {countSummary && !isAccessDenied && (
+          <div className="mt-2 space-y-1 text-xs text-zinc-600" aria-live="polite">
+            <p>Work Order shortages: <span className="font-semibold text-zinc-900">{countSummary.activeShortages ?? "Unavailable"}</span></p>
+            <p>Project notifications: <span className="font-semibold text-zinc-900">{countSummary.projectUnread ?? "Unavailable"}</span></p>
+            {countSummary.status === "loading" && <p role="status">Updating alert counts…</p>}
+            {countSummary.status === "error" && (
+              <p role="alert">
+                Count unavailable. <button type="button" onClick={onRetryCounts}
+                  className="rounded font-semibold text-red-700 underline focus-visible:outline-2 focus-visible:outline-red-500">
+                  Retry alert counts
+                </button>
+              </p>
+            )}
+            {countSummary.status === "ready" && countSummary.asOf && (
+              <p className="text-zinc-500">Last checked {alertTimestampFormatter.format(new Date(countSummary.asOf))}. Updates refresh on focus and inbox opening.</p>
+            )}
+          </div>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto">
@@ -82,7 +112,7 @@ function DashboardAlertsPanel({
           <div role="alert" className="px-5 py-8 text-center">
             <p className="font-semibold text-zinc-900">Alerts are unavailable.</p>
             <p className="mt-1 text-sm leading-6 text-zinc-500">
-              You no longer have access to Project alerts.
+              {combined ? "You no longer have access to alerts." : "You no longer have access to Project alerts."}
             </p>
           </div>
         ) : isPending ? (
@@ -92,14 +122,14 @@ function DashboardAlertsPanel({
               className="size-5 animate-spin rounded-full border-2 border-zinc-200 border-t-red-600"
             />
             <span className="text-sm font-medium text-zinc-600">
-              Loading Project alerts...
+              {combined ? "Loading alerts..." : "Loading Project alerts..."}
             </span>
           </div>
         ) : isInitialError ? (
           <div role="alert" className="px-5 py-8 text-center">
             <p className="font-semibold text-zinc-900">Unable to load alerts</p>
             <p className="mt-1 text-sm leading-6 text-zinc-500">
-              Project alerts could not be loaded. Please try again.
+              {combined ? "Alerts could not be loaded. Please try again." : "Project alerts could not be loaded. Please try again."}
             </p>
             <button
               type="button"
@@ -111,17 +141,19 @@ function DashboardAlertsPanel({
           </div>
         ) : items.length === 0 ? (
           <div role="status" className="px-5 py-10 text-center">
-            <p className="font-semibold text-zinc-900">No Project alerts.</p>
+            <p className="font-semibold text-zinc-900">{combined ? "No alerts." : "No Project alerts."}</p>
             <p className="mt-1 text-sm text-zinc-500">
-              New Project alerts will appear here.
+              {combined ? "New alerts will appear here." : "New Project alerts will appear here."}
             </p>
           </div>
         ) : (
           <>
-            <ol aria-label="Project alert notifications" className="divide-y divide-zinc-100">
+            <ol aria-label={combined ? "Alert notifications" : "Project alert notifications"} className="divide-y divide-zinc-100">
               {items.map((item) => {
                 const unread = item.readAt === null;
-                const notificationTitle = item.notificationKind === "issue_resolved"
+                const notificationTitle = item.notificationKind === "work_order_shortage"
+                  ? `${item.shortageEventType === "opened" ? "Material shortage" : "Material shortage resolved"} — Work Order ${item.workOrderNumber}`
+                  : item.notificationKind === "issue_resolved"
                   ? `Issue resolved: ${item.activityTitle ?? "Project Issue"}`
                   : item.notificationKind === "activity"
                     ? item.activityTitle ?? "Project update"
@@ -160,8 +192,18 @@ function DashboardAlertsPanel({
                               {notificationTitle}
                             </p>
                             <p className="mt-1 break-words text-sm font-medium text-zinc-700">
-                              {item.projectName}
+                              {dashboardAlertLabel(item)}
                             </p>
+                            {item.notificationKind === "work_order_shortage" && (
+                              <div className="mt-2 text-xs leading-5 text-zinc-600">
+                                <p>{item.shortageEventType === "opened"
+                                  ? `${item.productName} is short by ${item.shortageQuantity} units.`
+                                  : `${item.productName}: shortage resolved.`}</p>
+                                <p className="mt-1">{item.episodeStatus
+                                  ? "Latest reconciled shortage, not a stock guarantee. Test-hold expiry is reconciled on the next relevant change."
+                                  : "Recorded at event time; open the Work Order for current availability."}</p>
+                              </div>
+                            )}
                             {item.notificationKind === "shortage" && (
                               <div className="mt-2 space-y-1 text-xs leading-5 text-zinc-600">
                                 <p className="break-words">
@@ -205,7 +247,9 @@ function DashboardAlertsPanel({
                                   : "bg-zinc-100 text-zinc-600"
                             }`}
                           >
-                            {pending ? "Processing" : unread ? "Unread" : "Read"}
+                            {pending ? "Processing" : item.targetType === "work_order" && item.episodeStatus
+                              ? item.episodeStatus === "active" ? "Active shortage" : "Resolved"
+                              : unread ? "Unread" : "Read"}
                           </span>
                         </div>
                         <p className="mt-2 text-xs leading-5 text-zinc-500">
@@ -221,11 +265,11 @@ function DashboardAlertsPanel({
                           </time>
                         </p>
                       </button>
-                      <DashboardAlertActionsMenu
+                      {!(item.targetType === "work_order" && item.episodeStatus === "active") && <DashboardAlertActionsMenu
                         item={item}
                         disabled={interactionPending}
                         onDismissRequest={onDismissRequest}
-                      />
+                      />}
                     </div>
                     {itemError && (
                       <p

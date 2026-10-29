@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  tracking:false,
   access: {
     profileId: "00000000-0000-4000-8000-000000000101" as string | null,
     canRead: true,
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   subscriptions: [] as Array<{
     active: boolean;
     options: {
+      target?: "work_order";
       profileId: string;
       accessToken: string;
       onInvalidate: () => void;
@@ -34,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   useAuth: vi.fn(),
   useProjectAlertAccess: vi.fn(),
 }));
+vi.mock("../../app/config/workOrderActiveShortagesActivation",()=>({isWorkOrderActiveShortagesEnabled:()=>mocks.tracking}));
 
 vi.mock("../../app/auth/AuthProvider", () => ({
   useAuth: mocks.useAuth,
@@ -79,6 +82,7 @@ function createWrapper() {
 }
 
 beforeEach(() => {
+  mocks.tracking=false;
   vi.resetAllMocks();
   mocks.subscriptions.length = 0;
   mocks.access = {
@@ -102,6 +106,17 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+it("WO-08 subscribes to owner-scoped shortage invalidations only after activation and permission",async()=>{
+  mocks.tracking=true;
+  mocks.useProjectAlertAccess.mockReturnValue({...mocks.access,canReadWorkOrders:true,canReadProjects:true});
+  const setup=createWrapper(),view=render(<ProjectAlertRuntimeSync/>,{wrapper:setup.Wrapper});
+  expect(mocks.subscriptions).toHaveLength(2);
+  expect(mocks.subscriptions[1]?.options).toMatchObject({target:"work_order",profileId:mocks.access.profileId});
+  act(()=>mocks.subscriptions[1]?.options.onInvalidate());
+  await waitFor(()=>expect(mocks.invalidate).toHaveBeenCalledWith(setup.queryClient,mocks.access.profileId));
+  view.unmount();expect(mocks.subscriptions.every(s=>!s.active)).toBe(true);
+});
 
 describe("ProjectAlertRuntimeSync authorization and lifecycle", () => {
   it.each(["active Admin", "active authorized non-Admin"])(

@@ -12,6 +12,8 @@ import { useAuth } from "../auth/AuthProvider";
 import { hasPermission } from "../auth/permissionService";
 import { permissionQueryKey } from "../auth/permissionQueryKeys";
 import { useProjectAlertUnreadCount } from "../../features/dashboard/hooks/useProjectAlerts";
+import { getDashboardAlertCount } from "../../features/dashboard/dashboardAlertCount";
+import { isWorkOrderActiveShortagesEnabled } from "../config/workOrderActiveShortagesActivation";
 import { useProcurementSidebarBadge } from "../../features/procurement/hooks/useProcurementSidebarBadge";
 import { NAVIGATION } from "./navigation";
 import type { PermissionKey } from "../auth/permissions";
@@ -85,12 +87,12 @@ function Sidebar({
       ? procurementBadgeQuery.data.value
       : null;
   const projectAlertUnreadCount = useProjectAlertUnreadCount();
-  const dashboardAlertBadge =
-    projectAlertUnreadCount.access.canRead &&
-      !projectAlertUnreadCount.unreadCountQuery.isError &&
-      projectAlertUnreadCount.unreadCountQuery.data?.hasUnread
-      ? projectAlertUnreadCount.unreadCountQuery.data.displayValue
-      : null;
+  const tracking = isWorkOrderActiveShortagesEnabled();
+  const { badgeValue: dashboardAlertBadge, combinedCount } = getDashboardAlertCount(
+    projectAlertUnreadCount.unreadCountQuery,
+    tracking,
+    projectAlertUnreadCount.access.canRead && !projectAlertUnreadCount.access.permissionsPending,
+  );
   const visibleNavigation = NAVIGATION.filter((item) => {
     if (!isAuthenticatedActive) {
       return false;
@@ -233,7 +235,7 @@ function Sidebar({
               <span>{label}</span>
               {path === "/" && dashboardAlertBadge !== null && (
                 <span
-                  aria-label={`${dashboardAlertBadge} unread Project ${
+                  aria-label={tracking ? `${combinedCount?.toString()} combined alert${combinedCount === 1n ? "" : "s"}` : `${dashboardAlertBadge} unread Project ${
                     dashboardAlertBadge === "1" ? "alert" : "alerts"
                   }`}
                   className="ml-auto inline-flex min-w-6 items-center justify-center rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold tabular-nums text-white"

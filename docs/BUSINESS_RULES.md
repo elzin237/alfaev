@@ -1,5 +1,91 @@
 # AlfaEV — BUSINESS_RULES.md
 
+## Current release rules — 2026-10-29
+
+Current state takes precedence over historical local/inactive rollout notes below.
+The previously verified DEV baseline is migration 166. Test Calculator, Low Stock,
+WO availability, WO notifications and active-shortage UI gates are ON locally for
+the approved DEV backend only; no production release is implied.
+
+The single red Dashboard/Sidebar badge equals active recipient-visible Work Order/
+Product shortage episodes plus unread Project notifications. It does not count read
+Projects, resolved WO episodes or opening/resolution events twice. Reading an active
+shortage does not reduce it and active shortages cannot be dismissed. Resolution
+removes the episode from the count, makes its inbox item read and leaves it visible
+until manual dismissal; recurrence creates a new episode. Zero hides the badge;
+unverified required counts never produce a fabricated total. The opened panel retains
+separate WO and Project metrics. Historical evidence/events are not rewritten.
+
+Dashboard's recent Raw catalog subsection displays only active canonical Raw members
+among its bounded legacy candidate window, with Raw-context detail links and verified
+physical quantities. A candidate window with no Raw members is not evidence that all
+Raw Inventory is empty. Stock Health remains physical-only; Project/Test accounting
+is unchanged. Procurement trends remain unavailable, All Inventory retains its
+1,000-per-warehouse completeness limit, and live resolved-alert/non-Admin browser
+acceptance remains incomplete. Passive Test expiry awaits the next reconciliation
+trigger for inbox resolution; it does not require an expiry worker for stock safety.
+
+## WO-08 — persistent active Work Order shortages (local, inactive)
+
+The Dashboard's red shortage badge counts unique recipient-owned active Work Order/
+Product episodes, not unread messages. Reading does not reduce it. Active episodes
+remain visible, including legacy dismissed opening messages, and cannot be dismissed.
+Current episode missing quantities come from authoritative reconciliation, never
+from an old opening event. Project unread notifications remain separately labelled.
+
+Resolution makes the one episode item read (effective read_at is at latest its
+resolution time), removes it from the active count, and leaves it visible until
+explicit resolved dismissal. Opening/resolution deliveries are not two problems.
+Previously dismissed resolved history remains dismissed; a dismissal made while
+active does not suppress a later resolution. Recurrence creates a new episode.
+Immutable events, original recipient dismiss timestamps and stock accounting are
+retained. Expiry alone still waits for the next reconciliation trigger. Counts show
+their observation time, refresh on private invalidation/focus/open, and are not a
+guarantee of current production stock. Migration 166/release opening require approval.
+
+## Work Order shortage notification delivery — WO-04
+
+Opening and resolution intents each deliver once per eligible recipient in the
+originating transaction; increased/decreased quantities update history silently.
+Message quantities are immutable event-time decimal strings, never a guarantee of
+current availability. Work Order notifications are independent from Project alerts.
+Draft deletion retains notification history; opening a removed Work Order follows
+the existing missing-detail handling. Inbox reads never reconcile shortages, renew
+holds or mutate stock. Test expiry alone still awaits the next relevant mutation
+before generating a resolution event. No historical intent backfill is automatic.
+
+## Work Order material shortages V1 — WO-03 local episodes
+
+Each Work Order/Product has at most one active material shortage episode. The
+shortage is based on current production-eligible stock, so creating and saving a
+Draft remains allowed. A change in missing quantity records an immutable event;
+only opening and resolution create notification intents. A later recurrence opens
+a new episode. Finish and Draft deletion close active episodes without deleting
+history. Test-hold expiry changes authoritative availability immediately; the
+episode catches up on the next relevant mutation. V1 has no expiry worker or
+polling, and notification delivery belongs to WO-04.
+
+## Work Order material shortages V1 — WO-01 (local migration 162)
+
+All Draft Work Orders, including incomplete/general and Calculator production Drafts,
+may be created and saved despite material shortages. Required quantity aggregates
+persisted frozen BOM and supplemental rows per Product. Missing = max(required minus
+eligible production quantity, 0). Ordinary inputs use Raw → Customs → eligible FG;
+Calculator-linked finished inputs use FG only. Active Test holds and hard FG Project
+reservations reduce eligibility; soft Project demand does not. No recursive BOM
+consumption is introduced. Read observations are not reservations or Finish guarantees.
+Empty Drafts return an empty material list, not fabricated material quantities.
+
+The approved future alert direction is separate WO/Product episodes, not Project
+shortage episodes: active Admins and active Dashboard + Work Order viewers are eligible
+recipients; one active episode per WO/Product, opening/resolution notifications only,
+and silent quantity-change history. Stock sufficiency resolves an episode; renewed
+shortage opens another. Finish/deletion must close outstanding warnings without
+blocking existing Draft deletion or erasing immutable history. Test expiry must be
+reconciled using database time; passive expiry alone cannot fire a database trigger.
+WO-03 adopts next-trigger expiry reconciliation. WO-01 itself implements no
+episodes, delivery, expiry jobs or notification writes.
+
 Status: Canonical business rules v1  
 Purpose: Define business invariants that implementation must preserve.
 

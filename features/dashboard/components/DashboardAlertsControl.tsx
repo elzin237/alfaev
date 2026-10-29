@@ -7,6 +7,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Bell } from "lucide-react";
+import { isWorkOrderActiveShortagesEnabled } from "../../../app/config/workOrderActiveShortagesActivation";
 import { useNavigate } from "react-router";
 
 import ConfirmDialog from "../../../shared/components/ConfirmDialog";
@@ -24,6 +25,8 @@ import type {
   ProjectAlertResult,
 } from "../services/projectAlertService";
 import DashboardAlertsPanel from "./DashboardAlertsPanel";
+import { dashboardAlertDestination } from "../services/projectAlertService";
+import { getDashboardAlertCount } from "../dashboardAlertCount";
 
 interface PanelPosition {
   left: number;
@@ -171,9 +174,7 @@ function DashboardAlertsControl() {
     const sequence = interactionSequenceRef.current + 1;
     interactionSequenceRef.current = sequence;
     const profileId = access.profileId;
-    const destination = item.activityId
-      ? `/projects/${item.projectId}#activity-${item.activityId}`
-      : `/projects/${item.projectId}`;
+    const destination = dashboardAlertDestination(item);
     setRowError(null);
 
     if (item.readAt !== null) {
@@ -237,6 +238,7 @@ function DashboardAlertsControl() {
     item: ProjectAlertNotification,
     returnFocusTo: HTMLButtonElement,
   ) {
+    if(item.targetType === "work_order" && item.episodeStatus === "active") return;
     if (interactionLockRef.current || !access.profileId || !canRead) return;
     dismissReturnFocusRef.current = returnFocusTo;
     setDismissError(null);
@@ -313,7 +315,16 @@ function DashboardAlertsControl() {
 
   if (permissionsPending || !canRead) return null;
 
-  const countLabel = unreadCountQuery.isPending
+  const tracking = isWorkOrderActiveShortagesEnabled();
+  const accessDenied = mutationAccessDenied || inboxAccessDenied;
+  const { isLoading: countsLoading, verifiedCounts, combinedCount, badgeValue } =
+    getDashboardAlertCount(unreadCountQuery, tracking, !accessDenied);
+  const countLabel = tracking
+    ? countsLoading ? "updating alert counts"
+      : combinedCount === null ? "alert count unavailable"
+        : combinedCount === 0n ? "no active shortages or unread Project notifications"
+          : `${combinedCount.toString()} alert${combinedCount === 1n ? "" : "s"}`
+    : unreadCountQuery.isPending
     ? "unread count loading"
     : unreadCountQuery.isError
       ? "unread count unavailable"
@@ -322,7 +333,6 @@ function DashboardAlertsControl() {
           unreadCount.exactValue === 1n ? "" : "s"
         }`
         : "no unread notifications";
-  const accessDenied = mutationAccessDenied || inboxAccessDenied;
   const initialError = inboxQuery.isError && !inboxQuery.isFetchNextPageError;
 
   const panel = open && createPortal(
@@ -336,6 +346,13 @@ function DashboardAlertsControl() {
       isPending={inboxQuery.isPending}
       isInitialError={initialError}
       isAccessDenied={accessDenied}
+      countSummary={tracking && !accessDenied ? {
+        status: countsLoading ? "loading" : verifiedCounts ? "ready" : "error",
+        activeShortages: verifiedCounts?.activeShortages.toString() ?? null,
+        projectUnread: verifiedCounts?.projectUnread.toString() ?? null,
+        asOf: verifiedCounts ? unreadCount?.asOf : undefined,
+      } : undefined}
+      onRetryCounts={() => void unreadCountQuery.refetch()}
       hasNextPage={Boolean(inboxQuery.hasNextPage)}
       isFetchingNextPage={inboxQuery.isFetchingNextPage}
       isNextPageError={inboxQuery.isFetchNextPageError}
@@ -363,16 +380,16 @@ function DashboardAlertsControl() {
           if (!open) void unreadCountQuery.refetch();
           setOpen((current) => !current);
         }}
-        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-400 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+        className="inline-flex min-h-11 max-w-full items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-400 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
       >
         <Bell aria-hidden="true" className="size-4.5 text-zinc-600" strokeWidth={1.9} />
         <span>Alerts</span>
-        {unreadCount?.hasUnread && (
+        {badgeValue !== null && (
           <span
             aria-hidden="true"
             className="inline-flex min-w-6 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-xs font-bold leading-5 text-white"
           >
-            {unreadCount.displayValue}
+            {badgeValue}
           </span>
         )}
       </button>

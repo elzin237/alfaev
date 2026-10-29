@@ -1,5 +1,302 @@
 # AlfaEV — docs/BUILD_PLAN.md
 
+## Current release checkpoint — pre-commit corrections (2026-10-29)
+
+This current-state checkpoint supersedes older local/OFF/pending descriptions below
+without rewriting their chronological execution evidence. The previously verified
+DEV deployment baseline is alfaev-dev / yzysgbrpbhiapalgetau, migrations 166/166.
+This correction task does not reconnect to DEV or claim a new remote parity check.
+
+- Test Calculator, Low Stock, Work Order availability, Work Order notifications and
+  persistent active-shortage switches are ON locally, restricted to the configured
+  approved DEV origin. No production activation or frontend deployment is implied.
+- WO-09/WO-10: Alerts and Sidebar share one scoped query/count presentation:
+  active recipient-visible WO/Product episodes + unread Project notifications.
+  Reading an active shortage leaves the count unchanged; resolution removes it.
+  Missing/loading/error counts never become fabricated zeros. Exact bigint sums
+  retain compact 99+ display. Read/dismiss, private invalidation, focus/reconnect and
+  profile/permission isolation were verified by 219 focused tests before this task.
+- Low Stock test harnesses now install bounded historical prefixes: LS-01 through
+  159 and LS-02 through 161, excluding subsequent migrations regardless of future
+  repository growth. The next feature's RPC is asserted absent in each owned clone.
+  Current local runtime: 9/9 LS-01 + 15/15 LS-02 PASS; both newly owned clones removed
+  and source manifests unchanged. Initial sandbox Docker denial created no clones;
+  the approved runtime subsequently used the unchanged pinned-container guards.
+- Dashboard Raw catalog candidates are verified through the existing authorized
+  warehouse listing RPC in one bounded request (at most five IDs). Only canonical
+  active Raw members appear; quantities come from that read, links explicitly carry
+  warehouse=raw_materials, and denied/unverified reads never display legacy values.
+  The candidate window is not a complete recent-Raw feed: it may contain no Raw
+  members even when older Raw Products exist. Stock Health/Critical Items remain
+  separate authoritative projections; procurement trends remain explicitly unavailable.
+- Remaining limits: All Inventory fails closed above 1,000 Products per warehouse;
+  no complete server pagination or procurement trend contract is claimed. Existing
+  WO Test-hold expiry reconciles alerts on the next relevant trigger, not a worker.
+  Live resolved-alert/dismissal and full non-Admin browser acceptance still require
+  suitable existing data or separately approved fixtures. No scenario is fabricated.
+- Before the five planned commits: retain explicit shared-file hunk boundaries,
+  include the new Raw catalog hook/tests in the Dashboard group, validate staged
+  snapshots and exclude both retained maintenance rollback scripts. No staging,
+  deployment, persistent data changes, commit or push occurs in this task.
+- Focused Dashboard/Low Stock static verification: 122/122 tests across 16 files,
+  TypeScript typecheck and tracked/new-file whitespace checks PASS. These are local
+  mocked frontend/static checks, not a new DEV browser acceptance claim.
+
+## WO-08B — DEV deployment and localhost activation (2026-10-29)
+
+- Deployment/active acceptance PASS; overall PARTIAL because DEV has no resolved
+  Work Order episodes for live resolution/dismissal acceptance. No resolution was
+  manufactured by changing stock, materials, reservations or Test holds.
+- Exact target alfaev-dev / yzysgbrpbhiapalgetau, ACTIVE_HEALTHY. Approved migration
+  166 hash verified, existing isolated CLI dry run listed only 166, applied once.
+  Final parity 166/166. All existing data matched before/after deployment; stock
+  remained Raw/FG/Customs 1465/15/0, 41 permissions and approved RLS/grants retained.
+- Auth drift was independently verified using the existing encrypted, restored
+  backup entirely in memory: four users' 32 durable columns, four identities and
+  all 41 permission definitions matched. One legitimate token rotation in an
+  existing session explains session drift; no added/deleted users or new sessions.
+  The conditionally authorized fresh Auth baseline was then pinned pre/post deploy.
+- Initial post-deployment trigger-count check omitted internal FK triggers. CLI
+  succeeded; no retry occurred. Read-only identity verification confirmed exactly
+  three application triggers plus eight internal triggers for the two approved
+  non-cascading foreign keys, one new private table and one owner-only Realtime
+  policy. 216 public SECURITY DEFINER functions; approved function bodies verified.
+- Real authenticated READ ONLY checks verified Admin count 1, restored legacy
+  dismissed active item, current RN-2026-0041 / S4-24VDC 60/45/15, and anonymous,
+  inactive, private-table/helper and unauthorized-recipient denial/exclusion.
+- Local active-shortage gate ON, strict configured-DEV restriction retained;
+  prior availability/notification gates unchanged ON. Browser confirms restored
+  active item, count remains 1 after opening, correct Work Order route, no active
+  dismissal control. An actual authenticated dismissal attempt returned 55000;
+  an idempotent read preserved the original timestamp/all logical rows and emitted
+  private invalidation. Browser count refreshed automatically and remained 1.
+- Project unread metrics remain separate. An independently authored Project alert
+  by Vladan arrived during acceptance at 09:37 Sarajevo time, changing Project unread
+  from 0 to 1; it was not created/read/dismissed by this task. Do not confuse this
+  concurrent application activity with deployment data changes.
+- A later concurrent Project requirement edit/automatic FG reservation by Vladan
+  at 09:40 also changed requirement receipts, reservation events and Project shortage
+  state; Project unread then reached 2 while active Work Order count remained 1.
+  Final whole-database equality therefore cannot be claimed. Deployment-window and
+  idempotent-read preservation checks passed before this later activity. Acceptance
+  stopped without modifying/reverting those user changes or manufacturing a
+  resolution. No stock/Work Order/Test-hold mutations were issued by this task.
+- 155/155 focused frontend/static tests, typecheck and diff-check PASS. No production
+  access, reset, unrelated business writes, commit or push. Evidence is retained in
+  `/private/tmp/alfaev-wo08b-dg1wpy/`; remaining live resolution acceptance needs
+  suitable real data or separately authorized fixture/business mutations.
+
+## WO-08 — Persistent active shortage alerts (local only)
+
+- Migration 166 adds recipient-owned episode tracking, separate active/Project-unread
+  counts, and private resolved-dismissal acknowledgements. Reading does not reduce
+  active count. Active dismissal is rejected under the episode lock. Resolution
+  yields one read item until manual dismissal; recurrence is a new item. Legacy
+  dismissed active alerts reappear without rewriting historical events/dismissals.
+- New tracking release in `app/config/workOrderActiveShortagesActivation.ts` is OFF.
+  It inherits the existing strict DEV-backend gate. Current deployed contracts stay
+  in use; no undeployed tracking RPC is called on DEV. Future activation requires
+  reviewed migration 166, security/data verification, then separately approved gate
+  opening and browser lifecycle acceptance. No reconciliation/backfill is needed to
+  project previously dismissed active episodes into the new inbox.
+- Recipient-scoped private Realtime invalidates on episode quantity/resolution,
+  recipient read/delivery and resolved dismissal; existing Project topic is retained.
+  Focus/open refresh remains. No polling or expiry worker; last-checked time and
+  unavailable/updating states avoid representing stale counts as live guarantees.
+- Local validation: 37/37 owned-clone backend cases, including five WO-08 lifecycle,
+  legacy-dismissal, multi-Product/Work-Order, real-role authorization, concurrent
+  episode locking and Project count compatibility cases. 153/153 focused frontend/
+  static tests PASS; TypeScript and diff-check PASS. Owned clones removed and
+  source snapshots preserved. Migrations 1–165 and maintenance scripts unchanged.
+- Migration SHA-256:
+  `0b3aad6547c284310a1cf3788f714b8529f0a20132aafb4e7b8f6fbaf58f4550`.
+  No DEV/production access, deployment, release activation, persistent reset,
+  commit or push. Live browser acceptance remains a separately authorized step.
+
+## WO-07 — Explicit existing-Draft initialization (local only)
+
+- Fresh read-only DEV diagnosis: RN-2026-0041 has no episode, event or intent;
+  delivery and recipient tables are empty. Migrations 162–164 intentionally did
+  not initialize pre-existing Drafts. Availability/inbox reads never reconcile.
+- Local forward migration 165 adds operator-only, SECURITY INVOKER
+  `initialize_work_order_material_shortages(uuid[], integer DEFAULT 100)`.
+  It accepts 1–20 distinct existing Products, bounds the entire shared-Product
+  Draft/active-episode scope to at most 100 pairs, and calls migration 163's
+  reconciler in sorted Product order. No application role receives EXECUTE.
+  Short SHARE locks on Work Orders/items freeze candidate membership; use caller
+  lock_timeout and statement_timeout. All writes roll back together on failure.
+- Deployment performs no initialization. A separate approved operator transaction
+  must explicitly invoke the function after fresh target/scope/recipient checks.
+  It may write episodes, immutable events, opening/resolution intents, delivery
+  markers and eligible recipient rows only; no Work Order, Inventory, Project
+  alert or accounting mutation is introduced. Existing current episodes and exact
+  retries do not create duplicate opening events or recipient notifications.
+- Browser delivery/link acceptance remains pending explicit DEV approval. No
+  Dashboard-triggered backfill, polling, permission changes or old-intent replay.
+- Local verification: 32/32 owned-clone backend cases (three WO-07 additions),
+  53/53 focused migration/frontend checks, typecheck and diff-check PASS. The first
+  setup run exposed a missing required product_kind in the new historical fixture;
+  corrected only that fixture before the passing run. Both owned clones removed,
+  persistent source snapshots preserved. Migrations 162–164 remain byte-identical.
+- Read-only DEV proposal at 2026-10-29: three Drafts (RN-2026-0038/0041/0043),
+  23 distinct Work Order/Product pairs, nine material Products. Only RN-2026-0041 /
+  S4-24VDC currently lacks stock: required 60, eligible 45, missing 15. The one
+  active Admin Vladan Markovic is eligible; the other active profile lacks
+  work_orders.view. With this exact baseline, initialization creates one episode,
+  one opened event, one outbox intent, one delivery marker and one Admin recipient
+  notification. It does not fabricate historical creation-time observations.
+- Future execution requires separate approval to deploy ONLY migration 165 and
+  invoke the initializer ONCE in a READ COMMITTED transaction, lock_timeout 3s,
+  statement_timeout 30s, with pair bound 23 and this explicit Product allowlist:
+  `12b27f36-9271-46af-89f3-4c5bcfe4cb03`,
+  `1ab3752f-afc2-4921-a6a7-6399ff0c3781`,
+  `318e20e0-6a2a-48ea-aceb-71c07f677035`,
+  `3c5352f7-3d7e-42e2-8a44-848b155660e9`,
+  `61c8d0f5-2364-4a8a-be8b-bf85732c42e8`,
+  `6c3b3f8c-da9c-46b6-a508-9c2408925454`,
+  `930c8994-62f8-48cb-96a9-31691f28cd2e`,
+  `e3c155c2-1fb9-4349-bab1-bfad3c2afd41`,
+  `e597c6e3-77cf-4189-8cd5-d8cc5f2390d6`.
+  Fresh DEV identity, quantities, exact pair scope and recipient checks are required;
+  stop on unexplained drift. Verify unchanged physical stock 1465/15/0, immutable
+  Project-alert history, Work Orders, holds/reservations and other business data,
+  then refresh the existing inbox and verify its Work Order destination. No DEV
+  migration or initialization was executed in WO-07.
+
+## WO-06 — DEV deployment and localhost activation (2026-10-29)
+
+- Overall PARTIAL: deployment, security verification and localhost activation PASS;
+  event-dependent real-browser acceptance remains UNVERIFIED because both Work
+  Order and Project notification histories are empty. No synthetic events,
+  reconciliation, Work Order creation or Draft save was performed to fill gaps.
+- Exact target `alfaev-dev / yzysgbrpbhiapalgetau`, ACTIVE_HEALTHY. Fresh remote
+  baseline 161, local 164; isolated CLI dry run listed only 162 → 163 → 164.
+  Applied once with the established explicit-project CLI workflow and `--skip-vault`.
+  Final parity 164/164 with zero pending migrations. Approved hashes unchanged.
+- Before/after public business, stock, Storage and account data matched. Physical
+  Raw/FG/Customs totals remain 1465/15/0. All 41 permissions preserved; 213 public
+  SECURITY DEFINER functions (expected +12), six new private RLS tables empty,
+  approved function bodies/ACLs verified and existing security unchanged.
+- Authenticated smoke passed using the established verified-TLS temporary-login
+  connection, real `authenticated` role and explicit READ ONLY transaction; anonymous
+  calls denied. Availability, combined inbox/count and existing Project list returned
+  correct decimal-string contracts. Initial management read-only role setup was
+  rejected; no security bypass or deployment retry was used. Pooler startup options
+  did not establish READ ONLY, so the successful probe set it transactionally first.
+- Both Work Order release switches are ON and retain the existing environment URL
+  origin restriction to approved DEV. `.env.local` uses that DEV backend; other
+  origins remain OFF. No frontend/Edge deployment occurred.
+- Browser verified RN-2026-0041: S4-24VDC required 60 / eligible 45 / missing 15,
+  red highlight and “Short by 15”; sufficient rows normal, Save for Later enabled.
+  RN-2026-0043 sufficient rows and new columns also verified. Inbox opens with
+  honest “No alerts”. Actual create/save, opening/resolution messages, alert
+  navigation, read/dismiss, populated Project-alert compatibility and non-Admin
+  browser acceptance remain UNVERIFIED. Existing records were not changed.
+- 177/177 focused frontend tests across 11 files, 13/13 migration/static checks,
+  TypeScript and whitespace checks PASS. Existing uncommitted work and maintenance
+  scripts retained. No production access, reset, commit or push.
+- Evidence: `/private/tmp/alfaev-wo06-YVaxiJ/` contains owner-controlled before/after,
+  dry-run and security artifacts. Browser screenshot:
+  `/private/tmp/alfaev-wo06-shortage.png`. Remaining acceptance requires an existing
+  real event or separately authorized bounded fixtures/mutations; no automatic
+  backfill or further activation action is authorized by this record.
+
+## WO-05 — Integrated lifecycle verification (local only)
+
+- PASS: 29/29 owned-clone backend cases cover trusted Draft creation/saving,
+  frozen BOM plus supplemental edits, stock arrival/resolution/recurrence, protected
+  FG/Test availability, Finish/FIFO/PDF preservation, deletion with retained
+  notification links, real-role authorization and concurrent reconciliation/retries.
+- Expiry verification uses the exact before/at-expiry capacity boundary plus valid
+  expired-hold/historical-episode fixtures. Current reads exclude expired holds
+  without writes; next-trigger reconciliation delivers one resolution. No database
+  clock changes, constraint bypass, worker or real-midnight wait is used.
+- Fixed a demonstrated frontend defect: confirmed read/dismiss receipts previously
+  updated only unscoped caches after the combined inbox added permission-scoped
+  keys. Reconciliation now updates each matching profile/scope and its own unread
+  count, preserving other profiles and scopes without the notification. New
+  regression tests exercise successful receipts independently of refresh success.
+- 193/193 focused frontend/static/route tests across 15 files, TypeScript and
+  whitespace checks PASS. Migrations 162–164 unchanged. Source manifests match;
+  owned test clones are removed. Existing work and maintenance scripts retained.
+- Exact runtime file: `test/backend/work-order-material-availability.backend.ts`
+  with `WORK_ORDER_AVAILABILITY_LOCAL=1`,
+  `WORK_ORDER_AVAILABILITY_APPROVAL=owned-clone-only`, clean environment and
+  `vitest.backend.config.ts --bail 1` (29 final PASS).
+- Exact focused files (193 final PASS):
+  `features/work-orders/services/workOrderAvailabilityService.test.ts`,
+  `features/work-orders/hooks/useWorkOrderAvailability.test.tsx`,
+  `features/work-orders/components/WorkOrderMaterialsAvailability.test.tsx`,
+  `app/config/workOrderAvailabilityActivation.test.ts`,
+  `app/config/workOrderNotificationsActivation.test.ts`,
+  `features/dashboard/services/workOrderAlertService.test.ts`,
+  `features/dashboard/services/projectAlertService.test.ts`,
+  `features/dashboard/hooks/useProjectAlerts.test.tsx`,
+  `features/dashboard/components/DashboardAlertsControl.test.tsx`,
+  `features/dashboard/ProjectAlertRuntimeSync.test.tsx`,
+  `features/dashboard/services/projectAlertRealtimeService.test.ts`,
+  `app/router/WorkOrdersRoute.test.tsx`,
+  `test/workOrderMaterialAvailabilityMigration.test.ts`,
+  `test/workOrderMaterialShortageMigration.test.ts`,
+  `test/workOrderShortageNotificationMigration.test.ts`.
+- WO-06 remains separately authorized: fresh DEV preflight, reviewed 162–164
+  deployment/security/data checks, coordinated release-switch activation, and
+  browser acceptance. Both local switches remain OFF. No DEV/production access,
+  deployment, feature activation, persistent reset, commit or push occurred.
+
+## WO-04 — Work Order shortage delivery and Dashboard inbox (local migration 164)
+
+- New opening/resolution intents deliver transactionally once to active Admins or
+  active `dashboard.view` + `work_orders.view` recipients. Quantity-change events
+  remain silent. A processing identity and unique intent/recipient key prevent retries
+  from duplicating delivery. There is no historical backfill.
+- Combined Dashboard list/count/read/dismiss RPCs preserve existing Project RPCs,
+  current module authorization, recipient ownership and exact event-time quantities.
+  The inbox displays explicit Project/Work Order targets with correct navigation.
+- `WORK_ORDER_NOTIFICATIONS_RELEASE.enabled` remains false, pinned to approved DEV;
+  OFF uses only existing Project RPCs. Combined caches include profile and current
+  module scope. Inbox refreshes on opening/focus; WO-specific realtime is not added.
+- Local acceptance: 27/27 owned-clone backend tests (4 WO-04, 10 WO-03, 13 WO-01)
+  and 140/140 focused frontend/static/route regressions PASS, plus TypeScript and
+  whitespace checks. Source snapshots matched and newly owned clones were removed.
+  No DEV deployment or browser activation claimed. WO-05 verifies integration;
+  WO-06 requires separately authorized coordinated 162–164 deployment, UI release
+  and real-browser acceptance.
+
+## WO-03 — Draft material shortage episodes (local migration 163)
+
+- Private per Work Order/Product episodes retain exact required, eligible and
+  missing quantities, immutable change events, and opening/resolution notification
+  intents for WO-04. No notification delivery is activated in WO-03.
+- A transaction-coalesced, deferred Product queue reconciles Draft material edits,
+  stock changes, Test hold insertions, FG Project reservation changes, Calculator
+  output linkage, Finish and Draft deletion. Draft deletion retains episode history.
+- Production eligibility matches WO-01; Test expiry is read immediately but episode
+  resolution waits until the next relevant mutation. No worker or polling is added.
+- WO-03B owned-clone runtime acceptance passed (10 WO-03 + 13 WO-01 cases).
+  No DEV deployment
+  or Work Order inbox activation is claimed.
+
+## WO-01 — Authoritative Draft material availability (local migration 162)
+
+- Scope: all Draft Work Orders, including incomplete/empty and frozen BOM plus
+  supplemental material sets. Creation/saving with shortage remains allowed.
+- One trusted Work Order-detail-authorized read returns one statement snapshot,
+  exact text quantities and aggregate missing quantities per Product.
+- Shares production free-capacity arithmetic; preserves post-lock wall-clock
+  semantics, Finish, FIFO, source fingerprints, accounting and permissions.
+- Validation: 13/13 focused owned-clone runtime tests and 12/12 focused static
+  regressions PASS; TypeScript and diff-check PASS. Includes exact shortage,
+  origin aggregation, snapshot consistency, archived identity, authorization,
+  hold/reservation exclusions, bigint and FIFO/PDF/Finish preservation. Source
+  manifests matched before/after; newly owned clones were verified removed.
+  Migrations 1–161 remain byte-identical. No DEV deployment, frontend or Work
+  Order alert activation is included.
+- WO-02 dependencies: consume this contract in Materials UI; keep warnings advisory,
+  refresh identity-scoped reads, and preserve editing/creation with shortages.
+  Later alert work uses the separately documented WO episode/recipient rules;
+  WO-03 uses next-trigger expiry reconciliation without a proactive scheduler.
+
 Status: Canonical implementation plan v3  
 Purpose: Maximize Codex reliability by using small, coherent, independently verifiable execution tasks.  
 Execution model: **one numbered task = one Codex implementation prompt = one review gate**.  

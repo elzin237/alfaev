@@ -15,6 +15,8 @@ import {
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
+import { isWorkOrderNotificationsEnabled } from "../../../app/config/workOrderNotificationsActivation";
+import { isWorkOrderActiveShortagesEnabled } from "../../../app/config/workOrderActiveShortagesActivation";
 import {
   projectAlertInboxQueryKey,
   projectAlertQueryPrefix,
@@ -96,11 +98,11 @@ export async function invalidateProjectAlertQueries(
   await Promise.all([
     queryClient.invalidateQueries({
       queryKey: projectAlertInboxQueryKey(profileId),
-      exact: true,
+      exact: !isWorkOrderNotificationsEnabled(),
     }),
     queryClient.invalidateQueries({
       queryKey: projectAlertUnreadCountQueryKey(profileId),
-      exact: true,
+      exact: !isWorkOrderNotificationsEnabled(),
     }),
   ]);
 }
@@ -119,10 +121,14 @@ export function reconcileProjectAlertReadReceipt(
   profileId: string,
   receipt: ProjectAlertReadReceipt,
 ): void {
-  let changedUnreadNotification = false;
-  queryClient.setQueryData<ProjectAlertInfiniteData>(
-    projectAlertInboxQueryKey(profileId),
-    (current) => {
+  const prefix = projectAlertInboxQueryKey(profileId);
+  const inboxes = queryClient.getQueriesData<ProjectAlertInfiniteData>({
+    queryKey: prefix,
+    exact: !isWorkOrderNotificationsEnabled(),
+  });
+  for (const [inboxKey] of inboxes) {
+    let changedUnreadNotification = false;
+    queryClient.setQueryData<ProjectAlertInfiniteData>(inboxKey, (current) => {
       if (!current) return current;
       let changed = false;
       const pages = current.pages.map((page) => ({
@@ -135,24 +141,18 @@ export function reconcileProjectAlertReadReceipt(
         }),
       }));
       return changed ? { ...current, pages } : current;
-    },
-  );
+    });
 
-  if (!changedUnreadNotification) return;
-  queryClient.setQueryData<ProjectAlertUnreadCount>(
-    projectAlertUnreadCountQueryKey(profileId),
-    (current) => {
-      if (!current || current.exactValue === null || current.exactValue === 0n) {
-        return current;
-      }
-      const exactValue = current.exactValue - 1n;
-      return {
-        exactValue,
-        displayValue: exactValue > 99n ? "99+" : exactValue.toString(),
-        hasUnread: exactValue > 0n,
-      };
-    },
-  );
+    if (!changedUnreadNotification || isWorkOrderActiveShortagesEnabled()) continue;
+    queryClient.setQueryData<ProjectAlertUnreadCount>(
+      [...projectAlertUnreadCountQueryKey(profileId), ...inboxKey.slice(prefix.length)],
+      (current) => {
+        if (!current || current.exactValue === null || current.exactValue === 0n) return current;
+        const exactValue = current.exactValue - 1n;
+        return { exactValue, displayValue: exactValue > 99n ? "99+" : exactValue.toString(), hasUnread: exactValue > 0n };
+      },
+    );
+  }
 }
 
 export function reconcileProjectAlertDismissReceipt(
@@ -160,15 +160,20 @@ export function reconcileProjectAlertDismissReceipt(
   profileId: string,
   receipt: ProjectAlertDismissReceipt,
 ): void {
-  let removedUnreadNotification = false;
-  queryClient.setQueryData<ProjectAlertInfiniteData>(
-    projectAlertInboxQueryKey(profileId),
-    (current) => {
+  const prefix = projectAlertInboxQueryKey(profileId);
+  const inboxes = queryClient.getQueriesData<ProjectAlertInfiniteData>({
+    queryKey: prefix,
+    exact: !isWorkOrderNotificationsEnabled(),
+  });
+  for (const [inboxKey] of inboxes) {
+    let removedUnreadNotification = false;
+    queryClient.setQueryData<ProjectAlertInfiniteData>(inboxKey, (current) => {
       if (!current) return current;
       let changed = false;
       const pages = current.pages.map((page) => {
         const items = page.items.filter((item) => {
           if (item.notificationId !== receipt.notificationId) return true;
+          if (isWorkOrderActiveShortagesEnabled() && item.targetType === "work_order" && item.episodeStatus === "active") return true;
           changed = true;
           if (item.readAt === null) removedUnreadNotification = true;
           return false;
@@ -176,24 +181,18 @@ export function reconcileProjectAlertDismissReceipt(
         return items.length === page.items.length ? page : { ...page, items };
       });
       return changed ? { ...current, pages } : current;
-    },
-  );
+    });
 
-  if (!removedUnreadNotification) return;
-  queryClient.setQueryData<ProjectAlertUnreadCount>(
-    projectAlertUnreadCountQueryKey(profileId),
-    (current) => {
-      if (!current || current.exactValue === null || current.exactValue === 0n) {
-        return current;
-      }
-      const exactValue = current.exactValue - 1n;
-      return {
-        exactValue,
-        displayValue: exactValue > 99n ? "99+" : exactValue.toString(),
-        hasUnread: exactValue > 0n,
-      };
-    },
-  );
+    if (!removedUnreadNotification || isWorkOrderActiveShortagesEnabled()) continue;
+    queryClient.setQueryData<ProjectAlertUnreadCount>(
+      [...projectAlertUnreadCountQueryKey(profileId), ...inboxKey.slice(prefix.length)],
+      (current) => {
+        if (!current || current.exactValue === null || current.exactValue === 0n) return current;
+        const exactValue = current.exactValue - 1n;
+        return { exactValue, displayValue: exactValue > 99n ? "99+" : exactValue.toString(), hasUnread: exactValue > 0n };
+      },
+    );
+  }
 }
 
 export function useProjectAlertAccess() {
@@ -225,17 +224,31 @@ export function useProjectAlertAccess() {
   const permissionsPending = shouldCheckPermissions && (
     dashboardPermissionQuery.isPending || projectPermissionQuery.isPending
   );
+  const workOrderPermissionQuery = useQuery({
+    queryKey: permissionQueryKey(session?.user.id,profile?.id,"work_orders.view"),
+    queryFn: () => hasPermission("work_orders.view"),
+    enabled: shouldCheckPermissions && isWorkOrderNotificationsEnabled(),
+    staleTime: 60_000,
+  });
   const canRead = hasActiveProfile && (isAdmin || (
     dashboardPermissionQuery.data?.ok === true &&
     dashboardPermissionQuery.data.value &&
-    projectPermissionQuery.data?.ok === true &&
-    projectPermissionQuery.data.value
+    ((projectPermissionQuery.data?.ok === true && projectPermissionQuery.data.value) ||
+      (isWorkOrderNotificationsEnabled() && workOrderPermissionQuery.data?.ok === true && workOrderPermissionQuery.data.value))
   ));
+  const canReadProjects=hasActiveProfile && (isAdmin || (dashboardPermissionQuery.data?.ok === true && dashboardPermissionQuery.data.value &&
+    projectPermissionQuery.data?.ok === true && projectPermissionQuery.data.value));
+  const canReadWorkOrders=hasActiveProfile && isWorkOrderNotificationsEnabled() && (isAdmin ||
+    (dashboardPermissionQuery.data?.ok === true && dashboardPermissionQuery.data.value &&
+      workOrderPermissionQuery.data?.ok === true && workOrderPermissionQuery.data.value));
 
   return {
     profileId: hasActiveProfile ? profile?.id ?? null : null,
     canRead,
-    permissionsPending,
+    canReadProjects,
+    canReadWorkOrders,
+    scope: `${canReadProjects ? "p" : ""}${canReadWorkOrders ? "w" : ""}`,
+    permissionsPending: permissionsPending || (shouldCheckPermissions && isWorkOrderNotificationsEnabled() && workOrderPermissionQuery.isPending),
   };
 }
 
@@ -256,7 +269,7 @@ export function useProjectAlertInbox(panelOpen: boolean) {
   const enabled = Boolean(access.profileId && access.canRead && panelOpen);
   const inboxQuery = useInfiniteQuery({
     queryKey: access.profileId
-      ? projectAlertInboxQueryKey(access.profileId)
+      ? [...projectAlertInboxQueryKey(access.profileId),...(isWorkOrderNotificationsEnabled() ? [access.scope] : [])]
       : disabledInboxQueryKey,
     queryFn: async ({ pageParam }) => {
       const result = await listProjectAlertNotifications(pageParam);
@@ -285,7 +298,7 @@ export function useProjectAlertInbox(panelOpen: boolean) {
     inboxQuery,
     items: deniedByBackend
       ? []
-      : dedupeProjectAlertPages(inboxQuery.data?.pages),
+      : dedupeProjectAlertPages(inboxQuery.data?.pages).filter(item=>item.targetType === "work_order" ? access.canReadWorkOrders : access.canReadProjects),
   };
 }
 
@@ -294,7 +307,7 @@ export function useProjectAlertUnreadCount() {
   const enabled = Boolean(access.profileId && access.canRead);
   const unreadCountQuery = useQuery({
     queryKey: access.profileId
-      ? projectAlertUnreadCountQueryKey(access.profileId)
+      ? [...projectAlertUnreadCountQueryKey(access.profileId),...(isWorkOrderNotificationsEnabled() ? [access.scope] : [])]
       : disabledUnreadCountQueryKey,
     queryFn: async () => {
       const result = await getProjectAlertUnreadCount();

@@ -1,4 +1,6 @@
 import { supabase } from "../../../lib/supabase/client";
+import { isWorkOrderNotificationsEnabled } from "../../../app/config/workOrderNotificationsActivation";
+import { isWorkOrderActiveShortagesEnabled } from "../../../app/config/workOrderActiveShortagesActivation";
 
 export const PROJECT_ALERT_PAGE_SIZE = 20;
 
@@ -8,6 +10,7 @@ export interface ProjectAlertCursor {
 }
 
 interface ProjectAlertNotificationBase {
+  targetType?: "project";
   notificationId: string;
   alertId: string;
   projectId: string;
@@ -70,7 +73,38 @@ export interface ProjectShortageAlertNotification
 export type ProjectAlertNotification =
   | ProjectActivityAlertNotification
   | ProjectIssueResolvedAlertNotification
-  | ProjectShortageAlertNotification;
+  | ProjectShortageAlertNotification
+  | WorkOrderShortageAlertNotification;
+
+export interface WorkOrderShortageAlertNotification {
+  episodeStatus?: "active" | "resolved";
+  episodeId?: string;
+  targetType: "work_order";
+  notificationKind: "work_order_shortage";
+  notificationId: string;
+  alertId: string;
+  projectId: null;
+  projectName: null;
+  workOrderId: string;
+  workOrderNumber: string;
+  productId: string;
+  productName: string;
+  shortageEventType: "opened" | "resolved";
+  shortageQuantity: string;
+  createdAt: string;
+  readAt: string | null;
+  activityId: null;
+  activityTitle: null;
+}
+
+export function dashboardAlertDestination(item: ProjectAlertNotification): string {
+  if (item.targetType === "work_order") return `/work-orders/${item.workOrderId}`;
+  return item.activityId ? `/projects/${item.projectId}#activity-${item.activityId}` : `/projects/${item.projectId}`;
+}
+
+export function dashboardAlertLabel(item: ProjectAlertNotification): string {
+  return item.targetType === "work_order" ? item.workOrderNumber : item.projectName;
+}
 
 export interface ProjectAlertPage {
   items: ProjectAlertNotification[];
@@ -78,6 +112,8 @@ export interface ProjectAlertPage {
 }
 
 export interface ProjectAlertUnreadCount {
+  projectUnread?: bigint;
+  asOf?: string;
   exactValue: bigint | null;
   displayValue: string;
   hasUnread: boolean;
@@ -229,6 +265,32 @@ function mapRpcError(
 }
 
 function parseInboxRow(value: unknown): ProjectAlertNotification | null {
+  if (isRecord(value) && value.target_type === "work_order") {
+    const tracking=isWorkOrderActiveShortagesEnabled();
+    if (!hasExactKeys(value,["target_type","notification_id","event_id","notification_kind","work_order_id",
+      "work_order_number","product_id","product_name","shortage_event_type","shortage_quantity","created_at","read_at","has_more",...(tracking?["episode_id","episode_status"]:[])]) ||
+      (tracking && (!isUuid(value.episode_id) || !["active","resolved"].includes(value.episode_status as string) ||
+        (value.episode_status === "active") !== (value.shortage_event_type === "opened") ||
+        (value.episode_status === "resolved" && value.read_at === null))) ||
+      value.notification_kind !== "work_order_shortage" || !isUuid(value.notification_id) || !isUuid(value.event_id) ||
+      !isUuid(value.work_order_id) || !isUuid(value.product_id) || !isTrimmedNonblank(value.work_order_number) ||
+      !isTrimmedNonblank(value.product_name) || !isTimestamp(value.created_at) ||
+      !(value.read_at === null || isTimestamp(value.read_at)) || typeof value.has_more !== "boolean" ||
+      typeof value.shortage_quantity !== "string" || !unsignedIntegerPattern.test(value.shortage_quantity) ||
+      BigInt(value.shortage_quantity)>9223372036854775807n ||
+      !((value.shortage_event_type === "opened" && BigInt(value.shortage_quantity)>0n) ||
+        (value.shortage_event_type === "resolved" && value.shortage_quantity === "0"))) return null;
+    return {...(tracking?{episodeId:value.episode_id as string,episodeStatus:value.episode_status as "active"|"resolved"}:{}),targetType:"work_order",notificationKind:"work_order_shortage",notificationId:value.notification_id,
+      alertId:value.event_id,projectId:null,projectName:null,workOrderId:value.work_order_id,
+      workOrderNumber:value.work_order_number,productId:value.product_id,productName:value.product_name,
+      shortageEventType:value.shortage_event_type as "opened"|"resolved",shortageQuantity:value.shortage_quantity,
+      createdAt:value.created_at,readAt:value.read_at,activityId:null,activityTitle:null};
+  }
+  if (isRecord(value) && value.target_type === "project") {
+    const {target_type: _targetType,...project}=value;
+    const parsed=parseInboxRow(project);
+    return parsed && parsed.targetType !== "work_order" ? {...parsed,targetType:"project"} : null;
+  }
   if (!isRecord(value) || !hasExactKeys(value, inboxRowKeys) ||
     !isUuid(value.notification_id) || !isUuid(value.event_id) ||
     !(value.notification_kind === "activity" ||
@@ -374,7 +436,7 @@ export async function listProjectAlertNotifications(
 
   let response: { data: unknown; error: RpcErrorLike | null };
   try {
-    response = await supabase.rpc("list_project_notifications", {
+    response = await supabase.rpc(isWorkOrderActiveShortagesEnabled() ? "list_dashboard_shortage_tracking" : isWorkOrderNotificationsEnabled() ? "list_dashboard_notifications" : "list_project_notifications", {
       p_limit: PROJECT_ALERT_PAGE_SIZE,
       p_before_created_at: cursor?.createdAt ?? null,
       p_before_recipient_id: cursor?.notificationId ?? null,
@@ -416,11 +478,21 @@ export async function getProjectAlertUnreadCount(): Promise<
 > {
   let response: { data: unknown; error: RpcErrorLike | null };
   try {
-    response = await supabase.rpc("get_project_alert_unread_count");
+    response = await supabase.rpc(isWorkOrderActiveShortagesEnabled() ? "get_dashboard_alert_counts" : isWorkOrderNotificationsEnabled() ? "get_dashboard_notification_unread_count" : "get_project_alert_unread_count");
   } catch {
     return { ok: false, error: mapRpcError(null, "unread_count_load_failed") };
   }
 
+  if(isWorkOrderActiveShortagesEnabled()) {
+    const data=response.data;
+    if(response.error || !isRecord(data) || !hasExactKeys(data,["active_work_order_shortages","unread_project_notifications","as_of"]) ||
+      typeof data.active_work_order_shortages!=="string" || !unsignedIntegerPattern.test(data.active_work_order_shortages) ||
+      typeof data.unread_project_notifications!=="string" || !unsignedIntegerPattern.test(data.unread_project_notifications) || !isTimestamp(data.as_of))
+      return {ok:false,error:mapRpcError(null,"unread_count_load_failed")};
+    const parsed=parseProjectAlertUnreadCount(data.active_work_order_shortages);
+    return parsed ? {ok:true,value:{...parsed,projectUnread:BigInt(data.unread_project_notifications),asOf:data.as_of}}
+      : {ok:false,error:mapRpcError(null,"unread_count_load_failed")};
+  }
   const parsed = response.error ? null : parseProjectAlertUnreadCount(response.data);
   return parsed
     ? { ok: true, value: parsed }
@@ -436,7 +508,7 @@ export async function markProjectAlertRead(
 
   let response: { data: unknown; error: RpcErrorLike | null };
   try {
-    response = await supabase.rpc("mark_project_alert_read", {
+    response = await supabase.rpc(isWorkOrderNotificationsEnabled() ? "mark_dashboard_notification_read" : "mark_project_alert_read", {
       p_notification_id: notificationId,
     });
   } catch {
@@ -467,7 +539,7 @@ export async function dismissProjectAlertNotification(
 
   let response: { data: unknown; error: RpcErrorLike | null };
   try {
-    response = await supabase.rpc("dismiss_project_alert_notification", {
+    response = await supabase.rpc(isWorkOrderNotificationsEnabled() ? "dismiss_dashboard_notification" : "dismiss_project_alert_notification", {
       p_notification_id: notificationId,
     });
   } catch {

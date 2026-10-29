@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock("../../../lib/supabase/client", () => ({
   supabase: { rpc: mocks.rpc },
 }));
+// Preserve explicit coverage of the legacy Project-only release path.
+vi.mock("../../../app/config/workOrderNotificationsActivation",()=>({isWorkOrderNotificationsEnabled:()=>false}));
 
 import {
   dismissProjectAlertNotification,

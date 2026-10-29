@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../app/auth/AuthProvider";
+import { isWorkOrderActiveShortagesEnabled } from "../../app/config/workOrderActiveShortagesActivation";
 import {
   invalidateProjectAlertQueries,
   removeProjectAlertQueries,
@@ -60,22 +61,29 @@ function ProjectAlertRuntimeSync() {
       })();
     };
 
-    const subscription = subscribeToProjectAlertInvalidations({
+    const subscription = !isWorkOrderActiveShortagesEnabled() || access.canReadProjects ? subscribeToProjectAlertInvalidations({
       profileId: capturedProfileId,
       accessToken: session.access_token,
       onInvalidate: reconcile,
       onStatusChange: (status) => {
         if (status === "subscribed") reconcile();
       },
-    });
+    }) : null;
+    const shortageSubscription = isWorkOrderActiveShortagesEnabled() && access.canReadWorkOrders
+      ? subscribeToProjectAlertInvalidations({profileId:capturedProfileId,accessToken:session.access_token,
+        target:"work_order",onInvalidate:reconcile,onStatusChange:status=>{if(status==="subscribed")reconcile();}})
+      : null;
 
     return () => {
       active = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
+      shortageSubscription?.unsubscribe();
       removeProjectAlertQueries(queryClient, capturedProfileId);
     };
   }, [
     access.canRead,
+    access.canReadWorkOrders,
+    access.canReadProjects,
     access.profileId,
     queryClient,
     session?.access_token,

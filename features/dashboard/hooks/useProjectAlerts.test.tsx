@@ -1,6 +1,8 @@
 import {
   QueryClient,
   QueryClientProvider,
+  focusManager,
+  onlineManager,
   type InfiniteData,
 } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
@@ -8,12 +10,18 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  activeTracking:false,
+  workOrderAlertsEnabled: false,
   useAuth: vi.fn(),
   hasPermission: vi.fn(),
   listNotifications: vi.fn(),
   getUnreadCount: vi.fn(),
   markRead: vi.fn(),
   dismiss: vi.fn(),
+}));
+vi.mock("../../../app/config/workOrderActiveShortagesActivation",()=>({isWorkOrderActiveShortagesEnabled:()=>mocks.activeTracking}));
+vi.mock("../../../app/config/workOrderNotificationsActivation",()=>({
+  isWorkOrderNotificationsEnabled:()=>mocks.workOrderAlertsEnabled,
 }));
 
 vi.mock("../../../app/auth/AuthProvider", () => ({ useAuth: mocks.useAuth }));
@@ -35,7 +43,10 @@ vi.mock("../services/projectAlertService", async (importOriginal) => {
 
 import {
   dedupeProjectAlertPages,
+  reconcileProjectAlertReadReceipt,
+  reconcileProjectAlertDismissReceipt,
   getNextProjectAlertPageParam,
+  invalidateProjectAlertQueries,
   type ProjectAlertInfiniteData,
   useDismissProjectAlertNotification,
   useMarkProjectAlertRead,
@@ -51,6 +62,7 @@ import type {
   ProjectAlertNotification,
   ProjectAlertPage,
 } from "../services/projectAlertService";
+import { getDashboardAlertCount } from "../dashboardAlertCount";
 
 const profileOne = "00000000-0000-4000-8000-000000000001";
 const profileTwo = "00000000-0000-4000-8000-000000000002";
@@ -103,7 +115,20 @@ function auth(profileId = profileOne) {
   };
 }
 
+it("WO-08 read receipts never decrement authoritative active counts or touch another profile",()=>{
+  mocks.activeTracking=true;mocks.workOrderAlertsEnabled=true;
+  const client=new QueryClient(),inboxKey=[...projectAlertInboxQueryKey(profileOne),"pw"],countKey=[...projectAlertUnreadCountQueryKey(profileOne),"pw"];
+  client.setQueryData(inboxKey,{pages:[{items:[item(1)],hasMore:false}],pageParams:[null]});
+  const counts={exactValue:2n,displayValue:"2",hasUnread:true,projectUnread:3n,asOf:"2026-10-29T10:00:00Z"};
+  client.setQueryData(countKey,counts);client.setQueryData(projectAlertUnreadCountQueryKey(profileTwo),counts);
+  reconcileProjectAlertReadReceipt(client,profileOne,{notificationId:item(1).notificationId,readAt:"2026-10-29T10:01:00Z"});
+  expect(client.getQueryData(countKey)).toEqual(counts);
+  expect(client.getQueryData(projectAlertUnreadCountQueryKey(profileTwo))).toEqual(counts);client.clear();
+});
+
 beforeEach(() => {
+  mocks.activeTracking=false;
+  mocks.workOrderAlertsEnabled=false;
   mocks.useAuth.mockReturnValue(auth());
   mocks.hasPermission.mockResolvedValue({ ok: true, value: true });
   mocks.listNotifications.mockResolvedValue({
@@ -128,6 +153,49 @@ beforeEach(() => {
       dismissedAt: "2026-10-19T11:00:00.000Z",
     },
   });
+});
+
+it.each(["read","dismiss"] as const)("reconciles %s receipts in the matching permission-scoped inbox even if refresh fails",operation=>{
+  mocks.workOrderAlertsEnabled=true;
+  const {client}=createWrapper(),prefix=projectAlertInboxQueryKey(profileOne);
+  const key=[...prefix,"pw"],otherScope=[...prefix,"p"],otherProfile=[...projectAlertInboxQueryKey(profileTwo),"pw"];
+  const cache=(items:ProjectAlertNotification[])=>({pages:[{items,hasMore:false}],pageParams:[null]});
+  client.setQueryData(key,cache([item(1),item(2)]));
+  client.setQueryData(otherScope,cache([item(2)]));
+  client.setQueryData(otherProfile,cache([item(1)]));
+  client.setQueryData([...projectAlertUnreadCountQueryKey(profileOne),"pw"],{exactValue:2n,displayValue:"2",hasUnread:true});
+  client.setQueryData([...projectAlertUnreadCountQueryKey(profileOne),"p"],{exactValue:1n,displayValue:"1",hasUnread:true});
+  const stamp="2026-10-29T10:00:00.123456Z";
+  if(operation==="read")reconcileProjectAlertReadReceipt(client,profileOne,{notificationId:item(1).notificationId,readAt:stamp});
+  else reconcileProjectAlertDismissReceipt(client,profileOne,{notificationId:item(1).notificationId,dismissedAt:stamp});
+  const items=client.getQueryData<ProjectAlertInfiniteData>(key)!.pages[0]!.items;
+  if(operation==="read")expect(items[0]!.readAt).toBe(stamp);else expect(items).toEqual([item(2)]);
+  expect(client.getQueryData([...projectAlertUnreadCountQueryKey(profileOne),"pw"])).toMatchObject({exactValue:1n});
+  expect(client.getQueryData([...projectAlertUnreadCountQueryKey(profileOne),"p"])).toMatchObject({exactValue:1n});
+  expect(client.getQueryData<ProjectAlertInfiniteData>(otherProfile)!.pages[0]!.items).toEqual([item(1)]);
+});
+
+it("allows Dashboard plus Work Order viewers without Project access and scopes their inbox",async()=>{
+  mocks.workOrderAlertsEnabled=true;
+  mocks.hasPermission.mockImplementation(async(key:string)=>({ok:true,value:key!=="projects.view"}));
+  const project=item(1);
+  const workOrder:ProjectAlertNotification={notificationId:item(2).notificationId,alertId:project.alertId,targetType:"work_order",
+    notificationKind:"work_order_shortage",projectId:null,projectName:null,workOrderId:project.projectId!,workOrderNumber:"RN-2026-0010",
+    productId:project.alertId,productName:"Relay",shortageEventType:"opened",shortageQuantity:"5",createdAt:project.createdAt,
+    readAt:null,activityId:null,activityTitle:null};
+  mocks.listNotifications.mockResolvedValue({ok:true,value:{items:[project,workOrder],hasMore:false}});
+  const {client,wrapper}=createWrapper();
+  const {result}=renderHook(()=>useProjectAlertInbox(true),{wrapper});
+  await waitFor(()=>expect(result.current.items).toEqual([workOrder]));
+  expect(result.current.access.canReadProjects).toBe(false);
+  expect(result.current.access.canReadWorkOrders).toBe(true);
+  expect(client.getQueryData([...projectAlertInboxQueryKey(profileOne),"w"])).toBeDefined();
+});
+
+it("keeps Work Order permission requests and combined inbox reads off before activation",async()=>{
+  const {wrapper}=createWrapper();renderHook(()=>useProjectAlertInbox(true),{wrapper});
+  await waitFor(()=>expect(mocks.listNotifications).toHaveBeenCalled());
+  expect(mocks.hasPermission).not.toHaveBeenCalledWith("work_orders.view");
 });
 
 afterEach(() => {
@@ -315,6 +383,97 @@ describe("useProjectAlertInbox", () => {
 });
 
 describe("useProjectAlertUnreadCount", () => {
+  it("never carries either badge count into another profile or an inactive permission scope", async () => {
+    mocks.activeTracking = true;
+    mocks.workOrderAlertsEnabled = true;
+    mocks.useAuth.mockReturnValue({ ...auth(), isAdmin: true });
+    let releaseNewProfile: (() => void) | undefined;
+    mocks.getUnreadCount.mockResolvedValueOnce({ ok: true, value: {
+      exactValue: 1n, projectUnread: 2n, displayValue: "1", hasUnread: true,
+    } }).mockImplementation(async () => {
+      await new Promise<void>((resolve) => { releaseNewProfile = resolve; });
+      return { ok: true, value: { exactValue: 0n, projectUnread: 1n, displayValue: "0", hasUnread: false } };
+    });
+    const setup = createWrapper();
+    const view = renderHook(() => {
+      const sidebar = useProjectAlertUnreadCount();
+      const alerts = useProjectAlertUnreadCount();
+      return [sidebar, alerts].map(({ access, unreadCountQuery }) =>
+        getDashboardAlertCount(unreadCountQuery, true, access.canRead && !access.permissionsPending).badgeValue);
+    }, { wrapper: setup.wrapper });
+    try {
+      await waitFor(() => expect(view.result.current).toEqual(["3", "3"]));
+      mocks.useAuth.mockReturnValue({ ...auth(profileTwo), isAdmin: true });
+      view.rerender();
+      expect(view.result.current).toEqual([null, null]);
+      await waitFor(() => expect(releaseNewProfile).toBeDefined());
+      act(() => releaseNewProfile?.());
+      await waitFor(() => expect(view.result.current).toEqual(["1", "1"]));
+      expect(setup.client.getQueryCache().find({ queryKey: [...projectAlertUnreadCountQueryKey(profileTwo), "pw"], exact: true }))
+        .toBeDefined();
+      mocks.useAuth.mockReturnValue({ ...auth(profileTwo), isActive: false, isAdmin: true });
+      view.rerender();
+      expect(view.result.current).toEqual([null, null]);
+    } finally {
+      view.unmount(); setup.client.clear();
+    }
+  });
+
+  it("shares one query across both badge observers and refreshes both after receipts, invalidation, focus and reconnect", async () => {
+    mocks.activeTracking = true;
+    mocks.workOrderAlertsEnabled = true;
+    mocks.useAuth.mockReturnValue({ ...auth(), isAdmin: true });
+    let active = 1n;
+    let projects = 2n;
+    mocks.getUnreadCount.mockImplementation(async () => ({ ok: true, value: {
+      exactValue: active, projectUnread: projects, displayValue: active.toString(), hasUnread: active > 0n,
+    } }));
+    const setup = createWrapper();
+    const view = renderHook(() => {
+      const sidebar = useProjectAlertUnreadCount();
+      const alerts = useProjectAlertUnreadCount();
+      const read = useMarkProjectAlertRead();
+      const dismiss = useDismissProjectAlertNotification();
+      return {
+        badges: [sidebar, alerts].map(({ access, unreadCountQuery }) =>
+          getDashboardAlertCount(unreadCountQuery, true, access.canRead && !access.permissionsPending).badgeValue),
+        read, dismiss,
+      };
+    }, { wrapper: setup.wrapper });
+    try {
+      await waitFor(() => expect(view.result.current.badges).toEqual(["3", "3"]));
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1);
+      expect(setup.client.getQueryCache().findAll({ queryKey: projectAlertUnreadCountQueryKey(profileOne) })).toHaveLength(1);
+
+      projects = 1n;
+      await act(async () => { await view.result.current.read.markRead(item(1).notificationId); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["2", "2"]));
+      await act(async () => { await view.result.current.read.markRead(item(1).notificationId); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["2", "2"]));
+
+      active = 0n; // Private shortage resolution invalidates the same scoped key.
+      await act(async () => { await invalidateProjectAlertQueries(setup.client, profileOne); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["1", "1"]));
+      projects = 2n; // New Project notification arrives.
+      await act(async () => { await invalidateProjectAlertQueries(setup.client, profileOne); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["2", "2"]));
+      projects = 1n;
+      await act(async () => { await view.result.current.dismiss.dismiss(item(1).notificationId); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["1", "1"]));
+
+      projects = 2n;
+      act(() => { focusManager.setFocused(false); focusManager.setFocused(true); });
+      await waitFor(() => expect(view.result.current.badges).toEqual(["2", "2"]));
+      projects = 0n;
+      act(() => { onlineManager.setOnline(false); onlineManager.setOnline(true); });
+      await waitFor(() => expect(view.result.current.badges).toEqual([null, null]));
+      await waitFor(() => expect(mocks.getUnreadCount).toHaveBeenCalledTimes(8));
+    } finally {
+      view.unmount(); setup.client.clear();
+      focusManager.setFocused(undefined); onlineManager.setOnline(true);
+    }
+  });
+
   it("loads independently with exact profile options and no polling", async () => {
     const setup = createWrapper();
     const rendered = renderHook(() => useProjectAlertUnreadCount(), {

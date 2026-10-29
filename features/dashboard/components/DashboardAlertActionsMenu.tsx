@@ -9,6 +9,7 @@ import { createPortal } from "react-dom";
 import { Ellipsis } from "lucide-react";
 
 import type { ProjectAlertNotification } from "../services/projectAlertService";
+import { dashboardAlertLabel } from "../services/projectAlertService";
 
 interface MenuPosition {
   left: number;
@@ -110,7 +111,7 @@ function DashboardAlertActionsMenu({
       data-dashboard-alert-layer="menu"
       id={menuId}
       role="menu"
-      aria-label={`Actions for ${item.activityTitle ?? item.projectName}`}
+      aria-label={`Actions for ${item.activityTitle ?? dashboardAlertLabel(item)}`}
       onKeyDown={handleMenuKeyDown}
       style={position ? { left: position.left, top: position.top } : undefined}
       className={`fixed z-[70] min-w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl ${
@@ -139,7 +140,7 @@ function DashboardAlertActionsMenu({
       <button
         ref={buttonRef}
         type="button"
-        aria-label={`Actions for ${item.activityTitle ?? item.projectName}`}
+        aria-label={`Actions for ${item.activityTitle ?? dashboardAlertLabel(item)}`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

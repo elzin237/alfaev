@@ -1,5 +1,89 @@
 # AlfaEV — DATA_MODEL.md
 
+## Current implementation checkpoint — 2026-10-29
+
+The previously verified DEV schema is through migration 166; this local correction
+does not perform a fresh remote check or change any migration/schema. Older rollout
+notes below are retained historical evidence, not the current activation summary.
+All five local Test/Low Stock/WO release switches are ON only for approved DEV.
+
+`get_dashboard_alert_counts` remains authoritative for separate active WO episode
+and unread Project counts. The frontend combines them losslessly for both badges;
+it never counts paginated inbox rows or treats resolved history as an active issue.
+No notification/event/recipient table or accounting contract changes here.
+
+The Raw catalog subsection verifies at most five existing Dashboard candidates using
+`search_inventory_products_by_warehouse(uuid,text)` with canonical Raw warehouse ID
+and a bounded Product-ID filter. Omitted IDs are not Raw members; failed reads are
+unavailable, never zero. Returned active membership and physical quantity replace
+legacy assumptions; candidate timestamps/order remain the existing catalog snapshot.
+This is not a complete recent-Raw list. Detail links carry explicit Raw context.
+Stock Health, critical items, reservations and Test holds retain their own contracts.
+
+Low Stock runtime fixtures intentionally install only 1–159 or 1–161 in newly owned
+clones; subsequent WO schema must not enter those historical foundation tests.
+Known unfinished scope: procurement trends, larger-than-1,000 All Inventory server
+pagination and full resolved-alert/non-Admin browser acceptance. No new data model
+or backend contract is invented to conceal these gaps.
+
+## WO-08 active shortage projection (local migration 166)
+
+`work_order_shortage_resolved_dismissals(episode_id, recipient_user_id, dismissed_at)`
+is a private RLS acknowledgement keyed by episode/recipient. Existing immutable
+events and recipient delivery rows remain historical. `list_dashboard_shortage_tracking`
+uses existing bounded cursor arguments and returns one Work Order item per owned
+episode, with `episode_id`, `episode_status` and exact latest reconciled missing
+quantity. Resolved read_at is coalesced with resolved_at. `get_dashboard_alert_counts()`
+returns decimal-text `active_work_order_shortages`, `unread_project_notifications`
+and database `as_of`; the metrics are never added. Original Project RPCs remain.
+
+## Work Order shortage notification delivery — WO-04 (local migration 164)
+
+Private RLS tables `work_order_shortage_notification_deliveries` (one processing
+identity per immutable WO-03 outbox intent) and `work_order_shortage_notification_recipients`
+(unique intent/profile, created/read/dismissed timestamps) provide recipient-owned state.
+Delivery is an AFTER INSERT outbox trigger in the originating transaction, with no
+deployment-time backfill. Reads join immutable event quantities and episode identity
+snapshots; they never reinterpret those quantities as current availability.
+`list_dashboard_notifications(integer,timestamptz,uuid)` returns at most 20 JSON
+rows with explicit `target_type`, paired cursor and `has_more`. Project rows retain
+their existing fields; Work Order rows include number, Product name and exact
+decimal `shortage_quantity`. Count returns decimal text. Owner-only
+`mark_dashboard_notification_read(uuid)` and `dismiss_dashboard_notification(uuid)`
+return authoritative timestamps and delegate Project targets to unchanged RPCs.
+
+## Work Order material shortage history — WO-03 (local migration 163)
+
+`work_order_material_shortage_episodes` keeps Work Order/Product IDs, number/name
+snapshots, required/eligible/missing bigint quantities, revision and opened/resolved
+times. The partial unique index permits one active episode per pair. Historical
+identity has no restrictive Work Order/Product FK so Draft deletion remains possible.
+`work_order_material_shortage_events` is immutable, unique per episode/revision and
+records opened, increased, decreased, changed or resolved observations.
+`work_order_material_shortage_notification_outbox` holds exactly one opening and one
+resolution intent per episode, each linked to its matching event. No recipient or
+delivery state exists yet. A private `(transaction_id, product_id)` queue coalesces
+deferred reconciliation within each transaction. None of these tables has direct
+browser access. No migration-time historical backfill occurs.
+
+## Work Order material availability — WO-01 (local migration 162)
+
+`get_work_order_material_availability(p_work_order_id uuid)` returns JSON:
+`{work_order_id, work_order_number, status: "draft", updated_at, as_of, materials: []}`.
+Each material contains `product_id`, `serial_number`, `product_name`,
+`product_is_active`, `required_quantity`, `eligible_quantity`, `missing_quantity`
+and `has_shortage`. All quantities are exact decimal strings; totals outside SQL
+bigint fail explicitly. Empty/incomplete Drafts remain readable. Archived persisted
+Product identity is retained with its active flag; stock sufficiency does not override
+Finish's independent Product/lifecycle/provenance validation.
+
+One STABLE statement snapshot and statement-time `as_of` cover header, aggregated
+origins, balances, reservations and expiry. A private snapshot-safe free-capacity core
+is shared with the existing VOLATILE production wrapper; production still obtains
+wall-clock time after locks. No new tables, ledgers, reservations or history writes.
+Errors: 42501 denied, 22023 missing ID, P0002 unknown WO, WOR02 non-Draft,
+IVB01 missing structural warehouse balance. Never interpret these errors as zero stock.
+
 ## Low Stock V1 — LS-02 local read contracts (migration 160)
 
 `get_inventory_stock_health(p_warehouse_id uuid, p_search text DEFAULT NULL,

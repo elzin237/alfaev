@@ -8,6 +8,7 @@ export type ProjectAlertRealtimeStatus =
   | "closed";
 
 interface SubscribeToProjectAlertInvalidationsOptions {
+  target?: "work_order";
   profileId: string;
   accessToken: string;
   onInvalidate: () => void;
@@ -30,8 +31,9 @@ export function subscribeToProjectAlertInvalidations({
   accessToken,
   onInvalidate,
   onStatusChange,
+  target,
 }: SubscribeToProjectAlertInvalidationsOptions): ProjectAlertRealtimeSubscription {
-  const topic = projectAlertRealtimeTopic(profileId);
+  const topic = target === "work_order" ? `work-order-shortages:${profileId}` : projectAlertRealtimeTopic(profileId);
   let status: ProjectAlertRealtimeStatus = "connecting";
   let disposed = false;
   let channel: ReturnType<typeof supabase.channel> | null = null;

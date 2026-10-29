@@ -5,6 +5,7 @@ import type {
   WorkOrderMaterialSourceType,
 } from "../services/workOrderService";
 import { getWorkOrderMaterialQuantityError } from "../workOrderMaterialQuantity";
+import type { MaterialAvailability } from "../services/workOrderAvailabilityService";
 
 export interface DraftWorkOrderMaterial {
   productId: string;
@@ -28,6 +29,9 @@ interface WorkOrderMaterialRowProps {
   readOnly?: boolean;
   disabled?: boolean;
   showRequiredError?: boolean;
+  showAvailability?: boolean;
+  availability?: MaterialAvailability;
+  sharedAvailability?: boolean;
 }
 
 function WorkOrderMaterialRow({
@@ -39,6 +43,9 @@ function WorkOrderMaterialRow({
   readOnly = false,
   disabled = false,
   showRequiredError = false,
+  showAvailability = false,
+  availability,
+  sharedAvailability = false,
 }: WorkOrderMaterialRowProps) {
   const quantityInputRef = useRef<HTMLInputElement>(null);
   const error = getWorkOrderMaterialQuantityError(
@@ -49,14 +56,15 @@ function WorkOrderMaterialRow({
   const errorId = `${inputId}-error`;
   const frozen = material.sourceType === "pcb_bom";
   const rowReadOnly = readOnly || frozen;
+  const short = showAvailability && availability !== undefined && BigInt(availability.missing) > 0n;
 
   useEffect(() => {
     if (focusRequestId !== null) quantityInputRef.current?.focus();
   }, [focusRequestId]);
 
   return (
-    <tr className="border-t border-zinc-200 align-top">
-      <td className="whitespace-nowrap px-4 py-4 font-mono text-sm text-zinc-900">
+    <tr className={`border-t border-zinc-200 align-top ${short ? "bg-red-50/70" : ""}`}>
+      <td className={`whitespace-nowrap px-4 py-4 font-mono text-sm text-zinc-900 ${short ? "border-l-4 border-l-red-500" : ""}`}>
         {material.serialNumber}
       </td>
       <td className="px-4 py-4 text-sm font-medium text-zinc-900">
@@ -105,9 +113,21 @@ function WorkOrderMaterialRow({
           </>
         )}
       </td>
-      <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-zinc-900">
+      {showAvailability ? !availability ? (
+        <td colSpan={3} className="px-4 py-4 text-sm text-zinc-500">Availability unavailable</td>
+      ) : sharedAvailability ? (
+        <td colSpan={3} className={`px-4 py-4 text-sm ${short ? "text-red-800" : "text-zinc-600"}`}>
+          Shared Product total shown above{short ? ` · Short by ${availability.missing} overall` : ""}
+        </td>
+      ) : <>
+        <td className="px-4 py-4 text-sm tabular-nums">{availability.required}</td>
+        <td className="px-4 py-4 text-sm tabular-nums">{availability.eligible}</td>
+        <td className={`px-4 py-4 text-sm tabular-nums ${short ? "font-semibold text-red-800" : ""}`}>
+          {short ? `Short by ${availability.missing}` : availability.missing}
+        </td>
+      </> : <td className="whitespace-nowrap px-4 py-4 text-sm tabular-nums text-zinc-900">
         {material.currentInventory}
-      </td>
+      </td>}
       {!readOnly && (
         <td className="px-4 py-4 text-right">
           {frozen ? (

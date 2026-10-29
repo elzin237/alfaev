@@ -1,5 +1,8 @@
+import { isWorkOrderNotificationsEnabled } from "../../app/config/workOrderNotificationsActivation";
+import { isWorkOrderActiveShortagesEnabled } from "../../app/config/workOrderActiveShortagesActivation";
+
 export function projectAlertQueryPrefix(profileId: string) {
-  return ["dashboard", "project-alerts", profileId] as const;
+  return ["dashboard", isWorkOrderActiveShortagesEnabled() ? "shortage-tracking" : isWorkOrderNotificationsEnabled() ? "combined-alerts" : "project-alerts", profileId] as const;
 }
 
 export function projectAlertInboxQueryKey(profileId: string) {

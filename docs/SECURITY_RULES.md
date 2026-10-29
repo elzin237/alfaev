@@ -1,5 +1,104 @@
 # AlfaEV — SECURITY_RULES.md
 
+## Current security checkpoint — 2026-10-29
+
+The previously verified approved DEV baseline is migrations 166/166. Test Calculator,
+Low Stock, WO availability, notification and persistent-shortage switches are ON
+locally with strict approved-DEV backend guards. No production access/activation is
+implied. Earlier local/OFF notes below are preserved historical execution evidence.
+
+Both badges derive an exact combined count from the existing recipient/profile/
+permission-scoped query, never an unscoped total: active WO episodes + unread Project
+notifications. Loading/errors/permission changes fail closed; active read receipts
+do not decrement episode counts. Existing owner-only private invalidation, RLS,
+receipt and dismissal checks are unchanged. Test expiry alone still awaits a relevant
+trigger before episode notification reconciliation; cached counts are observations.
+
+Raw Dashboard catalog membership is verified through the existing trusted warehouse
+listing boundary with explicit Raw authorization, bounded IDs and exact quantities.
+No private-table reads, guessed zero values, new stock logic or backend grants are
+introduced. The canonical listing excludes Calculator outputs; detail links preserve
+Raw warehouse context. A failed or denied read cannot fall back to legacy candidates.
+
+Local Low Stock tests pin historical migration prefixes in newly owned disposable
+clones only. Existing databases/residue and unknown clones must remain untouched.
+Procurement trends and live resolved-alert/non-Admin acceptance remain unfinished;
+do not manufacture evidence or silently initialize historical shortages on reads.
+
+## WO-08B deployment status
+
+DEV migration 166 and localhost tracking are activated after exact-target,
+approved-hash, Auth-baseline, data-preservation and real-role security verification.
+Only the configured DEV origin is enabled; other backends remain closed. Existing
+availability/notification release gates and permission assignments are unchanged.
+Active dismissal returned SQLSTATE 55000 in DEV; private tables/helper and other
+recipient records were denied/excluded under real authenticated roles. Live
+resolution acceptance remains unverified because no resolved episode exists.
+
+## WO-08 active-shortage tracking (local migration 166)
+
+Two narrowly granted authenticated reads derive the active profile and require
+Dashboard plus Work Order view (or active Admin), retaining Project authorization.
+One canonical owned recipient per episode prevents opening/resolution double counts.
+The projection helper and new RLS resolved-dismissal acknowledgement table remain
+private. No event or episode backfill runs during migration. Effective resolved read
+state is projected without rewriting notification history. Dismissal locks episode
+then recipient, rechecks actor/grants after waits, and rejects active state even via
+legacy mutation RPCs. New acknowledgements preserve prior dismissed_at metadata.
+Private payload-free Work Order invalidation uses a separate owner-only Realtime
+topic/policy; no private table or cross-profile data is exposed. Frontend tracking
+release remains OFF until migration 166 is separately deployed and verified.
+
+## WO-07 existing-Draft initialization boundary
+
+The local migration-165 initialization function is SECURITY INVOKER with empty
+search_path, revoked from PUBLIC, anon, authenticated and service_role. Even an
+application Admin cannot call it through PostgREST. Only an explicitly approved
+operator transaction may initialize a bounded Product allowlist. It reuses existing
+reconciliation locks and server-side recipient eligibility, without new delivery
+grants, stock access, browser mutation RPCs or automatic deployment-time backfill.
+Work Order/items SHARE locks bound candidate membership, not Inventory consumption;
+caller timeouts are mandatory operational safeguards. Never run on Dashboard reads.
+
+## WO-04 notification boundary
+
+Migration 164 delivery helpers and private recipient/processing tables have no
+PUBLIC/anon/authenticated/service_role access. Only four bounded Dashboard RPCs
+grant authenticated EXECUTE; each derives the current active actor. Work Order
+delivery requires active Admin or both Dashboard and Work Order view grants.
+Reads filter current module permissions; read/dismiss enforces ownership and
+rechecks authorization after row locking. Existing Work Order detail authorization
+remains mandatory when opening a link. No Inventory grant is introduced. Project
+contracts and authorization remain unchanged. WO-06 verified DEV migration 164 and
+enabled the localhost release after authenticated read-only smoke checks. The
+existing configured-backend origin guard restricts activation to approved DEV;
+other backends stay closed. Event-dependent browser acceptance is still pending.
+
+## WO-03 shortage reconciliation boundary
+
+Migration 163 adds private RLS-enabled episode, event, outbox and queue tables with
+no browser/service-role grants. Trusted SECURITY DEFINER trigger functions use an
+empty search_path and have no direct EXECUTE grant. Existing Work Order create/edit,
+Finish and Draft delete RPC authorization remains authoritative. A deferred queue
+coalesces by Product and transaction. Reconciliation serializes each Work Order/
+Product episode identity in Product-then-Work-Order order, without acquiring the
+Project alert pipeline's advisory lock. It uses production capacity arithmetic
+and database time. No new public mutation RPC,
+recipient delivery, stock movement or Project alert-table change is introduced.
+The outbox is only an undelivered WO-04 foundation.
+
+## WO-01 advisory material read boundary
+
+Migration 162 adds one authenticated STABLE SECURITY DEFINER RPC with empty
+search_path and explicit active-profile/Work Order detail authorization. The shared
+capacity helper is STABLE SECURITY INVOKER, private to trusted callers. The existing
+production wrapper stays VOLATILE and samples clock_timestamp after production locks;
+Finish/FIFO/PDF functions and their locking, ACLs and accounting are unchanged.
+The read takes no row/advisory locks and performs no data, audit or notification
+writes. All read queries use one caller snapshot and one authoritative expiry instant.
+Missing required balance state and bigint overflow fail closed. RLS and table grants
+remain unchanged; advisory results never authorize stock consumption.
+
 ## Low Stock V1 — LS-02 physical stock-health boundary
 
 Migration 160 is additive and read-only: two STABLE SECURITY DEFINER read RPCs with

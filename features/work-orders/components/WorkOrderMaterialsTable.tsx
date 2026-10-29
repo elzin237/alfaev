@@ -2,8 +2,9 @@ import WorkOrderMaterialRow, {
   type DraftWorkOrderMaterial,
 } from "./WorkOrderMaterialRow";
 import type { WorkOrderMaterialSourceType } from "../services/workOrderService";
+import type { MaterialAvailability } from "../services/workOrderAvailabilityService";
 
-interface WorkOrderMaterialsTableProps {
+export interface WorkOrderMaterialsTableProps {
   focusRequest: {
     productId: string;
     requestId: number;
@@ -20,6 +21,8 @@ interface WorkOrderMaterialsTableProps {
   disabled?: boolean;
   showRequiredErrors?: boolean;
   emptyDescription?: string;
+  showAvailability?: boolean;
+  availability?: ReadonlyMap<string, MaterialAvailability>;
 }
 
 function WorkOrderMaterialsTable({
@@ -32,6 +35,8 @@ function WorkOrderMaterialsTable({
   disabled = false,
   showRequiredErrors = false,
   emptyDescription = "No materials added yet.",
+  showAvailability = false,
+  availability,
 }: WorkOrderMaterialsTableProps) {
   if (materials.length === 0) {
     return (
@@ -48,8 +53,8 @@ function WorkOrderMaterialsTable({
               "Serial Number",
               "Product Name",
               ...(showSource ? ["Source"] : []),
-              "Quantity",
-              "Current Inventory",
+              showAvailability ? "Row Quantity" : "Quantity",
+              ...(showAvailability ? ["Required (Product total)", "Available for Production", "Missing (Product total)"] : ["Current Inventory"]),
               ...(readOnly ? [] : ["Remove"]),
             ].map((heading) => (
               <th
@@ -63,7 +68,7 @@ function WorkOrderMaterialsTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 bg-white">
-          {materials.map((material) => (
+          {materials.map((material, index) => (
             <WorkOrderMaterialRow
               key={`${material.sourceType}:${material.productId}`}
               focusRequestId={material.sourceType === "manual" &&
@@ -71,6 +76,9 @@ function WorkOrderMaterialsTable({
                 ? focusRequest.requestId
                 : null}
               material={material}
+              showAvailability={showAvailability}
+              availability={availability?.get(material.productId)}
+              sharedAvailability={materials.findIndex(row => row.productId === material.productId) !== index}
               showSource={showSource}
               onQuantityChange={onQuantityChange}
               onRemove={onRemove}

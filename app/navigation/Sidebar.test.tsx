@@ -13,10 +13,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
 const sidebarMocks = vi.hoisted(() => ({
+  activeTracking: false,
   hasPermission: vi.fn(),
   useProjectAlertUnreadCount: vi.fn(),
   useProcurementSidebarBadge: vi.fn(),
   useAuth: vi.fn(),
+}));
+vi.mock("../config/workOrderActiveShortagesActivation", () => ({
+  isWorkOrderActiveShortagesEnabled: () => sidebarMocks.activeTracking,
 }));
 
 vi.mock("../auth/AuthProvider", () => ({
@@ -111,6 +115,7 @@ function renderSidebar(
 }
 
 beforeEach(() => {
+  sidebarMocks.activeTracking = false;
   sidebarMocks.useAuth.mockReturnValue(createAuthState());
   sidebarMocks.useProcurementSidebarBadge.mockReturnValue({ data: undefined });
   sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
@@ -129,6 +134,72 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+});
+
+describe("WO-10 shared Dashboard badge", () => {
+  beforeEach(() => {
+    sidebarMocks.activeTracking = true;
+    sidebarMocks.useAuth.mockReturnValue(createAuthState({
+      profile: { ...createProfile(firstUser), isAdmin: true }, isAdmin: true,
+    }));
+  });
+
+  function counts(active: bigint, projects: bigint | undefined, state: {
+    isError?: boolean; isPending?: boolean; isFetching?: boolean;
+    canRead?: boolean; permissionsPending?: boolean;
+  } = {}) {
+    sidebarMocks.useProjectAlertUnreadCount.mockReturnValue({
+      access: { profileId: createProfile(firstUser).id, canRead: state.canRead ?? true,
+        permissionsPending: state.permissionsPending ?? false },
+      unreadCountQuery: {
+        data: { exactValue: active, projectUnread: projects, displayValue: active.toString(), hasUnread: active > 0n },
+        isError: state.isError ?? false, isPending: state.isPending ?? false, isFetching: state.isFetching ?? false,
+      },
+    });
+  }
+
+  it("uses the combined count through Project reads, active shortage reads, resolution and zero", () => {
+    counts(1n, 2n);
+    const view = renderSidebar();
+    expect(screen.getByLabelText("3 combined alerts")).toHaveTextContent("3");
+    const rerender = () => view.rerender(
+      <QueryClientProvider client={view.queryClient}><MemoryRouter>
+        <Sidebar sidebarOpen={true} setSidebarOpen={vi.fn()} />
+      </MemoryRouter></QueryClientProvider>,
+    );
+    counts(1n, 1n); rerender();
+    expect(screen.getByLabelText("2 combined alerts")).toHaveTextContent("2");
+    counts(1n, 1n); rerender(); // Reading an active shortage does not resolve it.
+    expect(screen.getByLabelText("2 combined alerts")).toHaveTextContent("2");
+    counts(0n, 1n); rerender();
+    expect(screen.getByLabelText("1 combined alert")).toHaveTextContent("1");
+    counts(0n, 0n); rerender();
+    expect(screen.queryByLabelText(/combined alerts/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { isError: true }, { isPending: true }, { isFetching: true },
+    { canRead: false }, { permissionsPending: true },
+  ])("hides the badge rather than showing a stale/fabricated value: %j", (state) => {
+    counts(1n, 2n, state); renderSidebar();
+    expect(screen.queryByLabelText(/combined alerts/)).not.toBeInTheDocument();
+  });
+
+  it("requires both counts and preserves exact bigint overflow", () => {
+    counts(1n, undefined);
+    const view = renderSidebar();
+    expect(screen.queryByLabelText(/combined alerts/)).not.toBeInTheDocument();
+    counts(9007199254740993n, 2n);
+    view.rerender(<QueryClientProvider client={view.queryClient}><MemoryRouter>
+      <Sidebar sidebarOpen={true} setSidebarOpen={vi.fn()} />
+    </MemoryRouter></QueryClientProvider>);
+    expect(screen.getByLabelText("9007199254740995 combined alerts")).toHaveTextContent("99+");
+  });
+
+  it("counts unread Projects even when there are no active Work Order shortages", () => {
+    counts(0n, 2n); renderSidebar();
+    expect(screen.getByLabelText("2 combined alerts")).toHaveTextContent("2");
+  });
 });
 
 describe("Sidebar permission visibility", () => {

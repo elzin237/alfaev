@@ -5,7 +5,7 @@ import LoadingState from "../../../shared/components/LoadingState";
 import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
 import WorkOrderDeleteDraftDialog from "./WorkOrderDeleteDraftDialog";
 import WorkOrderFinishDialog from "./WorkOrderFinishDialog";
-import WorkOrderMaterialsTable from "./WorkOrderMaterialsTable";
+import WorkOrderMaterialsAvailability from "./WorkOrderMaterialsAvailability";
 import type { DraftWorkOrderMaterial } from "./WorkOrderMaterialRow";
 import type {
   DraftWorkOrderDeleteResult,
@@ -115,6 +115,8 @@ function WorkOrderDraftShell({
   const [hydratedWorkOrderId, setHydratedWorkOrderId] = useState<string | null>(null);
   const [savedMaterialsSignature, setSavedMaterialsSignature] = useState<string | null>(null);
   const [savedMaterialCount, setSavedMaterialCount] = useState(0);
+  // Read-only observation revision; never part of the persisted Draft payload.
+  const [availabilityRevision, setAvailabilityRevision] = useState(0);
   const [showRequiredErrors, setShowRequiredErrors] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<
     | { kind: "error"; code: string; message: string }
@@ -251,6 +253,7 @@ function WorkOrderDraftShell({
         setSavedMaterialsSignature(materialSignature(submission.materials));
         setSavedMaterialCount(submission.materials.length);
         setExpectedUpdatedAt(result.value.updatedAt);
+        setAvailabilityRevision(current => current + 1);
         setShowRequiredErrors(false);
         setSaveFeedback({ kind: "success", message: "Draft saved." });
         setFinishFeedback(null);
@@ -445,7 +448,7 @@ function WorkOrderDraftShell({
             {canEdit && <div className="mt-6 space-y-2">{productionContext && <p className="text-sm text-zinc-600">BOM materials are locked. Additional materials may be added.</p>}<WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} focusRequestId={barcodeFocusRequestId} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}
             {isLoadingMaterial && <p role="status" className="mt-4 text-sm text-zinc-600">Loading material...</p>}
             {barcodeError && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">{barcodeError}</p>}
-            <WorkOrderMaterialsTable focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, sourceType, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId && item.sourceType === sourceType ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId, sourceType) => { setMaterials((current) => current.filter((item) => item.productId !== productId || item.sourceType !== sourceType)); setSaveFeedback(null); }} showSource={Boolean(productionContext)} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />
+            <WorkOrderMaterialsAvailability workOrderId={workOrder.id} version={expectedUpdatedAt} revision={`${availabilityRevision}:${materialSignature(materials)}`} unsaved={materialSignature(materials) !== savedMaterialsSignature} focusRequest={materialFocusRequest} materials={materials} onQuantityChange={(productId, sourceType, quantity) => { setMaterials((current) => current.map((item) => item.productId === productId && item.sourceType === sourceType ? { ...item, quantity } : item)); setSaveFeedback(null); }} onRemove={(productId, sourceType) => { setMaterials((current) => current.filter((item) => item.productId !== productId || item.sourceType !== sourceType)); setSaveFeedback(null); }} showSource={Boolean(productionContext)} readOnly={!canEdit} disabled={editingDisabled} showRequiredErrors={showRequiredErrors} emptyDescription={productionContext ? "This PCB production Draft has no BOM or supplemental input materials. Finish will add only the actual completed PCB quantity to Inventory." : undefined} />
           </>
         ) : materialsReady ? <div className="mt-6"><LoadingState message="Preparing Draft materials..." /></div> : null}
       </section>

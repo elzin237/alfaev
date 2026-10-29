@@ -1,5 +1,50 @@
 # AlfaEV — PERMISSIONS.md
 
+## Current authorization checkpoint — 2026-10-29
+
+Previously verified DEV migration 166 retains the existing 41 permission definitions.
+Local Test Calculator, Low Stock and three WO release switches are ON only for the
+approved DEV origin; gates confer no permission and do not replace backend checks.
+Older local/OFF rollout notes remain historical records.
+
+Combined Dashboard/Sidebar badges use the same profile/permission-scoped authorized
+query: active WO/Product episodes plus unread Project notifications. Recipient-owned
+reads/dismissals and current module visibility remain mandatory. Active WO dismissal
+is denied; resolved dismissal does not alter immutable notification history.
+
+Dashboard Raw catalog verification additionally requires an active Admin or the Raw
+warehouse view grant, within the existing authorized Dashboard section. It uses the
+trusted warehouse listing RPC, never direct tables or inferred Product kinds. Denied
+or uncertain membership hides catalog values; no extra Inventory grant is introduced.
+Full non-Admin and resolved-alert browser acceptance is still outstanding; no new
+permission assignment or fresh remote permission audit occurs in this correction.
+
+## WO-04 recipient-owned Dashboard alerts
+
+No new permission keys. Active Admins qualify; active non-Admins need BOTH
+`dashboard.view` and `work_orders.view` for Work Order delivery/read/dismiss.
+Project recipients continue to require existing Project permissions. Combined
+reads omit currently unauthorized target types. Notifications belong to their
+recipient; even an Admin cannot read/dismiss another recipient's notification.
+
+## WO-03 private shortage event foundation
+
+No new permission keys, assignments, table access or client EXECUTE grants are
+introduced. Work Order mutations continue to require their existing backend
+authorization. WO-04 must deliver opening/resolution intents only to active Admins
+or active users with both Dashboard and Work Order view permissions, with recipient
+ownership checks on reads; WO-03 does not expose an inbox or recipient records.
+
+## WO-01 material availability
+
+The narrow trusted read follows Work Order detail: authenticated active Admin OR
+active profile with `work_orders.view`. Edit-Draft, Finish, PCB Produce or warehouse
+permissions alone do not grant this read. No broader Product/Inventory table access,
+permission assignment or permission definition is added. Only authenticated EXECUTE
+is granted; private shared production helpers remain denied to browser/service roles.
+Future WO notification delivery must preserve recipient ownership and current active
+Dashboard + Work Order access, rather than inheriting Project recipient eligibility.
+
 ## Low Stock V1 — LS-02 read authorization
 
 Inventory stock-health read requires an active authenticated Admin or the selected
