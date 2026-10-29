@@ -29,8 +29,17 @@ it("keeps health without minimum configuration separately from Active status and
   expect(within(screen.getByRole("table")).getByText("Low Stock")).toBeInTheDocument();expect(screen.getByText("Active")).toBeInTheDocument();expect(screen.getByText("10")).toBeInTheDocument();
   expect(screen.getByRole("link",{name:product.name})).toHaveAttribute("href",`/inventory/${product.id}?warehouse=raw_materials`);
 });
-it.each([["HEALTHY","Healthy"],["LOW_STOCK","Low Stock"],["OUT_OF_STOCK","Out of Stock"],["NOT_CONFIGURED","Not Configured"]])("renders authoritative %s separately from Product status",(status,label)=>{
+it.each([["HEALTHY","Healthy"],["LOW_STOCK","Low Stock"],["OUT_OF_STOCK","Out of Stock"],["NOT_CONFIGURED","Not Set"]])("renders authoritative %s separately from Product status",(status,label)=>{
   mocks.hook.mockReturnValue({...mocks.hook(),rows:[{...row,status}]});show();expect(within(screen.getByRole("table")).getByText(label)).toBeInTheDocument();expect(screen.getByText("Active")).toBeInTheDocument();
+});
+it.each(INVENTORY_WAREHOUSES)("shortens only the unconfigured badge in $label while preserving its filter",warehouse=>{
+  mocks.hook.mockReturnValue({...mocks.hook(),rows:[{...row,warehouseId:warehouse.id,status:"NOT_CONFIGURED",minimumQuantity:null}]});
+  render(<MemoryRouter><InventoryStockHealthProductList products={[product]} warehouseCode={warehouse.code} warehouseId={warehouse.id} search="" authorizedWarehouseIds={[warehouse.id]} showCommitments={false}/></MemoryRouter>);
+  const badge=within(screen.getByRole("table")).getByText("Not Set");
+  expect(badge).toHaveClass("bg-zinc-100","text-zinc-700","border-zinc-200");
+  expect(screen.getByRole("option",{name:"Not Configured"})).toHaveValue("NOT_CONFIGURED");
+  fireEvent.change(screen.getByRole("combobox",{name:"Stock Health"}),{target:{value:"NOT_CONFIGURED"}});
+  expect(mocks.hook).toHaveBeenLastCalledWith(warehouse.id,"","NOT_CONFIGURED",true);
 });
 it("renders a successful empty health filter without changing editing or navigation",()=>{
   mocks.hook.mockReturnValue({...mocks.hook(),rows:[]});show();fireEvent.change(screen.getByRole("combobox",{name:"Stock Health"}),{target:{value:"HEALTHY"}});expect(screen.getByRole("status")).toHaveTextContent("No Products match");

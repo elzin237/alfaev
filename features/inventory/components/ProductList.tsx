@@ -117,7 +117,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                   </span>
                 </td>}
                 {showStockHealth && <td className={`whitespace-nowrap ${cellSpacing}`}>
-                  {health ? <StatusBadge label={{HEALTHY:"Healthy",LOW_STOCK:"Low Stock",OUT_OF_STOCK:"Out of Stock",NOT_CONFIGURED:"Not Configured"}[health.status]}
+                  {health ? <StatusBadge label={{HEALTHY:"Healthy",LOW_STOCK:"Low Stock",OUT_OF_STOCK:"Out of Stock",NOT_CONFIGURED:"Not Set"}[health.status]}
                     tone={{HEALTHY:"success",LOW_STOCK:"warning",OUT_OF_STOCK:"danger",NOT_CONFIGURED:"neutral"}[health.status] as "success"|"warning"|"danger"|"neutral"} /> : "Unavailable"}
                 </td>}
                 <td className={`whitespace-nowrap ${cellSpacing}`}>

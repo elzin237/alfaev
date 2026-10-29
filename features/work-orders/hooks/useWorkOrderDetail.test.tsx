@@ -844,8 +844,19 @@ describe("useWorkOrderDetail", () => {
     expect(detailMocks.deleteDraftWorkOrder).toHaveBeenCalledOnce();
   });
 
-  it("finishes with the exact saved timestamp and refreshes authoritative caches", async () => {
+  it("finishes with the exact saved timestamp and refreshes Dashboard for automatic Project completion", async () => {
     allowPermissions({ finish: true });
+    detailMocks.finishWorkOrder.mockResolvedValue({
+      ok: true,
+      value: {
+        workOrderId, workOrderNumber: draftDetail.workOrderNumber,
+        finishedAt: "2026-09-22T09:02:00.123456+00:00",
+        projectId: "00000000-0000-4000-8000-000000000020",
+        projectCompleted: true,
+        workOrderPdfId: "00000000-0000-4000-8000-000000000040",
+        storageReference: `final/${workOrderId}/00000000-0000-4000-8000-000000000050.pdf`,
+      },
+    });
     const { result, queryClient } = renderDetailHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const removeQueries = vi.spyOn(queryClient, "removeQueries");
@@ -853,6 +864,10 @@ describe("useWorkOrderDetail", () => {
     const fgKey=["inventory","commitments","profile-1","warehouse","finished_goods"];
     const foreign=["inventory","commitments","profile-2","warehouse","finished_goods"];
     queryClient.setQueryData(fgKey,"old");queryClient.setQueryData(foreign,"private");
+    const dashboardKey = ["dashboard", "read-model", "profile-1"];
+    const foreignDashboardKey = ["dashboard", "read-model", "profile-2"];
+    queryClient.setQueryData(dashboardKey, { projects: { statusCounts: { inProgress: 1 } } });
+    queryClient.setQueryData(foreignDashboardKey, "Other profile snapshot");
 
     await waitFor(() => expect(result.current.canFinishDraft).toBe(true));
     await act(async () => {
@@ -884,6 +899,9 @@ describe("useWorkOrderDetail", () => {
       queryKey: ["projects", "list", "profile-1"],
       exact: true,
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: dashboardKey, exact: true });
+    expect(queryClient.getQueryState(dashboardKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(foreignDashboardKey)?.isInvalidated).toBe(false);
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: [
         "projects",

@@ -15,6 +15,17 @@ beforeEach(() => { vi.resetAllMocks(); mocks.read.mockReturnValue(defaults()); m
 afterEach(cleanup);
 const renderView = (ids: string[] = INVENTORY_WAREHOUSES.map(w => w.id)) => render(<MemoryRouter><AllInventoryView authorizedWarehouseIds={ids} search="part" testsEnabled /></MemoryRouter>);
 describe("All Inventory union table", () => {
+  it("uses Not Set badges for all warehouse rows while keeping the Not Configured filter", () => {
+    const rows=defaults().rows.map(item=>({...item,health:{productId:item.product.id,warehouseId:item.warehouse.id,productName:item.product.name,isActive:item.product.isActive,physicalQuantity:item.product.quantity.toString(),minimumQuantity:null,version:null,status:"NOT_CONFIGURED" as const}}));
+    mocks.read.mockReturnValue({...defaults(),rows});
+    renderView();
+    const badges=within(screen.getByRole("table")).getAllByText("Not Set");
+    expect(badges).toHaveLength(3);
+    for(const badge of badges)expect(badge).toHaveClass("bg-zinc-100","text-zinc-700","border-zinc-200");
+    expect(screen.getByRole("option",{name:"Not Configured"})).toHaveValue("NOT_CONFIGURED");
+    fireEvent.change(screen.getByRole("combobox",{name:"Stock Health"}),{target:{value:"NOT_CONFIGURED"}});
+    expect(within(screen.getByRole("table")).getAllByText("Not Set")).toHaveLength(3);
+  });
   it("uses compact centered headers with keyboard-accessible full meanings", () => {
     render(<MemoryRouter><AllInventoryTable rows={[row(0)]} testsEnabled /></MemoryRouter>);
     expect(screen.getAllByRole("columnheader").map(header => header.getAttribute("aria-label"))).toEqual([

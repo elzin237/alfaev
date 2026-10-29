@@ -20,10 +20,10 @@ describe("Test Calculator presentation foundation", () => {
   });
   it("links to both destinations with an active Test indicator and wrapping responsive layout", () => {
     render(<MemoryRouter initialEntries={["/pcb/test"]}><TestCalculatorPage /></MemoryRouter>);
-    expect(screen.getByRole("link", { name: "Normal Calculator" })).toHaveAttribute("href", "/pcb");
+    expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute("href", "/pcb");
     expect(screen.getByRole("link", { name: "Test Calculator" })).toHaveAttribute("href", "/pcb/test");
     expect(screen.getByRole("link", { name: "Test Calculator" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "Normal Calculator" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("link", { name: "Calculator" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("navigation", { name: "Product Calculator" })).toHaveClass("flex", "flex-wrap", "gap-2");
   });
   it("navigates between Normal and Test without changing the Normal path", () => {
@@ -31,10 +31,10 @@ describe("Test Calculator presentation foundation", () => {
       <Route path="/pcb" element={<h1>Normal destination</h1>} />
       <Route path="/pcb/test" element={<h1>Test destination</h1>} />
     </Routes></MemoryRouter>);
-    expect(screen.getByRole("link", { name: "Normal Calculator" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Calculator" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(screen.getByRole("link", { name: "Test Calculator" }));
     expect(screen.getByRole("heading", { name: "Test destination" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("link", { name: "Normal Calculator" }));
+    fireEvent.click(screen.getByRole("link", { name: "Calculator" }));
     expect(screen.getByRole("heading", { name: "Normal destination" })).toBeInTheDocument();
   });
 });

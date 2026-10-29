@@ -52,7 +52,7 @@ describe("PCB production precheck page", () => {
     expect(screen.getByText("Finished-product definition not found.")).toBeInTheDocument();
     cleanup();
     show("invalid");
-    expect(screen.getByText("The Finished Product Calculator definition could not be found.")).toBeInTheDocument();
+    expect(screen.getByText("The Product Calculator definition could not be found.")).toBeInTheDocument();
   });
 
   it("shows a safe created Work Order reference without unauthorized navigation", () => {

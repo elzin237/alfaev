@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
+import { dashboardQueryKey } from "../../dashboard/dashboardQueryKeys";
 import { projectDetailQueryKey, projectListQueryKey } from "../projectQueryKeys";
 import { projectFinishedGoodsQueryKeys } from "../projectFinishedGoodsQueryKeys";
 import {
@@ -72,6 +73,7 @@ export function useProjectDetail(projectId: string) {
       queryClient.invalidateQueries({ queryKey: detailQueryKey, exact: true }),
       queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
       queryClient.invalidateQueries({ queryKey: projectFinishedGoodsQueryKeys.profile(profile?.id) }),
+      queryClient.invalidateQueries({ queryKey: dashboardQueryKey(profile?.id), exact: true }),
     ]);
   }
 

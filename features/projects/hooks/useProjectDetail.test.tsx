@@ -141,8 +141,9 @@ describe("useProjectDetail", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects", "list", "profile-1"], exact: true });
     invalidateQueries.mockClear();
     await act(async () => { await result.current.cancel(); });
-    expect(invalidateQueries).toHaveBeenCalledTimes(3);
+    expect(invalidateQueries).toHaveBeenCalledTimes(4);
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects", "finished-goods", "profile-1"] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["dashboard", "read-model", "profile-1"], exact: true });
     invalidateQueries.mockClear();
     await act(async () => { await result.current.reopen(); });
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["projects", "detail", "profile-1", projectId], exact: true });

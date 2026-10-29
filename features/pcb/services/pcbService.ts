@@ -58,13 +58,13 @@ function mapListRow(value: unknown): PcbCardListItem | null {
 export async function listPcbCards(): Promise<PcbResult<PcbCardListItem[]>> {
   const { data, error } = await supabase.rpc("list_pcb_cards");
   if (error || !Array.isArray(data)) {
-    return { ok: false, error: { code: "pcb_list_failed", message: "Finished Product Calculator could not be loaded." } };
+    return { ok: false, error: { code: "pcb_list_failed", message: "Product Calculator could not be loaded." } };
   }
   const cards: PcbCardListItem[] = [];
   for (const row of data) {
     const card = mapListRow(row);
     if (!card) {
-      return { ok: false, error: { code: "pcb_list_failed", message: "Finished Product Calculator could not be loaded." } };
+      return { ok: false, error: { code: "pcb_list_failed", message: "Product Calculator could not be loaded." } };
     }
     cards.push(card);
   }
@@ -78,23 +78,23 @@ export async function createPcbCard(name: string, serialNumber: string): Promise
   });
   if (error) {
     if (error.code === "42501") {
-      return { ok: false, error: { code: "access_denied", message: "You do not have permission to create Finished Product Calculator definitions." } };
+      return { ok: false, error: { code: "access_denied", message: "You do not have permission to create Product Calculator definitions." } };
     }
     if (error.code === "22023") {
       return { ok: false, error: { code: "invalid_name", message: "Enter a valid Name / Code and exact three-digit Serial Number." } };
     }
     if (error.code === "PCB14") {
-      return { ok: false, error: { code: "duplicate_name", message: "A Finished Product Calculator with this Name / Code already exists." } };
+      return { ok: false, error: { code: "duplicate_name", message: "A Product Calculator with this Name / Code already exists." } };
     }
     if (error.code === "PRD06" || error.code === "23505") {
       return { ok: false, error: { code: "duplicate_serial", message: "A Product with this Serial Number already exists." } };
     }
-    return { ok: false, error: { code: "pcb_create_failed", message: "Finished Product Calculator could not be created." } };
+    return { ok: false, error: { code: "pcb_create_failed", message: "Product Calculator could not be created." } };
   }
   const row: unknown = Array.isArray(data) && data.length === 1 ? data[0] : null;
   if (!isRecord(row) || !isUuid(row.pcb_card_id) || !isUuid(row.product_id) ||
     typeof row.serial_number !== "string" || !calculatorSerialPattern.test(row.serial_number)) {
-    return { ok: false, error: { code: "pcb_create_failed", message: "Finished Product Calculator could not be created." } };
+    return { ok: false, error: { code: "pcb_create_failed", message: "Product Calculator could not be created." } };
   }
   return { ok: true, value: {
     pcbCardId: row.pcb_card_id,

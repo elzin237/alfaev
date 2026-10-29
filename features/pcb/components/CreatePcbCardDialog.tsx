@@ -63,7 +63,7 @@ export default function CreatePcbCardDialog({ onClose, onSubmit, onCreated }: Pr
       <section role="dialog" aria-modal="true" aria-labelledby={titleId}
         aria-busy={isSubmitting}
         className="w-full max-w-lg rounded-3xl border border-zinc-200 bg-white p-6 shadow-xl sm:p-8">
-        <h2 id={titleId} className="text-2xl font-bold text-zinc-900">Create Finished Product Calculator</h2>
+        <h2 id={titleId} className="text-2xl font-bold text-zinc-900">Create Product Calculator</h2>
         <p className="mt-2 text-sm text-zinc-500">Enter the permanent three-digit Product Serial Number. Initial stock starts at 0 in all warehouses.</p>
         <form className="mt-6 space-y-5" onSubmit={(event) => void submit(event)} noValidate>
           <div>
@@ -87,7 +87,7 @@ export default function CreatePcbCardDialog({ onClose, onSubmit, onCreated }: Pr
               className="rounded-xl border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 disabled:opacity-50">Cancel</button>
             <button type="submit" disabled={isSubmitting}
               className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
-              {isSubmitting ? "Creating..." : "Create Finished Product Calculator"}
+              {isSubmitting ? "Creating..." : "Create Product Calculator"}
             </button>
           </div>
         </form>

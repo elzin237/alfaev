@@ -25,7 +25,7 @@ export function ProjectFinishedGoodsSection({ projectId, status }: { projectId: 
       message={error?.message ?? "Project Finished Goods could not be loaded. Please try again."}
       onRetry={error?.code === "access_denied" || error?.code === "project_not_found" ? undefined : () => void contextQuery.refetch()} />;
   } else if (contextQuery.data.value.length === 0) content = <EmptyState title="No explicit Finished Goods requirements"
-    description="Only explicitly required Finished Product Calculator outputs appear here. A Project Product group name does not create demand or a reservation." />;
+    description="Only explicitly required Product Calculator outputs appear here. A Project Product group name does not create demand or a reservation." />;
   else content = <div className="max-h-[28rem] max-w-full overflow-auto rounded-2xl border border-zinc-200"
     role="region" aria-label="Finished Goods requirements table" tabIndex={0}>
     <table className="w-full min-w-[48rem] divide-y divide-zinc-200 text-left text-sm">

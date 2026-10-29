@@ -24,7 +24,7 @@ export default function TestCalculatorRoute() {
     <div className="space-y-6">
       <ProductCalculatorNavigation />
       <ErrorState title="Test Calculator is not activated"
-        message="Test Calculator requires the coordinated permission rollout: test_calculator.view for access and test_calculator.manage for creation. Normal Calculator remains available to authorized users." />
+        message="Test Calculator requires the coordinated permission rollout: test_calculator.view for access and test_calculator.manage for creation. Calculator remains available to authorized users." />
     </div>
   );
 }

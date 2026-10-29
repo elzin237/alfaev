@@ -13,7 +13,7 @@ const PERMISSION_GROUPS: ReadonlyArray<{
   { module: "procurement", label: "Procurement" },
   { module: "suppliers", label: "Suppliers" },
   { module: "inventory", label: "Inventory" },
-  { module: "pcb", label: "Finished Product Calculator" },
+  { module: "pcb", label: "Product Calculator" },
   { module: "work_orders", label: "Work Orders" },
   { module: "archive", label: "Archive" },
   { module: "test_calculator", label: "Test Calculator" },

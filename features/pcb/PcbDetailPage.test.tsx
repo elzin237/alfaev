@@ -43,7 +43,7 @@ describe("PCB detail page", () => {
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByText("Finished Goods stock")).toBeInTheDocument();
     expect(screen.getByText("None")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to Finished Product Calculator/ })).toHaveAttribute("href", "/pcb");
+    expect(screen.getByRole("link", { name: /Back to Product Calculator/ })).toHaveAttribute("href", "/pcb");
     expect(screen.getByText("Editor authority: editable")).toBeInTheDocument();
     expect(screen.getByText("BOM History section")).toBeInTheDocument();
     expect(screen.getByText("Production History section")).toBeInTheDocument();
@@ -89,6 +89,6 @@ describe("PCB detail page", () => {
     expect(screen.getByText("Finished-product definition not found.")).toBeInTheDocument();
     missing.unmount();
     renderPage("bad-id");
-    expect(screen.getByText("The Finished Product Calculator definition could not be found.")).toBeInTheDocument();
+    expect(screen.getByText("The Product Calculator definition could not be found.")).toBeInTheDocument();
   });
 });

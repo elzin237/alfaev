@@ -21,9 +21,35 @@ describe("saved Test Calculation history UI (mock services)",()=>{
  it("shows active and expired shared history, both creators, dates and no fabricated list totals",async()=>{
   page();await screen.findByRole("button",{name:"Active calculation"});expect(screen.getByRole("button",{name:"Expired calculation"})).toBeInTheDocument();
   expect(screen.getByText("First Creator")).toBeInTheDocument();expect(screen.getByText("Another Creator")).toBeInTheDocument();
-  expect(screen.getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Calculation","Creator","Created","Deadline (Europe/Sarajevo)","Status"]);
-  expect(screen.getByText("Active")).toBeInTheDocument();expect(screen.getByText("Expired")).toBeInTheDocument();expect(screen.getByText("2020-01-01")).toBeInTheDocument();
+  expect(screen.getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Calculation","Creator","Created","Deadline","Status"]);
+  expect(screen.getByText("Active")).toBeInTheDocument();expect(screen.getByText("Expired")).toBeInTheDocument();expect(screen.getByText("1 Jan 2020")).toBeInTheDocument();
   expect(mocks.list).toHaveBeenCalledWith(20,null,"memory-token",expect.any(AbortSignal));
+ });
+ it("renders Sarajevo dates and keeps exact server snapshots accessible without repeating raw ISO text",async()=>{
+  page();await screen.findByRole("button",{name:"Active calculation"});
+  const table=screen.getByRole("table");
+  expect(within(table).getByText("27 Oct 2026 · 12:00")).toHaveAttribute("datetime",active.createdAt);
+  expect(within(table).getByText("1 Jan 2090")).toHaveAttribute("datetime",active.deadlineDate);
+  expect(within(table).queryByText(active.asOf,{exact:true})).not.toBeInTheDocument();
+  const status=screen.getByLabelText(`Active. Server snapshot: 27 Oct 2026 · 13:00 Europe/Sarajevo. Exact as_of: ${active.asOf}`);
+  expect(status).toHaveAttribute("tabindex","0");
+  expect(status.getAttribute("title")).toContain(active.asOf);
+  expect(screen.getByRole("columnheader",{name:"Created"})).toHaveAttribute("title","Created date and time in Europe/Sarajevo");
+  expect(screen.getByRole("columnheader",{name:"Deadline"}).getAttribute("title")).toContain("next local midnight (exclusive)");
+ });
+ it("keeps long names readable and calculation navigation inside a keyboard-accessible scrolling table",async()=>{
+  const creator="Very long Creator name ".repeat(8),name="Long saved calculation ".repeat(5);
+  mocks.list.mockResolvedValue({ok:true,value:{rows:[{...active,name,creatorFullName:creator}],nextCursor:null}});
+  page();const calculation=await screen.findByRole("button",{name:name.trim()});
+  const scroll=screen.getByRole("region",{name:"Saved calculations table"});
+  expect(scroll).toHaveAttribute("tabindex","0");expect(scroll).toHaveClass("overflow-x-auto");
+  expect(screen.getByText(creator.trim())).toHaveClass("break-words","text-left");
+  expect(calculation).toHaveClass("font-semibold");
+  for(const header of within(scroll).getAllByRole("columnheader")){
+    expect(header).toHaveAttribute("scope","col");expect(header).toHaveClass("text-center");
+  }
+  fireEvent.click(calculation);await screen.findByRole("region",{name:"Saved calculation detail"});
+  expect(mocks.detail).toHaveBeenCalledWith(active.calculationId,"memory-token",expect.any(AbortSignal));
  });
  it("requests the exact next cursor and appends expired rows without filtering",async()=>{
   const cursor={createdAt:active.createdAt,id:active.calculationId};

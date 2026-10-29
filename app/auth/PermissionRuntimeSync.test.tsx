@@ -81,7 +81,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PermissionRuntimeSync", () => {
-  it("invalidates only the current auth/profile permission query prefix", async () => {
+  it("invalidates only the current auth/profile permissions and Dashboard snapshot", async () => {
     const queryClient = new QueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
 
@@ -106,7 +106,10 @@ describe("PermissionRuntimeSync", () => {
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["permission", user.id, profile.id],
     });
-    expect(invalidateQueries).toHaveBeenCalledOnce();
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["dashboard", "read-model", profile.id], exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it("unsubscribes on identity change and does not subscribe for Admins", () => {

@@ -40,7 +40,7 @@ export default function TestCalculatorPage({enabledAfterActivation=false}:{enabl
       <ProductCalculatorNavigation />
       <div className="rounded-3xl border-t-4 border-blue-600 bg-blue-50 p-1">
         <PageHeader title="Test Calculator"
-          description="Preview component availability and plan time-limited Test Calculations separately from Normal Calculator."
+          description="Preview component availability and plan time-limited Test Calculations separately from Calculator."
           actions={<button type="button" disabled aria-describedby="test-calculator-stage"
             className="w-full rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-blue-100 disabled:text-blue-800 sm:w-auto">
             Create Test Calculation

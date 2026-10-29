@@ -7,7 +7,7 @@ export default function ProductCalculatorNavigation() {
         `rounded-xl border px-4 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 ${isActive
           ? "border-zinc-900 bg-zinc-900 text-white"
           : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"}`}>
-        Normal Calculator
+        Calculator
       </NavLink>
       <NavLink to="/pcb/test" className={({ isActive }) =>
         `rounded-xl border px-4 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700 ${isActive

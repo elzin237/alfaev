@@ -12,5 +12,12 @@ export function useDashboard() {
     queryFn: getDashboardReadModel,
     enabled: Boolean(profile?.id),
     staleTime: 60_000,
+    // General Project edits do not emit the recipient-specific alert broadcasts.
+    // One visible Dashboard observer refreshes the trusted snapshot on a bounded interval.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: "always",
+    refetchOnReconnect: "always",
   });
 }

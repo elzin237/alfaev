@@ -19,17 +19,17 @@ export default function PcbPage() {
   return (
     <div className="space-y-6">
       <ProductCalculatorNavigation />
-      <PageHeader title="Finished Product Calculator" description="Finished-product definitions, BOMs, and output Products."
+      <PageHeader title="Product Calculator" description="Finished-product definitions, BOMs, and output Products."
         actions={canCreate ? <button type="button" onClick={() => { setSuccess(null); setDialogOpen(true); }}
-          className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Finished Product Calculator</button> : undefined} />
+          className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Product Calculator</button> : undefined} />
       {success && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{success}</p>}
-      {cardsQuery.isPending ? <LoadingState message="Loading Finished Product Calculator..." /> :
+      {cardsQuery.isPending ? <LoadingState message="Loading Product Calculator..." /> :
         cardsQuery.isError || !cardsQuery.data?.ok ?
-          <ErrorState title="Unable to load Finished Product Calculator"
-            message={cardsQuery.data?.ok === false ? cardsQuery.data.error.message : "Finished Product Calculator could not be loaded."}
+          <ErrorState title="Unable to load Product Calculator"
+            message={cardsQuery.data?.ok === false ? cardsQuery.data.error.message : "Product Calculator could not be loaded."}
             onRetry={() => void cardsQuery.refetch()} /> :
         cardsQuery.data.value.length === 0 ?
-          <EmptyState title="No finished-product definitions found" description="There are no Finished Product Calculator definitions to display." /> :
+          <EmptyState title="No finished-product definitions found" description="There are no Product Calculator definitions to display." /> :
           <div className="overflow-x-auto rounded-3xl border border-zinc-200 bg-white shadow-sm">
             <table className="w-full min-w-[680px] text-left text-sm">
               <thead className="border-b border-zinc-200 bg-zinc-50 text-zinc-600">
@@ -49,7 +49,7 @@ export default function PcbPage() {
             </table>
           </div>}
       {dialogOpen && <CreatePcbCardDialog onClose={() => setDialogOpen(false)} onSubmit={create}
-        onCreated={(created) => setSuccess(`Finished Product Calculator created. Serial Number: ${created.serialNumber}`)} />}
+        onCreated={(created) => setSuccess(`Product Calculator created. Serial Number: ${created.serialNumber}`)} />}
     </div>
   );
 }

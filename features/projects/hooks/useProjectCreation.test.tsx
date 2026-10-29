@@ -147,6 +147,10 @@ describe("useProjectCreation", () => {
       queryKey: ["projects", "list", "profile-1"],
       exact: true,
     });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["dashboard", "read-model", "profile-1"],
+      exact: true,
+    });
   });
 
   it("does not invalidate the list after failed creation", async () => {

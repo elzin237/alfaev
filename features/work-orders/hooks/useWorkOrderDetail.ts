@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
+import { dashboardQueryKey } from "../../dashboard/dashboardQueryKeys";
 import {
   projectDetailQueryKey,
   projectListQueryKey,
@@ -331,6 +332,7 @@ export function useWorkOrderDetail(workOrderId: string) {
     onSuccess: async (result) => {
       if (result.ok) {
         const commonInvalidations = [
+          queryClient.invalidateQueries({ queryKey: dashboardQueryKey(profile?.id), exact: true }),
           queryClient.invalidateQueries({ queryKey: detailKey, exact: true }),
           queryClient.invalidateQueries({ queryKey: listKey, exact: true }),
           queryClient.invalidateQueries({

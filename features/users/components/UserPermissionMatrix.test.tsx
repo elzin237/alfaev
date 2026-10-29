@@ -17,7 +17,7 @@ const groupLabels = [
   "Procurement",
   "Suppliers",
   "Inventory",
-  "Finished Product Calculator",
+  "Product Calculator",
   "Work Orders",
   "Archive",
 ];

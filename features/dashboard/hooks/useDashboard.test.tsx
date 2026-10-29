@@ -1,6 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -32,6 +33,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  focusManager.setFocused(undefined);
+  onlineManager.setOnline(true);
   vi.resetAllMocks();
 });
 
@@ -111,5 +115,71 @@ describe("useDashboard", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     await result.current.refetch();
     expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes a still-fresh snapshot on return to Dashboard", async () => {
+    const first = renderDashboardHook();
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    first.unmount();
+    mocks.getDashboardReadModel.mockResolvedValueOnce({ ok: true, value: { projects: { recent: [{ status: "completed" }] } } });
+    const second = renderDashboardHook(first.queryClient);
+    await waitFor(() => expect(second.result.current.data).toMatchObject({ value: { projects: { recent: [{ status: "completed" }] } } }));
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes on focus and reconnect even with the app-wide focus default disabled", async () => {
+    focusManager.setFocused(true);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
+    const view = renderDashboardHook(client);
+    await waitFor(() => expect(view.result.current.isSuccess).toBe(true));
+    act(() => focusManager.setFocused(false));
+    act(() => focusManager.setFocused(true));
+    await waitFor(() => expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2));
+    act(() => onlineManager.setOnline(false));
+    act(() => onlineManager.setOnline(true));
+    await waitFor(() => expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(3));
+  });
+
+  it("observes another tab/user's confirmed edits within one visible refresh interval", async () => {
+    vi.useFakeTimers();
+    focusManager.setFocused(true);
+    const view = renderDashboardHook();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledOnce();
+    mocks.getDashboardReadModel.mockResolvedValue({ ok: true, value: { projects: { recent: [{ name: "Changed elsewhere", status: "in_progress" }] } } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(59_998); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2);
+    expect(view.result.current.data).toMatchObject({ value: { projects: { recent: [{ name: "Changed elsewhere", status: "in_progress" }] } } });
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll hidden/unfocused Dashboards and refreshes when focus returns", async () => {
+    vi.useFakeTimers();
+    focusManager.setFocused(false);
+    renderDashboardHook();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledOnce();
+    await act(async () => { focusManager.setFocused(true); await vi.advanceTimersByTimeAsync(1); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not duplicate the refresh loop under Strict Mode remounting", async () => {
+    vi.useFakeTimers();
+    focusManager.setFocused(true);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <StrictMode><QueryClientProvider client={client}>{children}</QueryClientProvider></StrictMode>;
+    const view = renderHook(() => useDashboard(), { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(3);
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(mocks.getDashboardReadModel).toHaveBeenCalledTimes(3);
   });
 });

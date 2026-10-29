@@ -17,7 +17,7 @@ export default function PcbProductionPrecheckPage() {
     plannedQuantity: string; projectName: string | null } | null>(null);
   const { sourceQuery } = usePcbProductionPrecheck(pcbCardId);
   const production = usePcbProduction(pcbCardId);
-  if (!isPcbCardId(pcbCardId)) return <ErrorState title="Finished-product definition not found" message="The Finished Product Calculator definition could not be found." />;
+  if (!isPcbCardId(pcbCardId)) return <ErrorState title="Finished-product definition not found" message="The Product Calculator definition could not be found." />;
   if (completed) return <div className="space-y-6">
     <PageHeader title="Production Work Order created" description={`Finished product: ${completed.cardName}`} />
     <section role="status" className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-sm text-emerald-950 shadow-sm">

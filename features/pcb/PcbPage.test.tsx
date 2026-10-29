@@ -32,19 +32,19 @@ describe("PCB list and creation", () => {
     expect(screen.getByRole("columnheader", { name: "Finished Goods stock" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Current Stock" })).not.toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Create Finished Product Calculator" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Product Calculator" })).toBeInTheDocument();
   });
 
   it("fails closed for a view-only creator", () => {
     mocks.usePcbCreation.mockReturnValue({ canCreate: false, create: mocks.create });
     renderPage();
-    expect(screen.queryByRole("button", { name: "Create Finished Product Calculator" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create Product Calculator" })).not.toBeInTheDocument();
   });
 
   it("shows loading, error with retry, and empty states", () => {
     mocks.usePcbCards.mockReturnValueOnce({ isPending: true });
     const view = renderPage();
-    expect(screen.getByText("Loading Finished Product Calculator...")).toBeInTheDocument();
+    expect(screen.getByText("Loading Product Calculator...")).toBeInTheDocument();
     view.unmount();
     mocks.usePcbCards.mockReturnValueOnce({ isPending: false, isError: true, refetch: mocks.refetch });
     const errorView = renderPage();
@@ -58,17 +58,17 @@ describe("PCB list and creation", () => {
 
   it("validates name and exact three-digit Serial, preserving leading zeroes", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Create Finished Product Calculator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Product Calculator" }));
     const dialog = screen.getByRole("dialog");
     expect(dialog.querySelectorAll("input")).toHaveLength(2);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Product Calculator" }));
     expect(screen.getByRole("alert")).toHaveTextContent("required");
     fireEvent.change(screen.getByLabelText("Name / Code"), { target: { value: "  Controller  " } });
     fireEvent.change(screen.getByLabelText("Three-digit Serial Number"), { target: { value: "07" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Product Calculator" }));
     expect(screen.getByRole("alert")).toHaveTextContent("exact three-digit");
     fireEvent.change(screen.getByLabelText("Three-digit Serial Number"), { target: { value: "007" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create Finished Product Calculator" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create Product Calculator" }));
     await waitFor(() => expect(mocks.create).toHaveBeenCalledWith("Controller", "007"));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByRole("status")).toHaveTextContent("007");
@@ -78,15 +78,15 @@ describe("PCB list and creation", () => {
     let finish: ((result: { ok: false; error: { code: string; message: string } }) => void) | undefined;
     mocks.create.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Create Finished Product Calculator" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create Product Calculator" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Name / Code"), { target: { value: "Card" } });
     fireEvent.change(within(dialog).getByLabelText("Three-digit Serial Number"), { target: { value: "123" } });
-    const submit = within(dialog).getByRole("button", { name: "Create Finished Product Calculator" });
+    const submit = within(dialog).getByRole("button", { name: "Create Product Calculator" });
     fireEvent.click(submit);
     fireEvent.click(submit);
     expect(mocks.create).toHaveBeenCalledTimes(1);
-    finish?.({ ok: false, error: { code: "pcb_create_failed", message: "Finished Product Calculator could not be created." } });
+    finish?.({ ok: false, error: { code: "pcb_create_failed", message: "Product Calculator could not be created." } });
     await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("could not be created"));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });

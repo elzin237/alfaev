@@ -16,7 +16,7 @@ export default function PcbDetailPage() {
   const canProduce = usePcbProduceAccess();
 
   if (!isPcbCardId(pcbCardId)) {
-    return <ErrorState title="Finished-product definition not found" message="The Finished Product Calculator definition could not be found." />;
+    return <ErrorState title="Finished-product definition not found" message="The Product Calculator definition could not be found." />;
   }
   if (detailQuery.isPending) return <LoadingState message="Loading finished-product definition..." />;
   if (detailQuery.isError || !detailQuery.data?.ok) {
@@ -27,10 +27,10 @@ export default function PcbDetailPage() {
   }
   const detail = detailQuery.data.value;
   return <div className="space-y-6">
-    <PageHeader title={detail.name} description="Finished Product Calculator definition and current BOM."
+    <PageHeader title={detail.name} description="Product Calculator definition and current BOM."
       actions={detail.isActive && canProduce ? <Link to={`/pcb/${pcbCardId}/produce`}
         className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Production Work Order</Link> : undefined} />
-    <Link to="/pcb" className="inline-block text-sm font-semibold text-zinc-700 hover:text-red-700">← Back to Finished Product Calculator</Link>
+    <Link to="/pcb" className="inline-block text-sm font-semibold text-zinc-700 hover:text-red-700">← Back to Product Calculator</Link>
     <dl className="grid gap-5 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
       <div><dt className="text-xs font-semibold uppercase text-zinc-500">Output Serial Number</dt>
         <dd className="mt-2 font-mono text-lg font-semibold">{detail.outputSerialNumber}</dd></div>

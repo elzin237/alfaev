@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
+import { dashboardQueryKey } from "../../dashboard/dashboardQueryKeys";
 import { projectListQueryKey } from "../projectQueryKeys";
 import { createProject } from "../services/projectService";
 
@@ -24,10 +25,10 @@ export function useProjectCreation() {
     mutationFn: createProject,
     onSuccess: async (result) => {
       if (result.ok) {
-        await queryClient.invalidateQueries({
-          queryKey: listQueryKey,
-          exact: true,
-        });
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: listQueryKey, exact: true }),
+          queryClient.invalidateQueries({ queryKey: dashboardQueryKey(profile?.id), exact: true }),
+        ]);
       }
     },
   });
