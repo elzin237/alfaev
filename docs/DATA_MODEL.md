@@ -2235,14 +2235,16 @@ mutation/non-Admin acceptance still pending.
   global Product identity/lifecycle and Brand identity/lifecycle together with only the
   requested warehouse balance and its separate balance timestamp. Product `updated_at`
   is never substituted with the InventoryBalance timestamp.
-- Listing membership is not balance existence. Raw Materials preserves all existing
-  Product visibility, including historical Calculator stock. Finished Goods lists only
+- Listing membership is not balance existence. Raw Materials excludes Products linked
+  by `pcb_cards.output_product_id`, including historical Calculator stock; Raw-scoped
+  detail reads reject those outputs (forward migration 161). Finished Goods lists only
   Products referenced by `pcb_cards.output_product_id`, including zero-stock and
   archived outputs. Customs lists positive balances or retained committed Customs
   movement history; structural zero rows alone establish no membership. Depletion
   preserves membership; rollback creates none. No stored origin/membership flag is added.
 - Calculator output-stock reads use Finished Goods only. BOM input/picker stock stays
-  Raw. Listing does not restrict trusted detail, adjustments, transfers or allocation.
+  Raw. Apart from the linked-output Raw detail exclusion, listing does not restrict
+  trusted detail, adjustments, transfers or allocation.
   Historical stock and provenance are not moved.
 - `InventoryBalance` becomes one row per `(product_id, warehouse_id)`.
   `InventoryMovement` and `InventorySourceLot` carry a non-null warehouse identity;

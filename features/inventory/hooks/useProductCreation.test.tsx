@@ -20,6 +20,7 @@ vi.mock("../services/productService", () => ({
 }));
 
 import { useProductCreation } from "./useProductCreation";
+import { inventoryTestCommitmentsPrefix } from "../../test-calculator/services/testCalculationRecoveryStore";
 
 function renderProductCreationHook() {
   const queryClient = new QueryClient({
@@ -38,7 +39,7 @@ function renderProductCreationHook() {
 beforeEach(() => {
   hookMocks.useAuth.mockReturnValue({
     session: { user: { id: "auth-user-1" } },
-    profile: { id: "profile-1", isActive: true },
+    profile: { id: "profile-1", authUserId: "auth-user-1", isActive: true },
     isAdmin: false,
   });
   hookMocks.hasPermission.mockResolvedValue({ ok: true, value: false });
@@ -124,6 +125,9 @@ describe("useProductCreation", () => {
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: inventoryTestCommitmentsPrefix({ authUserId: "auth-user-1", profileId: "profile-1" }),
     });
   });
 

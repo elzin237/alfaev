@@ -9,6 +9,8 @@ vi.mock("../../../app/auth/permissionService", () => ({ hasPermission: mocks.has
 vi.mock("../services/pcbService", () => ({ createPcbCard: mocks.createPcbCard }));
 
 import { usePcbCreation } from "./usePcbCreation";
+import { inventoryTestCommitmentsPrefix } from "../../test-calculator/services/testCalculationRecoveryStore";
+import { dashboardStockHealthPrefix, stockHealthPrefix } from "../../inventory/stockHealthQueryKeys";
 
 function setup() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -18,7 +20,7 @@ function setup() {
 }
 
 beforeEach(() => {
-  mocks.useAuth.mockReturnValue({ session: { user: { id: "auth-1" } }, profile: { id: "profile-1", isActive: true }, isAdmin: false });
+  mocks.useAuth.mockReturnValue({ session: { user: { id: "auth-1" } }, profile: { id: "profile-1", authUserId: "auth-1", isActive: true }, isAdmin: false });
   mocks.hasPermission.mockResolvedValue({ ok: true, value: false });
   mocks.createPcbCard.mockResolvedValue({ ok: true, value: { pcbCardId: "card", productId: "product", serialNumber: "0000001" } });
 });
@@ -60,6 +62,10 @@ describe("PCB creation permission and cache", () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: commitmentKey });
     expect(client.getQueryState(fgKey)?.isInvalidated).toBe(true);
     expect(client.getQueryState(foreign)?.isInvalidated).toBe(false);
+    for (const queryKey of [inventoryTestCommitmentsPrefix({ authUserId: "auth-1", profileId: "profile-1" }),
+      stockHealthPrefix("auth-1", "profile-1"), dashboardStockHealthPrefix("auth-1", "profile-1")]) {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey });
+    }
     invalidate.mockClear();
     mocks.createPcbCard.mockResolvedValue({ ok: false, error: { code: "pcb_create_failed", message: "Failed" } });
     await act(async () => { await result.current.create("Card", "007"); });

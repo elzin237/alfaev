@@ -6,6 +6,7 @@ import { hasPermission } from "../../../app/auth/permissionService";
 import { productListQueryPrefix } from "../productQueryKeys";
 import { inventoryCommitmentsQueryKey } from "../inventoryCommitmentQueryKeys";
 import { createProduct } from "../services/productService";
+import { inventoryTestCommitmentsPrefix } from "../../test-calculator/services/testCalculationRecoveryStore";
 
 export function useProductCreation() {
   const { session, profile, isAdmin } = useAuth();
@@ -26,6 +27,8 @@ export function useProductCreation() {
   );
 
   async function create(input: Parameters<typeof createProduct>[0]) {
+    const identity = session?.user.id && profile?.isActive && profile.authUserId === session.user.id
+      ? { authUserId: session.user.id, profileId: profile.id } : null;
     const result = await createProduct(input);
 
     if (result.ok) {
@@ -35,6 +38,7 @@ export function useProductCreation() {
           queryKey: inventoryCommitmentsQueryKey(profile?.id),
           exact: true,
         }),
+        ...(identity ? [queryClient.invalidateQueries({ queryKey: inventoryTestCommitmentsPrefix(identity) })] : []),
       ]);
     }
 

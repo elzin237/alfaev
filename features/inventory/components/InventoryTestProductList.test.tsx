@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ hook: vi.fn() }));
@@ -58,5 +58,33 @@ describe("gated Inventory Test columns", () => {
     expect(within(screen.getByRole("row", { name: /Second/ })).getAllByText("Unavailable")).toHaveLength(4);
     expect(screen.getByRole("alert")).toHaveTextContent("No missing figures are assumed to be zero");
     expect(mocks.hook).toHaveBeenCalledWith(INVENTORY_WAREHOUSES[0]!.id, "resistor", true, true);
+  });
+  it.each(INVENTORY_WAREHOUSES.map(w => w.code))("explicitly retries partial %s rows once without inventing zero or looping", async code => {
+    const second = { ...product, id: "00000000-0000-4000-8000-000000000002", serialNumber: "008", name: "New Product" };
+    let finish!: () => void;
+    const refetch = vi.fn(() => new Promise<void>(resolve => { finish = resolve; }));
+    mocks.hook.mockReturnValue({ allowed: true, rows: [row], query: { isFetching: false, refetch } });
+    renderList(code, true, undefined, [product, second]);
+    expect(within(screen.getByRole("row", { name: /New Product/ })).getAllByText("Unavailable").length).toBeGreaterThanOrEqual(2);
+    const button = screen.getByRole("button", { name: "Retry Test commitments" });
+    fireEvent.click(button); fireEvent.click(button);
+    expect(button).toBeDisabled();
+    expect(refetch).toHaveBeenCalledExactlyOnceWith({ cancelRefetch: false });
+    mocks.hook.mockReturnValue({ allowed: true, rows: [row, { ...row, productId: second.id, committedToTests: "0", availableAfterProjectsAndTests: "12" }], query: { isFetching: false, refetch } });
+    await act(async () => { finish(); });
+    await waitFor(() => expect(within(screen.getByRole("row", { name: /New Product/ })).getByText("0")).toBeInTheDocument());
+    expect(screen.getByText(row.committedToTests)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry Test commitments" })).not.toBeInTheDocument();
+    expect(refetch).toHaveBeenCalledTimes(1);
+  });
+  it("retains full-error retry and reports a failed retry without automatically trying again", async () => {
+    const refetch = vi.fn().mockRejectedValue(new Error("network"));
+    mocks.hook.mockReturnValue({ allowed: true, rows: undefined, query: { isFetching: false, refetch } });
+    renderList();
+    fireEvent.click(screen.getByRole("button", { name: "Retry Test commitments" }));
+    await waitFor(() => expect(screen.getByText("Test commitments could not be refreshed. Try again.")).toBeInTheDocument());
+    expect(screen.getAllByText("Unavailable")).toHaveLength(2);
+    expect(refetch).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Retry Test commitments" })).toBeEnabled();
   });
 });

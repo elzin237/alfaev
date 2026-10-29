@@ -14,6 +14,7 @@ vi.mock("../services/componentImportService", () => ({
 }));
 
 import { useComponentImport } from "./useComponentImport";
+import { inventoryTestCommitmentsPrefix } from "../../test-calculator/services/testCalculationRecoveryStore";
 
 function renderImportHook() {
   const queryClient = new QueryClient({
@@ -29,7 +30,10 @@ const rows = [{ name: "Resistor", category: "Passive", brand: null }];
 
 beforeEach(() => {
   vi.resetAllMocks();
-  hookMocks.useAuth.mockReturnValue({ profile: { id: "profile-1" } });
+  hookMocks.useAuth.mockReturnValue({
+    session: { user: { id: "auth-user-1" } },
+    profile: { id: "profile-1", authUserId: "auth-user-1", isActive: true },
+  });
   hookMocks.importComponents.mockResolvedValue({
     ok: true,
     value: {
@@ -42,19 +46,22 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("useComponentImport", () => {
-  it("calls the service once and invalidates only Product prefix and exact commitments", async () => {
+  it("calls the service once and invalidates Product, planning and identity-scoped Test commitments", async () => {
     const { result, queryClient } = renderImportHook();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     await act(async () => { await result.current.importBatch(rows); });
 
     expect(hookMocks.importComponents).toHaveBeenCalledOnce();
     expect(hookMocks.importComponents).toHaveBeenCalledWith(rows);
-    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+    expect(invalidateQueries).toHaveBeenCalledTimes(3);
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "products", "profile-1"],
     });
     expect(invalidateQueries).toHaveBeenCalledWith({
       queryKey: ["inventory", "commitments", "profile-1"], exact: true,
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: inventoryTestCommitmentsPrefix({ authUserId: "auth-user-1", profileId: "profile-1" }),
     });
   });
 

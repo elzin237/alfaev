@@ -16,12 +16,14 @@ activation and reservation frontend remain pending.
 
 ## Task 001J warehouse listing contract
 
-- Raw Materials retains existing Product visibility, including historical Calculator stock.
+- Raw Materials excludes every Product linked as `pcb_cards.output_product_id`, even
+  when a structural Raw balance or historical Raw stock exists (forward migration 161).
 - Finished Goods lists only Calculator outputs linked by `pcb_cards.output_product_id`,
   including active/archived outputs and zero stock. Ordinary Products are excluded.
 - Customs lists positive Customs balances or committed Customs movement history.
   Structural zero rows are hidden; depletion retains visibility; rollback creates none.
-- Listing membership does not restrict trusted detail, adjustments, transfers or
+- Raw-scoped Product details reject linked Calculator outputs. Other listing
+  membership does not restrict trusted detail, adjustments, transfers or
   Work Order allocation. Existing ordinary-Product transfers into Finished Goods
   remain allowed but do not make those Products Calculator outputs.
 - Calculator output stock means Finished Goods quantity. BOM input/picker stock stays
