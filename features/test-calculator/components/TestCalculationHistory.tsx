@@ -6,6 +6,8 @@ import StatusBadge from "../../../shared/components/StatusBadge";
 import { useTestCalculationHistory } from "../hooks/useTestCalculationHistory";
 import TestCalculationDetail from "./TestCalculationDetail";
 import { formatHistoryDeadline, formatHistoryTimestamp } from "../testCalculationHistoryDates";
+import { useTestConversions } from "../hooks/useTestConversions";
+import TestConversionProvenance from "./TestConversionProvenance";
 
 // Closed gate: disabled rendering mounts no Auth/query hooks and performs no reads.
 export default function TestCalculationHistory({enabledAfterActivation=false,pageSize=20}:{enabledAfterActivation?:boolean;pageSize?:number}){
@@ -15,10 +17,11 @@ export default function TestCalculationHistory({enabledAfterActivation=false,pag
 function AuthorizedHistory({pageSize}:{pageSize:number}){
   const {query,scope,allowed,isLoading}=useTestCalculationHistory(true,pageSize);
   const [selection,setSelection]=useState<{scope:string;id:string}|null>(null);
+  const rows=query.data?.pages.flatMap(page=>page.ok?page.value.rows:[])??[];
+  const conversions=useTestConversions(rows.map(row=>row.calculationId),allowed&&!query.isFetching);
   if(isLoading||allowed&&query.isPending)return <LoadingState message="Loading saved calculations..."/>;
   if(!allowed)return <ErrorState title="Access denied" message="Your Test Calculator history access could not be verified."/>;
   const failure=query.data?.pages.find(page=>!page.ok);
-  const rows=query.data?.pages.flatMap(page=>page.ok?page.value.rows:[])??[];
   const duplicate=new Set(rows.map(row=>row.calculationId)).size!==rows.length;
   if(query.isError||failure||duplicate)return <ErrorState title="Unable to load saved calculations" message={failure?.ok===false?failure.error.message:"Saved calculation history could not be verified."} onRetry={()=>void query.refetch()}/>;
   return <section aria-label="Saved calculation history" className="space-y-4">
@@ -30,12 +33,14 @@ function AuthorizedHistory({pageSize}:{pageSize:number}){
         <colgroup><col className="w-[26%]"/><col className="w-[20%]"/><col className="w-[24%]"/><col className="w-[17%]"/><col className="w-[13%]"/></colgroup>
         <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] uppercase tracking-wide text-zinc-500"><tr>{["Calculation","Creator","Created","Deadline","Status"].map(label=><th scope="col" key={label} title={label==="Created"?"Created date and time in Europe/Sarajevo":label==="Deadline"?"Sarajevo deadline date; expires at the next local midnight (exclusive)":undefined} className="px-3 py-3.5 text-center font-semibold">{label}</th>)}</tr></thead>
         <tbody className="divide-y divide-zinc-100">{rows.map(row=><tr key={row.calculationId} className="align-middle transition-colors hover:bg-zinc-50/70 focus-within:bg-blue-50/40">
-          <td className="px-3 py-3.5 text-left"><button type="button" aria-expanded={selection?.scope===scope&&selection.id===row.calculationId} onClick={()=>setSelection({scope,id:row.calculationId})} className="w-full break-words rounded text-left font-semibold text-blue-800 underline-offset-4 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300">{row.name}</button></td>
+          <td className="px-3 py-3.5 text-left"><button type="button" aria-expanded={selection?.scope===scope&&selection.id===row.calculationId} onClick={()=>setSelection({scope,id:row.calculationId})} className="w-full break-words rounded text-left font-semibold text-blue-800 underline-offset-4 [overflow-wrap:anywhere] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300">{row.name}</button>
+            {conversions.rows?.find(c=>c.calculation_id===row.calculationId)&&<TestConversionProvenance conversion={conversions.rows.find(c=>c.calculation_id===row.calculationId)!}/>}</td>
           <td className="break-words px-3 py-3.5 text-left text-xs leading-5 text-zinc-600 [overflow-wrap:anywhere]">{row.creatorFullName??"Not returned"}</td><td className="px-3 py-3.5 text-center text-xs tabular-nums text-zinc-600"><time dateTime={row.createdAt} title={`${row.createdAt} (displayed in Europe/Sarajevo)`} className="whitespace-nowrap">{formatHistoryTimestamp(row.createdAt)}</time></td>
           <td className="px-3 py-3.5 text-center text-xs tabular-nums text-zinc-600"><time dateTime={row.deadlineDate} title="Europe/Sarajevo deadline date; expiry remains server-authoritative" className="whitespace-nowrap">{formatHistoryDeadline(row.deadlineDate)}</time></td><td className="px-2 py-3.5 text-center"><span tabIndex={0} aria-label={`${row.status==="active"?"Active":"Expired"}. Server snapshot: ${formatHistoryTimestamp(row.asOf)} Europe/Sarajevo. Exact as_of: ${row.asOf}`} title={`Server snapshot: ${formatHistoryTimestamp(row.asOf)} (Europe/Sarajevo). Exact as_of: ${row.asOf}`} className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 [&>span]:px-2 [&>span]:py-0.5 [&>span]:text-xs"><StatusBadge label={row.status==="active"?"Active":"Expired"} tone={row.status==="active"?"info":"neutral"}/></span></td>
         </tr>)}</tbody>
       </table></div>}
     {rows.length>0&&<p className="text-xs text-zinc-500">Dates are shown in Europe/Sarajevo. Focus or hover over a status for its authoritative server snapshot.</p>}
+    {conversions.released&&!conversions.ready&&<p role="status" className="text-sm text-zinc-600">{conversions.error?"Conversion status unavailable.":"Loading conversion status…"}<button type="button" onClick={()=>void conversions.refresh()} className="ml-2 font-semibold underline">Retry conversion status</button></p>}
     {query.hasNextPage&&<button type="button" disabled={query.isFetching} onClick={()=>{if(!query.isFetching)void query.fetchNextPage();}} className="rounded-xl bg-blue-700 px-4 py-2 text-sm font-semibold text-white">Load more calculations</button>}
     {query.isFetchingNextPage&&<p role="status">Loading more saved calculations...</p>}
     {selection?.scope===scope&&<div key={`${scope}:${selection.id}`} className="space-y-3">

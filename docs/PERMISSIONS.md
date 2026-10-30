@@ -1,5 +1,41 @@
 # AlfaEV — PERMISSIONS.md
 
+## Current Import from Test authorization checkpoint — 2026-10-30
+
+DEV deployment through migration 170 was previously verified; the existing 41
+permission definitions remain unchanged. The local import gate is ON only for
+the approved DEV backend, not a permission grant or production activation.
+Active Admin or all five Test/Calculator grants plus applicable source warehouse
+authority remain mandatory server-side, including exact receipt replay.
+Test history access alone never permits destination metadata/navigation or import.
+Earlier local/OFF descriptions below are retained historical phase evidence.
+
+## Phase 3 atomic Test import — local migration 169
+
+The new authenticated-only import_test_calculation(uuid,uuid,text) requires active Admin
+OR test_calculator.view/manage AND pcb.view/create/edit. FG view is always required for
+non-Admins; ordinary component definitions additionally require Raw and Customs views.
+The same current authority is checked on exact request replay. Shared-Test import is
+allowed but receipt ownership remains the original importing profile AND Auth identity.
+PUBLIC/anon/service_role remain denied; private conversion/release tables remain unreadable
+and unwritable by application roles. No permission definitions, assignments, general
+Inventory privileges or existing Calculator grants change. No frontend import is activated.
+
+## Import from Test — approved authority; Phase 1 local only
+
+Future import requires an active Admin OR all of test_calculator.view,
+test_calculator.manage, pcb.view, pcb.create and pcb.edit. Preserve source-specific
+warehouse view authorization: FG for linked finished inputs; Raw, Customs and FG for
+ordinary inputs. Shared authorized Tests may be imported across creators, but request
+receipt recovery remains bound to the importing profile AND authenticated identity.
+Explicit employee confirmation is required. View-only history does not permit release.
+No new permission definitions, assignments, general Inventory access or role expansion.
+
+Migration 167 grants no table access and no RPC EXECUTE to PUBLIC, anon, authenticated
+or service_role, including Admin JWTs. Its two consistency/immutability helpers are
+SECURITY INVOKER with empty search_path and private EXECUTE. Authorization enforcement,
+release-aware consumers and narrow authenticated import/read RPCs belong to later phases.
+
 ## Current authorization checkpoint — 2026-10-29
 
 Previously verified DEV migration 166 retains the existing 41 permission definitions.

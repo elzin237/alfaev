@@ -1,5 +1,78 @@
 # AlfaEV — SECURITY_RULES.md
 
+## Current Import from Test security checkpoint — 2026-10-30
+
+The recorded guarded deployment and independent read-only verification confirmed
+alfaev-dev (`yzysgbrpbhiapalgetau`), 170/170 migrations, protected private tables,
+narrow authenticated RPC grants and preserved existing business/security data.
+The completed local UI is now intentionally enabled only for that backend origin;
+the prerequisite Test Calculator gate remains required and other origins stay OFF.
+No environment, URL or browser-storage activation override is introduced.
+
+The owner reports successful manual DEV import acceptance. This final audit relies
+on that report and existing deployment evidence without accessing DEV, repeating
+an import or making data/schema changes. Actor-bound exact replay, fail-closed
+recovery, immutable history and source-specific releases remain enforced by the
+contracts below. Earlier undeployed/OFF notes are preserved historical records.
+
+## Atomic import boundary — Phase 3 local migration 169
+
+Only authenticated receives EXECUTE on import_test_calculation(uuid,uuid,text); PUBLIC,
+anon and service_role are denied. SECURITY DEFINER uses empty search_path and explicit
+active Admin OR all five Test/Calculator grants plus applicable warehouse authority.
+Profile and delegated permission rows remain locked through commit and authority is
+rechecked after waits. Another Admin cannot recover the importing actor's receipt.
+Request ownership precedes payload comparison; no direct table policy/grant is added.
+
+Require READ COMMITTED; serialize request then source, acquire Products before balances,
+never acquire Project/WO row locks from import. Existing canonical creation/BOM RPCs retain
+their constraints and authorization. Observe expiry after blocking destination uniqueness
+and BOM operations; no deadline extension, Test snapshot update or stock mutation. Drain
+private deferred consistency/shortage checks under the trusted identity, never disable them
+or leave invoker-only checks to an authenticated COMMIT. Audit exposes destination provenance
+IDs, not private canonical request/receipt payloads. Import remains local/undeployed and
+has no frontend entrypoint or automatic invocation; explicit UI confirmation/recovery are
+future requirements, not a claim of browser activation in this phase.
+
+## Import release awareness — Phase 2 local migration 168
+
+Effective Test commitments share one private release-aware relation. Source calculation,
+item, Product AND warehouse identities must match the immutable allocation/release and
+conversion. Numeric intermediates never underflow; expired/fully released holds cannot
+protect stock or influence next-expiry. No original snapshots/receipts are changed.
+New helpers have empty search_path, SECURITY INVOKER and no PUBLIC/anon/authenticated/
+service_role EXECUTE. Existing trusted public RPC authorization/signatures/ACLs remain.
+Migration source assertions stop on unexpected Preview/Save/Inventory function drift.
+
+The existing warehouse guard and FG admission keep their VOLATILE post-lock clocks;
+WO advisory reads keep one STABLE snapshot/as_of, and production allocation retains its
+locks and FIFO checks. Release rows enqueue the existing coalesced Product shortage
+queue, not unbounded polling/backfill. An eventual importer must serialize stock identities
+and drain deferred checks under its trusted identity. There is still NO public import or
+release capability, table grant, permission assignment or operational DEV release row.
+
+## Import from Test — Phase 1 private foundation (local migration 167)
+
+Original Test headers/items/holds, Save receipts and expiry are never rewritten.
+Separate immutable conversion and hold-specific release records use restrictive FKs,
+source/destination/request uniqueness, positive bigint allocations and deferred INSERT
+consistency checks. RLS is enabled without application policies/grants; PUBLIC, anon,
+authenticated and service_role cannot directly read/write these tables or execute
+their invoker-only empty-search_path trigger helpers. No public import/release RPC exists.
+Foundation migration has no operational release, accounting change, backfill or privilege
+assignment. Existing grants/policies/functions and all migrations 1–166 remain intact.
+
+Future trusted import must require active Admin or combined Test view/manage plus
+Calculator view/create/edit, applicable source warehouse views, and explicit confirmation.
+Shared source ownership is allowed; idempotency ownership is NOT shared. Bind request UUID
+and exact canonical payload to profile/Auth actor; reject altered reuse, serialize source
+and stock identities, recheck authority/time after waits and roll back every destination,
+release, audit and reconciliation effect on failure. No browser-orchestrated multi-write
+conversion, privileged frontend credentials or private receipt exposure is permitted.
+All admission/read/debit/production consumers must recognize the same effective releases
+before activation; updating Inventory display alone is insufficient. Release must queue
+affected WO shortage reconciliation without touching stock, FIFO or Project reservations.
+
 ## Current security checkpoint — 2026-10-29
 
 The previously verified approved DEV baseline is migrations 166/166. Test Calculator,
@@ -1772,3 +1845,22 @@ current Full Name, never auth IDs, email, private request UUIDs/payloads or rece
 This does not broaden UserProfile access or transfer actor-bound replay ownership.
 Bounded keyset pagination and validated IDs fail closed. One server as-of classifies
 expiry; history reads make no mutations, notifications, renewals or stock allocations.
+
+Import Phase 6 (local migration 170, unactivated): the bounded
+`get_test_calculation_conversions(uuid[],boolean)` SECURITY DEFINER read uses an
+empty search_path and active-profile plus Admin/Test-view authorization. Existing
+shared Test-history authority permits the Imported indicator and source commitment
+projection, but does not imply `pcb.view`. Without current Admin/PCB-view authority,
+all destination fields are null and `can_navigate` is false; no destination serial,
+IDs or import timestamp are leaked. Destination existence is checked against the
+linked Calculator/output Product. Existing Calculator reads permit archived records,
+so provenance navigation does not invent an active-only restriction.
+
+Only authenticated EXECUTE is granted; PUBLIC, anon and service_role are revoked.
+No private-table privileges, policies, snapshots, releases or accounting change.
+The frontend independently masks navigation while its scoped PCB-view check is
+pending/denied, and metadata keys include actor, profile, configured backend and
+destination permission scope. The shared import gate remains OFF, with no calls to
+this undeployed contract against the deployed migration-166 baseline. Cache
+invalidation uses Phase 4's existing import/history prefixes and cannot clear an
+uncertain durable request merely because history contains a similar calculation.

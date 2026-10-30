@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ usePcbCards: vi.fn(), usePcbCreation: vi.fn(), refetch: vi.fn(), create: vi.fn() }));
 vi.mock("./hooks/usePcbCards", () => ({ usePcbCards: mocks.usePcbCards }));
 vi.mock("./hooks/usePcbCreation", () => ({ usePcbCreation: mocks.usePcbCreation }));
+vi.mock("../../app/config/testCalculationImportActivation", () => ({ isTestCalculationImportEnabled: () => false }));
 
 import PcbPage from "./PcbPage";
 
@@ -33,6 +34,7 @@ describe("PCB list and creation", () => {
     expect(screen.queryByRole("columnheader", { name: "Current Stock" })).not.toBeInTheDocument();
     expect(screen.getByText("Archived")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Product Calculator" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Import from Test" })).not.toBeInTheDocument();
   });
 
   it("fails closed for a view-only creator", () => {

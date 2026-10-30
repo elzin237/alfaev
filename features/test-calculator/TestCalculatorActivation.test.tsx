@@ -11,6 +11,7 @@ vi.mock("./services/testCalculationPreviewService", () => ({ previewTestCalculat
 vi.mock("./services/testCalculationSaveService", async original => ({ ...await original<typeof import("./services/testCalculationSaveService")>(), saveTestCalculation: mocks.save, reconcileTestCalculation: mocks.reconcile }));
 vi.mock("./services/testCalculationHistoryService", async original => ({ ...await original<typeof import("./services/testCalculationHistoryService")>(), listTestCalculations: mocks.list, getTestCalculation: mocks.detail }));
 vi.mock("../inventory/services/inventoryTestCommitmentService", async original => ({ ...await original<typeof import("../inventory/services/inventoryTestCommitmentService")>(), getInventoryTestCommitments: mocks.inventory }));
+vi.mock("../../app/config/testCalculationImportActivation", () => ({ isTestCalculationImportEnabled: () => false }));
 import TestCalculatorRoute from "../../app/guards/TestCalculatorRoute";
 import TestCalculatorPage from "./TestCalculatorPage";
 import InventoryTestProductList from "../inventory/components/InventoryTestProductList";

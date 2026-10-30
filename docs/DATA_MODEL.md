@@ -1,5 +1,104 @@
 # AlfaEV — DATA_MODEL.md
 
+## Current Import from Test implementation checkpoint — 2026-10-30
+
+Previously recorded guarded DEV verification confirms migrations 167–170 deployed
+in order, with total parity 170/170 and no pending migrations. The local import
+gate now intentionally enables the completed UI for the approved DEV origin only.
+Historical phase-local/undeployed/OFF descriptions below record earlier stages;
+they do not describe the current release state. No migration is rewritten here.
+
+The completed flow reuses the atomic import receipt, separate immutable provenance
+and release allocations, actor/backend/profile-scoped durable recovery and bounded
+conversion metadata read. Original Test history shapes and quantities remain
+unchanged; effective commitments are displayed separately. The owner reports
+successful manual DEV import acceptance; no new import is run during this audit.
+
+## Atomic Test import — Phase 3 local RPC (migration 169, undeployed)
+
+`import_test_calculation(p_request_id uuid,p_calculation_id uuid,p_serial_number text)`
+returns the immutable JSON receipt: import_id, calculation_id, original name,
+pcb_card_id, output_product_id, initial_bom_version_id, initial_bom_version_number
+(decimal string "1"), serial_number, imported_at, release_allocations (item_id,
+product_id, warehouse_id, exact quantity text) and release_totals (per Product only,
+exact quantity text). No total adds quantities across unlike Products.
+
+Request/source advisory locks serialize retries and one-time conversion. The original
+importing profile AND Auth user own exact replay; changed payload yields TCI01, a distinct
+conversion yields TCI02, invalid current component eligibility yields TCI03. Current
+permissions/warehouse access are mandatory on replay, but archival/expiry never recalculates
+the original receipt. Missing source returns P0002; serial/name conflicts retain PRD06/PCB14.
+Shared Test creator need not equal importing actor. Active and Expired sources are accepted.
+
+New imports lock all source Products then balances deterministically, retain active actor/
+grant locks, and reuse create_pcb_card plus save_initial_pcb_bom in ONE transaction. Product
+defaults/zero balances and normal creation/BOM audits remain canonical. Original required
+quantities become per-unit BOM quantities with direct finished inputs unexpanded.
+Database imported_at is captured AFTER Product/balance/name/serial/BOM waits. Effective
+source-only holds at that instant become immutable release records; expired/zero sources
+release none. Consistency and Product-scoped shortage queue constraints drain inside the
+trusted boundary before response; any failure rolls back all destination/history effects.
+No physical stock, FIFO, movement or Project reservation mutation occurs through import.
+The RPC call represents confirmed import intent; the future frontend must obtain explicit
+employee confirmation before dispatch and preserve the original request durably for recovery.
+
+## Import from Test — Phase 2 effective commitments (local migration 168)
+
+`active_test_holds_at(database_as_of, product_ids)` is the sole positive effective-hold relation.
+Operational callers pass only their affected/listed Product IDs into the helper so
+per-Product production/debit checks do not materialize the entire Test hold catalog.
+It joins each original item/calculation/Product/warehouse allocation to its exact
+immutable import-release row and conversion identity. At/after expiry quantity is
+zero; before expiry quantity is max(original - released, 0), using numeric arithmetic
+for lossless subtraction/aggregation. Releases later than the observation time are
+not applied. Fully released holds are absent from current totals AND next-expiry.
+Original quantities and saved history remain unchanged.
+
+The private pure `effective_test_hold_quantity` handles partial remainder arithmetic
+defensively; migration 167 still requires complete active allocation release for an
+actual conversion. This phase adds no permission or persistent partial-release operation.
+The new helpers are SECURITY INVOKER with empty search_path and no application EXECUTE.
+
+Direct consumers patched: Preview, Save admission and Inventory commitments/next-expiry.
+The existing VOLATILE warehouse total preserves post-lock database wall time for debit
+guards and manual/automatic FG reservation admission. The STABLE production-capacity
+core preserves caller snapshot/as_of for WO availability/shortage reconciliation;
+production's VOLATILE wrapper and existing source planner retain post-lock timing,
+FG-only linked input rules, hard FG reservations and FIFO provenance.
+
+Release INSERTs enqueue only their Product into the existing transaction-coalesced WO
+shortage queue. Future trusted import must acquire deterministic Product/balance locks,
+check current actor/time and drain consistency/reconciliation before returning. No import
+RPC, direct release endpoint, data backfill, stock mutation or remote activation exists.
+
+## Import from Test — Phase 1 local schema (migration 167, undeployed)
+
+`test_calculation_imports` retains one unique source calculation, unique destination
+Calculator/output Product/initial BOM version, importing profile AND Auth identity,
+finite conversion timestamp, unique request UUID, exact three-digit serial, canonical
+submitted payload and private receipt. Restrictive FKs preserve all provenance.
+Payload keys are auth_user_id, calculation_id, serial_number and confirmed=true;
+receipt must identify import/source/Calculator/output/initial version/serial consistently.
+Profile/Auth identities must match; source creator need not equal importing actor.
+
+`test_calculation_import_releases` references the conversion/source pair, exact
+item/source/Product tuple and original item/warehouse hold. Its unique item/warehouse
+identity prevents repeated allocation records; quantity is positive exact bigint.
+Deferred INSERT checks require exact initial BOM equality with saved required quantities,
+original output name, matching destination identities and version 1, and the complete
+positive unexpired source hold allocation set at imported_at. Expired/zero holds yield
+no release rows. No earlier partial-release operation exists; active original allocations
+are therefore the remaining amounts in this foundation, never the BOM required quantity.
+
+Both tables reject UPDATE/DELETE/TRUNCATE, enable RLS and have no application grants
+or read policies. No consumer subtracts these foundation records yet. Future trusted
+import must serialize Products/balances, observe database time after waits, enforce
+current actor/warehouse authority and actor-bound exact retries, and drain deferred
+checks within its trusted transaction before returning. Later normal BOM edits remain
+allowed; source snapshots and receipts never change. Imported metadata must use an
+explicit compatible read contract, not replace existing active/expired statuses or
+silently add fields to strict history/recovery JSON parsers.
+
 ## Current implementation checkpoint — 2026-10-29
 
 The previously verified DEV schema is through migration 166; this local correction
@@ -2617,3 +2716,25 @@ the separate current Inventory aggregate excludes expired commitments. Reads nev
 renew, release or modify holds. Creator display is current, not historically frozen.
 Private request UUIDs, canonical payloads and receipts are never projected. Shared
 history requires active Admin or Test view, not ownership or current warehouse views.
+
+### Import from Test Phase 6 — local conversion provenance reads (migration 170, unactivated)
+
+`get_test_calculation_conversions(p_calculation_ids uuid[], p_include_commitments boolean
+default false)` is an additive, read-only contract; migration 158 history/detail
+shapes remain unchanged. Require 1–100 distinct non-null existing calculation IDs;
+commitment detail is restricted to one calculation per request. Return one database
+`as_of`, earliest positive effective `next_expiry`, and complete selected-source rows.
+Each row has `calculation_id`, independent `imported` provenance, `can_navigate`,
+nullable destination (Calculator ID, output Product ID, exact three-digit serial,
+import timestamp), and optional per-item effective quantity/warehouse allocations.
+Quantities are decimal strings; the canonical migration 168 helper applies releases
+and exclusive expiry. Original item/hold snapshots are never rewritten.
+
+Imported does not replace Active/Expired. History retains original quantities;
+detail labels originally held quantities separately from currently effective
+commitments. A successfully imported active Test is not represented as still
+holding its original allocations. Failed metadata reads show unavailable, not zero.
+The import selector excludes converted sources and blocks selection on metadata
+failure. Reads are batched (100 sources maximum), reuse actor/profile/backend cache
+prefixes, and never clear recovery journals. The import gate stays OFF; coordinated
+activation now requires migrations 167–170, not merely 167–169.

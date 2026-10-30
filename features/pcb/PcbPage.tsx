@@ -9,6 +9,8 @@ import CreatePcbCardDialog from "./components/CreatePcbCardDialog";
 import { usePcbCards } from "./hooks/usePcbCards";
 import { usePcbCreation } from "./hooks/usePcbCreation";
 import ProductCalculatorNavigation from "./components/ProductCalculatorNavigation";
+import ImportFromTest from "./components/ImportFromTest";
+import { isTestCalculationImportEnabled } from "../../app/config/testCalculationImportActivation";
 
 export default function PcbPage() {
   const cardsQuery = usePcbCards();
@@ -20,8 +22,8 @@ export default function PcbPage() {
     <div className="space-y-6">
       <ProductCalculatorNavigation />
       <PageHeader title="Product Calculator" description="Finished-product definitions, BOMs, and output Products."
-        actions={canCreate ? <button type="button" onClick={() => { setSuccess(null); setDialogOpen(true); }}
-          className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Product Calculator</button> : undefined} />
+        actions={canCreate || isTestCalculationImportEnabled() ? <div className="flex flex-wrap items-center gap-2">{canCreate && <button type="button" onClick={() => { setSuccess(null); setDialogOpen(true); }}
+          className="rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Create Product Calculator</button>}<ImportFromTest /></div> : undefined} />
       {success && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{success}</p>}
       {cardsQuery.isPending ? <LoadingState message="Loading Product Calculator..." /> :
         cardsQuery.isError || !cardsQuery.data?.ok ?

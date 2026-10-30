@@ -4,6 +4,7 @@ import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
 const mocks=vi.hoisted(()=>({list:vi.fn(),detail:vi.fn(),auth:vi.fn()}));
 vi.mock("../services/testCalculationHistoryService",async original=>({...await original<typeof import("../services/testCalculationHistoryService")>(),listTestCalculations:mocks.list,getTestCalculation:mocks.detail}));
 vi.mock("../../../app/auth/AuthProvider",()=>({useAuth:mocks.auth}));
+vi.mock("../../../app/config/testCalculationImportActivation",()=>({isTestCalculationImportEnabled:()=>false}));
 import TestCalculationHistory from "./TestCalculationHistory";
 import {testCalculationHistoryPrefix,prepareTestRecovery,updateTestRecovery,testRecoveryKey} from "../services/testCalculationRecoveryStore";
 import {installRecoveryBrowser} from "../../../test/finishedGoodsRecoveryBrowser";

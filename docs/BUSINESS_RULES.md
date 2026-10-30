@@ -1,5 +1,51 @@
 # AlfaEV — BUSINESS_RULES.md
 
+## Current Import from Test release checkpoint — 2026-10-30
+
+This checkpoint supersedes the historical phase-local/OFF notes retained below.
+The guarded DEV deployment was verified at migrations 170/170 with no pending
+migrations and preserved business data. Import from Test is enabled locally only
+for alfaev-dev (`yzysgbrpbhiapalgetau`); other backend origins remain disabled.
+The owner subsequently reported a successful manual DEV import. This final
+pre-commit verification performs no further import or persistent database writes.
+
+The approved one-time conversion, immutable source snapshots, source-only active
+commitment release and unchanged physical stock rules below remain authoritative.
+Selector search is explicitly current-page only (20 sources per page). The earlier
+read-only browser run could not exercise multi-page, Expired/imported or non-Admin
+scenarios with its available data/session; automated coverage remains separate
+from that browser evidence. Unrelated existing limitations are unchanged.
+
+## Import from Test — approved rules; Phase 1 local foundation
+
+This explicitly extends the historical V1 no-cancellation/release scope below.
+One successful import is allowed per saved Test, including Active and Expired Tests.
+Use the original Test name for the Calculator and output Product; reject existing
+case-insensitive Calculator name collisions. The employee supplies an exact unique
+three-digit serial (leading zeroes preserved) and explicitly confirms import/release.
+Each saved Product identity and required quantity becomes the initial BOM identity
+and quantity per ONE finished output unit, without expansion or substitution.
+Archived/unavailable inputs fail atomically; partial/zero holds do not reduce BOM quantities.
+Authorized managers may import shared Tests created by other employees. Require active
+Admin or Test view/manage AND Calculator view/create/edit, preserving source warehouse
+authority (FG view for linked finished inputs; Raw/Customs/FG views for ordinary inputs).
+No separate permission or assignment is introduced.
+
+Conversion must atomically create destination Product/Calculator/BOM, immutable actor-bound
+request/provenance and release ONLY the selected Test's remaining active warehouse holds.
+Expired and zero-held Tests release zero. Other Tests, physical stock, movements, FIFO,
+Project demand/reservations and existing immutable Test snapshots/receipts remain unchanged.
+Imported is separate metadata alongside server-authoritative Active/Expired, never a rewrite.
+The destination follows normal BOM editing/versioning; provenance retains its initial version
+reference while the original Test remains the immutable imported definition.
+
+Migration 167 is LOCAL, private schema only: no import RPC, operational release, changed
+hold consumer, UI activation, notification or business-data backfill. Later phases must
+make ALL hold consumers release-aware and reconcile affected WO shortages atomically.
+History entries remain visible after import; only authorized Calculator viewers get a
+destination link. Duplicate conversion is not a retry: exact original actor/request replay
+returns its original receipt; altered payload/actor reuse is denied.
+
 ## Current release rules — 2026-10-29
 
 Current state takes precedence over historical local/inactive rollout notes below.
