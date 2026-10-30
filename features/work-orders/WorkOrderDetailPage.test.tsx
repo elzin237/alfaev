@@ -559,6 +559,40 @@ describe("WorkOrderDetailPage", () => {
       .toHaveAttribute("href", "/work-orders");
   });
 
+  it("keeps Draft details compact with aligned fields, a keyboard-native styled select and responsive stacking", () => {
+    renderPage();
+    const card=screen.getByRole("region",{name:"Draft details"});
+    const project=within(card).getByRole("combobox",{name:"Project"});
+    const customer=within(card).getByRole("textbox",{name:"Customer"});
+    const description=within(card).getByRole("textbox",{name:"Short Description"});
+    expect(card).toHaveClass("p-5","sm:p-6","rounded-3xl");
+    expect(project.closest("form")).toHaveClass("mt-4","grid-cols-1","sm:grid-cols-2","gap-4");
+    for(const field of [project,customer])expect(field).toHaveClass("h-11","w-full","rounded-xl","border-zinc-300","text-sm","focus:ring-2");
+    expect(project.tagName).toBe("SELECT");expect(project).toHaveClass("appearance-none","pr-10");
+    expect(project.parentElement?.querySelector("svg")).toHaveAttribute("aria-hidden","true");
+    expect(project.parentElement?.querySelector("svg")).toHaveClass("pointer-events-none");
+    expect(customer).toHaveAttribute("readonly");expect(customer).toHaveClass("bg-zinc-50");
+    expect(description).toHaveAttribute("rows","3");expect(description).toHaveClass("min-h-20","resize-y","leading-5");
+    expect(description.parentElement).toHaveClass("sm:col-span-2","min-w-0");
+  });
+
+  it("preserves the empty Project placeholder, derived Customer and multiline local editing without a save", () => {
+    renderPage();
+    const project=screen.getByRole("combobox",{name:"Project"});
+    fireEvent.change(project,{target:{value:""}});
+    expect(screen.getByRole("option",{name:"Select a Project"})).toHaveValue("");
+    expect(project).toHaveClass("text-zinc-500");
+    expect(screen.getByLabelText("Customer")).toHaveValue("Not set");
+    fireEvent.change(project,{target:{value:replacementProjectId}});
+    expect(screen.getByLabelText("Customer")).toHaveValue("Beta Customer");
+    expect(project).toHaveClass("text-zinc-900");
+    const description=screen.getByLabelText("Short Description");
+    fireEvent.change(description,{target:{value:"First line\nSecond line\nThird line"}});
+    expect(description).toHaveValue("First line\nSecond line\nThird line");
+    expect(description).toHaveAttribute("rows","3");
+    expect(pageMocks.saveDraft).not.toHaveBeenCalled();
+  });
+
   it("renders the editable local shell and previews Customer from a new Project", () => {
     renderPage();
 

@@ -27,6 +27,14 @@ beforeEach(()=>{vi.resetAllMocks();mocks.gate.mockReturnValue(true);mocks.auth.m
 afterEach(cleanup);
 it("shows Imported independently of Active and authorized navigation without changing original quantities",async()=>{
   setup();await screen.findByText("Imported");expect(screen.getByText("Active")).toBeInTheDocument();expect(screen.getByRole("link",{name:"View Calculator"})).toHaveAttribute("href",`/pcb/${destination.calculator_id}`);
+  const row=screen.getByRole("button",{name:header.name}).closest("tr")!,cells=within(row).getAllByRole("cell");
+  expect(cells).toHaveLength(6);
+  expect(within(cells[0]!).queryByText("Imported",{exact:true})).not.toBeInTheDocument();
+  expect(within(cells[4]!).getByText("Active")).toBeInTheDocument();
+  expect(within(cells[4]!).getByText("Imported",{exact:true})).toBeInTheDocument();
+  expect(within(cells[4]!).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(cells[5]!).getByRole("link",{name:"View Calculator"})).toHaveAttribute("href",`/pcb/${destination.calculator_id}`);
+  expect(cells[4]!.firstElementChild).toHaveClass("flex","items-center","justify-center","whitespace-nowrap");
   fireEvent.click(screen.getByRole("button",{name:header.name}));const detail=await screen.findByRole("region",{name:"Saved calculation detail"});
   await waitFor(()=>expect(within(detail).getByText("Imported")).toBeInTheDocument());
   expect(detail).toHaveTextContent("Output serial: 006");expect(detail).toHaveTextContent(destination.product_id);expect(detail).toHaveTextContent("Original Creator");
@@ -36,6 +44,21 @@ it("shows Imported independently of Active and authorized navigation without cha
 it("does not replace Expired with Imported",async()=>{
   mocks.list.mockResolvedValue({ok:true,value:{rows:[{...header,status:"expired",deadlineDate:"2020-01-01",expiresAt:"2020-01-01T23:00:00Z"}],nextCursor:null}});
   setup();await screen.findByText("Imported");expect(screen.getByText("Expired")).toBeInTheDocument();expect(screen.queryByText("Active",{exact:true})).not.toBeInTheDocument();
+  const cells=within(screen.getByRole("button",{name:header.name}).closest("tr")!).getAllByRole("cell");
+  expect(within(cells[4]!).getByText("Expired")).toBeInTheDocument();expect(within(cells[4]!).getByText("Imported",{exact:true})).toBeInTheDocument();
+});
+it("keeps unimported rows aligned with imported rows without inventing an action",async()=>{
+  const unimported={...header,calculationId:id(30),name:"Unimported Test"};
+  mocks.list.mockResolvedValue({ok:true,value:{rows:[header,unimported],nextCursor:null}});
+  mocks.metadata.mockImplementation(async(ids:string[])=>({as_of:header.asOf,next_expiry:null,rows:ids.map(calculation_id=>({calculation_id,imported:calculation_id===header.calculationId,can_navigate:calculation_id===header.calculationId,destination:calculation_id===header.calculationId?destination:null,items:[]}))}));
+  setup();await screen.findByText("Imported",{exact:true});
+  const cells=within(screen.getByRole("button",{name:unimported.name}).closest("tr")!).getAllByRole("cell");
+  expect(cells).toHaveLength(6);
+  for(const cell of cells)expect(cell).toHaveClass("text-center","py-2.5");
+  expect(within(cells[4]!).getByText("Active")).toBeInTheDocument();
+  expect(within(cells[4]!).queryByText("Imported",{exact:true})).not.toBeInTheDocument();
+  expect(within(cells[5]!).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(cells[5]!).getByLabelText("No available action")).toHaveTextContent("—");
 });
 it("Test view does not grant destination access, even if stale cached metadata contains destination IDs",async()=>{
   mocks.auth.mockReturnValue({...auth,isAdmin:false});mocks.permission.mockResolvedValue({ok:true,value:false});setup();await screen.findByText("Imported");

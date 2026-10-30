@@ -22,7 +22,7 @@ describe("saved Test Calculation history UI (mock services)",()=>{
  it("shows active and expired shared history, both creators, dates and no fabricated list totals",async()=>{
   page();await screen.findByRole("button",{name:"Active calculation"});expect(screen.getByRole("button",{name:"Expired calculation"})).toBeInTheDocument();
   expect(screen.getByText("First Creator")).toBeInTheDocument();expect(screen.getByText("Another Creator")).toBeInTheDocument();
-  expect(screen.getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Calculation","Creator","Created","Deadline","Status"]);
+  expect(screen.getAllByRole("columnheader").map(h=>h.textContent)).toEqual(["Calculation","Creator","Created","Deadline","Status","Action"]);
   expect(screen.getByText("Active")).toBeInTheDocument();expect(screen.getByText("Expired")).toBeInTheDocument();expect(screen.getByText("1 Jan 2020")).toBeInTheDocument();
   expect(mocks.list).toHaveBeenCalledWith(20,null,"memory-token",expect.any(AbortSignal));
  });
@@ -44,8 +44,15 @@ describe("saved Test Calculation history UI (mock services)",()=>{
   page();const calculation=await screen.findByRole("button",{name:name.trim()});
   const scroll=screen.getByRole("region",{name:"Saved calculations table"});
   expect(scroll).toHaveAttribute("tabindex","0");expect(scroll).toHaveClass("overflow-x-auto");
-  expect(screen.getByText(creator.trim())).toHaveClass("break-words","text-left");
-  expect(calculation).toHaveClass("font-semibold");
+  expect(screen.getByText(creator.trim())).toHaveClass("truncate");
+  expect(screen.getByText(creator.trim())).toHaveAttribute("title",creator);
+  expect(calculation).toHaveClass("font-semibold","truncate","text-center");
+  expect(calculation).toHaveAttribute("title",name);
+  expect(within(scroll).getByRole("table")).toHaveClass("min-w-[52rem]","table-fixed");
+  const row=calculation.closest("tr")!;
+  for(const cell of within(row).getAllByRole("cell"))expect(cell).toHaveClass("text-center","py-2.5");
+  expect(within(row).getByLabelText("No available action")).toHaveTextContent("—");
+  expect(within(row).queryByRole("link")).not.toBeInTheDocument();
   for(const header of within(scroll).getAllByRole("columnheader")){
     expect(header).toHaveAttribute("scope","col");expect(header).toHaveClass("text-center");
   }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
@@ -76,7 +77,7 @@ function ReadOnlyValue({ label, value }: { label: string; value: string | null }
   return (
     <div>
       <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="mt-2 whitespace-pre-wrap text-sm font-medium text-zinc-900">{value ?? "Not set"}</dd>
+      <dd className="mt-1.5 whitespace-pre-wrap text-sm font-medium text-zinc-900">{value ?? "Not set"}</dd>
     </div>
   );
 }
@@ -410,25 +411,28 @@ function WorkOrderDraftShell({
 
   return (
     <div className="space-y-6">
-      {productionContext ? <PcbWorkOrderOverview workOrder={workOrder} productionContext={productionContext} /> : <section className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
-        <h2 className="text-xl font-bold text-zinc-900">Draft details</h2>
+      {productionContext ? <PcbWorkOrderOverview workOrder={workOrder} productionContext={productionContext} /> : <section aria-labelledby="work-order-draft-details-heading" className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+        <h2 id="work-order-draft-details-heading" className="text-lg font-semibold text-zinc-900">Draft details</h2>
         {canEdit && !productionContext ? (
-          <form id="work-order-draft-form" className="mt-6 grid gap-6 lg:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void handleSave(); }}>
-            <div>
+          <form id="work-order-draft-form" className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); void handleSave(); }}>
+            <div className="min-w-0">
               <label htmlFor="work-order-project" className="block text-sm font-semibold text-zinc-800">Project</label>
-              <select id="work-order-project" value={selectedProjectId} disabled={editingDisabled || projectChoicesLoading || Boolean(projectChoicesError)} onChange={(event) => { setSelectedProjectId(event.target.value); setSaveFeedback(null); }} className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-zinc-100">
-                <option value="">Not selected</option>
-                {currentProjectIsMissingFromChoices && savedProjectId && <option value={savedProjectId} disabled>{workOrder.projectName} (current)</option>}
-                {projectChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
-              </select>
+              <div className="relative mt-1.5">
+                <select id="work-order-project" value={selectedProjectId} disabled={editingDisabled || projectChoicesLoading || Boolean(projectChoicesError)} onChange={(event) => { setSelectedProjectId(event.target.value); setSaveFeedback(null); }} className={`block h-11 w-full min-w-0 appearance-none rounded-xl border border-zinc-300 bg-white py-2.5 pl-3 pr-10 text-sm outline-none transition hover:border-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 ${selectedProjectId ? "text-zinc-900" : "text-zinc-500"}`}>
+                  <option value="">Select a Project</option>
+                  {currentProjectIsMissingFromChoices && savedProjectId && <option value={savedProjectId} disabled>{workOrder.projectName} (current)</option>}
+                  {projectChoices.map((choice) => <option key={choice.id} value={choice.id}>{choice.name}</option>)}
+                </select>
+                <ChevronDown aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+              </div>
               {projectChoicesLoading && <p role="status" className="mt-2 text-sm text-zinc-500">Loading Project choices...</p>}
               {projectChoicesError && <div role="alert" className="mt-3 rounded-xl border border-red-200 bg-red-50 p-4"><p className="text-sm font-medium text-red-700">{projectChoicesError}</p><button type="button" onClick={onRetryProjectChoices} className="mt-3 rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700">Try again</button></div>}
             </div>
-            <div><label htmlFor="work-order-customer" className="block text-sm font-semibold text-zinc-800">Customer</label><input id="work-order-customer" readOnly value={customerName ?? "Not set"} className="mt-2 w-full rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-3 text-sm text-zinc-700" /></div>
-            <div className="lg:col-span-2"><label htmlFor="work-order-description" className="block text-sm font-semibold text-zinc-800">Short Description</label><textarea id="work-order-description" value={description} disabled={editingDisabled} onChange={(event) => { setDescription(event.target.value); setSaveFeedback(null); }} rows={4} className="mt-2 w-full rounded-xl border border-zinc-300 bg-white px-4 py-3 text-sm disabled:cursor-not-allowed disabled:bg-zinc-100" /></div>
+            <div className="min-w-0"><label htmlFor="work-order-customer" className="block text-sm font-semibold text-zinc-800">Customer</label><input id="work-order-customer" readOnly value={customerName ?? "Not set"} className="mt-1.5 block h-11 w-full min-w-0 rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-700 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200" /></div>
+            <div className="min-w-0 sm:col-span-2"><label htmlFor="work-order-description" className="block text-sm font-semibold text-zinc-800">Short Description</label><textarea id="work-order-description" value={description} disabled={editingDisabled} onChange={(event) => { setDescription(event.target.value); setSaveFeedback(null); }} rows={3} className="mt-1.5 block min-h-20 w-full resize-y rounded-xl border border-zinc-300 bg-white px-3 py-2.5 text-sm leading-5 text-zinc-900 outline-none transition hover:border-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100" /></div>
           </form>
         ) : (
-          <dl className="mt-6 grid gap-6 sm:grid-cols-2"><ReadOnlyValue label="Project" value={workOrder.projectName ?? "Not selected"} /><ReadOnlyValue label="Customer" value={workOrder.customerName} /><div className="sm:col-span-2"><ReadOnlyValue label="Short Description" value={workOrder.description} /></div></dl>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-2"><ReadOnlyValue label="Project" value={workOrder.projectName ?? "Not selected"} /><ReadOnlyValue label="Customer" value={workOrder.customerName} /><div className="min-w-0 sm:col-span-2"><ReadOnlyValue label="Short Description" value={workOrder.description} /></div></dl>
         )}
       </section>}
 
