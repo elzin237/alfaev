@@ -164,10 +164,10 @@ describe("ProcurementPage", () => {
     const table = screen.getByRole("table");
 
     for (const heading of [
-      "Serial Number",
-      "Name",
+      "Serial",
+      "Product",
       "Supplier",
-      "Requested Quantity",
+      "Requested",
       "Delivered",
       "Remaining",
       "Status",
