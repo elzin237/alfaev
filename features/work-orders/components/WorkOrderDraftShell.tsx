@@ -6,6 +6,7 @@ import WorkOrderBarcodeScanInput from "./WorkOrderBarcodeScanInput";
 import WorkOrderDeleteDraftDialog from "./WorkOrderDeleteDraftDialog";
 import WorkOrderFinishDialog from "./WorkOrderFinishDialog";
 import WorkOrderMaterialsAvailability from "./WorkOrderMaterialsAvailability";
+import WorkOrderAttributionAction from "./WorkOrderAttributionAction";
 import PcbWorkOrderOverview from "./PcbWorkOrderOverview";
 import type { DraftWorkOrderMaterial } from "./WorkOrderMaterialRow";
 import type {
@@ -433,6 +434,7 @@ function WorkOrderDraftShell({
 
       <section aria-labelledby="work-order-materials-heading" className="rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         <h2 id="work-order-materials-heading" className="text-xl font-bold text-zinc-900">Materials</h2>
+        <WorkOrderAttributionAction workOrderId={workOrder.id} materials={persistedMaterials} disabled={!materialsHydrated||hasUnsavedChanges||interactionBlocked||materialsLoading||Boolean(materialsError)}/>
         {materialsLoading ? <div className="mt-6"><LoadingState message="Loading Draft materials..." /></div> : materialsError ? <div className="mt-6"><ErrorState title="Unable to load Materials" message={materialsError} onRetry={onRetryMaterials} /></div> : materialsHydrated ? (
           <>
             {canEdit && <div className="mt-6 space-y-2">{productionContext && <p className="text-sm text-zinc-600">BOM materials are locked. Additional materials may be added.</p>}<WorkOrderBarcodeScanInput disabled={isLoadingMaterial || editingDisabled} focusRequestId={barcodeFocusRequestId} onScan={(serial) => void handleBarcodeScan(serial)} refocusOnEnable={false} /></div>}

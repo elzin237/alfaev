@@ -1,6 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// Test-hold regression fixtures keep the independently tested WO feature OFF.
+vi.mock("../../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));
+vi.mock("../../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));
 const mocks = vi.hoisted(() => ({ hook: vi.fn() }));
 vi.mock("../hooks/useInventoryTestCommitments", () => ({ useInventoryTestCommitments: mocks.hook }));
 import InventoryTestProductList from "./InventoryTestProductList";

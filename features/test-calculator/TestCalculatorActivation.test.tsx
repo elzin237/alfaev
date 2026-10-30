@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// This integration tests Test Save/holds, not the independent WO commitment release.
+vi.mock("../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), permission: vi.fn(), enabled: vi.fn(), search: vi.fn(), preview: vi.fn(), save: vi.fn(), reconcile: vi.fn(), list: vi.fn(), detail: vi.fn(), inventory: vi.fn() }));
 vi.mock("../../app/auth/AuthProvider", () => ({ useAuth: mocks.auth }));
 vi.mock("../../app/auth/permissionService", () => ({ hasPermission: mocks.permission }));

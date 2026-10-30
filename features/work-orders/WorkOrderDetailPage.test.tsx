@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router";
+// Legacy lifecycle fixtures do not mount AuthProvider; the Admin action has its own ON/OFF suite.
+vi.mock("../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));
 import { renderToStaticMarkup } from "react-dom/server";
 
 const pageMocks = vi.hoisted(() => ({

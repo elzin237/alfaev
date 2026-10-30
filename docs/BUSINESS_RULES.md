@@ -1,5 +1,246 @@
 # AlfaEV — BUSINESS_RULES.md
 
+## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
+
+DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,
+with zero pending migrations. Operational Draft reservations, Inventory accounting/
+breakdown and Unified Committed/Admin attribution are ON for DEV only. Other backend
+origins remain OFF; this checkpoint changes no activation or permission.
+
+Committed is the approved reporting sum of Project Demand and actual active Draft
+WO Held, not deduplicated unique demand or hard reserved stock. The authenticated
+DEV read and Raw/All browser popup verified ULN2804AN: 23 + 68 = 91, with authorized
+Project and Work Order sources. Availability, physical stock, Test/FG protections,
+existing allocations, evidence/history and security were preserved by deployment.
+Raw, All and FG browser checks passed. Populated Customs row-level browser acceptance
+is PENDING: DEV has no eligible Customs Products; only its empty state was checked.
+Earlier local/OFF/deployment-pending sections below are retained historical evidence.
+
+## Current approved Committed reporting rule — local migration 182
+
+Displayed Committed = existing Project Demand + actual active Draft Work Order Held.
+This is a source-attributed reporting sum, NOT deduplicated unique demand or physically
+reserved stock. Linked business requirements may overlap and may be counted twice.
+Unknown attribution no longer blocks this reporting total; attribution evidence and
+its separate Admin workflow remain intact.
+
+Raw uses existing Raw+Customs Project demand and Held. FG/Customs use their existing
+warehouse Held scope (no imported Raw demand); FG Reserved and Test Holds remain
+separate. Physical stock, Available/Net Available, protection and Stock Health formulas
+are unchanged. There is no backfill, reservation change or attribution write.
+Migration 182 is local only; deployment is separately authorized. Existing activation
+states are not changed by this task. Earlier checkpoints below are historical.
+
+## Admin attribution interface — local preparation, migration 181
+
+The default-OFF Draft action uses only saved, tracked material context. Duplicate
+BOM/supplemental occurrences select one aggregated Product state. Unsaved Draft
+changes disable the action; historical untracked Drafts remain unavailable rather
+than being initialized. Active Admin authority is rechecked server-side.
+
+Independent and coverage entries replace the selected attribution total. Returning
+an exact quantity to Unknown withdraws that amount from ONE selected active
+independence/coverage declaration using its predecessor token, never bulk-clears
+history. Already-Unknown quantities need no write. Explicit employee confirmation
+is mandatory. Context limits are observations; transactional validation remains
+authoritative and stale revisions require reload/reconfirmation.
+
+Original-request recovery follows Test Save's durable read-back/Web Locks pattern
+in a separate actor/profile/backend journal namespace. Persist uncertainty before
+dispatch; never replace an unresolved UUID or clear it because a replay is denied.
+Verified success is retained durably through scoped refresh. The feature remains
+OFF: unified popup/batch-loading/browser/deployment work remains separately scoped.
+
+## Unified Committed preparation — local migration 180, NOT activated
+
+Only active Admin may use the new narrow attribution operation; existing private
+validators remain authoritative. Coverage is warehouse-specific. Independence is
+material-wide: a partial declaration does not prove which warehouse-held units it
+describes. A complete Required = Coverage + Independence partition classifies all
+remaining scoped Held as independent; otherwise remaining Held stays Unknown.
+
+The new read preserves existing scopes: Raw = Raw+Customs soft Project demand and
+Held; FG/Customs = their warehouse Held, with FG Reserved still a separate metric.
+It never imports Raw planning demand into another warehouse or sums row scopes.
+When both planning demand and Held exist, return a deduplicated total only if all
+relevant Held overlap is proven. Unknown returns NULL, never a guessed arithmetic
+sum. If current authoritative Project demand is zero, no overlap with that metric
+is possible; this does not declare the Work Order independent. Project-only demand
+is similarly exact without an ownership deduction. Existing availability formulas
+and physical Stock Health remain untouched.
+
+The additive source read separates Project demand, WO Held and signed verified
+coverage adjustments. Its source subtotal is NOT a committed total when proof is
+Unknown. Restricted positive amounts and coverage deductions remain separate,
+even if their net cancels to zero. Old source RPCs and historical evidence remain.
+
+Current implementation is incomplete and must stay OFF: server workflow/read and
+prepared columns exist, but the practical Admin context/form and clickable unified
+popup/pagination UI remain dependencies. No release, backfill or current DEV
+behavior change is implied by this local checkpoint.
+
+## Exact Project coverage authority — approved private foundation, migration 179
+
+An active Admin may explicitly declare that an exact saved Work Order/Product
+material quantity fulfills an exact Project component requirement. This is an
+authorized business declaration, never inferred from Work Order `project_id`.
+Match Product and exact requirement ancestry/revision; bind the current material
+version and Draft revision, warehouse allocation, actor/Auth and database time.
+
+Coverage cannot exceed current requirement capacity across Work Orders, the
+material quantity remaining after Admin-independent attribution, or that owner's
+actual eligible warehouse Held quantity. No held unit may cover multiple Project
+requirements. Replacement declarations supersede rather than accumulate; zero
+withdraws coverage. Immutable history survives lifecycle changes and deletion.
+
+The current ledger cannot attribute Project/Product consumption to an individual
+requirement. Migration 179 therefore accepts positive coverage only when there is
+NO qualifying consumption history for that Project/Product: each exact requirement
+is then provably unconsumed. Any such historical or subsequent consumption makes
+coverage ineffective/Unknown; it is never distributed by FIFO, pro-rata, association
+or guesswork. Consumed Projects require a later requirement-level consumption
+proof producer before exact coverage can be established there.
+
+Project/requirement revision changes, closure/removal, Work Order edits/completion/
+deletion and allocation changes invalidate stale evidence conservatively. No old
+declaration is automatically revived or backfilled. Verified coverage, explicit
+independence and Unknown remain separate. Only private attribution projections
+change; Inventory coverage, demand, availability, reservations and physical stock
+remain unchanged. No public declaration workflow or activation is introduced.
+
+## Requirement attribution authority — approved private foundation, migration 178
+
+An active Admin may explicitly attest an exact quantity of one saved Draft
+Work Order/Product material requirement as independent of Project demand.
+Missing Project linkage does not prove independence; Work Order `project_id`
+does not prove coverage. Verified coverage, Admin-confirmed independence and
+Unknown are distinct concepts. An undeclared or stale quantity remains Unknown.
+
+Declarations are immutable actor/Auth-bound, timestamped replacement snapshots
+bound to the exact reservation material version, Draft timestamp and aggregated
+required quantity. They cannot exceed that requirement. A later declaration
+supersedes, never adds to, its predecessor; declaring zero restores Unknown.
+Any material/version or Draft revision change invalidates the old declaration
+conservatively. Finished/deleted owners contribute no current attribution but
+retain historical evidence. Exact authorized replay returns history, not renewed
+authority. No automatic declaration or historical backfill is permitted.
+
+Migration 178 is local private preparation only: no browser grant, public workflow,
+activation, existing availability/reservation formula change or physical mutation.
+Verified Project coverage remains zero until an actual requirement-level ownership
+and consumption proof producer exists. A unified Committed metric must not treat
+Unknown as independent, nor add overlapping planning and Held quantities blindly.
+Earlier implementation/activation records below remain historical evidence.
+
+## Task 9A local operational wiring — migration 177, 2026-10-30
+
+The existing five public Draft RPCs now have prepared transactional delegation to
+the reviewed private reservation lifecycle. The owner-controlled database gate
+`work_order_reservation_activation.enabled` is seeded false. It controls enrollment
+of new/untracked Draft operations; already-tracked ownership continues through the
+trusted edit/delete lifecycle even if new enrollment is paused, so a gate change
+cannot orphan commitments. No deployment, real activation or backfill is implied.
+
+Ordinary creation remains an empty Draft with no materials/allocations and retains
+its existing no-request-token creation behavior. Saving newly requested quantities
+admits eligible stock in the same transaction, with partial/zero holds allowed.
+PCB creation preserves its existing caller request UUID and normalized planned
+quantity replay. New PCB Project linkage is still rejected by the canonical rule;
+pre-activation PCB request replays return the old Draft without initializing holds.
+No-op/legacy edits never top up historical deficits; only net increases can allocate.
+All existing protected Test/FG/other-Draft priorities and owner-aware Finish remain.
+
+## Task 7 local source breakdown — 2026-10-30
+
+Migration 176 adds a read-only, metric-specific source breakdown; it does not
+activate reservations or the popup. Project Demand is soft planning in Raw+Customs,
+not a stock hold. FG Project reservations, effective Test holds and active Draft
+Held allocations are separate metrics. A combined scope groups each source once;
+it never adds the Raw+Customs figure again to Customs. Uncovered is not protected
+stock. Project coverage remains zero without requirement-level proof.
+
+Inventory access permits aggregate quantities, not restricted source identities.
+Restricted sources retain their real aggregate under “Restricted sources”. Full
+visible totals are distinct from page subtotals. A changed underlying visible
+snapshot/aggregate requires restarting pagination, never silently mixing pages.
+All earlier task evidence and activation boundaries below remain historical evidence.
+
+## Current local Draft accounting checkpoint — Task 6, 2026-10-30
+
+Migrations 171–175 are local implementation only; automatic Draft reservation
+creation and the new frontend accounting-read gate remain OFF. No deployment or
+historical Draft backfill is implied. Existing operational/legacy column meanings
+remain unchanged until coordinated integration and activation.
+
+Inventory accounting reports actual warehouse Held separately from Project Demand
+and from its explicit Raw+Customs planning scope. Only Held protects physical stock.
+Required/Held/Uncovered and owner-aware current shortage are different observations;
+stock arrival may resolve a shortage without topping up Held. Explicit requirement
+coverage remains zero without a trusted positive-proof producer: a linked Project ID
+alone never reduces Project Demand. Source-detail disclosure remains a separate,
+source-authorized contract for later popup work. Historical design/evidence follows.
+
+## Draft Work Order reservations V1 — locked design, 2026-10-30
+
+APPROVED DESIGN ONLY: not implemented, migrated, deployed or activated. These rules
+supersede earlier statements that Drafts never reserve stock ONLY when the complete
+new accounting boundary is separately implemented and activated. Current behavior
+and historical task evidence below remain unchanged until then.
+
+### Required, Held and Uncovered
+
+- Creating a new supported Draft automatically reserves available required inputs.
+  Ordinary Drafts, PCB-production Drafts, frozen BOM inputs and supplemental manual
+  materials are covered. An empty Draft reserves nothing; insufficient stock never
+  blocks creation or saving merely because the requirement cannot be fully held.
+- Required is the sum of saved material quantities per Work Order/Product, including
+  both origins. Held is the sum of that Draft's active warehouse allocations.
+  Uncovered = Required - Held, with 0 <= Held <= Required. Uncovered is not reserved
+  stock and is not necessarily the current Finish shortage.
+- Ordinary inputs use existing Raw -> Customs -> eligible FG sourcing; linked
+  Calculator outputs use FG only. New allocations use stock remaining after all
+  existing protected Test, FG Project and other Draft allocations. No owner can
+  preempt another allocation. Concurrent requests are serialized; creation time
+  alone is not a promise of queue priority or a new scheduling system.
+- Allocations reserve exact whole bigint quantities in a specific warehouse, not
+  FIFO lots. They never change physical balances, movements, lots or output stock.
+  Test holds remain release/expiry-aware; FG Project reservations remain separate.
+- No automatic top-up or reservation expiry in V1. Stock arrivals, Test expiry/import
+  release, another owner's release, window refresh and unrelated saves do not fill
+  old Uncovered quantities. A quantity increase admits only the net newly requested
+  quantity; reductions release excess Held. A normalized no-op has no allocation
+  or event effect. Explicit future top-up/reallocation is outside this approval.
+- Existing Drafts receive no silent initialization/backfill. Track activation
+  participation explicitly; legacy requirements start unreserved. A later ordinary
+  edit may reserve only newly added/increased demand, not silently fill its entire
+  historical deficit. Any bulk initialization requires a separately reviewed scope.
+
+### Lifecycle and Project coverage
+
+- Save/reconcile, Draft deletion/release and Finish/consumption are transactional
+  trusted Work Order operations. Project cancellation must neither delete a linked
+  Draft nor release its allocations. No new Work Order cancellation or reopening
+  state is introduced; existing Finished immutability remains intact.
+- PCB quantity/BOM version and BOM-derived items remain frozen. Calculator BOM edits
+  do not alter an existing Draft. Generic material and supplemental edits retain
+  current eligibility, permission and expected-version checks.
+- Finish recognizes its own Held, protects every other owner and retains existing
+  warehouse-priority/FIFO rules, source fingerprint validation and actual-good output
+  semantics. All saved inputs are consumed even when actual-good is below planned.
+  Allocations transition to consumed/released atomically with existing stock, PDF,
+  lifecycle and audit effects. A failed Finish leaves allocations and stock intact.
+- Project Demand stays soft planning demand, not a warehouse reservation. A Draft
+  allocation may cover that demand ONLY through exact, server-verified requirement
+  ownership and bounded quantity attribution. A shared Project ID, Product match,
+  name, BOM resemblance or creator is never sufficient proof.
+- Coverage is reporting attribution, not another physical allocation or a mutation
+  of Project requirements/consumption. Unproven coverage is zero. Direct finished
+  inputs must not be expanded into components or counted as component consumption.
+  See DATA_MODEL for scope-specific deduplication and conservation rules.
+- Inventory popups identify authorized Project demand, FG Project reservations,
+  Draft allocations and effective Test holds as distinct source types. Never expose
+  restricted identities or treat an incomplete authorized list as a complete total.
+
 ## Current Import from Test release checkpoint — 2026-10-30
 
 This checkpoint supersedes the historical phase-local/OFF notes retained below.

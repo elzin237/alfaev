@@ -1,5 +1,477 @@
 # AlfaEV — DATA_MODEL.md
 
+## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
+
+DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,
+with zero pending migrations. Operational Draft reservations, Inventory accounting/
+breakdown and Unified Committed/Admin attribution are ON for DEV only. Other backend
+origins remain OFF; this checkpoint changes no activation or permission.
+
+Committed is the approved reporting sum of Project Demand and actual active Draft
+WO Held, not deduplicated unique demand or hard reserved stock. The authenticated
+DEV read and Raw/All browser popup verified ULN2804AN: 23 + 68 = 91, with authorized
+Project and Work Order sources. Availability, physical stock, Test/FG protections,
+existing allocations, evidence/history and security were preserved by deployment.
+Raw, All and FG browser checks passed. Populated Customs row-level browser acceptance
+is PENDING: DEV has no eligible Customs Products; only its empty state was checked.
+Earlier local/OFF/deployment-pending sections below are retained historical evidence.
+
+## Committed reporting response v2 — local migration 182
+
+The existing get_inventory_unified_committed(uuid,uuid) signature now returns schema 2,
+metric_definition=project_demand_plus_work_order_held, Product/warehouse/scope/as_of,
+and exact decimal strings project_demand, work_order_held and committed_quantity.
+Checked frontend BigInt reconciliation requires total = demand + Held. PostgreSQL
+numeric aggregate intermediates preserve sums beyond bigint. Original held quantities
+remain bigint and only effective active Draft allocations count.
+
+The existing bounded breakdown signature returns schema 2, Project and Work Order
+positive source quantities, full/visible/restricted totals, page/before/after totals
+and actor/profile/content-bound continuation. No signed coverage adjustment is part
+of this reporting view. Existing private evidence is neither deleted nor rewritten.
+Only these two read functions change. Schema-1 responses fail closed rather than
+being mislabeled as additive totals until separately authorized deployment of 182.
+Historical checkpoints below remain retained.
+
+## Admin attribution context — local read-only migration 181
+
+`get_work_order_attribution_context(uuid,uuid,integer,uuid)` is an active-Admin-only
+STABLE read of one Draft/Product state. It returns current material version/Draft
+revision, exact R/H/U and coverage/independence/Unknown, opaque predecessor tokens,
+actual warehouse Held, and 1–50 matching open Project requirements (UI page size 20).
+UUID keyset continuation replaces pages rather than accumulating mixed snapshots.
+Each requirement carries its current revision, known outstanding or NULL, and
+per-warehouse replacement maximum capped by requirement, material partition and Held.
+Consumed Project/Product requirements retain Unknown outstanding and zero admission.
+No existing writer/accounting function, grant on private tables or stock is changed.
+
+The Admin UI and durable recovery are now implemented locally behind the OFF gate.
+The separate `material-attribution-recovery` journal uses Test Save's lock/verified
+localStorage protocol, actor/profile/backend scope, immutable canonical original
+intent, uncertainty and verified receipt. Save/import journals are untouched.
+Closing/unmounting keeps unresolved requests; a confirmed stored receipt can complete
+refresh without dispatching again. Earlier migration-180 checkpoint remains history.
+
+## Unified Committed contracts — local migration 180, partial frontend integration
+
+`set_work_order_material_attribution(uuid,text,uuid,text,text,uuid,uuid,timestamptz,uuid)`
+accepts request/kind/state/material-version/quantity/predecessor and optional exact
+requirement revision/warehouse. It is authenticated but active-Admin-only, delegates
+to migrations 178–179, serializes cross-kind request identity, rejects changed kind
+reuse and returns schema/request/kind/state. Quantities/versions are decimal strings.
+Independence is global to the material, not a new warehouse allocation operation.
+
+`get_inventory_unified_committed(uuid,uuid)` returns one authorized Product/scope
+observation: database as_of, Project demand, WO Held, scoped verified coverage,
+applicable coverage adjustment, proven independent Held, Unknown overlap and nullable
+committed quantity. All quantities are decimal strings. A complete material
+partition proves remaining warehouse Held independent; partial global independence
+cannot be assigned to a warehouse by assumption. Raw alone uses Raw+Customs planning;
+FG/Customs retain warehouse-only accounting. The old accounting functions are intact.
+
+`get_inventory_unified_commitment_breakdown(uuid,uuid,integer,jsonb)` returns bounded
+authorized Project/WO rows and signed coverage adjustments, a nested observation,
+source/visible/restricted/page-before/page/page-after subtotals, restricted positive
+and adjustment amounts, and stable snapshot cursor. Page size is 1–100. Subtotals
+reconcile source contributions, but are not a proven committed total while Unknown.
+Changed observations/visible sources/authorization reject a stale cursor with ICB01.
+No restricted source IDs enter the snapshot digest or returned rows.
+
+Frontend service/read hook, scoped mutation hook and prepared Committed columns are
+behind a separate default-OFF DEV-only gate. Admin context selection/form and typed
+unified popup/pagination wiring remain unfinished; do not activate this checkpoint.
+The current per-Product read seam also needs bounded batch/visible-page integration
+before enabling it for a large combined catalog; no per-row request fanout is active
+while OFF. Browser acceptance remains outstanding.
+
+## Exact requirement coverage — local forward migration 179
+
+`work_order_requirement_coverage_evidence` is an immutable private declaration
+ledger: request, retained material state, exact requirement UUID, canonical
+warehouse, material version/Draft revision, requirement revision/quantity,
+Project/Product ancestry and Project revision, actual Held snapshot, exact bigint
+coverage, actor/Auth, database time, per-mapping revision and preceding request.
+Requirement and Work Order identities are historical snapshots rather than live
+restrictive FKs; existing Draft/requirement deletion is not blocked. Retained
+material-state, Product, warehouse and actor integrity remains enforced.
+
+Owner-only `declare_work_order_requirement_coverage(uuid,uuid,bigint,uuid,
+timestamptz,uuid,bigint,uuid)` takes request/state/material version, requirement/
+expected revision, warehouse, replacement quantity and expected predecessor.
+The trigger fills authoritative snapshots, bounds per-state/per-warehouse/per-
+requirement sums, enforces matching Product and active Admin, and preserves exact
+actor-bound replay. Zero withdraws; changed request reuse or stale supersession
+fails. Existing Admin-independent declarations cannot overlap coverage.
+
+Private `work_order_requirement_coverage_current` considers latest evidence only.
+All live requirement, Project, material, allocation and lifecycle snapshots must
+still match. Exact requirement outstanding is currently known only with no
+qualifying Project/Product consumption; otherwise the view omits positive coverage
+and the writer raises WRC11/Unknown. No requirement-level consumption allocation is
+fabricated. The migration-178 private attribution projection now includes verified
+coverage and derives Unknown = Required - Coverage - Independence. Existing
+Inventory accounting/breakdown contracts still expose zero coverage and are not
+rewired. A public Admin workflow, requirement-specific consumption proof for
+consumed Projects and separately verified unified accounting remain dependencies.
+
+## Requirement attribution evidence — local migration 178
+
+Private `work_order_requirement_attribution_evidence` records request UUID,
+retained reservation state, snapshot Work Order/Product, material version, Draft
+timestamp, exact required/independent bigint quantities, declaration kind,
+per-state evidence revision, superseded request, actor profile/Auth and DB time.
+History has no live Work Order FK, so ordinary Draft deletion remains possible.
+The existing retained state FK preserves identity. Update/delete/truncate fail.
+
+Owner-only `declare_work_order_material_independence(uuid,uuid,bigint,uuid,bigint)`
+accepts request, state, expected material version, expected preceding declaration
+and replacement independent quantity. It checks active Admin, serializes request
+and parent/state, enforces compare-and-swap supersession and exact actor-bound
+replay. Zero records an explicit Unknown reset; positive values require Admin
+attestation. No existing public operation invokes it.
+
+Private security-invoker current/totals views expose exact numeric Required,
+verified coverage (currently zero), effective Admin independence and Unknown
+remainder. Only the latest declaration is considered; stale snapshots never fall
+back to older evidence. Dynamic checks compare live Draft status/timestamp,
+reservation state/version and actual aggregate saved material rows. Closed/deleted
+owners have zero current attribution. This classifies requirement quantities, not
+warehouse Held units. Project proof production, exact consumption attribution and
+warehouse allocation-to-requirement mapping remain separate dependencies before
+an accurate unified Inventory metric can be exposed. No current reads are changed.
+
+## Task 9A local public lifecycle delegation — migration 177
+
+The singleton private `work_order_reservation_activation(singleton, enabled)` row
+defaults to false. No browser setter/read is granted. Trusted wrappers hold its
+row SHARE lock until transaction end, serializing a separately approved operator
+gate change without adding stock locks. A missing row fails closed.
+
+The five original public signatures and return shapes remain unchanged:
+`create_draft_work_order()`, `create_pcb_production_work_order(uuid,text,uuid,uuid)`,
+`save_draft_work_order(uuid,uuid,text,jsonb,timestamptz)`,
+`save_pcb_production_supplemental_materials(uuid,jsonb,timestamptz)` and
+`delete_draft_work_order(uuid,timestamptz)`. Their original implementations are
+renamed to private `_reservation_base` functions. The existing private staging
+helper calls those bases directly, preventing recursive wrapper delegation; the
+allocation algorithm itself is unchanged.
+
+Ordinary creation uses a server UUID (the existing endpoint has no retry token).
+PCB creation reuses the client UUID; save/supplemental/delete derive stable private
+request identities from actor/Auth, action, Work Order, exact expected timestamp
+and complete JSON payload. Existing immutable receipts authorize exact replay,
+including deletion after the live row is gone. Optimistic stale/changed operations
+still fail. Old PCB replay records without reservation receipts are not backfilled.
+Only the false gate seed is inserted during migration; no Work Orders are scanned.
+
+## Task 7 source breakdown — local migration 176
+
+`get_inventory_commitment_breakdown(p_product_id uuid, p_warehouse_id uuid,
+p_metric text, p_scope text default 'warehouse', p_limit integer default 50,
+p_cursor jsonb default null)` returns schema-1 JSON, not private table access.
+Metrics: `project_demand` (only `raw_customs`, anchored at Raw),
+`fg_project_reservation` (FG warehouse only), `test_hold` and
+`work_order_reservation` (canonical single warehouse or Raw+Customs).
+Membership reuses the authoritative Inventory listing, including archived Products.
+
+Envelope: Product/warehouse/scope and scope warehouse IDs, metric, database `as_of`,
+`metric_total`, `visible_total`, `restricted_remainder`, restricted label,
+`visible_before_quantity`, `page_subtotal`, `visible_after_quantity`, limit,
+has_more, next_cursor and items. Quantities are nonnegative decimal strings.
+Total = visible + restricted; visible = before + page + after. The full visible
+total is never represented by one page subtotal. Pages contain 1–100 source rows
+(or fewer at the end), ordered by source UUID with no duplicate source in a scope.
+Each item has type, authorized ID/label, scoped quantity and navigation eligibility.
+Work Order global Required/Held/Uncovered context is nullable unless all warehouse
+views are authorized; when present, R=H+U and scoped Held <= global H.
+
+Cursors contain an authorized last UUID and a snapshot digest bound to actor,
+profile, Product, scope, metric, visible rows, allowed context and permitted total.
+No restricted identities or counts enter the cursor. Changed data, expiry or
+authorization produces ICB01/restart; no cross-request frozen snapshot is claimed.
+No tables, writes, coverage producer or historical backfill are introduced.
+
+## Draft reservation Task 6 — local additive read contracts (migration 175)
+
+`get_inventory_reservation_accounting(uuid,text,boolean,integer,integer)` is a
+bounded STABLE snapshot read (1–200 rows, serial/Product ordering, offset/has_more,
+explicit Active/Archived filter). It reuses authoritative warehouse membership.
+Raw scope is Raw+Customs and requires both views; FG and Customs remain separate.
+Warehouse physical quantity and warehouse-held quantity are distinct from their
+scope quantities. Never sum a Raw+Customs scope again with a Customs scope.
+
+The response separates physical, Project demand D, hard FG reserved F, effective
+Test held T and Draft held W. `available_after_projects = scopePhysical-D-F`;
+`net_available_after_all_commitments = scopePhysical-D-F-T-W` remains signed;
+`hard_available_quantity = max(scopePhysical-F-T-W,0)` never deducts soft demand.
+Coverage is explicitly zero: a matching Work Order Project ID does not change D.
+All quantities are exact decimal strings, including numeric cross-warehouse sums.
+Physical Stock Health and all legacy Inventory RPCs/column meanings are unchanged.
+
+`get_work_order_material_commitment_status(uuid)` is an additive Draft read with
+the same authority/snapshot as existing material availability. Per-Product saved
+Required R includes legacy/uninitialized Drafts; Held H is live owned allocations;
+Uncovered U=R-H has no warehouse attribution. Current Eligible/Missing remain
+owner-aware observations, not U or future Finish guarantees. No general Inventory
+or warehouse physical access is granted by Work Order view.
+
+Private allocation/state lifecycle triggers coalesce affected Products into the
+existing deferred shortage queue, without Work Order/Project row locking, top-up,
+expiry workers or history rewrites. Quantity changes do not repeat opening fanout;
+resolution and recurrence retain existing episode/recipient lifecycle rules.
+
+Typed frontend services and a scoped read hook are prepared behind an OFF,
+DEV-restricted migration-175 read gate; no existing table mounts new RPCs yet.
+Automatic Draft reservation creation remains OFF. Later source-breakdown work must
+authorize every disclosed Project/WO/Test identity separately from these aggregates,
+paginate authorized sources, report any permitted restricted remainder without
+identities/counts, and preserve the explicit metric/warehouse scope. Positive
+Project coverage still requires a separately reviewed exact requirement proof producer.
+
+## Draft reservation Task 5 — local atomic Finish (migration 174)
+
+`20261030140000_integrate_work_order_reservations_into_finish.sql` integrates
+both existing Finish overloads without activating Draft reservation creation.
+Owner-aware preflight/FIFO planning credits only the finishing Draft's live
+warehouse allocations. Source/PDF fingerprints bind reservation identities,
+versions, requirements and allocations as well as the existing lot/source plan;
+unreserved historical Drafts retain their original source-fingerprint format.
+
+Inside the same Finish transaction, a private helper consumes only the owned
+portion immediately before each existing guarded physical/FIFO debit. No global
+stock-guard bypass or caller-controlled exemption exists. Remaining unused own
+allocations are released after successful production/document/status effects,
+and states become consumed. All changes roll back together on failure. Frozen
+BOM and supplemental quantities remain authoritative, including zero actual-good
+output. Existing Test/FG and other Draft allocations remain protected.
+
+Two immutable actor/Auth/payload-bound finish receipts record intent and verified
+result, using deterministic operation identities derived from the complete exact
+Finish payload. Current authorization is required even on exact replay; a changed
+payload does not reuse a successful Finish. No historical Draft state is created.
+The existing Product-scoped deferred shortage queues reconcile final committed
+stock/owner state, preserving Project and Work Order history.
+
+Finish preflight acquires ordered Product UPDATE locks before balances, avoiding
+late SHARE-to-UPDATE upgrades during ledger validation. FG reservation Project
+locks use NO KEY UPDATE (still excluding concurrent Project mutations), allowing
+deferred shortage-history FK KEY SHARE checks to complete without a Project ->
+Product / Product -> Project-FK deadlock. Automatic FG admission uses a private
+copy of its original authorized planning lock helper with that lock mode; unrelated
+Project planning contracts are unchanged.
+
+Operational creation, Inventory commitment-source reads/UI, final integrated
+acceptance and separately authorized deployment/activation remain later work.
+Explicit Project requirement coverage remains zero.
+
+## Draft reservation Task 4 — local stock protection (migration 173)
+
+`20261030130000_protect_draft_work_order_commitments.sql` adds the private numeric
+`active_draft_warehouse_hold_quantity(Product, warehouse)` boundary. It sums live
+active allocations belonging to saved Drafts, backed by migration 171's immutable
+event ledger and deferred counter/quantity validation. Deleted/finished owners,
+released states and Uncovered requirements contribute nothing.
+
+Physical debit protection, Test Preview/Save and manual/automatic FG admission
+now protect Test + FG + Draft holds without turning soft Project Demand into
+physical reservations. Existing Test admission's separate soft planning deduction
+remains unchanged; explicit Project coverage is still zero. Production free
+capacity, eligibility and source plans deduct Draft Held once. The lifecycle and
+foundation validators deliberately use a private Test/FG-only base capacity before
+their own Draft-counter deductions, preventing double subtraction.
+
+Work Order availability and shortage reconciliation use private owner-aware
+snapshot capacity, crediting only that live Draft's saved Product allocations.
+A separate private locked capacity helper requires READ COMMITTED, locks the
+Draft then Product/balance, and samples database time after waits. Neither helper
+is a debit exemption. Finish source-plan/physical-debit own-credit, allocation
+consumption/release, fingerprints and atomic accounting remain a later task.
+Until then source plans conservatively exclude all Draft-held stock.
+
+No operational create/save/delete hook is enabled, no application EXECUTE grant
+is added and no reservation backfill/top-up/expiry or physical movement occurs.
+Allocation/release-triggered shortage queue integration, Inventory breakdown
+reads and final Finish integration/acceptance remain activation dependencies.
+
+## Draft reservation Task 3 — local private lifecycle (migration 172)
+
+`20261030120000_add_private_work_order_reservation_lifecycle.sql` adds only
+`stage_draft_work_order_reservations(uuid,text,uuid,timestamptz,jsonb)`, an
+owner-private staging contract. EXECUTE is revoked from PUBLIC, anon,
+authenticated and service_role. No existing RPC, trigger or frontend delegates
+to it: operational activation remains OFF, with no historical backfill.
+
+The private actions `create`, `create_pcb`, `edit`, `supplemental` and `delete`
+wrap the existing authorized Draft writers and reconcile state in the same
+transaction. They preserve exact expected Draft timestamps and actor-bound
+request/payload replay. Saved manual and frozen BOM rows are aggregated once;
+admission uses only newly added requirement quantity, never automatic top-up.
+Existing protected allocations retain priority; allocation follows Raw/Customs/FG
+or FG-only for linked outputs. Reductions release in reverse priority; deletion
+releases allocations and retains detached immutable history. Required/Held/
+Uncovered receipt quantities are decimal strings. Explicit Project coverage
+remains zero. There is no physical stock movement or FIFO consumption.
+
+This contract is not safe to expose operationally yet: every stock-debit,
+Test/FG admission, production availability, shortage and Finish consumer must
+recognize these commitments first. Finish needs own-reservation credit and
+atomic consumption events; public writer delegation and activation are later
+separately reviewed changes.
+
+## Draft reservation Task 2 — local inert foundation (migration 171)
+
+Migration `20261030110000_add_work_order_reservation_foundation.sql` creates the
+five private state/allocation/event/receipt/coverage relations proposed below,
+plus a private security-invoker totals view. No existing accounting function or
+writer is changed, no historical Draft is initialized, and no public RPC is added.
+Positive live allocation rows have unique state/warehouse identity; absent rows
+mean zero Held. Numeric aggregate/deferred ledger checks bound Held by Required
+and eligible physical capacity, respecting current effective Test/FG protections.
+Events retain exact before/after continuity and positive allocation/release/consumed
+or requirement-change quantities; receipts bind actor/Auth/Work Order/payload and
+the originating transaction. Replay writers must return receipts, not append to a
+previously committed request. Required changes preserve monotonically increasing
+state versions and the exact saved Draft timestamp, including microseconds.
+
+Only the live state reference uses Work Order ON DELETE SET NULL. Immutable
+history keeps snapshot identities; detached states have zero effective Held and
+Uncovered in the private view. This permits the unchanged existing Draft deletion
+before operational integration; it does not implement release events or change
+Inventory. Later trusted delete/Finish operations must explicitly reconcile history
+and stock atomically. The deferred private checker is SECURITY DEFINER with empty
+search_path and no application EXECUTE, so authenticated FK detachment can validate
+without exposing private tables or changing the existing deletion RPC.
+
+Coverage stores exact live requirement ancestry/revision evidence candidates, but
+`effective_quantity` is generated zero: there is no trusted ownership proof producer
+yet. Positive effective coverage requires a separately reviewed forward change;
+matching a Project or supplying arbitrary JSON never authorizes a demand deduction.
+Operational concurrency, every stock-consumer integration and activation remain
+later tasks; the foundation alone does not protect allocations from existing debits.
+
+## Draft Work Order reservations V1 — proposed accounting design, 2026-10-30
+
+DESIGN ONLY; no relation/function below is created by this documentation task.
+Names are implementation targets, not claims about deployed schema (currently 170).
+The authoritative requirement remains work_order_items: positive bigint quantities,
+unique (work_order_id, product_id, source_type), aggregating manual + pcb_bom once.
+PCB production context freezes BOM version and planned quantity; do not multiply
+already-derived WorkOrderItem quantities a second time or follow a newer BOM.
+
+### Minimum private records
+
+1. `work_order_material_reservation_states`: one durable identity per Work Order/
+   Product; required quantity, monotonically increasing version, lifecycle
+   (active/consumed/released), actor/timestamps and last applied Draft version.
+   Creation receipts mark post-activation participation, including empty Drafts;
+   no state row means uninitialized, not zero historical Required. A legacy edit
+   derives R_old from saved materials before creating state, never from an absent
+   row. Enrollment alone creates no allocation. Held derives from allocations;
+   Uncovered derives from Required - Held, not an independently writable counter.
+2. `work_order_material_reservation_allocations`: unique state/warehouse, nonnegative
+   held bigint, canonical warehouse FK and state version. Positive rows alone protect
+   stock. Preserve Product/warehouse identity and lifecycle history; do not attach a
+   source lot or create a structural balance/membership row to admit a reservation.
+3. `work_order_material_reservation_events`: append-only state/version/event identity,
+   operation, exact warehouse deltas and before/after quantities, actor/time, cause
+   and operation identity. Required changes with no new Held remain observable;
+   normalized no-ops create no event. Finish consumption and deletion release are
+   distinct events. Quantity conservation is checked against live allocations.
+4. `work_order_material_reservation_receipts`: original authenticated user/profile,
+   operation/request identity, exact canonical payload, expected Draft/state version
+   and authoritative result. Enforce unique actor-bound operation identity, exact
+   replay and rejection of changed payload. Reuse PCB creation_request_id rather
+   than independently reserving again on creation replay. Preserve existing Draft
+   optimistic concurrency; receipt/recovery integration for other operations must
+   be explicit, not a browser-orchestrated second write.
+5. `work_order_project_requirement_coverage`: explicit allocation/state -> exact
+   project_product_components identity and its Project/Product ancestry; verified
+   requirement revision/snapshot, attributed bigint, proof origin and history.
+   Coverage never owns or reserves additional stock. Do not populate from
+   work_orders.project_id alone. The current Project consumption ledger aggregates
+   Project/Product, not individual requirement ownership; absent stronger proof,
+   coverage must remain zero rather than inventing per-requirement consumption.
+
+All records are private/RLS-protected. Preserve event/receipt snapshots after Draft
+deletion: live FKs must be detached transactionally or otherwise deletion-compatible,
+never restrictive orphan blockers or cascading destruction of immutable history.
+For required/held values use bigint with numeric intermediate sums/products and
+checked bigint bounds. Cross-owner totals may need numeric range; transport all
+quantities and versions as decimal strings, never lossy JavaScript numbers.
+
+### Accounting and scope
+
+For one Work Order/Product: R = aggregate saved requirement; H = sum active owned
+warehouse allocations; U = R-H. Enforce R >= H >= 0. For an edit retain existing
+allocations up to the new requirement; release only excess. Admit at most
+max(R_new-R_old,0) of new quantity, bounded by free capacity. Removing a Product
+releases all its allocations. A reduction releases in reverse sourcing priority
+(FG, Customs, Raw), preserving earlier-priority allocations where possible.
+R/H/U describe the live Draft only; closed states retain historical snapshots and
+must never reappear as current demand or a new Uncovered shortage after completion.
+
+For Product/warehouse w and database time t:
+P(w) = physical; T(w,t) = release-aware effective Test holds; F(w) = existing hard
+FG Project reservations (zero outside FG); W(w) = all active Draft-held quantities.
+HardFree(w,t) = max(P(w)-T(w,t)-F(w)-W(w),0).
+An allocation must leave P(w) >= T(w,t)+F(w)+W(w); unmet demand never enters W.
+For a target Draft, production capacity credits ONLY that owner's H(w):
+OwnEligible = sum(HardFree(w,t)+H(w), over its existing eligible source warehouses).
+CurrentFinishMissing = max(R-OwnEligible,0); this differs from Uncovered U. Thus a
+stock arrival can remove a current shortage without topping up a reservation.
+Other Drafts' R/U are not physical reservations and are not subtracted as Held.
+
+For an explicitly defined planning source scope S, D is existing outstanding open-
+Project demand. Verified coverage C(S) comes only from currently active held
+allocations inside S with exact same-Product requirement proof. Cap each coverage
+by its Held and proven live requirement; cap aggregate coverage per Project/Product
+by canonical remaining demand. No allocation unit may cover two requirements, and
+concurrent mappings cannot cover the same requirement capacity twice. Invalidated,
+removed, closed or changed requirement proof contributes zero coverage immediately;
+it does not release W or rewrite Project consumption. Historical mapping survives.
+
+ResidualPlanningDemand(S) = D-C(S); combined planning deduction = W(S)+D-C(S),
+NOT W(S)+D and NOT max(W(S),D). Hard physical availability subtracts W, F and T,
+never soft D. Raw planning S is Raw+Customs; FG and Customs keep their distinct
+existing semantics. Do not discount a Raw+Customs figure with an FG allocation.
+For Test admission's broader ordinary-input sourcing scope, evaluate any proven
+coverage within that exact scope and deduct residual soft demand once per Product.
+No quantities across unlike Products/units may be added. Preserve legacy column
+meanings; expose W, residual demand and deduplicated planning via an explicit
+additive/versioned contract instead of silently relabelling old Project Demand.
+
+### Transaction and read boundaries
+
+Create/save applies saved requirements, allocation changes, coverage, events and
+receipt together. Delete releases live Held and retains history in the deletion
+transaction. Finish plans existing FIFO against own allocations plus free capacity,
+then consumes/releases allocations in the same transaction as the existing source
+movements/output/PDF linkage/status/audits. No earlier standalone release is allowed.
+Preserve warehouse priority: if a fresh preferred source requires replacing an own
+allocation, transfer only that owner's quantity under all affected balance locks
+inside Finish; no background reallocation, cross-owner use or extra top-up results.
+Any remaining unheld stock used by Finish is consumed immediately, not reserved twice.
+Preflight/preview must only simulate the owner-aware source plan, not exchange
+allocations on a read. Bind its source fingerprint to relevant allocation versions;
+Finish revalidates that same plan under locks before applying its allocation exchange
+and physical debits. A stale plan fails rather than silently choosing different stock.
+
+All stock debit guards, Test preview/Save, FG reservation admission/fulfillment,
+production planners, Inventory aggregates, WO availability and shortage reconciliation
+must use the same effective W and owner-aware exception. Existing Test expiry/import
+release semantics and FG ownership remain unchanged. Reconcile only affected Products
+through the existing coalesced shortage queue, without polling or inverse WO locks.
+
+The proposed breakdown read takes Product, canonical warehouse, explicit metric/
+quantity scope and bounded cursor/limit. One authorized database snapshot returns
+as_of, scope, exact aggregate total, authorized source rows, coverage attribution
+where applicable, navigation eligibility and stable pagination/completeness metadata.
+Typed sources: project_demand, fg_project_reservation, work_order_reservation,
+test_hold. Raw demand/Test totals may span Raw+Customs and must say so. Test rows use
+active_test_holds_at, not original held-at-Save quantities. Required/U and coverage
+are context, not extra commitment rows to sum. Available/Net Available may show a
+formula breakdown with separate hard allocations and residual soft planning.
+
 ## Current Import from Test implementation checkpoint — 2026-10-30
 
 Previously recorded guarded DEV verification confirms migrations 167–170 deployed

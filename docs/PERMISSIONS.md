@@ -1,5 +1,143 @@
 # AlfaEV — PERMISSIONS.md
 
+## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
+
+DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,
+with zero pending migrations. Operational Draft reservations, Inventory accounting/
+breakdown and Unified Committed/Admin attribution are ON for DEV only. Other backend
+origins remain OFF; this checkpoint changes no activation or permission.
+
+Committed is the approved reporting sum of Project Demand and actual active Draft
+WO Held, not deduplicated unique demand or hard reserved stock. The authenticated
+DEV read and Raw/All browser popup verified ULN2804AN: 23 + 68 = 91, with authorized
+Project and Work Order sources. Availability, physical stock, Test/FG protections,
+existing allocations, evidence/history and security were preserved by deployment.
+Raw, All and FG browser checks passed. Populated Customs row-level browser acceptance
+is PENDING: DEV has no eligible Customs Products; only its empty state was checked.
+Earlier local/OFF/deployment-pending sections below are retained historical evidence.
+
+## Committed reporting response v2 — local migration 182
+
+The additive reporting definition changes no permission requirement. Active Admins
+or authorized active profiles require the applicable warehouse view; Raw+Customs
+requires both. Source labels/IDs/links require projects.view or work_orders.view.
+Restricted quantities remain aggregate-only. No attribution authority, private table
+grant or Inventory mutation grant changes. Existing activation states are preserved;
+migration 182 remains a local forward migration pending separate deployment.
+
+## Admin attribution interface/context — local migration 181
+
+Only authenticated EXECUTE is granted on the bounded context RPC; active Admin and
+active Auth/profile checks are explicit. PUBLIC/anon/service_role remain denied.
+No private table or general Inventory access is granted. Context exposes only the
+selected saved material, its current quantities/revisions, matching Project choices
+and opaque mutation predecessor tokens—not private actor/event/receipt history.
+The Draft action is hidden from inactive/non-Admin identities and while gate OFF.
+
+## Unified Committed local workflow/read — migration 180
+
+Authenticated EXECUTE is granted only on three new narrow RPCs. Attribution still
+requires active Admin; reads require active profile and the selected warehouse view.
+Raw+Customs requires both warehouse views. Source identities/navigation additionally
+require projects.view or work_orders.view respectively. Coverage-adjustment source
+identities require BOTH; denied identities remain aggregated, never fabricated zero.
+PUBLIC/anon/service_role EXECUTE remains revoked. No private-table grants, permission
+assignments or operational reservation changes occur. The new frontend gate is OFF.
+
+## Exact coverage declaration authority — local migration 179
+
+Active Admin is the approved explicit Project requirement coverage authority.
+Project editing, Work Order editing or warehouse view alone does not grant it.
+Every declaration/replay checks active profile/Auth and Admin state server-side;
+no user-visible RPC or new permission assignment is introduced. The coverage
+ledger has RLS with no application grants/policies. All new private helpers and
+views deny PUBLIC/anon/authenticated/service_role access. Existing Project and
+Work Order mutation permissions, source navigation and Inventory access remain
+unchanged. Earlier migration-178 evidence below predates this specific approval.
+
+## Explicit independence authority — local migration 178
+
+Only an active authenticated Admin may attest independence. Existing Work Order,
+Project or warehouse permissions alone do not confer this authority. Profile/Auth
+identity and current Admin status are checked server-side, including retries.
+The preparation helper and trigger have no PUBLIC/anon/authenticated/service_role
+EXECUTE; the evidence ledger has RLS and no application table grants or policies.
+Its private projections have no application SELECT. There is no browser endpoint
+or UI yet, and no permission definition, assignment or gate is modified.
+This approval does not authorize arbitrary Project requirement coverage claims.
+
+## Task 9A public lifecycle wrappers — local migration 177
+
+Only authenticated retains EXECUTE on the existing five public Draft RPCs. Their
+canonical active-profile/parent-operation authorization remains authoritative.
+The private staging helper, `_reservation_base` functions, request-ID helper and
+database gate helper have no PUBLIC/anon/authenticated/service_role EXECUTE. The
+RLS-enabled activation table has no application table grants or public setter.
+No warehouse grants, permission definitions, assignments or Inventory access are
+added. Work Order authority continues to permit only the existing trusted parent
+operation, never a standalone arbitrary stock reservation mutation.
+
+## Task 7 local breakdown read — migration 176
+
+Authenticated EXECUTE only, with explicit active Auth/profile checks. Active Admin
+or the selected warehouse view is mandatory; Raw+Customs requires both views.
+Source disclosure additionally requires projects.view (Project Demand/FG reserved),
+test_calculator.view (Tests) or work_orders.view (Drafts), or active Admin.
+Without source view, only real metric/restricted aggregate quantities are returned;
+no names, IDs, source counts, navigation or identity-bearing cursors are returned.
+Global Work Order R/H/U context additionally requires all three warehouse views.
+Private table grants, parent operation permissions and permission definitions are
+unchanged. The existing frontend accounting-read release gate remains OFF.
+
+## Task 6 local accounting reads — migration 175
+
+Only authenticated receives EXECUTE on the two new read RPCs; active profile checks
+remain mandatory. Inventory accounting requires the applicable warehouse view;
+Raw combined planning additionally requires Customs view. Active Admin preserves
+the existing bypass. The response contains authorized warehouse Product aggregates,
+not Work Order/Project/Test identities. No source-detail privilege is implied.
+Work Order commitment status follows existing work_orders.view authority and returns
+Required/Held/Uncovered and combined production availability, not warehouse physical
+stock or other Work Order identities. Private allocation/event/receipt/queue tables
+and trigger helpers remain inaccessible. No permission definitions/assignments change.
+
+## Draft Work Order reservations V1 — approved boundary, 2026-10-30
+
+DESIGN ONLY: no grants, roles, permission definitions or assignments change here.
+Reservations are a trusted effect of already-authorized Work Order operations:
+active Admin or work_orders.create for ordinary creation, pcb.produce for specialized
+PCB creation, work_orders.edit_draft for allowed material changes,
+work_orders.delete_draft for deletion and work_orders.finish for completion.
+Their existing active-profile, Product eligibility and expected-version checks apply.
+PCB Produce does not confer general Work Order read/edit/finish rights. No separate
+browser reservation/release endpoint, warehouse-adjust right or Admin bypass of
+other owners' stock protection is introduced. Reconciliation takes place within
+the authorized parent operation, never because a viewer opens Inventory/Dashboard.
+
+Coverage requires server-verifiable ownership of an exact Project requirement;
+normal Work Order authority does not permit editing Project requirements or forging
+coverage. No user-editable arbitrary Project/requirement linkage is introduced.
+Until a trusted proof producer exists, coverage remains zero. Any future user-driven
+mapping operation must separately preserve existing Project planning authorization.
+Project cancellation authority cannot implicitly release a linked Draft's Held.
+
+Inventory breakdowns require an active authenticated profile plus the metric's
+existing warehouse authority (Admin bypass remains as currently defined). Raw combined
+planning/Test scopes require Raw AND Customs view; FG requires FG view; Customs-only
+requires Customs view. Source identities/names/navigation additionally require their
+current module read authorization: projects.view, work_orders.view or
+test_calculator.view respectively, or active Admin. Destination routes recheck access.
+Aggregate access is not source-detail access and never grants general Inventory
+access to Work Order-only readers. Backend authorization, not a hidden link, is final.
+
+Without source authorization, omit its IDs, names, dates, links and source-record
+counts. A response may reconcile a total already authorized by the same metric using
+one unlabelled restricted-quantity remainder, never fabricated source rows or zeros;
+do not expose new cross-warehouse/type subtotals. Clearly identify incomplete detail.
+Existing get_product_project_commitments currently exposes Project attribution under
+Raw+Customs authority alone; do not reuse it unchanged for this stricter popup boundary
+or silently broaden the popup's access by calling that legacy read.
+
 ## Current Import from Test authorization checkpoint — 2026-10-30
 
 DEV deployment through migration 170 was previously verified; the existing 41

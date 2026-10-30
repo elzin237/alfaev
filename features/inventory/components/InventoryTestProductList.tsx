@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import ProductList, { type ProductListProps } from "./ProductList";
+import { type ProductListProps } from "./ProductList";
+import InventoryHeldProductList from "./InventoryHeldProductList";
 import { useInventoryTestCommitments } from "../hooks/useInventoryTestCommitments";
 import { INVENTORY_WAREHOUSES } from "../inventoryWarehouses";
 
@@ -37,12 +38,12 @@ function ActivatedList({ warehouseId, search, authorizedWarehouseIds, ...props }
     </div>}
     {missing && <p role="alert">Some Test commitment figures are unavailable. No missing figures are assumed to be zero.{allowed && retryButton}</p>}
     {retryError && <p role="alert">{retryError}</p>}
-    <ProductList {...props} showTestCommitments testCommitments={rows ? new Map(rows.map(r => [r.productId, r])) : undefined} />
+    <InventoryHeldProductList {...props} warehouseId={warehouseId} search={search} authorizedWarehouseIds={authorizedWarehouseIds} commitmentBreakdownWarehouseIds={authorizedWarehouseIds} showTestCommitments testCommitments={rows ? new Map(rows.map(r => [r.productId, r])) : undefined} />
   </div>;
 }
 // Deliberately closed, including for Admins, until coordinated backend activation.
 // The inactive path mounts no new hook and makes no Test RPC/permission requests.
 export default function InventoryTestProductList({ enabledAfterActivation = false, ...props }: Props) {
-  if (!enabledAfterActivation) return <ProductList {...props} />;
+  if (!enabledAfterActivation) return <InventoryHeldProductList {...props} commitmentBreakdownWarehouseIds={props.authorizedWarehouseIds} />;
   return <ActivatedList {...props} />;
 }

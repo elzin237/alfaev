@@ -1,6 +1,8 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
+// Preserve explicit legacy/OFF regression coverage after DEV activation.
+vi.mock("../../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));
 
 import type { ProductListItem } from "../services/productService";
 import ProductList from "./ProductList";
@@ -136,3 +138,5 @@ describe("ProductList", () => {
       .toHaveAttribute("href", "/inventory/product-2");
   });
 });
+// Legacy presentation coverage is intentionally independent of the DEV release state.
+vi.mock("../../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));

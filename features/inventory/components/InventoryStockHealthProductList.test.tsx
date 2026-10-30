@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+// Stock-health fixtures remain independent of the DEV WO-read release switch.
+vi.mock("../../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));
 const mocks=vi.hoisted(()=>({hook:vi.fn(),gate:vi.fn(),save:vi.fn(),refetch:vi.fn()}));
 vi.mock("../../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:mocks.gate}));
 vi.mock("../hooks/useInventoryStockHealth",()=>({useInventoryStockHealth:mocks.hook}));

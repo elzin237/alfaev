@@ -155,3 +155,6 @@ describe("useWorkOrderCreation", () => {
     expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });
+// Base creation behavior with commitment reads OFF; ON invalidation has focused coverage.
+vi.mock("../../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));
+vi.mock("../../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));

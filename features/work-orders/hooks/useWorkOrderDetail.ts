@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../../app/auth/AuthProvider";
+import {refreshUnsignalledWorkOrderCommitments} from "../../inventory/refreshWorkOrderCommitmentReads";
 import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { dashboardQueryKey } from "../../dashboard/dashboardQueryKeys";
@@ -242,6 +243,7 @@ export function useWorkOrderDetail(workOrderId: string) {
           ok: true as const,
           value: input.materialSnapshot,
         });
+        await refreshUnsignalledWorkOrderCommitments(queryClient,session?.user.id,profile?.id);
         await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
         return;
       }
@@ -310,6 +312,7 @@ export function useWorkOrderDetail(workOrderId: string) {
         ]);
         queryClient.removeQueries({ queryKey: detailKey, exact: true });
         queryClient.removeQueries({ queryKey: materialsKey, exact: true });
+        await refreshUnsignalledWorkOrderCommitments(queryClient,session?.user.id,profile?.id);
         await queryClient.invalidateQueries({ queryKey: listKey, exact: true });
         return;
       }

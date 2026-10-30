@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 // Legacy list regression coverage; the StockHealthProductList suite exercises ON.
 vi.mock("../../app/config/inventoryStockHealthActivation",()=>({isInventoryStockHealthEnabled:()=>false}));
+vi.mock("../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));
 vi.mock("./components/AllInventoryView", () => ({ default: () => <p>Combined Inventory view</p> }));
 
 const inventoryMocks = vi.hoisted(() => ({
@@ -564,3 +565,5 @@ describe("InventoryPage", () => {
     expect(await screen.findByText("Brand archived.")).toBeInTheDocument();
   });
 });
+// Keep these legacy page fixtures independent of live DEV feature activation.
+vi.mock("../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));

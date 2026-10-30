@@ -1,0 +1,7 @@
+import {createHash} from "node:crypto";
+import {readFileSync,readdirSync} from "node:fs";
+import {expect,it} from "vitest";
+const file="20261030210000_add_admin_attribution_context.sql",sql=readFileSync(`supabase/migrations/${file}`,"utf8");
+it("adds forward migration 181 without rewriting trusted mutation/accounting contracts",()=>{expect(readdirSync("supabase/migrations").filter(f=>/^\d{14}_.+\.sql$/.test(f)).sort()[180]).toBe(file);expect(createHash("sha256").update(readFileSync("supabase/migrations/20261030200000_add_unified_committed_contracts.sql")).digest("hex")).toBe("e354359704c0aab8215ee18c7088fbd2a18d44468882d5c4cebacead3276db01");expect(sql).not.toMatch(/create or replace|insert into|update public|delete from|create table/i);});
+it("is a narrow bounded active-Admin read with current revisions and exact limits",()=>{for(const fragment of ["stable security definer set search_path=''","current_user_is_admin()","p_limit>50","limit p_limit+1","r.product_id=p_product_id","r.id>p_after","max_quantity","independence_request_id","no historical initialization"])expect(sql).toContain(fragment);expect(sql).toContain("from public,anon,authenticated,service_role");expect(sql).toContain("to authenticated");});
+it("requires the deployed context migration for authorized DEV activation",()=>{const gate=readFileSync("app/config/unifiedCommittedActivation.ts","utf8");expect(gate).toContain("enabled:true");expect(gate).toContain("20261030210000");expect(gate).toContain("origin===UNIFIED_COMMITTED_RELEASE.backendOrigin");});

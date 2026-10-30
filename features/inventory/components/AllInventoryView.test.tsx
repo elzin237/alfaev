@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../../app/config/unifiedCommittedActivation",()=>({isUnifiedCommittedEnabled:()=>false}));
 const mocks = vi.hoisted(() => ({ read: vi.fn(), gate: vi.fn() }));
 vi.mock("../hooks/useAllInventory", () => ({ useAllInventory: mocks.read }));
 vi.mock("../../../app/config/inventoryStockHealthActivation", () => ({ isInventoryStockHealthEnabled: mocks.gate }));
@@ -161,3 +162,5 @@ describe("All Inventory union table", () => {
     expect(screen.getByText({pending:"Loading complete authorized Inventory…",failure:"Incomplete response",empty:"No Products match the authorized Inventory filters.",denied:"Access denied",health:"Stock health unavailable"}[state]!)).toBeInTheDocument();
   });
 });
+// Gate-ON accounting and popup coverage lives in InventoryHeldProductList tests.
+vi.mock("../../../app/config/workOrderCommitmentReadsActivation",()=>({isWorkOrderCommitmentReadsEnabled:()=>false}));

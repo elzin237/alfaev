@@ -6,6 +6,12 @@ import type { ProductListItem } from "../services/productService";
 import type { InventoryCommitment } from "../services/inventoryCommitmentService";
 import type { InventoryTestCommitment } from "../services/inventoryTestCommitmentService";
 import type { InventoryStockHealth } from "../services/inventoryStockHealthService";
+import CommitmentQuantity from "./CommitmentQuantity";
+import {isWorkOrderCommitmentReadsEnabled} from "../../../app/config/workOrderCommitmentReadsActivation";
+import type {InventoryReservationAccountingRow} from "../services/inventoryReservationAccountingService";
+import {isUnifiedCommittedEnabled} from "../../../app/config/unifiedCommittedActivation";
+import {INVENTORY_WAREHOUSES} from "../inventoryWarehouses";
+import UnifiedCommittedCell from "./UnifiedCommittedCell";
 
 export interface ProductListProps {
   products: ProductListItem[];
@@ -16,9 +22,14 @@ export interface ProductListProps {
   testCommitments?: ReadonlyMap<string, InventoryTestCommitment>;
   showStockHealth?: boolean;
   stockHealth?: ReadonlyMap<string, InventoryStockHealth>;
+  commitmentBreakdownWarehouseIds?: readonly string[];
+  showWorkOrderCommitments?: boolean;
+  reservationAccounting?: ReadonlyMap<string,InventoryReservationAccountingRow>;
 }
 
-function ProductList({ products, warehouseCode, commitments, showCommitments = true, showTestCommitments = false, testCommitments, showStockHealth = false, stockHealth }: ProductListProps) {
+function ProductList({ products, warehouseCode, commitments, showCommitments = true, showTestCommitments = false, testCommitments, showStockHealth = false, stockHealth, commitmentBreakdownWarehouseIds,showWorkOrderCommitments=false,reservationAccounting }: ProductListProps) {
+  const heldEnabled=showWorkOrderCommitments&&isWorkOrderCommitmentReadsEnabled();
+  const unifiedEnabled=isUnifiedCommittedEnabled();
   const rawMaterials = !warehouseCode || warehouseCode === "raw_materials";
   const compact = rawMaterials || warehouseCode === "finished_goods";
   const columnHelpId = useId();
@@ -40,18 +51,23 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
     "Committed to Tests": rawMaterials ? "Committed to Tests: active Test holds across Raw Materials and Customs." : "Committed to Tests: active Test holds in Finished Goods only.",
     "Available After Projects and Tests": rawMaterials ? "Available After Projects and Tests: Raw + Customs physical stock minus existing Project planning demand and active Raw/Customs Test holds. May be negative." : "Available After Projects and Tests: Finished Goods physical stock minus hard FG Project reservations and active FG Test holds.",
     "Stock Health": "Stock Health: warehouse physical stock compared with its configured minimum, independent of commitments.",
+    Committed:"Project Demand plus actual Draft Work Order Held. Linked requirements may overlap. Raw uses Raw + Customs; other rows use their own warehouse. This reporting total does not change availability.",
     Status: "Product Active or Archived status, separate from Stock Health.",
+    "WO Held":"Actual active Draft Work Order Held allocations in this warehouse only. Uncovered requirements are not reserved stock.",
+    "Net incl. WO":rawMaterials?"Raw + Customs physical stock minus independent Project Demand, effective Test holds and actual Raw + Customs WO Held, each deducted once. No Project coverage is assumed.":"Warehouse physical stock minus applicable FG Project reservations, effective Test holds and actual WO Held, each deducted once.",
   };
   const cellSpacing = compact ? "px-2 py-3 text-center" : "px-5 py-4";
   const numericClass = `whitespace-nowrap tabular-nums ${cellSpacing} ${compact ? "w-24 min-w-24" : ""}`;
   const headings = ["Serial Number", "Name", "Category", "Brand", rawMaterials ? "Raw Physical Quantity" : "Physical Quantity"];
+  if(unifiedEnabled)headings.push("Committed");
   if (showCommitments) {
     headings.push(...(warehouseCode === "finished_goods"
       ? ["Reserved to Projects", "Available FG"]
-      : rawMaterials ? ["Outstanding Project Demand", "Available After Demand (Raw + Customs)"]
-        : ["Committed to Projects", "Available After Commitments"]));
+      : rawMaterials ? [...(unifiedEnabled?[]:["Outstanding Project Demand"]), "Available After Demand (Raw + Customs)"]
+        : [...(unifiedEnabled?[]:["Committed to Projects"]), "Available After Commitments"]));
   }
   if (showTestCommitments) headings.push("Committed to Tests", "Available After Projects and Tests");
+  if (heldEnabled) headings.push(...(unifiedEnabled?[]:["WO Held"]),"Net incl. WO");
   if (showStockHealth) headings.push("Stock Health");
   headings.push("Status");
   return (
@@ -65,9 +81,10 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                   <th
                     key={heading}
                     scope="col"
-                    aria-label={compact ? labels[heading] ?? heading : undefined}
+                    aria-label={compact || heading==="WO Held" || heading==="Net incl. WO" ? labels[heading] ?? heading : undefined}
                     aria-describedby={compact ? `${columnHelpId}-${index}` : undefined}
-                    className={`${compact ? "px-2 py-3 text-center whitespace-nowrap" : "px-5 py-4 text-left"} text-xs font-semibold uppercase tracking-wide ${heading === "Committed to Tests" ? "text-blue-700" : "text-zinc-500"}`}
+                    title={descriptions[heading]}
+                    className={`${compact || heading==="Committed" || heading==="WO Held" || heading==="Net incl. WO" ? "px-2 py-3 text-center whitespace-nowrap" : "px-5 py-4 text-left"} text-xs font-semibold uppercase tracking-wide ${heading === "Committed to Tests" ? "text-blue-700" : "text-zinc-500"}`}
                   >
                     {compact ? <span tabIndex={0} title={descriptions[heading]} aria-describedby={`${columnHelpId}-${index}`} className="group relative inline-block rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500">
                       {labels[heading] ?? heading}
@@ -83,6 +100,7 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
               const commitment = commitments?.get(product.id);
               const testCommitment = testCommitments?.get(product.id);
               const health = stockHealth?.get(product.id);
+              const accounting=reservationAccounting?.get(product.id);
               return (
               <tr key={product.id} className="text-sm text-zinc-700">
                 <th scope="row" className={`whitespace-nowrap ${cellSpacing} ${compact ? "w-24 min-w-24" : "text-left"} font-mono font-semibold text-zinc-900`}>
@@ -99,7 +117,8 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                 <td className={cellSpacing}>{product.category}</td>
                 <td className={cellSpacing}>{product.brandName ?? "—"}</td>
                 <td className={numericClass}>{(warehouseCode === "finished_goods" && commitment ? commitment.physicalQuantity : product.quantity).toString()}</td>
-                {showCommitments && <td className={numericClass}>{commitment?.committedToProjects.toString() ?? "Unavailable"}</td>}
+                {unifiedEnabled&&<td className={`${numericClass} text-center`}><UnifiedCommittedCell productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseId={INVENTORY_WAREHOUSES.find(w=>w.code===(warehouseCode??"raw_materials"))?.id??""} authorizedWarehouseIds={commitmentBreakdownWarehouseIds??[]}/></td>}
+                {showCommitments && !(unifiedEnabled&&warehouseCode!=="finished_goods") && <td className={numericClass}>{rawMaterials||warehouseCode==="finished_goods"?<CommitmentQuantity value={commitment?.committedToProjects.toString()??"Unavailable"} productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseCode={warehouseCode} metric={rawMaterials?"project_demand":"fg_project_reservation"} authorizedWarehouseIds={commitmentBreakdownWarehouseIds}/>:commitment?.committedToProjects.toString()??"Unavailable"}</td>}
                 {showCommitments && <td className={numericClass}>
                   {commitment ? (
                     <span className={commitment.availableAfterCommitments < 0n ? "font-semibold text-red-700" : undefined}>
@@ -110,12 +129,14 @@ function ProductList({ products, warehouseCode, commitments, showCommitments = t
                     </span>
                   ) : "Unavailable"}
                 </td>}
-                {showTestCommitments && <td className={`${numericClass} font-semibold text-blue-700`}>{testCommitment?.committedToTests ?? "Unavailable"}</td>}
+                {showTestCommitments && <td className={`${numericClass} font-semibold text-blue-700`}><CommitmentQuantity value={testCommitment?.committedToTests??"Unavailable"} productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseCode={warehouseCode} metric="test_hold" authorizedWarehouseIds={commitmentBreakdownWarehouseIds}/></td>}
                 {showTestCommitments && <td className={numericClass}>
                   <span className={testCommitment?.availableAfterProjectsAndTests.startsWith("-") ? "font-semibold text-red-700" : undefined}>
                     {testCommitment?.availableAfterProjectsAndTests ?? "Unavailable"}
                   </span>
                 </td>}
+                {heldEnabled&&!unifiedEnabled&&<td className="w-24 min-w-24 whitespace-nowrap px-2 py-3 text-center tabular-nums"><CommitmentQuantity value={accounting?.warehouseWorkOrderHeld??"Unavailable"} productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseCode={warehouseCode} metric="work_order_reservation" authorizedWarehouseIds={commitmentBreakdownWarehouseIds}/></td>}
+                {heldEnabled&&<td className="w-24 min-w-24 whitespace-nowrap px-2 py-3 text-center tabular-nums"><span className={accounting?.netAvailableAfterAllCommitments.startsWith("-")?"font-semibold text-red-700":undefined}>{accounting?.netAvailableAfterAllCommitments??"Unavailable"}</span></td>}
                 {showStockHealth && <td className={`whitespace-nowrap ${cellSpacing}`}>
                   {health ? <StatusBadge label={{HEALTHY:"Healthy",LOW_STOCK:"Low Stock",OUT_OF_STOCK:"Out of Stock",NOT_CONFIGURED:"Not Set"}[health.status]}
                     tone={{HEALTHY:"success",LOW_STOCK:"warning",OUT_OF_STOCK:"danger",NOT_CONFIGURED:"neutral"}[health.status] as "success"|"warning"|"danger"|"neutral"} /> : "Unavailable"}

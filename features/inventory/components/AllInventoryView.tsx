@@ -6,6 +6,12 @@ import StatusBadge from "../../../shared/components/StatusBadge";
 import { INVENTORY_WAREHOUSES } from "../inventoryWarehouses";
 import { useAllInventory, type AllInventoryRow } from "../hooks/useAllInventory";
 import { isInventoryStockHealthEnabled } from "../../../app/config/inventoryStockHealthActivation";
+import CommitmentQuantity from "./CommitmentQuantity";
+import {isWorkOrderCommitmentReadsEnabled} from "../../../app/config/workOrderCommitmentReadsActivation";
+import {useInventoryHeldAccounting} from "../hooks/useInventoryHeldAccounting";
+import type {InventoryReservationAccountingRow} from "../services/inventoryReservationAccountingService";
+import {isUnifiedCommittedEnabled} from "../../../app/config/unifiedCommittedActivation";
+import UnifiedCommittedCell from "./UnifiedCommittedCell";
 
 const healthLabels = { HEALTHY: "Healthy", LOW_STOCK: "Low Stock", OUT_OF_STOCK: "Out of Stock", NOT_CONFIGURED: "Not Configured" };
 const identityWidths = ["w-12 min-w-12 max-w-12", "w-24 min-w-24 max-w-24", "w-56 min-w-56 max-w-56"];
@@ -27,13 +33,20 @@ function pinnedBodyColumn(column: number) {
   if (column === 2) return "bg-white md:sticky md:left-36 md:z-10 md:border-r md:border-zinc-200 md:shadow-[2px_0_3px_-2px_#a1a1aa]";
   return "";
 }
-export function AllInventoryTable({ rows, testsEnabled }: { rows: AllInventoryRow[]; testsEnabled: boolean }) {
+export interface AllInventoryTableProps {rows:AllInventoryRow[];testsEnabled:boolean;authorizedWarehouseIds?:readonly string[];showWorkOrderCommitments?:boolean;reservationAccounting?:ReadonlyMap<string,InventoryReservationAccountingRow>}
+export function AllInventoryTable({ rows, testsEnabled, authorizedWarehouseIds,showWorkOrderCommitments=false,reservationAccounting }: AllInventoryTableProps) {
   const scrollHelpId = useId();
   const healthEnabled = isInventoryStockHealthEnabled();
-  const columns = [...baseColumns,
+  const heldEnabled=showWorkOrderCommitments&&isWorkOrderCommitmentReadsEnabled();
+  const unifiedEnabled=isUnifiedCommittedEnabled();
+  const columns = [...baseColumns.map(c=>unifiedEnabled&&c.label==="Project Demand"?{label:"Committed",description:"Project Demand plus actual Draft Work Order Held. Linked requirements may overlap. Raw rows use Raw + Customs; FG and Customs use their own warehouse. Availability is unchanged."}:c),
     ...(testsEnabled ? [
       { label: "Test Holds", description: "Committed to Tests: active Test Calculator holds. Raw rows cover Raw + Customs; FG and Customs rows cover only their own warehouse." },
       { label: "After Tests", description: "Available After Projects and Tests: Raw + Customs minus Project demand and their Test holds for Raw rows; FG minus Project reservations and FG Test holds for FG rows; Customs minus Customs Test holds for Customs rows." },
+    ] : []),
+    ...(heldEnabled ? [
+      ...(!unifiedEnabled?[{label:"WO Held",description:"Actual active Draft Work Order Held in this row's warehouse only; excludes Uncovered requirements."}]:[]),
+      {label:"Net incl. WO",description:"Raw rows: Raw + Customs physical minus independent Project Demand, Test holds and WO Held in that combined scope. FG: physical minus FG reservations, Test holds and WO Held. Customs: physical minus Customs Test and WO holds. Each deducted once; no Project coverage assumed."},
     ] : []),
     ...(healthEnabled ? [{ label: "Health", description: "Stock Health: warehouse physical stock compared with its configured minimum, independent of commitments." }] : []),
     { label: "Status", description: "Product Active or Archived status, separate from Stock Health." },
@@ -53,14 +66,35 @@ export function AllInventoryTable({ rows, testsEnabled }: { rows: AllInventoryRo
     </th>)}</tr></thead>
     <tbody>{rows.map(({ warehouse, product, commitment, test, health }) => {
       const raw = warehouse.code === "raw_materials", fg = warehouse.code === "finished_goods";
+      const accounting=reservationAccounting?.get(`${warehouse.id}:${product.id}`);
+      const quantity=(metric:"project_demand"|"fg_project_reservation"|"test_hold"|"work_order_reservation",value:string)=><CommitmentQuantity value={value} productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseCode={warehouse.code} metric={metric} authorizedWarehouseIds={authorizedWarehouseIds}/>;
       const cells = [product.serialNumber, <Link to={`/inventory/${product.id}?warehouse=${warehouse.code}`} title={product.name} className="mx-auto block w-50 truncate text-center font-semibold underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-red-500">{product.name}</Link>, product.category, product.brandName ?? "—", product.quantity.toString(),
-        raw ? commitment?.committedToProjects.toString() ?? "Unavailable" : "—", fg ? commitment?.committedToProjects.toString() ?? "Unavailable" : "—",
+        unifiedEnabled?<UnifiedCommittedCell productId={product.id} productName={product.name} serialNumber={product.serialNumber} warehouseId={warehouse.id} authorizedWarehouseIds={authorizedWarehouseIds??[]}/>:raw ? quantity("project_demand",commitment?.committedToProjects.toString()??"Unavailable") : "—", fg ? quantity("fg_project_reservation",commitment?.committedToProjects.toString()??"Unavailable") : "—",
         raw ? commitment?.availableAfterCommitments.toString() ?? "Unavailable" : "—", fg ? commitment?.availableAfterCommitments.toString() ?? "Unavailable" : "—",
-        ...(testsEnabled ? [test?.committedToTests ?? "Unavailable", test?.availableAfterProjectsAndTests ?? "Unavailable"] : []),
+        ...(testsEnabled ? [quantity("test_hold",test?.committedToTests??"Unavailable"), test?.availableAfterProjectsAndTests ?? "Unavailable"] : []),
+        ...(heldEnabled ? [...(!unifiedEnabled?[quantity("work_order_reservation",accounting?.warehouseWorkOrderHeld??"Unavailable")]:[]),accounting?.netAvailableAfterAllCommitments??"Unavailable"] : []),
         ...(healthEnabled ? [health ? <StatusBadge label={health.status === "NOT_CONFIGURED" ? "Not Set" : healthLabels[health.status]} tone={health.status === "HEALTHY" ? "success" : health.status === "LOW_STOCK" ? "warning" : health.status === "OUT_OF_STOCK" ? "danger" : "neutral"} /> : "Unavailable"] : []), <StatusBadge label={product.isActive ? "Active" : "Archived"} tone={product.isActive ? "success" : "neutral"} />];
       return <tr key={`${warehouse.id}:${product.id}`} className="h-12 text-sm text-zinc-700"><th scope="row" className={`h-12 border-b border-zinc-200 px-2 py-2 text-center ${identityWidths[0]} ${pinnedBodyColumn(0)}`}><abbr title={warehouse.label} aria-label={warehouse.label} className="rounded-md bg-zinc-100 px-2 py-1 no-underline">{{raw_materials:"R",finished_goods:"F",customs:"C"}[warehouse.code]}</abbr></th>
         {cells.map((value, i) => <td key={columns[i + 1]!.label} className={`h-12 border-b border-zinc-200 px-2 py-2 whitespace-nowrap tabular-nums text-center ${identityWidths[i + 1] ?? "min-w-24"} ${pinnedBodyColumn(i + 1)} ${columns[i + 1]!.label === "Test Holds" ? "font-semibold text-blue-700" : typeof value === "string" && /^-[1-9]/.test(value) ? "font-semibold text-red-700" : ""}`}>{value}</td>)}</tr>;
     })}</tbody></table></div></div>;
+}
+function HeldInventoryTable(props:AllInventoryTableProps&{search:string}){
+  const ids=props.authorizedWarehouseIds??[];
+  const raw=useInventoryHeldAccounting(INVENTORY_WAREHOUSES[0]!.id,props.search,ids,props.rows.some(r=>r.warehouse.code==="raw_materials"));
+  const fg=useInventoryHeldAccounting(INVENTORY_WAREHOUSES[1]!.id,props.search,ids,props.rows.some(r=>r.warehouse.code==="finished_goods"));
+  const customs=useInventoryHeldAccounting(INVENTORY_WAREHOUSES[2]!.id,props.search,ids,props.rows.some(r=>r.warehouse.code==="customs"));
+  const reads=[raw,fg,customs],accounting=new Map<string,InventoryReservationAccountingRow>();
+  reads.forEach((read,index)=>read.rows?.forEach(row=>accounting.set(`${INVENTORY_WAREHOUSES[index]!.id}:${row.productId}`,row)));
+  const missing=props.rows.some(row=>!accounting.has(`${row.warehouse.id}:${row.product.id}`));
+  return <div className="space-y-2">
+    <p className="text-xs text-zinc-500">WO Held is warehouse-specific. Net incl. WO is the separate Held-aware projection; Raw covers Raw + Customs. Legacy Available / After Tests remain unchanged. Accounting pages are separate observations.</p>
+    {missing&&<p role={reads.some(r=>r.query.isFetching)?"status":"alert"} className="text-sm text-zinc-600">{reads.some(r=>r.query.isFetching)?"Loading Work Order commitment accounting…":"Some Work Order commitment accounting is unavailable; no missing values are assumed to be zero."}</p>}
+    <button type="button" disabled={reads.some(r=>r.query.isFetching)||!reads.some(r=>r.allowed)} className="text-xs text-zinc-600 underline focus-visible:outline-2 focus-visible:outline-red-500" onClick={()=>void Promise.all(reads.filter(r=>r.allowed).map(r=>r.query.refetch({cancelRefetch:false})))}>Refresh WO commitments</button>
+    <AllInventoryTable {...props} showWorkOrderCommitments reservationAccounting={accounting}/>
+  </div>;
+}
+export function InventoryAccountingTable(props:AllInventoryTableProps&{search:string}){
+  return isWorkOrderCommitmentReadsEnabled()?<HeldInventoryTable {...props}/>:<AllInventoryTable {...props}/>;
 }
 export default function AllInventoryView({ authorizedWarehouseIds, search, testsEnabled }: { authorizedWarehouseIds: readonly string[]; search: string; testsEnabled: boolean }) {
   const [warehouseChoice, setWarehouse] = useState("all"), [lifecycle, setLifecycle] = useState("all"), [health, setHealth] = useState("all"), [pageState, setPage] = useState({ scope: "", page: 0 }), [refreshing, setRefreshing] = useState(false), [refreshError, setRefreshError] = useState(false);
@@ -81,7 +115,7 @@ export default function AllInventoryView({ authorizedWarehouseIds, search, tests
     <p className="text-sm text-zinc-500">Quantities are warehouse-specific, never added together. Raw planning and Raw Test columns cover Raw + Customs; FG reservations and Customs Test holds keep their separate scopes. “—” means not applicable; “Unavailable” means unverified. Reads across warehouses are not an atomic stock snapshot.</p>
     {refreshError && <p role="alert">All Inventory could not be refreshed. Retry before relying on unverified figures.</p>}
     {data.pending ? <LoadingState message="Loading complete authorized Inventory…" /> : data.failure ? <ErrorState title="Unable to load All Inventory" message={data.failure} onRetry={() => void refresh()} /> : health !== "all" && !data.healthReady ? <ErrorState title="Stock health unavailable" message="Filtered results require successful authorized stock-health reads." onRetry={() => void refresh()} /> : filtered.length === 0 ? <p role="status">No Products match the authorized Inventory filters.</p> : <>
-      <AllInventoryTable rows={filtered.slice(page * 50, page * 50 + 50)} testsEnabled={testsEnabled} />
+      <InventoryAccountingTable rows={filtered.slice(page * 50, page * 50 + 50)} testsEnabled={testsEnabled} authorizedWarehouseIds={authorizedWarehouseIds} search={search} />
       <nav aria-label="All Inventory pages" className="flex items-center gap-4"><button disabled={page === 0} onClick={() => setPage({ scope, page: page - 1 })}>Previous</button><span>Page {page + 1} of {pages} · {filtered.length} Product/warehouse rows</span><button disabled={page + 1 >= pages} onClick={() => setPage({ scope, page: page + 1 })}>Next</button></nav>
     </>}
   </div>;

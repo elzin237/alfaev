@@ -1,5 +1,212 @@
 # AlfaEV — SECURITY_RULES.md
 
+## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
+
+DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,
+with zero pending migrations. Operational Draft reservations, Inventory accounting/
+breakdown and Unified Committed/Admin attribution are ON for DEV only. Other backend
+origins remain OFF; this checkpoint changes no activation or permission.
+
+Committed is the approved reporting sum of Project Demand and actual active Draft
+WO Held, not deduplicated unique demand or hard reserved stock. The authenticated
+DEV read and Raw/All browser popup verified ULN2804AN: 23 + 68 = 91, with authorized
+Project and Work Order sources. Availability, physical stock, Test/FG protections,
+existing allocations, evidence/history and security were preserved by deployment.
+Raw, All and FG browser checks passed. Populated Customs row-level browser acceptance
+is PENDING: DEV has no eligible Customs Products; only its empty state was checked.
+Earlier local/OFF/deployment-pending sections below are retained historical evidence.
+
+## Additive Committed reporting — local migration 182
+
+The two replaced STABLE SECURITY DEFINER reads retain empty search_path, active
+authenticated profile checks and canonical Product/warehouse membership. Raw+Customs
+requires both warehouse grants. Project and Work Order identities/navigation require
+their respective current module grants; restricted amounts remain aggregate-only.
+Only authenticated EXECUTE is granted; PUBLIC, anon and service_role are revoked.
+No private table access, permission assignments, writer changes or gate changes occur.
+
+Pagination remains bounded to 1–100 rows with actor/profile/content-bound cursors and
+explicit stale-cursor restart. Frontend query identities separate reporting-v2 from
+older deduplicated cached values. Strict schema-2 parsing rejects legacy/Unknown
+responses rather than fabricating quantities. Local 182 requires separate deployment;
+no persistent backend was accessed or activated for this change.
+
+## Admin attribution context/recovery — local migration 181
+
+The new read-only context uses controlled SECURITY DEFINER and a single snapshot,
+bounded matching requirements, active-Admin authorization and saved-material/state
+consistency. No broad private-table access or mutation changes are introduced.
+Client snapshot limits never supersede the trusted material/requirement/warehouse
+checks. Page/context changes reset confirmation, and unsaved Drafts cannot submit.
+
+Recovery uses the established Test Save Web Locks and verified localStorage protocol
+with a separate namespace. Write uncertainty BEFORE network dispatch and preserve
+original actor/backend/profile, UUID, exact payload and revision tokens. Denied
+replay cannot prove an earlier failure; retain the journal. Persist verified receipt
+before cache refresh/clear, hide other scopes and never silently issue a replacement.
+All new reads/writes/UI remain behind the default-OFF unified gate, now requiring
+migrations through 181 plus separately authorized deployment and acceptance.
+
+## Unified Committed local contracts — migration 180
+
+New controlled-search_path SECURITY DEFINER operations preserve active-profile and
+current warehouse authorization. The Admin wrapper delegates immutable actor-bound
+validation/replay, serializes cross-kind UUID reuse and grants no direct table access.
+Read/breakdown are STABLE and share one statement snapshot. Membership reuses the
+authoritative warehouse search. Source identifiers require module authorization;
+coverage identity requires both modules, with restricted signed aggregates retained.
+
+Unknown overlap produces a NULL committed total. A source arithmetic subtotal is
+explicitly not proof. Cursor digests contain only permitted observation/visible
+source data, are recipient/profile scoped and fail stale with ICB01. Frontend keys
+include configured backend, actor, profile and warehouse grants; forced refetch must
+still honor the gate/authorization. No polling, activation or original accounting
+function rewrite is introduced. UI/form/popup completion and acceptance are required
+before the new default-OFF release may be considered for activation.
+
+## Admin exact coverage boundary — local migration 179
+
+New private SECURITY DEFINER helpers use empty search_path and explicit active
+Admin/Auth checks, actor-bound request serialization/replay and compare-and-swap
+supersession. Lock Work Order, all involved Projects in UUID order, requirement,
+Product, then material state, matching existing planning and Finish boundaries.
+Project serialization protects cross-Work-Order requirement caps; state locking
+protects warehouse/material/independence partitions. Dynamic reads never use
+`work_order.project_id` as evidence. It is used only as an existing lock dependency.
+
+Only proven zero Project/Product consumption permits exact outstanding inference.
+Any unassigned consumption fails closed, including after a declaration. Live
+revision/lifecycle/warehouse snapshots must match; historical rows remain immutable.
+No existing physical writer, availability formula, reservation admission or public
+RPC is modified. No public EXECUTE/table grants, activation, backfill or consumption
+allocation subsystem is introduced. Inventory's positive-coverage use remains OFF.
+
+## Attribution evidence boundary — local migration 178
+
+Controlled empty-search_path SECURITY DEFINER helpers require active Admin and
+bind request UUID/payload to both Auth and profile. Immutable replacement evidence
+is bounded by actual saved requirements, not caller-supplied Project associations.
+Request serialization plus parent/state locking and expected predecessor prevent
+concurrent declarations from becoming additive or silently overwriting history.
+Use READ COMMITTED; changed-payload retries fail. Exact historical replay never
+reactivates stale evidence. Evidence insertion locks no stock and changes no
+existing lifecycle/Inventory function. No application EXECUTE/table privileges,
+automatic attribution, activation or backfill is introduced.
+
+Effective private reads invalidate evidence on material version, Draft revision,
+quantity or lifecycle mismatch. Project coverage stays zero without trusted
+requirement-level proof; Unknown is not silently recategorized as independence.
+Future public Admin declaration and unified read contracts need separate scoped
+authorization, warehouse attribution and coverage-consumption consistency work.
+
+## Task 9A operational wiring — local migration 177
+
+Public transactional wrappers keep controlled empty search_path and canonical
+authorization, delegating to the existing trusted lifecycle only behind the
+private default-OFF enrollment gate or for already-tracked ownership maintenance.
+No client GUC, URL, environment or storage override exists. Gate changes require
+separately approved owner SQL, not an application RPC. Hold the gate row SHARE
+lock for the whole operation; perform a future operator switch as a standalone
+controlled transaction, not mixed with stock or Work Order writes.
+
+Private canonical bases remain unreachable to application roles, so gate-ON
+clients cannot bypass reservation reconciliation by invoking the old writer.
+Exact actor-bound retry receipts, expected-version checks and Product/warehouse
+locking remain those of the reviewed lifecycle; no new stock lock ordering,
+global debit exemption, physical mutation, historical initializer or top-up is
+introduced. New PCB Project rejection and old authorized PCB replay remain intact.
+Both database enrollment and frontend accounting/popup activation remain OFF.
+
+## Task 7 local breakdown boundary — migration 176
+
+The additive STABLE SECURITY DEFINER RPC has an empty search_path, explicit active
+actor checks, canonical warehouse scope validation and narrowly authenticated
+EXECUTE. It projects one selected metric from one MVCC snapshot, using statement
+time for effective Test expiry and immutable release-aware helpers. It neither
+mutates accounting nor changes any existing RPC response shape.
+
+Only source-authorized rows may carry identities/navigation. Redacted sources
+contribute an aggregate, never zero or private source counts. Cursor validation
+binds scope/actor/current authorized snapshot; it does not sign or freeze a server
+snapshot. Client-altered cursors cannot reveal denied sources; stale data or
+permissions fail closed with ICB01. Page limit is 100 and cursor JSON is bounded.
+The frontend parser checks exact fields, bigint equations, scope and ordering;
+service dispatch remains behind the existing OFF gate. Task 8 must coordinate
+migration 176 availability before any popup activation. No polling or subscriptions
+are introduced by this foundation.
+
+## Task 6 local read/queue boundary — migration 175
+
+Additive accounting RPCs use controlled SECURITY DEFINER, explicit existing read
+authorization, bounded results, one STABLE MVCC snapshot and database statement time
+for effective Test expiry. Missing structural stock sources fail unavailable, never
+zero. Legacy read signatures and physical-only Stock Health are preserved. No private
+source identities are exposed by warehouse aggregates. Work Order-only access does
+not confer warehouse stock access. Project coverage remains generated zero.
+Allocation/status triggers queue only Product identities in the existing transaction-
+coalesced deferred reconciliation path; they acquire no Work Order/Project locks and
+never allocate stock. New frontend reads remain gated OFF with backend/actor/profile
+cache scope. No create/save reservation activation or historical backfill is introduced.
+
+## Draft Work Order reservations V1 — implementation requirements, 2026-10-30
+
+DESIGN ONLY; no deployment, backfill or new database/client capability exists yet.
+Private state/allocation/event/receipt/coverage relations require RLS and no direct
+PUBLIC/anon/authenticated/service_role table grants. Trusted narrow functions use
+controlled empty search_path, explicit active actors and current parent-operation
+authorization. Private helpers are not browser-executable. Immutable events and
+actor-bound receipts cannot be rewritten, truncated or disclosed across actors.
+
+Under READ COMMITTED, integrate with the existing lock graph: serialize operation/
+request and Work Order identity first; acquire a linked Project/requirement lock
+only where its existing operation or proven coverage requires it, before Product
+locks (multiple affected Projects/requirements are ordered by their identities).
+Lock all affected Products in deterministic Product-ID order before balances;
+use the established compatible warehouse order, then allocation/coverage state and
+FIFO lots. Validate this graph against ordinary/PCB Finish, Project requirement and
+FG reservation mutations, Test Save/import, adjustment and transfer paths before
+shipping. Do not claim a newly added lock is safe merely because one RPC sorts it.
+Never acquire a Work Order or Project row lock from a stock/shortage trigger that
+already holds Product/balance locks; preserve the coalesced Product queue's boundary.
+
+First-write uniqueness and parent/version serialization prevent two simultaneous
+allocations for one logical change. Actor-bound exact request replay cannot allocate,
+release, consume or notify twice; altered payload/actor reuse is denied before receipt
+disclosure. Retain existing creation replay and stale-Draft checks. Recheck current
+authority after waits and use fresh database time for Test expiry, not browser time.
+All admission/debit paths must serialize on the affected stock identity and enforce
+P >= effective Test holds + FG Project reservations + active Draft Held at commit.
+Numeric intermediate arithmetic and checked bigint boundaries fail closed on overflow.
+
+Own-reservation credit is derived from the locked target Work Order, never an
+arbitrary caller-supplied exemption/owner flag. Finish may exchange only its own
+warehouse allocations to preserve sourcing/FIFO while all affected balances are
+locked; maintain other-owner protections throughout. Consumed/released transitions,
+physical debits, source lots, actual-good credit, PDF linkage and lifecycle/audit
+effects must commit or roll back together. No pre-release followed by a later Finish.
+Draft deletion preserves immutable receipts/events without orphaning active stock
+allocations or defeating the existing deletion authorization/version contract.
+
+Coverage claims must match exact live requirement ancestry/Product, revision and
+non-overlapping quantity capacity, and fail closed when proof cannot be verified.
+Never reduce Project Demand from work_order.project_id or an unbacked Required/U
+quantity. Do not reuse a Project FG allocation as an additional Draft allocation.
+Project cancellation, requirement changes and consumed demand can invalidate coverage
+without destroying independent Draft Held. Preserve evidence rather than rewriting it.
+
+Read-only popups must authorize the warehouse scope and each disclosed source type
+inside one trusted snapshot. Denied sources reveal no identifiers, labels, dates,
+links, source counts or cursor tokens encoding their identities. Paginate only the
+authorized rows; restricted remainder may contain only an already-authorized metric
+quantity. Scope frontend caches by backend, authenticated actor/profile, warehouse,
+metric and relevant permissions; hide stale values on identity/authority changes.
+Reads, refresh, stock arrival and Test expiry never create Draft allocations.
+
+Activation is blocked until every stock protection/admission/production/shortage
+consumer is integrated and isolated lifecycle/concurrency/security tests pass.
+Existing Drafts must remain explicitly uninitialized unless separately authorized;
+no unbounded initialization on startup, Inventory reads or Dashboard visits.
+
 ## Current Import from Test security checkpoint — 2026-10-30
 
 The recorded guarded deployment and independent read-only verification confirmed

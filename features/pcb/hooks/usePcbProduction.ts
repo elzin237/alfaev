@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../../app/auth/AuthProvider";
+import {refreshUnsignalledWorkOrderCommitments} from "../../inventory/refreshWorkOrderCommitmentReads";
 import { workOrderListQueryKey } from "../../work-orders/workOrderQueryKeys";
 import { pcbProductionSourceQueryKey } from "../pcbQueryKeys";
 import { producePcb, type ProducePcbInput, type ProducePcbResult } from "../services/pcbProductionService";
@@ -7,7 +8,7 @@ import { producePcb, type ProducePcbInput, type ProducePcbResult } from "../serv
 export type ProductionSubmission = ProducePcbInput;
 
 export function usePcbProduction(cardId: string) {
-  const { profile } = useAuth();
+  const { profile,session } = useAuth();
   const queryClient = useQueryClient();
   const profileId = profile?.id;
   const mutation = useMutation({
@@ -34,6 +35,7 @@ export function usePcbProduction(cardId: string) {
       return result;
     }
     await Promise.allSettled([
+      refreshUnsignalledWorkOrderCommitments(queryClient,session?.user.id,profileId),
       queryClient.invalidateQueries({ queryKey: pcbProductionSourceQueryKey(profileId, cardId), exact: true }),
       queryClient.invalidateQueries({ queryKey: workOrderListQueryKey(profileId), exact: true }),
     ]);

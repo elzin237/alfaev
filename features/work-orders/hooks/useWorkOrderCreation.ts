@@ -5,6 +5,7 @@ import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { createDraftWorkOrder } from "../services/workOrderService";
 import { workOrderListQueryKey } from "../workOrderQueryKeys";
+import {refreshUnsignalledWorkOrderCommitments} from "../../inventory/refreshWorkOrderCommitmentReads";
 
 export function useWorkOrderCreation() {
   const { session, profile, isAdmin } = useAuth();
@@ -24,6 +25,7 @@ export function useWorkOrderCreation() {
     mutationFn: createDraftWorkOrder,
     onSuccess: async (result) => {
       if (result.ok) {
+        await refreshUnsignalledWorkOrderCommitments(queryClient,session?.user.id,profile?.id);
         await queryClient.invalidateQueries({
           queryKey: listQueryKey,
           exact: true,
