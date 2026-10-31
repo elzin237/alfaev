@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import ErrorState from "../../shared/components/ErrorState";
@@ -46,6 +47,8 @@ function UserDetailPage() {
     staleTime: 60_000,
   });
 
+  useApplicationHeaderLabel(userId && !userQuery.isPending && !userQuery.isFetching && !userQuery.isError && userQuery.data?.ok
+    ? `User: ${userQuery.data.value.fullName}` : null);
   let content: ReactNode;
 
   if (!userId) {

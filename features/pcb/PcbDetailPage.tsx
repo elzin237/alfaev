@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
@@ -14,6 +15,8 @@ export default function PcbDetailPage() {
   const { pcbCardId = "" } = useParams<{ pcbCardId: string }>();
   const { detailQuery, canEdit, save, profileId } = usePcbBomDetail(pcbCardId);
   const canProduce = usePcbProduceAccess();
+  useApplicationHeaderLabel(isPcbCardId(pcbCardId) && !detailQuery.isPending && !detailQuery.isFetching && !detailQuery.isError && detailQuery.data?.ok
+    ? `Calculator: ${detailQuery.data.value.name}` : null);
 
   if (!isPcbCardId(pcbCardId)) {
     return <ErrorState title="Finished-product definition not found" message="The Product Calculator definition could not be found." />;

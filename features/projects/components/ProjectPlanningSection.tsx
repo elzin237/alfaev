@@ -5,6 +5,7 @@ import ConfirmDialog from "../../../shared/components/ConfirmDialog";
 import EmptyState from "../../../shared/components/EmptyState";
 import ErrorState from "../../../shared/components/ErrorState";
 import LoadingState from "../../../shared/components/LoadingState";
+import { RequirementProductAutocomplete } from "./RequirementProductAutocomplete";
 import type { InventoryCommitment } from "../../inventory/services/inventoryCommitmentService";
 import type { ProjectStatus } from "../projectStatus";
 import { useProjectPlanning } from "../hooks/useProjectPlanning";
@@ -434,7 +435,6 @@ function RequirementDialog({
   onSucceeded: () => void;
 }) {
   const titleId = useId();
-  const searchRef = useRef<HTMLInputElement>(null);
   const lockRef = useRef(false);
   const [productId, setProductId] = useState(
     editor.mode === "edit" ? editor.requirement.productId : "",
@@ -444,10 +444,7 @@ function RequirementDialog({
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { searchRef.current?.focus(); }, []);
   const current = editor.mode === "edit" ? editor.requirement : null;
-  const showHistoricalChoice = current &&
-    !choices.some((choice) => choice.productId === current.productId);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -489,7 +486,7 @@ function RequirementDialog({
         onKeyDown={(event) => {
           if (event.key === "Escape" && !submitting) onClose();
         }}
-        className="w-full max-w-xl rounded-3xl border border-zinc-200 bg-white p-6 shadow-xl"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-xl overflow-y-auto rounded-3xl border border-zinc-200 bg-white p-6 shadow-xl"
       >
         <h2 id={titleId} className="text-xl font-bold text-zinc-900">
           {editor.mode === "create" ? "Add Requirement" : "Edit Requirement"}
@@ -499,53 +496,22 @@ function RequirementDialog({
           Finished Goods may be automatically reserved up to outstanding demand.
         </p>
         <form className="mt-6 space-y-5" noValidate onSubmit={(event) => void submit(event)}>
-          <div>
-            <label htmlFor="planning-product-search" className="text-sm font-semibold text-zinc-800">
-              Search Products by Name or Serial Number
-            </label>
-            <input
-              ref={searchRef}
-              id="planning-product-search"
-              className={inputClass}
-              value={search}
-              onChange={(event) => {
-                if (productId !== current?.productId) setProductId("");
-                onSearch(event.target.value);
-              }}
-              disabled={submitting}
-            />
-          </div>
-          <div>
-            <label htmlFor="planning-product-choice" className="text-sm font-semibold text-zinc-800">
-              Product
-            </label>
-            <select
-              id="planning-product-choice"
-              className={inputClass}
-              value={productId}
-              onChange={(event) => setProductId(event.target.value)}
-              disabled={submitting || choicesPending || Boolean(choicesError)}
-            >
-              <option value="">Select a Product</option>
-              {showHistoricalChoice && (
-                <option value={current.productId}>
-                  {current.serialNumber} — {current.productName} (current historical Product)
-                </option>
-              )}
-              {choices.map((choice) => (
-                <option key={choice.productId} value={choice.productId}>
-                  {choice.serialNumber} — {choice.name} ({kindLabel(choice.productKind)})
-                </option>
-              ))}
-            </select>
-            {choicesPending && <p role="status" className="mt-2 text-sm text-zinc-500">Loading Product choices...</p>}
-            {choicesError && (
-              <p role="alert" className="mt-2 text-sm text-red-700">
-                {choicesError}{" "}
-                <button type="button" className="underline" onClick={onRetryChoices}>Try again</button>
-              </p>
-            )}
-          </div>
+          <RequirementProductAutocomplete
+            choices={choices}
+            pending={choicesPending}
+            error={choicesError}
+            onRetry={onRetryChoices}
+            search={search}
+            onSearch={onSearch}
+            initialProduct={current ? {
+              productId: current.productId,
+              name: current.productName,
+              serialNumber: current.serialNumber,
+              productKind: current.productKind,
+            } : null}
+            onSelect={setProductId}
+            disabled={submitting}
+          />
           <div>
             <label htmlFor="planning-required-quantity" className="text-sm font-semibold text-zinc-800">
               Required Quantity

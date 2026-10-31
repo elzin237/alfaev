@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
 import PageHeader from "../../shared/components/PageHeader";
@@ -17,6 +18,8 @@ export default function PcbProductionPrecheckPage() {
     plannedQuantity: string; projectName: string | null } | null>(null);
   const { sourceQuery } = usePcbProductionPrecheck(pcbCardId);
   const production = usePcbProduction(pcbCardId);
+  useApplicationHeaderLabel(isPcbCardId(pcbCardId) && !sourceQuery.isPending && !sourceQuery.isFetching && !sourceQuery.isError && sourceQuery.data?.ok
+    ? `Production: ${sourceQuery.data.value.cardName}` : null);
   if (!isPcbCardId(pcbCardId)) return <ErrorState title="Finished-product definition not found" message="The Product Calculator definition could not be found." />;
   if (completed) return <div className="space-y-6">
     <PageHeader title="Production Work Order created" description={`Finished product: ${completed.cardName}`} />

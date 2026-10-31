@@ -203,6 +203,20 @@ describe("WO-10 shared Dashboard badge", () => {
 });
 
 describe("Sidebar permission visibility", () => {
+  it("shows the official logo at its natural aspect ratio with the existing subtitle", () => {
+    renderSidebar();
+
+    const logo = screen.getByRole("img", { name: "Alfa Proteh" });
+    expect(logo).toHaveAttribute("src", "/assets/alfa-proteh-logo.png");
+    expect(logo).toHaveAttribute("width", "177");
+    expect(logo).toHaveAttribute("height", "59");
+    expect(logo).toHaveClass("h-auto", "w-40", "max-w-full", "object-contain");
+    expect(logo.closest("h1")).toHaveClass("bg-white", "rounded-lg");
+    expect(screen.getByText("Project & Production Hub")).toHaveClass("mt-2", "text-zinc-400");
+    expect(screen.queryByText("ALFAEV", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close navigation menu" })).toHaveClass("shrink-0");
+  });
+
   it("fills the dynamic viewport and keeps its own navigation scroll", () => {
     renderSidebar();
 

@@ -195,13 +195,19 @@ function Sidebar({
           lg:sticky lg:top-0 lg:h-dvh lg:shrink-0 lg:translate-x-0
         `}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-6">
-          <div>
-            <h1 className="text-2xl font-bold tracking-wide text-red-600">
-              ALFAEV
+        <div className="flex items-center justify-between gap-3 border-b border-white/10 px-6 py-6">
+          <div className="min-w-0">
+            <h1 className="inline-flex max-w-full rounded-lg bg-white px-2 py-1.5">
+              <img
+                src="/assets/alfa-proteh-logo.png"
+                alt="Alfa Proteh"
+                width={177}
+                height={59}
+                className="block h-auto w-40 max-w-full object-contain"
+              />
             </h1>
 
-            <p className="mt-1 text-sm text-zinc-400">
+            <p className="mt-2 text-sm text-zinc-400">
               Project & Production Hub
             </p>
           </div>
@@ -211,7 +217,7 @@ function Sidebar({
             type="button"
             aria-label="Close navigation menu"
             onClick={() => setSidebarOpen(false)}
-            className="rounded-lg p-2 lg:hidden"
+            className="shrink-0 rounded-lg p-2 lg:hidden"
           >
             <X size={22} />
           </button>

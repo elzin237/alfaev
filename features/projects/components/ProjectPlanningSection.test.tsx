@@ -533,9 +533,11 @@ describe("ProjectPlanningSection", () => {
     render(<ProjectPlanningSection projectId={projectId} status="planned" />);
     fireEvent.click(screen.getByRole("button", { name: "Add Requirement" }));
     const dialog = screen.getByRole("dialog", { name: "Add Requirement" });
-    expect(within(dialog).getByRole("option", { name: /0000123.*Relay/ })).toBeInTheDocument();
-    expect(within(dialog).getByRole("option", { name: /0000456.*PCB Output/ })).toBeInTheDocument();
-    fireEvent.change(within(dialog).getByLabelText("Product"), { target: { value: productId } });
+    expect(screen.getByRole("option", { name: /Relay.*0000123/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /PCB Output.*0000456/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /Relay.*0000123/ }));
+    expect(within(dialog).getByRole("combobox", { name: "Product" })).toHaveValue("Relay — 0000123");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     for (const quantity of ["0", "-1", "1.5"]) {
       fireEvent.change(within(dialog).getByLabelText("Required Quantity"), { target: { value: quantity } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
@@ -556,9 +558,7 @@ describe("ProjectPlanningSection", () => {
     const editButtons = screen.getAllByRole("button", { name: "Edit Requirement" });
     fireEvent.click(editButtons[0]!);
     const dialog = screen.getByRole("dialog", { name: "Edit Requirement" });
-    expect(within(dialog).getByRole("option", { name: /current historical Product/ }))
-      .toHaveValue(productId);
-    expect(within(dialog).getByLabelText("Product")).toHaveValue(productId);
+    expect(within(dialog).getByRole("combobox", { name: "Product" })).toHaveValue("Relay — 0000123");
     fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
     await waitFor(() => expect(mocks.updateRequirement).toHaveBeenCalledWith(componentId, productId, "50"));
     const removeButtons = screen.getAllByRole("button", { name: "Remove Requirement" });
@@ -566,5 +566,61 @@ describe("ProjectPlanningSection", () => {
     fireEvent.click(within(screen.getByRole("dialog", { name: "Remove Requirement" }))
       .getByRole("button", { name: "Remove Requirement" }));
     await waitFor(() => expect(mocks.removeRequirement).toHaveBeenCalledWith(componentId));
+  });
+
+  it("searches by serial, selects with the keyboard, and saves the exact Product identity", async () => {
+    setPlanningState({ canManage: true, data: { ok: true, value: [{ ...groups[0]!, requirements: [] }] } });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add Requirement" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Requirement" });
+    const input = within(dialog).getByRole("combobox", { name: "Product" });
+    fireEvent.change(input, { target: { value: "00004" } });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input).toHaveValue("PCB Output — 0000456");
+    expect(mocks.createRequirement).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByLabelText("Required Quantity"), { target: { value: "9007199254740993" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
+    await waitFor(() => expect(mocks.createRequirement).toHaveBeenCalledWith(groupId, pcbId, "9007199254740993"));
+  });
+
+  it("does not save a stale Product ID after clearing or typing over an edit selection", () => {
+    setPlanningState({ canManage: true });
+    render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 requirements" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Edit Requirement" })[0]!);
+    const dialog = screen.getByRole("dialog", { name: "Edit Requirement" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Clear Product selection" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Select a Product.");
+    expect(mocks.updateRequirement).not.toHaveBeenCalled();
+    fireEvent.focus(within(dialog).getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: /Relay/ }));
+    fireEvent.change(within(dialog).getByRole("combobox"), { target: { value: "not a Product" } });
+    expect(screen.getByRole("status")).toHaveTextContent("No products found");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save Requirement" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Select a Product.");
+    expect(mocks.updateRequirement).not.toHaveBeenCalled();
+  });
+
+  it("keeps Escape local to the dropdown and preserves loading/error save protection", () => {
+    setPlanningState({ canManage: true, choicePending: true });
+    const view = render(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.click(screen.getByRole("button", { name: "Add Requirement" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Requirement" });
+    expect(within(dialog).getByRole("button", { name: "Save Requirement" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading Product choices");
+    fireEvent.keyDown(within(dialog).getByRole("combobox"), { key: "Escape" });
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox")).toHaveAttribute("aria-expanded", "false");
+    setPlanningState({ canManage: true, choiceError: true });
+    view.rerender(<ProjectPlanningSection projectId={projectId} status="planned" />);
+    fireEvent.focus(within(dialog).getByRole("combobox"));
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Save Requirement" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(mocks.choicesRefetch).toHaveBeenCalledOnce();
+    expect(mocks.createRequirement).not.toHaveBeenCalled();
   });
 });

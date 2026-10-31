@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
@@ -57,6 +58,10 @@ function ProductDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   let content: ReactNode;
+
+  useApplicationHeaderLabel(selectedWarehouse && !warehouseAccess.isPending && !warehouseAccess.isError &&
+    !productQuery.isPending && !productQuery.isFetching && !productQuery.isError && productQuery.data?.ok
+    ? `${isEditOpen && canEdit ? "Edit Product" : "Product"}: ${productQuery.data.value.name} · ${productQuery.data.value.serialNumber}` : null);
 
   useEffect(() => {
     if (!selectedWarehouse || requestedWarehouse?.id === selectedWarehouse.id) return;

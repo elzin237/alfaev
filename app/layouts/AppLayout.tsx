@@ -4,13 +4,14 @@ import AppRouter from "../router/AppRouter";
 import Topbar from "../../shared/components/Topbar";
 import Sidebar from "../navigation/Sidebar";
 import ProjectAlertRuntimeSync from "../../features/dashboard/ProjectAlertRuntimeSync";
+import { ApplicationHeaderProvider } from "../../shared/components/ApplicationHeaderContext";
 
 function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div className="flex min-h-screen min-h-dvh bg-[#f4f5f7]">
+    <ApplicationHeaderProvider><div className="flex min-h-screen min-h-dvh bg-[#f4f5f7]">
       <ProjectAlertRuntimeSync />
       <Sidebar
         sidebarOpen={sidebarOpen}
@@ -29,7 +30,7 @@ function AppLayout() {
           <AppRouter />
         </main>
       </div>
-    </div>
+    </div></ApplicationHeaderProvider>
   );
 }
 

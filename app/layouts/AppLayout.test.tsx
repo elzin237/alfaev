@@ -1,6 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+vi.mock("../../shared/components/ApplicationHeaderContext", () => ({
+  ApplicationHeaderProvider: ({ children }: { children: import("react").ReactNode }) => <>{children}</>,
+}));
 
 vi.mock("../router/AppRouter", () => ({
   default: () => <section>Current page</section>,

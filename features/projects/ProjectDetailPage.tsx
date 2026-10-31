@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Link, useLocation, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
@@ -52,6 +53,9 @@ function ProjectDetailPage() {
   const [isReopening, setIsReopening] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useApplicationHeaderLabel(isProjectId(projectId) && !projectQuery.isPending && !projectQuery.isFetching && !projectQuery.isError && projectQuery.data?.ok
+    ? `${isEditOpen && canEdit ? "Edit Project" : "Project"}: ${projectQuery.data.value.name}` : null);
 
   async function confirmCancellation() {
     if (cancellationLockRef.current) return;

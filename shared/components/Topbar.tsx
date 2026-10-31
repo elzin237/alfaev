@@ -8,6 +8,7 @@ import { useAuth } from "../../app/auth/AuthProvider";
 import { hasPermission } from "../../app/auth/permissionService";
 import { permissionQueryKey } from "../../app/auth/permissionQueryKeys";
 import ProjectQuickSearch from "./ProjectQuickSearch";
+import { useApplicationHeader } from "./ApplicationHeaderContext";
 
 interface TopbarProps {
   sidebarOpen?: boolean;
@@ -21,6 +22,7 @@ function Topbar({
   sidebarToggleRef,
 }: TopbarProps) {
   const navigate = useNavigate();
+  const header = useApplicationHeader();
   const queryClient = useQueryClient();
   const { session, profile, isAdmin, isActive } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -73,7 +75,7 @@ function Topbar({
 
   return (
     <header className="flex h-20 items-center justify-between border-b border-zinc-200 bg-white px-4 lg:px-8">
-      <div className="flex items-center gap-4">
+      <div className="flex min-w-0 flex-1 items-center gap-4 pr-3">
         <button
           ref={sidebarToggleRef}
           type="button"
@@ -86,13 +88,13 @@ function Topbar({
           <Menu size={20} />
         </button>
 
-        <div>
-          <h2 className="text-xl font-semibold text-zinc-900 lg:text-2xl">
-            Dashboard
+        <div className="min-w-0">
+          <h2 title={header.title} className="truncate text-xl font-semibold text-zinc-900 lg:text-2xl">
+            {header.title}
           </h2>
 
-          <p className="hidden text-sm text-zinc-500 sm:block">
-            Welcome to AlfaEV
+          <p title={header.subtitle} className="hidden truncate text-sm text-zinc-500 sm:block">
+            {header.subtitle}
           </p>
         </div>
       </div>

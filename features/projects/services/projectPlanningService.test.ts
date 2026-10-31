@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ rpc: vi.fn() }));
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), limit: vi.fn() }));
 vi.mock("../../../lib/supabase/client", () => ({
   supabase: { rpc: mocks.rpc },
 }));
@@ -197,7 +197,8 @@ describe("projectPlanningService", () => {
   });
 
   it("uses only the trusted active-Product choice RPC and normalizes search", async () => {
-    mocks.rpc.mockResolvedValue({
+    mocks.rpc.mockReturnValue({ limit: mocks.limit });
+    mocks.limit.mockResolvedValue({
       data: [{
         product_id: productId,
         serial_number: "0000123",
@@ -219,6 +220,7 @@ describe("projectPlanningService", () => {
       "search_project_component_product_choices",
       { p_search: "00001" },
     );
+    expect(mocks.limit).toHaveBeenCalledWith(50);
   });
 
   it("sends only canonical mutation arguments, without Product or Inventory writes", async () => {

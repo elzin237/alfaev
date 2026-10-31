@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 
 import ErrorState from "../../shared/components/ErrorState";
 import LoadingState from "../../shared/components/LoadingState";
@@ -46,6 +47,8 @@ function WorkOrderDetailPage() {
     saveDraft,
   } =
     useWorkOrderDetail(workOrderId);
+  useApplicationHeaderLabel(isWorkOrderId(workOrderId) && !detailQuery.isPending && !detailQuery.isFetching && !detailQuery.isError && detailQuery.data?.ok
+    ? `Work Order ${detailQuery.data.value.workOrderNumber}` : null);
   let content: ReactNode;
 
   if (!isWorkOrderId(workOrderId)) {

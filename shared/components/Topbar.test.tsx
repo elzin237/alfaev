@@ -20,6 +20,7 @@ const topbarMocks = vi.hoisted(() => ({
   },
   clear: vi.fn(),
   navigate: vi.fn(),
+  pathname: "/",
   signOut: vi.fn(),
   permissionResult: { ok: true, value: true },
 }));
@@ -28,8 +29,10 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ clear: topbarMocks.clear }),
   useQuery: () => ({ data: topbarMocks.permissionResult }),
 }));
-vi.mock("react-router", () => ({
+vi.mock("react-router", async original => ({
+  ...await original<typeof import("react-router")>(),
   useNavigate: () => topbarMocks.navigate,
+  useLocation: () => ({ pathname: topbarMocks.pathname }),
 }));
 vi.mock("../../app/auth/authService", () => ({
   signOut: topbarMocks.signOut,
@@ -47,6 +50,7 @@ import Topbar from "./Topbar";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  topbarMocks.pathname = "/";
   topbarMocks.auth.session = { user: { id: "auth-user-1" } };
   topbarMocks.auth.profile = {
     id: "profile-1",
@@ -63,14 +67,25 @@ afterEach(() => {
 });
 
 describe("Topbar", () => {
-  it("renders the Dashboard heading", () => {
+  it("renders Operations Overview and the updated Dashboard subtitle without changing header styling", () => {
     const setSidebarOpen = vi.fn();
 
     render(<Topbar setSidebarOpen={setSidebarOpen} />);
 
-    expect(
-      screen.getByRole("heading", { name: "Dashboard" }),
-    ).toBeInTheDocument();
+    const heading = screen.getByRole("heading", { name: "Operations Overview" });
+    expect(heading).toHaveClass("text-xl", "font-semibold", "lg:text-2xl");
+    expect(heading.closest("header")).toHaveClass("flex", "h-20", "items-center", "justify-between", "px-4", "lg:px-8");
+    expect(screen.getByText("From planning to production."))
+      .toHaveClass("hidden", "text-sm", "text-zinc-500", "sm:block");
+    expect(screen.queryByText("Welcome to AlfaEV")).not.toBeInTheDocument();
+  });
+
+  it("shows Inventory metadata instead of the Dashboard placeholder on other pages", () => {
+    topbarMocks.pathname = "/inventory";
+    render(<Topbar setSidebarOpen={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Inventory" })).toBeInTheDocument();
+    expect(screen.getByText("Materials and stock management.")).toBeInTheDocument();
+    expect(screen.queryByText("Operations Overview")).not.toBeInTheDocument();
   });
 
   it("exposes mobile navigation state without dead notification or account buttons", () => {

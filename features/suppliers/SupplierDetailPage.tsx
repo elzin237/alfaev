@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
+import { useApplicationHeaderLabel } from "../../shared/components/ApplicationHeaderContext";
 
 import ConfirmDialog from "../../shared/components/ConfirmDialog";
 import ErrorState from "../../shared/components/ErrorState";
@@ -33,6 +34,9 @@ function SupplierDetailPage() {
   const [isArchiving, setIsArchiving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  useApplicationHeaderLabel(supplierId && !supplierQuery.isPending && !supplierQuery.isFetching && !supplierQuery.isError && supplierQuery.data?.ok
+    ? `${isEditOpen && canEdit ? "Edit Supplier" : "Supplier"}: ${supplierQuery.data.value.name}` : null);
 
   async function confirmArchive() {
     if (archiveLockRef.current) return;

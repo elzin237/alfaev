@@ -213,6 +213,8 @@ export async function getProjectPlanning(
   return { ok: true, value: [...groups.values()] };
 }
 
+export const planningProductChoiceLimit = 50;
+
 export async function searchPlanningProductChoices(
   search: string,
 ): Promise<PlanningResult<PlanningProductChoice[]>> {
@@ -222,7 +224,7 @@ export async function searchPlanningProductChoices(
     ({ data, error } = await supabase.rpc(
       "search_project_component_product_choices",
       { p_search: search.trim() || null },
-    ));
+    ).limit(planningProductChoiceLimit));
   } catch {
     return { ok: false, error: failure("load_failed") };
   }
