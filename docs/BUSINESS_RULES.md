@@ -1,5 +1,99 @@
 # AlfaEV — BUSINESS_RULES.md
 
+## Current Active Alerts v2 DEV checkpoint — 2026-10-31
+
+Active Alerts v2 is implemented and enabled only for DEV
+`alfaev-dev / yzysgbrpbhiapalgetau`, after verified migration parity 186/186.
+Production and unknown backend origins remain disabled. Earlier design and rollout
+records below are historical evidence, not the current activation state.
+
+The Dashboard/sidebar count now represents recipient-visible active WO shortages,
+active Project shortages and unresolved previously alerted Project Issues. Read
+tracking does not resolve conditions. Informational Updates and resolved History
+are separate. Both badges share the exact authoritative count; navigation and
+transient refresh retain its last verified same-scope value, never a fabricated
+zero. Logout, identity/backend/permission changes and access denial clear it.
+
+Desktop/mobile navigation and already-read alert source navigation are verified.
+Multi-page pagination, non-Admin isolation and forced reconnect remain PENDING as
+real-browser acceptance cases; focused automated checks cover those contracts.
+Do not create or resolve genuine conditions merely to complete acceptance.
+
+## Approved Active Alerts lifecycle — 2026-10-31 (design only)
+
+This section is the approved target contract, not evidence of implementation,
+deployment or activation. It supersedes the earlier mixed active-WO-plus-unread-
+Project counting rule for the future Active Alerts release only. The existing
+runtime/checkpoints below remain unchanged; retain all historical rollout evidence.
+
+- The red Dashboard and sidebar Alerts badge represents active unresolved problems,
+  not unread messages. Both surfaces use the same trusted count and scope.
+- Count one recipient-visible condition identity: a WO shortage episode, a Project
+  shortage episode, or a previously alerted Project Issue's Activity identity.
+  Do not count opening/resolution messages or component quantities as extra problems.
+- Work Order shortage behavior remains unchanged. Project shortages remain active
+  until their existing authoritative reconciliation closes the episode. Preserve
+  all current shortage formulas, Project lifecycle eligibility and warehouse rules;
+  no second shortage engine or browser-derived shortage calculation is permitted.
+- Project Issue alerts remain active until the authorized issue-resolution operation
+  creates their immutable resolution. Closing a Project, viewing an Issue or reading
+  an alert does not resolve the Issue. Existing resolution authority on closed
+  Projects is preserved.
+- Opening, viewing or marking read never reduces active-problem counts. Quantity
+  changes within an unresolved episode retain one count. Resolved conditions stop
+  counting as soon as their authoritative resolution commits, even if messages
+  remain unread. Cached UI observations refresh through authorized invalidation;
+  they are not a guarantee of zero-latency state delivery.
+- Project shortage recurrence creates a new episode under existing rules. Preserve
+  WO recurrence, uniqueness, retries and reconciliation semantics unchanged.
+- Only previously alerted Project Issues qualify. The recipient must own an existing
+  delivery of that Issue's original manual Activity alert. An unalerted Issue never
+  becomes an active Dashboard item automatically. A resolution-only recipient may
+  see its delivered resolution in History, but gains no retroactive opening delivery.
+- Preserve send-time recipient audiences and current active-profile/module access.
+  No historical recipient backfill, new notifications or broadened subscription
+  policy is implied. Do not infer Issue audiences from WO or shortage recipients.
+- Active Project conditions cannot be permanently dismissed, including through
+  legacy RPCs. Already-delivered, still-active conditions remain visible even when
+  a legacy message was dismissed; project their state without clearing or rewriting
+  that historical dismissal. A read receipt is not a condition acknowledgement.
+- Resolved conditions remain accessible in recipient-owned, currently authorized
+  Alerts History, including retained dismissed deliveries. Owner dismissal of a
+  resolved condition may hide its ordinary inbox item, never delete its history or
+  change another recipient's view. Opening/resolution deliveries for the same
+  condition are grouped, not counted or presented as two active problems.
+- General Project Activity alerts remain informational with their existing unread,
+  read and dismissal behavior. Show their unread count in a separate **Unread
+  Updates** indicator; never add it to the active-problem badge. Plain updates
+  posted without an alert continue to create no Dashboard notification.
+- Read state and condition state remain independent. Project resolution does not
+  require rewriting old read receipts; WO resolved effective-read behavior remains
+  unchanged. Preserve original Activity, resolution, notification and audit history.
+- No physical stock, reservations, Test holds, FIFO, availability or shortage-formula
+  changes are authorized by this lifecycle change.
+
+### Active Alerts delivery plan — each task capped at 15 minutes
+
+1. **Next: trusted Project shortage projection.** Add a forward, private, read-only
+   recipient-owned condition projection over existing episodes/events/deliveries.
+   Test unique identity, active/read independence, resolved history, legacy dismissed
+   active items and current authorization in owned disposable databases. No activation.
+2. Add the alerted-Issue projection using existing Activity kind, original delivery
+   and immutable resolution; test unalerted exclusion and resolution-only audiences.
+3. Add versioned bounded condition inbox/History and read-independent count contracts,
+   plus separate informational unread count; test scope, totals and pagination.
+4. Add owner-only resolved-condition acknowledgement and all active-dismissal guards;
+   test legacy routes, concurrent resolve/dismiss, exact retries and history retention.
+5. Add private condition-change invalidation without new notification fanout; test
+   quantity-only changes, resolution, audience isolation and existing WO behavior.
+6. Add strict typed service/hooks and coordinated default-OFF release wiring; test
+   exact count strings, profile/backend/permission isolation and undeployed-RPC denial.
+7. Integrate both badges, condition inbox, authorized History and separate Unread
+   Updates presentation; preserve source links, read tracking and existing actions.
+8. Run focused isolated lifecycle/security/concurrency and frontend regressions;
+   verify no accounting mutations. Deployment/activation requires a separate task
+   and explicit authorization; incomplete verification must be reported honestly.
+
 ## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
 
 DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,

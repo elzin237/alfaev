@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { useAuth } from "../../app/auth/AuthProvider";
 import { isWorkOrderActiveShortagesEnabled } from "../../app/config/workOrderActiveShortagesActivation";
+import { isActiveAlertsV2Enabled } from "../../app/config/activeAlertsV2Activation";
+import { activeAlertBackend, activeAlertScopeId, invalidateActiveAlertV2Queries, removeActiveAlertV2Queries, type ActiveAlertScope } from "./activeAlertsV2QueryKeys";
 import {
   invalidateProjectAlertQueries,
   removeProjectAlertQueries,
@@ -11,9 +13,13 @@ import {
 import { subscribeToProjectAlertInvalidations } from "./services/projectAlertRealtimeService";
 
 function ProjectAlertRuntimeSync() {
-  const { session, profile } = useAuth();
-  const access = useProjectAlertAccess();
+  const { session, profile, isActive, isLoading, error } = useAuth();
+  const access = useProjectAlertAccess(isActiveAlertsV2Enabled());
   const queryClient = useQueryClient();
+  const v2Scope:ActiveAlertScope|null=isActiveAlertsV2Enabled()&&!isLoading&&!error&&isActive&&profile?.isActive&&session?.access_token&&
+    profile.authUserId===session.user.id&&access.canRead&&!access.permissionsPending&&access.profileId===profile.id?
+    {backendOrigin:activeAlertBackend(),authUserId:session.user.id,profileId:profile.id,permissions:access.scope}:null;
+  const v2ScopeId=activeAlertScopeId(v2Scope);
 
   useEffect(() => {
     if (
@@ -52,7 +58,8 @@ function ProjectAlertRuntimeSync() {
         do {
           trailingReconciliationRequested = false;
           try {
-            await invalidateProjectAlertQueries(queryClient, capturedProfileId);
+            if(v2Scope)await Promise.all([invalidateProjectAlertQueries(queryClient,capturedProfileId),invalidateActiveAlertV2Queries(queryClient,v2Scope)]);
+            else await invalidateProjectAlertQueries(queryClient, capturedProfileId);
           } catch {
             // The trusted queries retain their own error/retry UI. Realtime is invalidation only.
           }
@@ -61,7 +68,7 @@ function ProjectAlertRuntimeSync() {
       })();
     };
 
-    const subscription = !isWorkOrderActiveShortagesEnabled() || access.canReadProjects ? subscribeToProjectAlertInvalidations({
+    const subscription = !(isWorkOrderActiveShortagesEnabled() || isActiveAlertsV2Enabled()) || access.canReadProjects ? subscribeToProjectAlertInvalidations({
       profileId: capturedProfileId,
       accessToken: session.access_token,
       onInvalidate: reconcile,
@@ -69,7 +76,7 @@ function ProjectAlertRuntimeSync() {
         if (status === "subscribed") reconcile();
       },
     }) : null;
-    const shortageSubscription = isWorkOrderActiveShortagesEnabled() && access.canReadWorkOrders
+    const shortageSubscription = (isWorkOrderActiveShortagesEnabled() || isActiveAlertsV2Enabled()) && access.canReadWorkOrders
       ? subscribeToProjectAlertInvalidations({profileId:capturedProfileId,accessToken:session.access_token,
         target:"work_order",onInvalidate:reconcile,onStatusChange:status=>{if(status==="subscribed")reconcile();}})
       : null;
@@ -79,6 +86,7 @@ function ProjectAlertRuntimeSync() {
       subscription?.unsubscribe();
       shortageSubscription?.unsubscribe();
       removeProjectAlertQueries(queryClient, capturedProfileId);
+      if(v2Scope)removeActiveAlertV2Queries(queryClient,v2Scope);
     };
   }, [
     access.canRead,
@@ -87,6 +95,7 @@ function ProjectAlertRuntimeSync() {
     access.profileId,
     queryClient,
     session?.access_token,
+    v2ScopeId,
   ]);
 
   return null;

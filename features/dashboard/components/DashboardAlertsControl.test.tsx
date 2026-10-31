@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../../../app/config/workOrderActiveShortagesActivation",()=>({isWorkOrderActiveShortagesEnabled:()=>mocks.activeTracking}));
 vi.mock("../../../app/config/workOrderNotificationsActivation",()=>({isWorkOrderNotificationsEnabled:()=>mocks.combinedAlerts}));
+// Keep legacy fallback coverage independent of the coordinated DEV release.
+vi.mock("../../../app/config/activeAlertsV2Activation",()=>({isActiveAlertsV2Enabled:()=>false}));
 
 vi.mock("react-router", async (importOriginal) => {
   const original = await importOriginal<typeof import("react-router")>();

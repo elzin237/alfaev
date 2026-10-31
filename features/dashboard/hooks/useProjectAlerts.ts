@@ -17,6 +17,7 @@ import { permissionQueryKey } from "../../../app/auth/permissionQueryKeys";
 import { hasPermission } from "../../../app/auth/permissionService";
 import { isWorkOrderNotificationsEnabled } from "../../../app/config/workOrderNotificationsActivation";
 import { isWorkOrderActiveShortagesEnabled } from "../../../app/config/workOrderActiveShortagesActivation";
+import { isActiveAlertsV2Enabled } from "../../../app/config/activeAlertsV2Activation";
 import {
   projectAlertInboxQueryKey,
   projectAlertQueryPrefix,
@@ -195,12 +196,14 @@ export function reconcileProjectAlertDismissReceipt(
   }
 }
 
-export function useProjectAlertAccess() {
-  const { session, profile, isActive, isAdmin } = useAuth();
+export function useProjectAlertAccess(includeV2 = false) {
+  const { session, profile, isActive, isAdmin, isLoading, error } = useAuth();
   const hasActiveProfile = Boolean(
-    session && profile?.isActive && isActive,
+    session && profile?.isActive && isActive && (!includeV2 ||
+      (!isLoading && !error && profile.authUserId === session.user.id && session.access_token)),
   );
   const shouldCheckPermissions = hasActiveProfile && !isAdmin;
+  const workOrderReadsEnabled = isWorkOrderNotificationsEnabled() || (includeV2 && isActiveAlertsV2Enabled());
   const dashboardPermissionQuery = useQuery({
     queryKey: permissionQueryKey(
       session?.user.id,
@@ -227,18 +230,18 @@ export function useProjectAlertAccess() {
   const workOrderPermissionQuery = useQuery({
     queryKey: permissionQueryKey(session?.user.id,profile?.id,"work_orders.view"),
     queryFn: () => hasPermission("work_orders.view"),
-    enabled: shouldCheckPermissions && isWorkOrderNotificationsEnabled(),
+    enabled: shouldCheckPermissions && workOrderReadsEnabled,
     staleTime: 60_000,
   });
   const canRead = hasActiveProfile && (isAdmin || (
     dashboardPermissionQuery.data?.ok === true &&
     dashboardPermissionQuery.data.value &&
     ((projectPermissionQuery.data?.ok === true && projectPermissionQuery.data.value) ||
-      (isWorkOrderNotificationsEnabled() && workOrderPermissionQuery.data?.ok === true && workOrderPermissionQuery.data.value))
+      (workOrderReadsEnabled && workOrderPermissionQuery.data?.ok === true && workOrderPermissionQuery.data.value))
   ));
   const canReadProjects=hasActiveProfile && (isAdmin || (dashboardPermissionQuery.data?.ok === true && dashboardPermissionQuery.data.value &&
     projectPermissionQuery.data?.ok === true && projectPermissionQuery.data.value));
-  const canReadWorkOrders=hasActiveProfile && isWorkOrderNotificationsEnabled() && (isAdmin ||
+  const canReadWorkOrders=hasActiveProfile && workOrderReadsEnabled && (isAdmin ||
     (dashboardPermissionQuery.data?.ok === true && dashboardPermissionQuery.data.value &&
       workOrderPermissionQuery.data?.ok === true && workOrderPermissionQuery.data.value));
 
@@ -248,7 +251,7 @@ export function useProjectAlertAccess() {
     canReadProjects,
     canReadWorkOrders,
     scope: `${canReadProjects ? "p" : ""}${canReadWorkOrders ? "w" : ""}`,
-    permissionsPending: permissionsPending || (shouldCheckPermissions && isWorkOrderNotificationsEnabled() && workOrderPermissionQuery.isPending),
+    permissionsPending: permissionsPending || (shouldCheckPermissions && workOrderReadsEnabled && workOrderPermissionQuery.isPending),
   };
 }
 

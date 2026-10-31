@@ -1,5 +1,60 @@
 # AlfaEV — PERMISSIONS.md
 
+## Current Active Alerts v2 authorization — 2026-10-31
+
+DEV migrations 183–186 and the DEV-only frontend release are verified. The
+implemented reads require an active authenticated profile and current Dashboard
+plus applicable Project/WO access, while preserving original recipient ownership
+and delivery audiences. Admin authority does not grant another recipient's inbox.
+Acknowledgment is owner-only, resolved-only and idempotent; active conditions
+cannot be permanently dismissed through legacy or v2 paths. No new module grant
+or direct browser access to private condition tables is introduced.
+
+Backend/profile/Auth/permission-scoped caches are canceled and removed on scope
+loss. Production/unknown backends remain gated OFF. Automated recipient/permission
+isolation is covered; a separate non-Admin real-browser session remains PENDING.
+Earlier design-only and rollout records below are preserved as historical evidence.
+
+## Approved Active Alerts authority — 2026-10-31 (design only)
+
+The future condition-based release changes counting/authorized projections, not
+permission keys, grants, existing recipient membership or present activation states.
+BUSINESS_RULES.md defines the target lifecycle; older mixed-count checkpoints below
+remain historical/runtime evidence until a separately verified release.
+
+- Every read/count/history/acknowledgement requires authenticated active Auth/profile
+  identity and current Dashboard access (active Admin or effective `dashboard.view`).
+  Project conditions/history additionally require current `projects.view`; WO
+  conditions/history retain current `work_orders.view`. Count only permitted target
+  types. Admin bypass never overrides recipient ownership.
+- Project shortage and Issue resolution automatic deliveries keep their existing
+  audience: active Admins, or active non-Admins with Dashboard and Project view.
+  Manual Issue/general Activity alerts retain their existing explicit non-Admin
+  `projects.alerts.receive` plus Dashboard/Project view audience and Admin rules.
+- Active Project Issues require this actor's original manual Issue-alert delivery.
+  Neither general Project read access nor a later resolution delivery grants a
+  retrospective active Issue subscription. Plain/unalerted Issues are excluded.
+  Preserve frozen delivery audiences; later permission grants do not add recipients.
+- Current receive-subscription removal does not erase an already delivered record;
+  current active-profile/Dashboard/target-module access still controls visibility.
+  Permission loss hides data, not history; restoration may reveal already-owned
+  records. Do not expose other recipients, private source tables or Inventory data.
+- Read tracking is owner-only and never resolves a condition or reduces the active
+  badge. Permanent dismissal of an active Project condition is denied server-side,
+  including legacy endpoints. Resolved acknowledgement is owner-only, idempotent
+  and cannot remove immutable history from the authorized Alerts History view.
+- Authorized History may include the caller's retained dismissed resolved deliveries;
+  this is a new bounded read projection, not permission to undo dismissals, delete
+  audit records or browse another user's inbox. Existing owned, active legacy-
+  dismissed conditions may reappear without rewriting their old receipt.
+- Issue resolution still requires an active Admin or `projects.edit`, including on
+  closed Projects, and retains original resolver/replay restrictions. Read/dismiss
+  authority never grants resolution, Project editing, stock mutation or notification
+  sending. General informational alerts keep their existing send/read/dismiss rules.
+- New count/inbox/History contracts must use narrow trusted authenticated EXECUTE
+  with explicit checks, not broad table access. Source navigation independently
+  passes the existing target detail authorization; gates are not permission grants.
+
 ## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
 
 DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,

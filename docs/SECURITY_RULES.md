@@ -1,5 +1,99 @@
 # AlfaEV — SECURITY_RULES.md
 
+## Current Active Alerts v2 release boundary — 2026-10-31
+
+DEV deployment is verified at migrations 186/186. Frontend activation is pinned to
+`https://yzysgbrpbhiapalgetau.supabase.co` and verified prerequisite
+`20261031130000`; production and unknown origins remain OFF. Operational Draft
+reservations, Inventory accounting/breakdown and Unified Committed activation
+states are unchanged by this release.
+
+Private projections/tables retain restricted grants and RLS. Existing private
+recipient channels invalidate scoped reads without exposing source content or
+adding subscriptions/polling. The shared count query uses query cancellation,
+not an individual observer's unmount as an authorization decision. Last verified
+counts may survive a same-scope transient refresh/error, but never scope loss or
+server access denial. Initial failure is unavailable, not zero.
+
+Local lifecycle/security/concurrency evidence and authenticated DEV read-only
+browser checks are retained. Real-browser multi-page pagination, non-Admin
+recipient isolation and forced reconnect remain PENDING; automated coverage does
+not replace those browser checks. No real condition mutation is needed for this
+checkpoint. Earlier design/deployment records below remain historical evidence.
+
+## Approved Active Alerts security boundary — 2026-10-31 (design only)
+
+This section prepares a future condition-based release. It authorizes no migration,
+deployment, gate change, backfill or runtime write. Existing verified DEV states and
+historical records below remain unchanged. Apply the target BUSINESS_RULES and
+DATA_MODEL Active Alerts contracts without adding a competing shortage engine.
+
+### Authoritative state and recipient isolation
+
+- Reuse Project shortage episode resolution and immutable Issue resolution as the
+  only condition authority; retain WO's existing owner-aware shortage engine and
+  tracking projection. Notification read/dismiss timestamps, browser time, cached
+  pages and event-time shortage quantities cannot resolve a live problem.
+- Count one eligible source condition per recipient, independent of read state.
+  Issue eligibility requires original manual-alert delivery, never inference from
+  a resolution-only delivery or from all readable Project Issues. No retroactive
+  recipient fanout, unalerted-Issue initialization or recipient membership rewrite.
+- Public trusted reads use controlled `SECURITY DEFINER`, empty `search_path`, explicit
+  active actor/profile/current module checks and owner-scoped source joins. Narrow
+  authenticated EXECUTE only; retain private-table RLS and no broad browser/service-
+  role table grants. Admin cannot bypass recipient ownership. Authorized history
+  may include only the actor's retained deliveries, not restricted source identities
+  or another recipient's read/dismiss metadata.
+- Count and inbox/history predicates must agree. Return database observation time,
+  exact decimal count/quantity strings and stable bounded keyset pages. Fail closed
+  on unverifiable authority/state; unavailable is not fabricated zero. Backend,
+  actor/profile, permission scope and response version must isolate frontend caches.
+
+### Read, acknowledgement, history and concurrency
+
+- Viewing/mark-read changes only an owned read receipt. Preserve existing immutable
+  event/audit data and one-way historical timestamps. Resolution ends the active
+  count independently of whether any notification has been read. Project resolved
+  History can retain unread state; preserve WO effective resolved-read behavior.
+- Reject permanent dismissal of active Project conditions inside trusted operations,
+  including existing Project and combined Dashboard RPC routes. Hiding a frontend
+  button is insufficient. A legacy dismissed active delivery must not suppress the
+  condition projection; do not reset or erase its historical `dismissed_at`.
+- Resolved acknowledgement is source/recipient-bound, unique and idempotent. Validate
+  actual source references, applicable owned delivery and current permissions under the
+  existing source-first lock order; recheck resolved state and authorization after
+  waits. A concurrent recurrence has a NEW episode identity and must not inherit the
+  prior episode's dismissal. History remains readable under current owner/module
+  checks even after resolved dismissal, without restoring mutable history.
+- Preserve existing Product reconciliation locks, partial unique active-episode
+  indexes, deferred queues and resolver-bound Issue request receipts. Do not acquire
+  Project/Work Order row locks from stock triggers or reverse established source/
+  recipient ordering. No silent retries, new duplicate openings or quantity-change
+  notification fanout. Issue closure remains an explicit authorized resolution;
+  shortage recurrence retains the established new-episode semantics.
+
+### Refresh and coordinated release
+
+- Reuse existing private, content-free recipient invalidation channels and scoped
+  query invalidation. Project episode updates must invalidate already-owned views,
+  including quantity-only changes that do not create notifications; Issue resolution
+  must refresh its opening condition as well as delivered resolution history.
+- Do not broadcast source identities, content, quantities or counts, expose private
+  tables through Realtime, or add duplicate subscriptions/unbounded polling. Reuse
+  focus, reconnect/subscription and panel-open refresh. Clear inaccessible caches
+  and reject late results after actor/profile/permission changes.
+- Authoritative counts exclude a resolved condition on commit; displayed cached
+  counts update through these refresh mechanisms, not an invented instantaneous
+  browser state. Preserve the approved WO Test-hold-expiry limitation: current
+  availability reflects expiry, while notification state awaits a relevant existing
+  reconciliation trigger. Add no expiry worker or polling in this release.
+- Version the changed read contracts because existing parsers require exact shapes.
+  Keep new reads/UI behind a coordinated default-OFF release boundary until separately
+  deployed and authorized; preserve existing gates and production exclusions.
+- Keep general Activity unread/read/dismiss semantics and a separate Unread Updates
+  indicator; never merge that unread value into the active-problem badge. Preserve
+  stock, reservations, Test holds, FIFO, availability and all shortage formulas.
+
 ## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
 
 DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,

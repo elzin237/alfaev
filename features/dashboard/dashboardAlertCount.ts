@@ -1,5 +1,12 @@
 import type { ProjectAlertUnreadCount } from "./services/projectAlertService";
 
+/** Exact server count only; missing/invalid data is unavailable, not zero. */
+export function activeProblemBadge(count: string | undefined): string | null {
+  if (count === undefined || !/^(0|[1-9][0-9]{0,99})$/.test(count)) return null;
+  const exact = BigInt(count);
+  return exact === 0n ? null : exact > 99n ? "99+" : count;
+}
+
 interface AlertCountQuery {
   data?: ProjectAlertUnreadCount;
   isPending?: boolean;

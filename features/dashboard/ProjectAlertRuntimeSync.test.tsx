@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   useProjectAlertAccess: vi.fn(),
 }));
 vi.mock("../../app/config/workOrderActiveShortagesActivation",()=>({isWorkOrderActiveShortagesEnabled:()=>mocks.tracking}));
+// Exercise the legacy refresh contract regardless of the DEV activation state.
+vi.mock("../../app/config/activeAlertsV2Activation",()=>({isActiveAlertsV2Enabled:()=>false}));
 
 vi.mock("../../app/auth/AuthProvider", () => ({
   useAuth: mocks.useAuth,

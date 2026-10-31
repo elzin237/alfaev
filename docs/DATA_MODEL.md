@@ -1,5 +1,104 @@
 # AlfaEV — DATA_MODEL.md
 
+## Current Active Alerts v2 contracts — 2026-10-31
+
+Migrations 183–186 are forward-only and deployed to DEV at 186/186. They reuse
+Project shortage episodes, alerted Issue Activities/resolutions and existing WO
+shortage tracking; notification snapshots and delivery history are preserved.
+
+The implemented version-2 RPCs are `get_dashboard_active_problem_counts_v2()`,
+`list_dashboard_problem_conditions_v2(...)`,
+`list_dashboard_informational_updates_v2(...)`,
+`list_dashboard_alert_history_v2(...)` and `acknowledge_dashboard_problem_v2(...)`.
+Counts/quantities remain exact decimal strings; pages use bounded stable server
+cursors and database `as_of`. Read, resolution and acknowledgment are independent.
+Private Project condition acknowledgments do not rewrite source resolution or
+notification history. Content-free recipient signals reuse existing invalidation.
+No stock, reservation, FIFO or shortage-calculation contract changes are included.
+
+The earlier design-only and migration-182 checkpoint sections below are retained
+as historical records, not statements that this implementation remains undeployed.
+
+## Approved Active Alerts read model — 2026-10-31 (design only)
+
+This is a future implementation contract, not a deployed schema change. Retain
+the migration-182 checkpoint and older notification evidence below unchanged.
+The target business rules and capped implementation plan are in BUSINESS_RULES.md,
+"Approved Active Alerts lifecycle".
+
+### Reuse authoritative conditions and immutable recipient history
+
+- `project_shortage_episodes.id` is the Project shortage condition identity; an
+  unresolved episode has `resolved_at IS NULL`. Join its immutable events to
+  `project_activity_alerts` and the actor's existing recipient deliveries. Use the
+  episode's current reconciled quantity for current state, not an old opening-event
+  quantity. Opening/resolution snapshots remain available as historical evidence.
+- A Project Issue condition is `project_activity_updates.id` with `activity_kind =
+  'issue'`, an existing original `notification_kind = 'activity'` alert delivered to
+  this recipient, and no corresponding `project_issue_resolutions` row. Resolution
+  existence, not recipient read/dismiss timestamps, ends the active condition.
+- An automatic `issue_resolved` delivery does not prove ownership of the original
+  manual Issue alert. Preserve resolution-only recipients as authorized history;
+  do not synthesize active Issue deliveries or include unalerted Issues.
+- Reuse the existing WO episode/recipient projection and resolved-dismissal records.
+  Do not create a second episode ledger, new shortage calculation or issue state
+  writer. Count unique `(condition_kind, condition_id)` per recipient, including
+  already-delivered active Project conditions with legacy dismissed messages.
+- Choose a deterministic canonical owned delivery per condition, preferring the
+  original opening delivery. Keep its notification/event identifiers distinct from
+  the condition identity and preserve every historical delivery. Group rather than
+  duplicate opening/resolution messages; a resolution-only historical item is valid.
+
+### Minimum trusted read contracts
+
+Prepare versioned reads (exact RPC names/signatures are an implementation detail):
+
+1. **Condition counts:** database `as_of`, exact decimal-string counts for active WO
+   shortages, active Project shortages and open alerted Project Issues, their exact
+   active-problem total, and separate unread informational updates. All fields use
+   the same recipient/current-access predicates; no counts from paginated UI rows.
+2. **Unified condition inbox:** bounded keyset pages with stable server ordering,
+   canonical owned delivery identity, condition kind/id, target type, permitted
+   target identities/labels/navigation, active/resolved status, opened/resolved time,
+   read state and applicable exact latest reconciled shortage quantity. Read state
+   must not determine active status or active visibility.
+3. **Alerts History:** bounded resolved-condition pages over the same authorized
+   source chains, including the actor's retained dismissed deliveries. Preserve
+   original opening/resolution event quantities, timestamps and available resolver
+   provenance. Group a condition once; do not fabricate a recipient's missing events.
+4. **Informational updates:** retain current general-Activity notification reads and
+   unread/read/dismiss behavior, filtered by authoritative `activity_kind = 'general'`.
+   Issue opening and resolution events are not informational unread updates.
+
+Each response is an observation from one database snapshot with database `as_of`.
+Count and list reads reuse one private eligibility/projection definition; separate
+requests may observe different commits. Keep stable cursor identities, bounded
+continuation and explicit refresh/reset when state changes invalidate loaded pages.
+Preserve exact quantity strings and checked aggregate arithmetic. Current strict
+frontend parsers cannot accept silently appended fields: use a versioned/coordinated
+contract, preserve old RPC response shapes and gate new reads until deployment.
+
+### Owner acknowledgements without historical rewrites
+
+Keep existing one-way recipient `read_at`/`dismissed_at` receipts immutable. Read
+tracking continues on the canonical owned delivery, independent of condition state.
+WO's existing effective resolved-read projection remains unchanged.
+
+Where Project condition-level resolved dismissal needs state beyond legacy message
+receipts, use the minimum private acknowledgement relation keyed by recipient and
+condition identity, with a server timestamp and enforced uniqueness. Its source
+references must be FK-backed/tag-validated against the actual Project episode or
+Issue Activity, never an unconstrained arbitrary UUID. Trusted operations verify
+ownership, valid source kind, the applicable owned delivery and resolved state.
+Original manual delivery is mandatory for active Issue eligibility, not for access
+to a caller's own resolution-only history. Exact retries return the same
+acknowledgement. It hides the ordinary resolved inbox item, not History.
+An active condition cannot receive a permanent-dismiss acknowledgement.
+
+No mutation/backfill of old notifications, source conditions, recipients, stock or
+reservations is implied. Historical dismissal does not suppress an active projection;
+History may expose only already-owned records allowed by current authorization.
+
 ## Current verified DEV checkpoint — 2026-10-30, migrations 182/182
 
 DEV `alfaev-dev / yzysgbrpbhiapalgetau` is deployed through migration 182,

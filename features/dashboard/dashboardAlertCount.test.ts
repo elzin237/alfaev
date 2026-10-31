@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { getDashboardAlertCount } from "./dashboardAlertCount";
+import { activeProblemBadge, getDashboardAlertCount } from "./dashboardAlertCount";
 
 function query(active: bigint, projectUnread: bigint | undefined) {
   return { data: { exactValue: active, projectUnread, hasUnread: active > 0n,
     displayValue: active.toString() }, isError: false };
 }
+
+it.each([
+  [undefined,null],['0',null],['1','1'],['99','99'],['100','99+'],['9007199254740993','99+'],
+  ['-1',null],['01',null],['1.1',null],['NaN',null],['9'.repeat(101),null],
+])('presents only an exact authoritative v2 active count %s', (value,expected)=>{
+  expect(activeProblemBadge(value)).toBe(expected);
+});
 
 describe("shared Dashboard alert count", () => {
   it.each([

@@ -19,6 +19,8 @@ const sidebarMocks = vi.hoisted(() => ({
   useProcurementSidebarBadge: vi.fn(),
   useAuth: vi.fn(),
 }));
+// This suite exercises the legacy sidebar; v2 has dedicated integration coverage.
+vi.mock("../config/activeAlertsV2Activation", () => ({ isActiveAlertsV2Enabled: () => false }));
 vi.mock("../config/workOrderActiveShortagesActivation", () => ({
   isWorkOrderActiveShortagesEnabled: () => sidebarMocks.activeTracking,
 }));

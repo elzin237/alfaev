@@ -27,13 +27,15 @@ import type {
 import DashboardAlertsPanel from "./DashboardAlertsPanel";
 import { dashboardAlertDestination } from "../services/projectAlertService";
 import { getDashboardAlertCount } from "../dashboardAlertCount";
+import { isActiveAlertsV2Enabled } from "../../../app/config/activeAlertsV2Activation";
+import DashboardActiveAlertsControl from "./DashboardActiveAlertsControl";
 
 interface PanelPosition {
   left: number;
   top: number;
 }
 
-function DashboardAlertsControl() {
+function LegacyDashboardAlertsControl() {
   const navigate = useNavigate();
   const panelId = useId();
   const panelTitleId = useId();
@@ -410,4 +412,6 @@ function DashboardAlertsControl() {
   );
 }
 
-export default DashboardAlertsControl;
+export default function DashboardAlertsControl() {
+  return isActiveAlertsV2Enabled() ? <DashboardActiveAlertsControl /> : <LegacyDashboardAlertsControl />;
+}
